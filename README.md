@@ -32,9 +32,11 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
 - **Quick filter rules** (Rules page): match on from / to / subject / body snippet
   (contains, equals, regex; ALL or ANY), then move to a folder, mark read, and/or
   flag. First matching rule wins, top to bottom. Folders are created if missing.
-- **Rule assistant** (Assistant page): describe the sorting you want in plain English;
-  a local LLM (which sees your current rules and recent senders) proposes structured
-  rules; one click adds them as live or disabled. No form-filling.
+- **Rule assistant** (Assistant page): a streaming, tool-calling chat. It shows its
+  thinking and every tool step live; it can search your whole mailbox history (live
+  IMAP through the proxy — not just what the app has indexed), read messages, create
+  folders, move and flag mail, and it proposes structured rules that you add with one
+  click. Actions can be switched to dry-run in Settings.
 - **LLM escalation** (Settings page): anything no rule matched gets classified into
   your categories (Action, Notification, Newsletter, Receipt, Personal, Promo by
   default). Auto-filing by category starts off; the LLM suggests until you enable it.
@@ -67,6 +69,22 @@ gemma/                         # the model server (own compose project, one GPU)
 - To point at something else entirely: edit `LLM_BASE_URL` / `LLM_MODEL` in `.env`
   and `docker restart mail-triage` (any OpenAI-compatible endpoint works).
 
+## The assistant (streaming + tools)
+
+The Assistant page uses the same LLM endpoint through an agent harness: the reply
+streams token by token (SSE on `/assistant/stream`), the model's thinking renders in
+a live "thinking" block, and every tool call shows as a card with its result. The
+transcript (thinking + tool steps) is stored per message, so it survives reloads.
+
+Tools: `mailbox_overview` · `search_messages` (local index) · `search_mail` (live
+IMAP search — full history, any folder) · `read_message` · `move_message` ·
+`flag_message` · `create_folder` · `list_folders` · `propose_rule`.
+
+Safety: assistant moves/flags/folders act live by default (it can never delete or
+send); untick "Assistant may act on mail" in Settings for a dry-run. Rules are only
+proposed in chat — they go live when you click "Add rule". Each turn is capped
+(8 tool rounds, 4 calls per round) and everything is logged on the Log page.
+
 ## Safety model
 
 - It **never deletes mail**. Worst case it files something into a folder.
@@ -85,7 +103,8 @@ docker logs -f mail-triage            # app live logs
 docker compose up -d --build          # rebuild + start the app after code changes
 docker restart mail-triage            # simple app restart
 docker exec mail-triage python app.py --check   # read-only IMAP health check
-.venv/bin/python tests/mock_e2e.py    # 58-check E2E suite (mock IMAP + mock LLM)
+.venv/bin/python tests/mock_e2e.py    # 92-check E2E suite (mock IMAP + mock LLM,
+                                      # including an SSE-streaming mock of the agent)
 
 cd gemma                              # the model server
 docker compose ps && docker compose logs -f

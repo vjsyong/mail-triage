@@ -907,6 +907,7 @@ function run(text){
     if(data){ try { d = JSON.parse(data); } catch(err) { return; } }
     if(ev === 'reasoning'){ det.style.display=''; pre.textContent += (d.text||''); setPhase('thinking…'); }
     else if(ev === 'content'){ content.textContent += (d.text||''); setPhase('writing…'); }
+    else if(ev === 'content_break'){ if(content.textContent) content.textContent += '\n\n'; }
     else if(ev === 'tool_start'){ setPhase('tool: ' + d.name + '…'); toolCard(d.id, d.name, d.args); }
     else if(ev === 'tool_end'){ toolDone(d.id, d.ok, d.summary, d.dry_run); setPhase('thinking…'); }
     else if(ev === 'proposals'){ proposals = d.proposals || []; }

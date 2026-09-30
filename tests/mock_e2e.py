@@ -495,6 +495,7 @@ class LLMHandler(BaseHTTPRequestHandler):
             self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
         elif step == 1:
             self.delta(reasoning="Found matches. I will file the lunch mail and propose a rule.")
+            self.delta(content="Working on it. ")
             self.tool_delta(0, "move_message",
                             {"folder": "INBOX", "uid": 4, "target_folder": "Personal"},
                             "call_%d_0" % step)
@@ -745,6 +746,7 @@ def main():
         check("SSE carries %s" % ev, ev in body)
     check("reasoning streamed before tool calls",
           body.index("event: reasoning") < body.index("event: tool_start"))
+    check("multi-turn content separated (content_break)", "event: content_break" in body)
     dm = re.search(r"event: done\ndata: (.*)", body)
     done_data = json.loads(dm.group(1)) if dm else {}
     check("done names the stored message", isinstance(done_data.get("message_id"), int))

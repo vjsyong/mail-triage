@@ -748,7 +748,9 @@ How to work
 - Keep searches bounded: small limits, use since/before for windows. Summarize results; never dump raw rows.
 - At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.
 
-Today is %(today)s (Hong Kong time). Reply in the user's language, as plain text (no markdown tables), concise and friendly. Text you write is shown to the user directly; tool calls happen through the tool interface."""
+Today is %(today)s (Hong Kong time). Reply in the user's language, as plain text (no markdown tables), concise and friendly.
+
+Output discipline: everything you write outside the tool interface is shown to the user as your answer. Write only the final answer — never narrate your process, never restate tool output or think out loud ("The user wants…", "I will provide…", "Let me count…", "The tool shows…"). The user already sees every tool call as a card; report conclusions, not your reading of the payload. Verify numbers and lists in the thinking channel, then answer once, cleanly."""
 
 
 def _fn(name, description, properties=None, required=()):
@@ -1417,6 +1419,8 @@ class AssistantAgent:
                               "tool_calls": [{"id": c["id"], "type": "function",
                                               "function": {"name": c["name"], "arguments": c["arguments"]}}
                                              for c in calls]})
+                if turn_content:
+                    yield {"type": "content_break"}
                 for i, c in enumerate(calls):
                     if i >= self.MAX_CALLS_PER_TURN:
                         res = {"ok": False, "summary": "skipped: too many tool calls in one step",
