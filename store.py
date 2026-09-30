@@ -1,4 +1,5 @@
 """SQLite storage for Mail Triage: settings, rules, templates, messages, events."""
+import email.utils
 import json
 import os
 import sqlite3
@@ -106,6 +107,12 @@ CREATE TABLE IF NOT EXISTS index_state (
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text);
+CREATE TABLE IF NOT EXISTS rule_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER, source TEXT NOT NULL DEFAULT '',
+    rule TEXT NOT NULL DEFAULT '{}', note TEXT NOT NULL DEFAULT '',
+    applied INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -114,6 +121,31 @@ def _migrate(conn):
     cols = [r[1] for r in conn.execute("PRAGMA table_info(assistant_messages)")]
     if "meta" not in cols:
         conn.execute("ALTER TABLE assistant_messages ADD COLUMN meta TEXT NOT NULL DEFAULT ''")
+    mcols = [r[1] for r in conn.execute("PRAGMA table_info(messages)")]
+    if "date_ts" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN date_ts INTEGER DEFAULT 0")
+        _backfill_date_ts(conn)
+    if "user_tag" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN user_tag TEXT NOT NULL DEFAULT ''")
+
+
+def _backfill_date_ts(conn):
+    rows = conn.execute("SELECT id, date FROM messages WHERE coalesce(date_ts,0)=0 "
+                        "AND coalesce(date,'')!=''").fetchall()
+    for r in rows:
+        ts = date_ts_from(r["date"])
+        if ts:
+            conn.execute("UPDATE messages SET date_ts=? WHERE id=?", (ts, r["id"]))
+
+
+def date_ts_from(date_str):
+    """Epoch seconds from an RFC822 date header (0 when unparseable)."""
+    if not date_str:
+        return 0
+    try:
+        return int(email.utils.parsedate_to_datetime(date_str).timestamp())
+    except Exception:
+        return 0
 
 
 def db(vec=False):
@@ -264,9 +296,10 @@ def insert_message(folder, uid, uidvalidity, fields):
     with db() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO messages (folder, uid, uidvalidity, msgid, from_addr, to_addr, "
-            "subject, date, snippet, status, processed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "subject, date, date_ts, snippet, status, processed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (folder, uid, uidvalidity, fields.get("msgid", ""), fields.get("from_addr", ""),
              fields.get("to_addr", ""), fields.get("subject", ""), fields.get("date", ""),
+             fields.get("date_ts") or date_ts_from(fields.get("date", "")),
              fields.get("snippet", ""), fields.get("status", "new"), int(time.time())))
         return cur.lastrowid, conn.total_changes
 
@@ -309,9 +342,9 @@ def find_message_by_msgid(msgid):
     return dict(row) if row else None
 
 
-def messages(limit=50, filt="all"):
+def messages(limit=50, filt="all", order="date"):
     q = "SELECT * FROM messages"
-    where = []
+    where = ["NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coalesce(msgid,'')='')"]
     if filt == "queued":
         where.append("status='queued'")
     elif filt == "unmatched":
@@ -322,9 +355,16 @@ def messages(limit=50, filt="all"):
         where.append("action_taken LIKE 'move%'")
     elif filt == "errors":
         where.append("status='error'")
+    elif filt == "tagged":
+        where.append("coalesce(user_tag,'') != ''")
     if where:
         q += " WHERE " + " AND ".join(where)
-    q += " ORDER BY id DESC LIMIT ?"
+    if order == "id":
+        q += " ORDER BY id DESC"
+    else:
+        q += (" ORDER BY (CASE WHEN coalesce(date_ts,0)>0 THEN date_ts ELSE processed_at END) "
+              "DESC, id DESC")
+    q += " LIMIT ?"
     with db() as conn:
         return [dict(r) for r in conn.execute(q, (limit,))]
 
@@ -589,3 +629,85 @@ def meta_set(key, value):
     with db() as conn:
         conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) "
                      "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (key, json.dumps(value)))
+
+
+# ---------------------------------------------------------------- tagging / classification
+
+def tag_messages(ids, tag):
+    ids = [int(i) for i in (ids or [])]
+    if not ids:
+        return 0
+    q = "UPDATE messages SET user_tag=? WHERE id IN (%s)" % ",".join("?" * len(ids))
+    with db() as conn:
+        cur = conn.execute(q, [tag] + ids)
+        return cur.rowcount
+
+
+def untag_messages(ids):
+    return tag_messages(ids, "")
+
+
+def tagged_examples(limit=80):
+    with db() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT id, folder, from_addr, subject, date, snippet, user_tag FROM messages "
+            "WHERE coalesce(user_tag,'') != '' ORDER BY id DESC LIMIT ?", (limit,))]
+
+
+def unclassified_count():
+    with db() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE status IN ('new','queued') "
+            "AND NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coalesce(msgid,'')='')"
+        ).fetchone()[0]
+
+
+def unclassified_next(skip=None):
+    q = ("SELECT * FROM messages WHERE status IN ('new','queued') "
+         "AND NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coalesce(msgid,'')='')")
+    params = []
+    if skip:
+        q += " AND id NOT IN (%s)" % ",".join("?" * len(skip))
+        params += list(skip)
+    q += " ORDER BY (CASE WHEN coalesce(date_ts,0)>0 THEN date_ts ELSE processed_at END) DESC LIMIT 1"
+    with db() as conn:
+        row = conn.execute(q, params).fetchone()
+    return dict(row) if row else None
+
+
+# ---------------------------------------------------------------- rule proposals (learned from tags)
+
+def add_rule_proposal(source, rule, note=""):
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO rule_proposals (ts, source, rule, note) VALUES (?,?,?,?)",
+            (int(time.time()), source, json.dumps(rule), note))
+        return cur.lastrowid
+
+
+def list_rule_proposals(pending_only=True, limit=20):
+    q = "SELECT * FROM rule_proposals"
+    if pending_only:
+        q += " WHERE applied=0"
+    q += " ORDER BY id DESC LIMIT ?"
+    with db() as conn:
+        out = []
+        for r in conn.execute(q, (limit,)):
+            d = dict(r)
+            try:
+                d["rule_obj"] = json.loads(d.get("rule") or "{}")
+            except (TypeError, ValueError):
+                d["rule_obj"] = {}
+            out.append(d)
+        return out
+
+
+def get_rule_proposal(pid):
+    with db() as conn:
+        row = conn.execute("SELECT * FROM rule_proposals WHERE id=?", (pid,)).fetchone()
+    return dict(row) if row else None
+
+
+def mark_rule_proposal_applied(pid):
+    with db() as conn:
+        conn.execute("UPDATE rule_proposals SET applied=1 WHERE id=?", (pid,))

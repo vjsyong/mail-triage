@@ -403,6 +403,15 @@ class LLMHandler(BaseHTTPRequestHandler):
             return
         if "write email replies" in system:
             content = FAKE_DRAFT
+        elif "manually tagged" in system:
+            content = json.dumps({
+                "reply": "Learned rules from your tags.",
+                "proposed_rules": [
+                    {"name": "Tagged receipts", "match_mode": "any",
+                     "conditions": [{"field": "subject", "op": "contains", "value": "invoice"}],
+                     "actions": {"move_to": "Receipts"}, "rationale": "from your tags"},
+                    {"name": "Broken", "match_mode": "all", "conditions": [], "actions": {}},
+                ]})
         elif "connectivity test" in system:
             content = "ok"
         else:
@@ -602,11 +611,11 @@ class TEIHandler(BaseHTTPRequestHandler):
 
 # ---------------------------------------------------------------- helpers
 
-def add_msg(state, frm, subj, body, msgid, folder="INBOX"):
+def add_msg(state, frm, subj, body, msgid, folder="INBOX", date="Wed, 30 Sep 2026 10:00:00 +0800"):
     raw = ("From: %s\r\nTo: seanyong@ust.hk\r\nSubject: %s\r\n"
-           "Date: Wed, 30 Sep 2026 10:00:00 +0800\r\nMessage-ID: <%s>\r\n"
+           "Date: %s\r\nMessage-ID: <%s>\r\n"
            "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s"
-           % (frm, subj, msgid, body)).encode()
+           % (frm, subj, date, msgid, body)).encode()
     return state.add(folder, raw)
 
 
@@ -1015,6 +1024,100 @@ def main():
     check("reply carries a message reference", "[msg:" in body)
     check("linkify renders message refs as links",
           'href="/messages/3"' in app_mod.linkify("see [msg:3]"))
+
+    section("T15 UI: ordering, markdown, tags, non-mail rows")
+    md = app_mod.md_to_html("**bold** and `code`\n- one\n- two")
+    check("md renderer handles bold/lists/code",
+          "<b>bold</b>" in md and "<code>code</code>" in md and "<li>one</li>" in md)
+    check("md renderer linkifies msg refs",
+          'href="/messages/9"' in app_mod.md_to_html("see [msg:9]"))
+    check("md renderer escapes html",
+          "&lt;script&gt;" in app_mod.md_to_html("<script>alert(1)</script>"))
+    id_old = add_msg(state, "old@x.com", "Old message from 2024", "ancient history", "old1@x",
+                     date="Mon, 15 Jan 2024 09:00:00 +0800")
+    id_new = add_msg(state, "new@x.com", "Fresh message latest", "recent stuff", "new1@x",
+                     date="Fri, 02 Oct 2026 09:00:00 +0800")
+    rag.index_pass(limit=60)
+    rows_dated = store.messages(limit=5)
+    check("messages ordered by mail date", rows_dated[0]["subject"] == "Fresh message latest")
+    row_old = [r for r in store.messages(limit=1000)
+               if r["uid"] == id_old and r["folder"] == "INBOX"][0]
+    check("date_ts parsed for new rows", row_old["date_ts"] > 0)
+    store.insert_message("Tasks", 77, 1, {})
+    with store.db() as conn:
+        nm = conn.execute("SELECT * FROM messages WHERE folder='Tasks' AND uid=77").fetchone()
+    check("headerless non-mail row hidden from lists",
+          nm is not None and all(not (r["folder"] == "Tasks" and r["uid"] == 77)
+                                 for r in store.messages(limit=2000, order="id")))
+    r = client.post("/messages/tag", data={"ids": [row_old["id"]], "tag": "Archive me"})
+    check("bulk tag redirects", r.status_code == 302)
+    check("tag stored", store.get_message(row_old["id"])["user_tag"] == "Archive me")
+    r = client.get("/messages?f=tagged")
+    check("tagged filter shows the badge", b"Archive me" in r.data)
+    r = client.post("/messages/untag", data={"ids": [row_old["id"]]})
+    check("untag clears", store.get_message(row_old["id"])["user_tag"] == "")
+
+    section("T16 classify: single + batch")
+    c1 = add_msg(state, "cafe@x.com", "Lunch with the team", "grabbing lunch friday", "c1@x")
+    c2 = add_msg(state, "billing2@vendor.com", "Invoice for September", "invoice attached", "c2@x")
+    c3 = add_msg(state, "deals2@shop.com", "Weekly newsletter deals", "deals inside", "c3@x")
+    rag.index_pass(limit=60)
+    rowc2 = [r for r in store.messages(limit=2000)
+             if r["uid"] == c2 and r["folder"] == "INBOX"][0]
+    r = client.post("/messages/%d/classify" % rowc2["id"])
+    check("single classify renders the result", r.status_code == 200 and b"classified this as" in r.data)
+    rowc2b = store.get_message(rowc2["id"])
+    check("single classify stored the category", rowc2b["llm_category"] == "Receipt")
+    check("single classify filed when a mapping exists",
+          rowc2b["status"] == "llm-moved" and rowc2b["action_taken"] == "move:Receipts")
+    job = engine.ClassifyJob()
+    job._run_job()
+    check("batch classified the backlog", job.state["done"] >= 3)
+    rowc1 = [r for r in store.messages(limit=2000)
+             if r["uid"] == c1 and r["folder"] == "INBOX"][0]
+    rowc3 = [r for r in store.messages(limit=2000)
+             if r["uid"] == c3 and r["folder"] == "INBOX"][0]
+    check("batch classified lunch as Personal",
+          store.get_message(rowc1["id"])["llm_category"] == "Personal")
+    check("batch classified newsletter as Newsletter",
+          store.get_message(rowc3["id"])["llm_category"] == "Newsletter")
+    pfrow = [r for r in store.messages(limit=2000) if r["subject"] == "permfail item"][0]
+    check("batch failure does not park on first strike",
+          store.get_message(pfrow["id"])["status"] == "queued"
+          and store.llm_fail_count(pfrow["id"]) == 1)
+    check("batch recorded the failure", job.state["failed"] >= 1)
+    r = client.get("/classify/status")
+    check("classify status endpoint", r.status_code == 200 and b"running" in r.data)
+    r = client.post("/messages/classify-all")
+    check("classify-all route triggers", r.status_code == 302)
+
+    section("T17 learn rules from manual tags")
+    store.tag_messages([rowc1["id"], rowc3["id"]], "Receipt")
+    r = client.post("/learn-rules")
+    check("learn-rules redirects", r.status_code == 302)
+    props = store.list_rule_proposals()
+    check("valid proposal stored from tags",
+          len(props) == 1 and props[0]["rule_obj"]["name"] == "Tagged receipts")
+    r = client.get("/messages")
+    check("proposals render on the messages page", b"Tagged receipts" in r.data)
+    rules_before = len(store.list_rules())
+    r = client.post("/proposals/%d/apply" % props[0]["id"])
+    check("proposal apply adds the rule",
+          len(store.list_rules()) == rules_before + 1
+          and any(x["name"] == "Tagged receipts" for x in store.list_rules()))
+    check("applied proposal no longer pending", not store.list_rule_proposals())
+    store.add_rule_proposal("tags", {"name": "Dismiss me", "match_mode": "all",
+                                     "conditions": [{"field": "subject", "op": "contains", "value": "x"}],
+                                     "actions": {"mark_read": True}})
+    p2 = store.list_rule_proposals()[0]
+    r = client.post("/proposals/%d/dismiss" % p2["id"])
+    check("dismiss hides the proposal", not store.list_rule_proposals())
+    agent = engine.AssistantAgent()
+    r = agent.call_tool("list_tagged", {})
+    check("assistant list_tagged tool works",
+          r["ok"] and r["result"]["count"] >= 2
+          and any(t["tag"] == "Receipt" for t in r["result"]["tagged"]))
+    agent.close()
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

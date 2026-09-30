@@ -27,8 +27,10 @@ app.secret_key = os.environ.get("APP_SECRET", "mail-triage-local")
 
 worker = engine.Worker()
 indexer = rag.Indexer()
+classifier = engine.ClassifyJob()
 
 MSG_REF_RE = re.compile(r"\[msg:(\d+)\]")
+_MD_FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 
 
 def linkify(text):
@@ -38,7 +40,113 @@ def linkify(text):
         lambda m: '<a href="/messages/%s">[msg:%s]</a>' % (m.group(1), m.group(1)), out)
 
 
+def _md_msg_link(s):
+    return MSG_REF_RE.sub(
+        lambda m: '<a href="/messages/%s">[msg:%s]</a>' % (m.group(1), m.group(1)), s)
+
+
+def md_to_html(text):
+    """Small safe markdown renderer for chat replies.
+
+    Escapes first, then structures: fenced + inline code, bold/italic, links,
+    [msg:ID] refs, headings, bullet/numbered lists, blockquotes, hr, line breaks.
+    """
+    text = (text or "").replace("\r\n", "\n")
+    code_blocks = []
+
+    def _stash_fence(m):
+        code_blocks.append(m.group(1))
+        return "\x00C%d\x00" % (len(code_blocks) - 1)
+
+    text = _MD_FENCE.sub(_stash_fence, text)
+    lines = text.split("\n")
+    out = []
+    i, n = 0, len(lines)
+
+    def inline(s):
+        s = html_escape(s)
+        spans = []
+
+        def _stash_span(m):
+            spans.append(m.group(1))
+            return "\x00I%d\x00" % (len(spans) - 1)
+
+        s = re.sub(r"`([^`\n]+)`", _stash_span, s)
+        s = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", s)
+        s = re.sub(r"__([^_]+)__", r"<b>\1</b>", s)
+        s = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"<i>\1</i>", s)
+        s = re.sub(r"(?<![\w_])_([^_\n]+)_(?![\w_])", r"<i>\1</i>", s)
+        s = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)",
+                   r'<a href="\2" target="_blank" rel="noopener">\1</a>', s)
+        for k, v in enumerate(spans):
+            s = s.replace("\x00I%d\x00" % k, "<code>%s</code>" % v)
+        return s
+
+    def _is_block_start(s2):
+        return (not s2 or re.match(r"([-*+]\s+|\d+[.)]\s+|#{1,6}\s+|>)", s2)
+                or re.fullmatch(r"\x00C\d+\x00", s2) or re.fullmatch(r"(-{3,}|\*{3,})", s2))
+
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+        m = re.fullmatch(r"\x00C(\d+)\x00", stripped)
+        if m:
+            out.append('<pre class="md-pre">%s</pre>'
+                       % html_escape(code_blocks[int(m.group(1))]))
+            i += 1
+            continue
+        if re.fullmatch(r"(-{3,}|\*{3,})", stripped):
+            out.append("<hr>")
+            i += 1
+            continue
+        m = re.match(r"#{1,6}\s+(.*)$", stripped)
+        if m:
+            out.append('<div class="md-h">%s</div>' % _md_msg_link(inline(m.group(1))))
+            i += 1
+            continue
+        if stripped.startswith(">"):
+            buf = []
+            while i < n and lines[i].strip().startswith(">"):
+                buf.append(inline(lines[i].strip().lstrip(">").strip()))
+                i += 1
+            out.append("<blockquote>%s</blockquote>" % "<br>".join(buf))
+            continue
+        m = re.match(r"[-*+]\s+(.*)$", stripped)
+        if m:
+            items = []
+            while i < n:
+                mm = re.match(r"\s*[-*+]\s+(.*)$", lines[i])
+                if not mm:
+                    break
+                items.append("<li>%s</li>" % _md_msg_link(inline(mm.group(1))))
+                i += 1
+            out.append("<ul>%s</ul>" % "".join(items))
+            continue
+        m = re.match(r"\d+[.)]\s+(.*)$", stripped)
+        if m:
+            items = []
+            while i < n:
+                mm = re.match(r"\s*\d+[.)]\s+(.*)$", lines[i])
+                if not mm:
+                    break
+                items.append("<li>%s</li>" % _md_msg_link(inline(mm.group(1))))
+                i += 1
+            out.append("<ol>%s</ol>" % "".join(items))
+            continue
+        buf = []
+        while i < n and not _is_block_start(lines[i].strip()):
+            buf.append(_md_msg_link(inline(lines[i].strip())))
+            i += 1
+        if buf:
+            out.append("<p>%s</p>" % "<br>".join(buf))
+    return "\n".join(out)
+
+
 app.jinja_env.globals["linkify"] = linkify
+app.jinja_env.globals["md"] = md_to_html
 
 HKT = 8 * 3600
 
@@ -188,6 +296,12 @@ padding:8px 14px;margin:0 8px 8px 0;text-align:center}
 .stat b{display:block;font-size:1.35rem}
 .stat span{color:var(--dim);font-size:.8rem}
 .foot{margin-top:26px;color:var(--dim);font-size:.8rem}
+.md p{margin:6px 0}
+.md .md-h{font-weight:600;margin:10px 0 4px}
+.md ul,.md ol{margin:6px 0 6px 22px;padding:0}
+.md blockquote{border-left:3px solid var(--line);margin:6px 0;padding:2px 10px;color:var(--dim)}
+.md pre.md-pre{background:#0d1319;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
+.md code{font-family:var(--mono);font-size:.85rem;background:#0d1319;border:1px solid var(--line);border-radius:6px;padding:1px 5px}
 </style>
 </head><body><div class="wrap">
 <div class="top">
@@ -655,29 +769,90 @@ def template_delete(tid):
 # ---------------------------------------------------------------- messages
 
 MESSAGES_TMPL = """
-<h2>Messages</h2>
+<h2>Messages <span class="sub">— newest mail first · tick rows to tag or classify in bulk</span></h2>
+
+{% if proposals %}
+<div class="card">
+  <h3>Rules proposed from your tags <span class="sub">— review, then add with one click</span></h3>
+  {% for p in proposals %}
+  <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
+    <div class="spread">
+      <div><b>{{ p.rule_obj.name }}</b> <span class="sub">({{ p.rule_obj.match_mode }})</span></div>
+      <div class="row" style="white-space:nowrap">
+        <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><button class="btn small primary" type="submit">Add rule</button></form>
+        <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><input type="hidden" name="disabled" value="1"><button class="btn small" type="submit">Add (disabled)</button></form>
+        <form class="inline" method="post" action="{{ url_for('proposal_dismiss', pid=p.id) }}"><button class="btn small danger" type="submit">Dismiss</button></form>
+      </div>
+    </div>
+    <div class="mono" style="font-size:.85rem">{{ p.cond_text }}</div>
+    <div class="sub">{{ p.act_text }}{% if p.rule_obj.rationale %} — {{ p.rule_obj.rationale }}{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if classify_state.running %}
 <div class="card">
   <div class="row">
-    {% for key, label in [('all','All'),('queued','Awaiting LLM'),('needs_reply','Needs reply'),('moved','Sorted'),('errors','Errors')] %}
-      <a class="btn small {{ 'primary' if filt==key else '' }}" href="{{ url_for('messages', f=key) }}">{{ label }}</a>
-    {% endfor %}
+    <span class="badge acc">classifying…</span>
+    <span class="sub">{{ classify_state.done }}/{{ classify_state.total }}{% if classify_state.failed %} · {{ classify_state.failed }} failed{% endif %}{% if classify_state.current %} · now: {{ classify_state.current }}{% endif %}</span>
+    <form class="inline" method="post" action="{{ url_for('classify_stop') }}"><button class="btn small danger" type="submit">Stop</button></form>
   </div>
 </div>
+<script>setTimeout(function(){ location.reload(); }, 10000);</script>
+{% endif %}
+
 <div class="card">
-  {% if msgs %}
-  <table class="tbl"><tr><th>when</th><th>from</th><th>subject</th><th>status</th><th>LLM</th></tr>
-  {% for m in msgs %}
-  <tr>
-    <td class="sub">{{ m.when }}</td>
-    <td class="sub">{{ m.from_addr[:40] }}</td>
-    <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:90] or '(no subject)' }}</a></td>
-    <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
-    <td class="sub">{{ m.llm }}</td>
-  </tr>
-  {% endfor %}</table>
-  {% else %}<div class="sub">No messages{% if filt != 'all' %} in this filter{% endif %} yet.</div>{% endif %}
+  <form id="bulk" method="post">
+    <div class="row">
+      <input type="text" name="tag" list="taglist" placeholder="tag selected as…" style="max-width:210px">
+      <datalist id="taglist">{% for c in tag_options %}<option value="{{ c }}">{% endfor %}</datalist>
+      <button class="btn" type="submit" formaction="{{ url_for('messages_tag') }}">Tag</button>
+      <button class="btn" type="submit" formaction="{{ url_for('messages_untag') }}">Untag</button>
+      <button class="btn" type="submit" formaction="{{ url_for('messages_classify') }}">Classify selected</button>
+      <button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify all unclassified ({{ unclassified }})</button>
+      <button class="btn small" type="submit" formaction="{{ url_for('learn_rules') }}" {{ 'disabled' if not tagged_count else '' }}>Learn rules from tags ({{ tagged_count }})</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      {% for key, label in [('all','All'),('queued','Awaiting LLM'),('needs_reply','Needs reply'),('moved','Sorted'),('tagged','Tagged'),('errors','Errors')] %}
+        <a class="btn small {{ 'primary' if filt==key else '' }}" href="{{ url_for('messages', f=key) }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+    <table class="tbl" style="margin-top:8px">
+      <tr>
+        <th><input type="checkbox" style="width:auto" onclick="for (var b of document.querySelectorAll('#bulk input[name=ids]')) b.checked = this.checked;"></th>
+        <th>date</th><th>from</th><th>subject</th><th>tag</th><th>status</th><th>LLM</th>
+      </tr>
+      {% for m in msgs %}
+      <tr>
+        <td><input type="checkbox" name="ids" value="{{ m.id }}" style="width:auto"></td>
+        <td class="sub">{{ m.when }}</td>
+        <td class="sub">{{ m.from_addr[:34] }}</td>
+        <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:84] or '(no subject)' }}</a></td>
+        <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
+        <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
+        <td class="sub">{{ m.llm }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% if not msgs %}<div class="sub">No messages{% if filt != 'all' %} in this filter{% endif %} yet.</div>{% endif %}
+  </form>
 </div>
 """
+
+
+def _proposal_views():
+    out = []
+    for p in store.list_rule_proposals():
+        ro = p["rule_obj"]
+        out.append({
+            "id": p["id"],
+            "rule_obj": ro,
+            "cond_text": summarize_conditions({"conditions": json.dumps(ro.get("conditions") or []),
+                                                "match_mode": ro.get("match_mode") or "all"}),
+            "act_text": summarize_actions({"actions": json.dumps(ro.get("actions") or {})}),
+        })
+    return out
 
 
 @app.route("/messages")
@@ -685,13 +860,129 @@ def messages():
     filt = request.args.get("f", "all")
     msgs = store.messages(limit=100, filt=filt)
     for m in msgs:
-        m["when"] = fmt_ts(m.get("processed_at"))
+        m["when"] = fmt_ts(m.get("date_ts") or m.get("processed_at"))
         m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
         llm = m.get("llm_category") or ""
         if llm and m.get("llm_confidence") is not None:
             llm += " (%.0f%%)" % (m["llm_confidence"] * 100)
         m["llm"] = llm
-    return render(render_template_string(MESSAGES_TMPL, msgs=msgs, filt=filt))
+    settings = store.all_settings()
+    tag_options = sorted(set(
+        list(settings.get("categories") or [])
+        + list((settings.get("category_folders") or {}).values())
+        + [json.loads(r.get("actions") or "{}").get("move_to", "")
+           for r in store.list_rules() if r.get("enabled")]))
+    tag_options = [t for t in tag_options if t]
+    return render(render_template_string(
+        MESSAGES_TMPL, msgs=msgs, filt=filt,
+        proposals=_proposal_views(),
+        classify_state=dict(classifier.state),
+        unclassified=store.unclassified_count(),
+        tagged_count=len(store.tagged_examples(1000)),
+        tag_options=tag_options))
+
+
+@app.route("/messages/tag", methods=["POST"])
+def messages_tag():
+    ids = request.form.getlist("ids")
+    tag = (request.form.get("tag") or "").strip()[:40]
+    if not ids or not tag:
+        flash("Select at least one message and type a tag.", "err")
+    else:
+        n = store.tag_messages(ids, tag)
+        store.log_event("info", "tagged %d message(s) as '%s'" % (n, tag))
+        flash("Tagged %d message(s) as '%s'." % (n, tag), "ok")
+    return redirect(url_for("messages"))
+
+
+@app.route("/messages/untag", methods=["POST"])
+def messages_untag():
+    ids = request.form.getlist("ids")
+    if not ids:
+        flash("Select at least one message first.", "err")
+    else:
+        n = store.untag_messages(ids)
+        flash("Cleared tags on %d message(s)." % n, "ok")
+    return redirect(url_for("messages"))
+
+
+@app.route("/messages/classify", methods=["POST"])
+def messages_classify():
+    ids = request.form.getlist("ids")
+    if not ids:
+        flash("Select at least one message first.", "err")
+    else:
+        classifier.trigger(ids=ids)
+        flash("Classifying %d selected message(s) — progress shows above the list." % len(ids), "ok")
+    return redirect(url_for("messages"))
+
+
+@app.route("/messages/classify-all", methods=["POST"])
+def messages_classify_all():
+    classifier.trigger()
+    flash("Classify-all started — it works newest-first and shows progress here.", "ok")
+    return redirect(url_for("messages"))
+
+
+@app.route("/classify/stop", methods=["POST"])
+def classify_stop():
+    classifier.request_stop()
+    flash("Stopping after the current message…", "ok")
+    return redirect(url_for("messages"))
+
+
+@app.route("/classify/status")
+def classify_status():
+    return jsonify(classifier.state)
+
+
+@app.route("/learn-rules", methods=["POST"])
+def learn_rules():
+    try:
+        reply, rules = engine.propose_rules_from_tags()
+        for r in rules:
+            store.add_rule_proposal("tags", r, reply)
+        if rules:
+            flash("Proposed %d rule(s) from your tags%s"
+                  % (len(rules), (" — " + reply) if reply else ""), "ok")
+        else:
+            flash("The model found no generalisable rules in your tags yet%s"
+                  % ((": " + reply) if reply else "."), "err")
+    except Exception as exc:
+        flash("Learn failed: %r" % exc, "err")
+    return redirect(url_for("messages"))
+
+
+@app.route("/proposals/<int:pid>/apply", methods=["POST"])
+def proposal_apply(pid):
+    row = store.get_rule_proposal(pid)
+    if not row or row.get("applied"):
+        flash("That proposal is no longer available.", "err")
+        return redirect(url_for("messages"))
+    try:
+        rule = json.loads(row.get("rule") or "{}")
+    except (TypeError, ValueError):
+        rule = {}
+    norm = engine.normalize_rule(rule) or rule
+    if not norm.get("conditions") or not norm.get("actions"):
+        flash("That proposal is not valid any more.", "err")
+        return redirect(url_for("messages"))
+    disabled = bool(request.form.get("disabled"))
+    store.add_rule(norm.get("name", "Learned rule"), norm.get("match_mode", "all"),
+                   norm.get("conditions", []), norm.get("actions", {}),
+                   enabled=not disabled)
+    store.mark_rule_proposal_applied(pid)
+    store.log_event("info", "rule '%s' added from tag learning (%s)"
+                    % (norm.get("name"), "disabled" if disabled else "enabled"))
+    flash("Rule '%s' added%s — check it on the Rules page."
+          % (norm.get("name"), " (disabled)" if disabled else ""), "ok")
+    return redirect(url_for("messages"))
+
+
+@app.route("/proposals/<int:pid>/dismiss", methods=["POST"])
+def proposal_dismiss(pid):
+    store.mark_rule_proposal_applied(pid)
+    return redirect(url_for("messages"))
 
 
 MESSAGE_TMPL = """
@@ -700,12 +991,27 @@ MESSAGE_TMPL = """
   <div class="kv sub">From <b>{{ m.from_addr }}</b> · {{ m.date }} · folder {{ m.folder }} · uid {{ m.uid }}</div>
   <div class="row" style="margin:8px 0">
     <span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>
+    {% if m.user_tag %}<span class="badge warn">tag: {{ m.user_tag }}</span>{% endif %}
     {% if m.action_taken %}<span class="badge">{{ m.action_taken }}</span>{% endif %}
     {% if m.llm_category %}<span class="badge acc">LLM: {{ m.llm_category }}
       {% if m.llm_confidence is not none %}({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
     {% if m.llm_needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
   </div>
   {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
+  <div class="row" style="margin:10px 0 2px">
+    <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
+      <button class="btn small primary" type="submit">{{ 'Re-classify with LLM' if m.llm_category else 'Classify with LLM' }}</button></form>
+    {% if m.llm_suggested_folder %}
+    <form class="inline" method="post" action="{{ url_for('message_file', mid=m.id) }}">
+      <button class="btn small" type="submit">File to {{ m.llm_suggested_folder }}</button></form>
+    {% endif %}
+    <form class="inline row" method="post" action="{{ url_for('message_tag', mid=m.id) }}">
+      <input type="text" name="tag" value="{{ m.user_tag }}" placeholder="tag…" style="max-width:170px;width:auto">
+      <button class="btn small" type="submit">Save tag</button>
+    </form>
+  </div>
+  {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
+    ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
   <p class="mono" style="font-size:.85rem;white-space:pre-wrap">{{ m.snippet[:900] }}</p>
 </div>
 
@@ -737,6 +1043,13 @@ MESSAGE_TMPL = """
 """
 
 
+def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0):
+    return render(render_template_string(
+        MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
+        draft_error=draft_error, draft_template_id=draft_template_id,
+        classify_result=classify_result, llm_configured=bool(config.LLM_API_KEY)))
+
+
 @app.route("/messages/<int:mid>")
 def message_detail(mid):
     m = store.get_message(mid)
@@ -744,10 +1057,61 @@ def message_detail(mid):
         flash("No such message.", "err")
         return redirect(url_for("messages"))
     m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
-    return render(render_template_string(
-        MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=None,
-        draft_error=None, draft_template_id=0,
-        llm_configured=bool(config.LLM_API_KEY)))
+    return _render_message(m)
+
+
+@app.route("/messages/<int:mid>/classify", methods=["POST"])
+def message_classify(mid):
+    m = store.get_message(mid)
+    if not m:
+        flash("No such message.", "err")
+        return redirect(url_for("messages"))
+    try:
+        res = engine.classify_and_store(m, store.all_settings())
+        store.add_llm_log(mid, True)
+        m = store.get_message(mid) or m
+        m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
+        return _render_message(m, classify_result={
+            "category": res.get("category"),
+            "confidence": float(res.get("confidence") or 0),
+            "summary": str(res.get("summary") or ""),
+            "moved": res.get("_moved_to") or "",
+        })
+    except Exception as exc:
+        flash("Classify failed: %r" % exc, "err")
+        return redirect(url_for("message_detail", mid=mid))
+
+
+@app.route("/messages/<int:mid>/tag", methods=["POST"])
+def message_tag(mid):
+    tag = (request.form.get("tag") or "").strip()[:40]
+    store.tag_messages([mid], tag)
+    flash(("Tag saved: " + tag) if tag else "Tag cleared.", "ok")
+    return redirect(url_for("message_detail", mid=mid))
+
+
+@app.route("/messages/<int:mid>/file", methods=["POST"])
+def message_file(mid):
+    m = store.get_message(mid)
+    target = (m or {}).get("llm_suggested_folder") or ""
+    if not m or not target:
+        flash("No suggested folder for this message — classify it first.", "err")
+    else:
+        try:
+            mc = engine.MailClient().connect()
+            try:
+                mc.ensure_selected(m["folder"])
+                mc.ensure_folder(target)
+                mc.move(m["uid"], target)
+            finally:
+                mc.close()
+            store.update_message(mid, status="llm-moved", action_taken="move:" + target)
+            store.log_event("info", "filed message %d ('%s') → %s"
+                            % (mid, (m.get("subject") or "")[:50], target))
+            flash("Filed to '%s'." % target, "ok")
+        except Exception as exc:
+            flash("File failed: %r" % exc, "err")
+    return redirect(url_for("message_detail", mid=mid))
 
 
 @app.route("/messages/<int:mid>/draft", methods=["POST"])
@@ -760,15 +1124,10 @@ def message_draft(mid):
     template_id = request.form.get("template_id") or None
     try:
         draft = engine.generate_draft(mid, int(template_id) if template_id else None)
-        return render(render_template_string(
-            MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
-            draft_error=None, draft_template_id=int(template_id) if template_id else 0,
-            llm_configured=bool(config.LLM_API_KEY)))
+        return _render_message(m, draft=draft,
+                               draft_template_id=int(template_id) if template_id else 0)
     except Exception as exc:
-        return render(render_template_string(
-            MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=None,
-            draft_error=repr(exc), draft_template_id=0,
-            llm_configured=bool(config.LLM_API_KEY)))
+        return _render_message(m, draft_error=repr(exc))
 
 
 @app.route("/messages/<int:mid>/save", methods=["POST"])
@@ -789,7 +1148,7 @@ ASSISTANT_TMPL = r"""
 {% if convo %}
   {% for m in convo %}
     {% if m.role == 'user' %}
-      <div class="msg ok" style="margin-left:10%"><b>You:</b> {{ m.content }}</div>
+      <div class="msg ok" style="margin-left:10%"><b>You:</b> {{ m.content }}<div class="sub" style="font-size:.72rem;text-align:right">{{ m.when }}</div></div>
     {% else %}
       <div class="msg" style="background:var(--card2);border:1px solid var(--line)">
         <b>Assistant:</b>
@@ -805,7 +1164,8 @@ ASSISTANT_TMPL = r"""
           {% endfor %}
         </div>
         {% endif %}
-        <div style="white-space:pre-wrap">{{ linkify(m.content)|safe }}</div>
+        <div class="md">{{ md(m.content)|safe }}</div>
+        <div class="sub" style="font-size:.72rem;text-align:right">{{ m.when }}</div>
         {% for p in m.proposals_list %}
         <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
           <div class="spread">
@@ -860,6 +1220,63 @@ if(!(window.fetch && window.ReadableStream && window.TextDecoder)) return;
 
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function linkifyText(s){ return esc(s).replace(/\[msg:(\d+)\]/g, '<a href="/messages/$1">[msg:$1]</a>'); }
+function mdRender(src){
+  var raw=(src||'').replace(/\r\n/g,'\n');
+  var lines=raw.split('\n'), out=[], i=0;
+  function link(s){return s.replace(/\[msg:(\d+)\]/g,'<a href="/messages/$1">[msg:$1]</a>');}
+  function inline(s){
+    s=esc(s);
+    var spans=[];
+    s=s.replace(/`([^`\n]+)`/g,function(m,p1){spans.push(p1);return '\x01I'+(spans.length-1)+'\x01';});
+    s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+    s=s.replace(/__([^_]+)__/g,'<b>$1</b>');
+    s=s.replace(/(^|[^\w*])\*([^*\n]+)\*(?![\w*])/g,'$1<i>$2</i>');
+    s=s.replace(/(^|[^\w_])_([^_\n]+)_(?![\w_])/g,'$1<i>$2</i>');
+    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    for(var k=0;k<spans.length;k++) s=s.replace('\x01I'+k+'\x01','<code>'+spans[k]+'</code>');
+    return s;
+  }
+  while(i<lines.length){
+    var st=lines[i].trim();
+    if(!st){i++;continue;}
+    if(/^```/.test(st)){
+      var buf=[]; i++;
+      while(i<lines.length && !/^\s*```/.test(lines[i])){buf.push(lines[i]);i++;}
+      i++;
+      out.push('<pre class="md-pre">'+esc(buf.join('\n'))+'</pre>');
+      continue;
+    }
+    if(/^(-{3,}|\*{3,})$/.test(st)){out.push('<hr>');i++;continue;}
+    var hm=st.match(/^#{1,6}\s+(.*)$/);
+    if(hm){out.push('<div class="md-h">'+link(inline(hm[1]))+'</div>');i++;continue;}
+    if(/^>/.test(st)){
+      var bq=[];
+      while(i<lines.length && /^\s*>/.test(lines[i])){bq.push(link(inline(lines[i].trim().replace(/^>\s?/,''))));i++;}
+      out.push('<blockquote>'+bq.join('<br>')+'</blockquote>');
+      continue;
+    }
+    if(/^[-*+]\s+/.test(st)){
+      var ul=[];
+      while(i<lines.length && /^\s*[-*+]\s+/.test(lines[i])){ul.push('<li>'+link(inline(lines[i].trim().replace(/^[-*+]\s+/,'')))+'</li>');i++;}
+      out.push('<ul>'+ul.join('')+'</ul>');
+      continue;
+    }
+    if(/^\d+[.)]\s+/.test(st)){
+      var ol=[];
+      while(i<lines.length && /^\s*\d+[.)]\s+/.test(lines[i])){ol.push('<li>'+link(inline(lines[i].trim().replace(/^\d+[.)]\s+/,'')))+'</li>');i++;}
+      out.push('<ol>'+ol.join('')+'</ol>');
+      continue;
+    }
+    var par=[];
+    while(i<lines.length){
+      var s2=lines[i].trim();
+      if(!s2 || /^([-*+]\s+|\d+[.)]\s+|#{1,6}\s+|>|```)/.test(s2) || /^(-{3,}|\*{3,})$/.test(s2)) break;
+      par.push(link(inline(s2))); i++;
+    }
+    if(par.length) out.push('<p>'+par.join('<br>')+'</p>');
+  }
+  return out.join('\n');
+}
 function mk(tag, cls, text){var d=document.createElement(tag); if(cls) d.className=cls; if(text!=null) d.textContent=text; return d;}
 function scrollDown(){ window.scrollTo(0, document.body.scrollHeight); }
 
@@ -954,7 +1371,7 @@ function run(text){
     if(finished) return; finished = true;
     stopTimer(); phase.dataset.final='1';
     phase.textContent = ' done in ' + Math.round((Date.now()-t0)/1000) + 's';
-    if(content.textContent) content.innerHTML = linkifyText(content.textContent);
+    if(content.textContent) content.innerHTML = mdRender(content.textContent);
     if(proposals.length && doneMsgId != null) proposals.forEach(function(p,i){ addProposal(p, i, doneMsgId); });
     btn.disabled = false; scrollDown();
   }
@@ -1037,6 +1454,7 @@ def assistant():
                 pass
         m["reasoning"] = ""
         m["tool_steps"] = []
+        m["when"] = fmt_ts(m.get("ts"))
         if m.get("role") == "assistant" and m.get("meta"):
             try:
                 meta = json.loads(m["meta"])
@@ -1317,4 +1735,5 @@ if __name__ == "__main__":
         sys.exit(0)
     worker.start()
     indexer.start()
+    classifier.start()
     app.run(host=config.UI_HOST, port=config.UI_PORT, threaded=True)

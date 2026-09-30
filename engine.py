@@ -682,13 +682,58 @@ def _process_folder(mc, folder, settings, rules):
     return scanned, moved
 
 
+def classify_and_store(msg, settings, mc=None):
+    """Classify one message, persist the result, file it when llm_apply is on.
+
+    Returns the classification dict with '_moved_to' set when it was filed.
+    Raises on LLM failure. Reused by the worker queue and the manual batch job.
+    """
+    res = LLMClient().classify(msg, settings.get("categories") or [],
+                               settings.get("my_name", ""))
+    category = str(res.get("category", ""))
+    try:
+        conf = float(res.get("confidence") or 0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    folder = (settings.get("category_folders") or {}).get(category, "")
+    already_filed = str(msg.get("action_taken") or "").startswith("move")
+    fields = {
+        "llm_category": category,
+        "llm_confidence": conf,
+        "llm_summary": str(res.get("summary", ""))[:200],
+        "llm_needs_reply": 1 if res.get("needs_reply") else 0,
+        "llm_suggested_folder": folder,
+        "status": "classified",
+    }
+    res["_moved_to"] = ""
+    if settings.get("llm_apply") and folder and not already_filed:
+        own = mc is None
+        try:
+            if own:
+                mc = MailClient().connect()
+            mc.ensure_selected(msg["folder"])
+            mc.ensure_folder(folder)
+            mc.move(msg["uid"], folder)
+            fields["status"] = "llm-moved"
+            fields["action_taken"] = "move:" + folder
+            res["_moved_to"] = folder
+        except Exception as exc:
+            store.log_event("error", "LLM move to %s failed: %r" % (folder, exc))
+        finally:
+            if own and mc is not None:
+                try:
+                    mc.close()
+                except Exception:
+                    pass
+    store.update_message(msg["id"], **fields)
+    return res
+
+
 def _process_llm_queue(mc, settings, batch):
-    llm = LLMClient()
-    categories = settings.get("categories") or []
     done = 0
     for msg in store.queued_messages(batch):
         try:
-            res = llm.classify(msg, categories, settings.get("my_name", ""))
+            res = classify_and_store(msg, settings, mc=mc)
             store.add_llm_log(msg["id"], True)
         except Exception as exc:
             store.add_llm_log(msg["id"], False, repr(exc))
@@ -702,35 +747,11 @@ def _process_llm_queue(mc, settings, batch):
                 store.log_event("error", "LLM attempt %d failed for '%s' (will retry): %s"
                                 % (fails, (msg.get("subject") or "")[:50], exc))
             continue
-        category = str(res.get("category", ""))
-        try:
-            conf = float(res.get("confidence") or 0)
-        except (TypeError, ValueError):
-            conf = 0.0
-        folder = (settings.get("category_folders") or {}).get(category, "")
-        fields = {
-            "llm_category": category,
-            "llm_confidence": conf,
-            "llm_summary": str(res.get("summary", ""))[:200],
-            "llm_needs_reply": 1 if res.get("needs_reply") else 0,
-            "llm_suggested_folder": folder,
-        }
-        if settings.get("llm_apply") and folder:
-            try:
-                mc.ensure_selected(msg["folder"])
-                mc.ensure_folder(folder)
-                mc.move(msg["uid"], folder)
-                fields["status"] = "llm-moved"
-                fields["action_taken"] = "move:" + folder
-            except Exception as exc:
-                fields["status"] = "classified"
-                store.log_event("error", "LLM move to %s failed: %r" % (folder, exc))
-        else:
-            fields["status"] = "classified"
-        store.update_message(msg["id"], **fields)
         store.log_event("info", "LLM: '%s' → %s (%.0f%%) %s"
-                        % ((msg.get("subject") or "")[:50], category, conf * 100,
-                           ("moved to %s" % folder) if fields.get("action_taken") else "(suggestion only)"))
+                        % ((msg.get("subject") or "")[:50], res.get("category"),
+                           (float(res.get("confidence") or 0)) * 100,
+                           ("moved to %s" % res["_moved_to"]) if res.get("_moved_to")
+                           else "(suggestion only)"))
         done += 1
     return done
 
@@ -809,6 +830,167 @@ def save_draft(msg_id, body_text):
     store.log_event("info", "draft saved for '%s'" % (msg.get("subject") or "")[:60])
     return folder
 
+
+# ---------------------------------------------------------------- manual classification job
+
+class ClassifyJob(threading.Thread):
+    """Manual batch classification ("Classify selected" / "Classify all unclassified").
+
+    Runs on demand (explicit user action, so no hourly cap), newest mail first,
+    with progress in `state` for the UI. Failures follow the worker's park rules
+    (3 strikes -> status 'error')."""
+
+    def __init__(self):
+        super().__init__(daemon=True, name="triage-classifier")
+        self.lock = threading.Lock()
+        self.force = threading.Event()
+        self.stop_flag = threading.Event()
+        self.queue = []
+        self._skip = set()
+        self._mc = None
+        self.state = {"running": False, "done": 0, "failed": 0, "total": 0,
+                      "current": "", "last_error": None, "started": 0}
+
+    def trigger(self, ids=None):
+        with self.lock:
+            self.queue = [int(i) for i in (ids or [])]
+        self.stop_flag.clear()
+        self.force.set()
+
+    def request_stop(self):
+        self.stop_flag.set()
+
+    def run(self):
+        store.init_db()
+        while True:
+            self.force.wait(1)
+            if not self.force.is_set():
+                continue
+            self.force.clear()
+            try:
+                self._run_job()
+            except Exception as exc:  # keep the thread alive no matter what
+                self.state["last_error"] = repr(exc)
+                self.state["running"] = False
+                store.log_event("error", "classify job crashed: %r" % exc)
+
+    def _mail(self):
+        if self._mc is None:
+            self._mc = MailClient().connect()
+        return self._mc
+
+    def _run_job(self):
+        with self.lock:
+            ids = list(self.queue)
+            self.queue = []
+        self._skip = set()
+        settings = store.all_settings()
+        done = failed = 0
+        self.state.update({"running": True, "done": 0, "failed": 0,
+                           "started": int(time.time()), "last_error": None, "current": ""})
+        self.state["total"] = len(ids) if ids else store.unclassified_count()
+        try:
+            pending = None
+            if ids:
+                pending = [m for m in (store.get_message(i) for i in ids) if m]
+            while not self.stop_flag.is_set():
+                msg = (pending.pop(0) if pending else None) if pending is not None \
+                    else store.unclassified_next(skip=self._skip)
+                if msg is None:
+                    break
+                self.state["current"] = (msg.get("subject") or "")[:70]
+                try:
+                    res = classify_and_store(msg, settings, mc=self._mail())
+                    store.add_llm_log(msg["id"], True)
+                    done += 1
+                    store.log_event("info", "classify: '%s' → %s%s"
+                                    % ((msg.get("subject") or "")[:50], res.get("category"),
+                                       (" (moved to %s)" % res["_moved_to"]) if res.get("_moved_to") else ""))
+                except Exception as exc:
+                    failed += 1
+                    self._skip.add(msg["id"])
+                    store.add_llm_log(msg["id"], False, repr(exc))
+                    if store.llm_fail_count(msg["id"]) >= 3:
+                        store.update_message(msg["id"], status="error")
+                        store.log_event("error", "classify: '%s' parked after repeated failures"
+                                        % (msg.get("subject") or "")[:50])
+                    else:
+                        store.log_event("error", "classify: '%s' failed (retry later): %r"
+                                        % ((msg.get("subject") or "")[:50], exc))
+                self.state["done"] = done
+                self.state["failed"] = failed
+                if not self.stop_flag.is_set():
+                    time.sleep(0.05)
+            if self.stop_flag.is_set():
+                store.log_event("info", "classify: stopped after %d message(s)" % done)
+            else:
+                store.log_event("info", "classify: finished - %d classified, %d failed"
+                                % (done, failed))
+        finally:
+            if self._mc is not None:
+                try:
+                    self._mc.close()
+                except Exception:
+                    pass
+                self._mc = None
+            self.state["running"] = False
+            self.state["current"] = ""
+
+
+# ---------------------------------------------------------------- learn rules from tags
+
+LEARN_SYSTEM = """You are the rule architect for "Mail Triage". The user has manually tagged a set of emails with their own labels. Infer filter rules that would sort matching mail the same way, without duplicating rules that already exist.
+
+Reply with ONE JSON object and nothing else:
+{"reply": "one short sentence for the user",
+ "proposed_rules": [
+   {"name": "short rule name",
+    "match_mode": "all" or "any",
+    "conditions": [{"field": "from|to|subject|body", "op": "contains|equals|regex", "value": "..."}],
+    "actions": {"move_to": "Folder name", "mark_read": true, "flag": true},
+    "rationale": "one line"}]}
+
+Rules about rules:
+- 1-3 conditions each; prefer distinctive substrings (an address fragment, a subject keyword).
+- Every rule needs at least one condition AND one action.
+- Learn generalisable patterns from the tags (senders, domains, subject words): do not hardcode single message ids.
+- Max 5 proposed rules; [] when the examples are too inconsistent.
+- Prefer "move_to" a folder whose name matches the tag or the closest existing folder."""
+
+
+def propose_rules_from_tags():
+    """Derive proposed rules from the user's manual tags. Returns (reply, [rules])."""
+    tagged = store.tagged_examples(80)
+    if not tagged:
+        raise RuntimeError("no tagged messages yet - tag some mail on the Messages page first")
+    lines = []
+    for i, t in enumerate(tagged, 1):
+        lines.append("%d. tag=%s | from=%s | subject=%s"
+                     % (i, t["user_tag"], (t["from_addr"] or "")[:70],
+                        (t["subject"] or "")[:90]))
+    context = ("EXISTING RULES (do not duplicate):\n%s\n\n"
+               "CATEGORIES: %s\n\n"
+               "TAGGED EXAMPLES (the user's manual labels):\n%s"
+               % (_rules_to_text(store.list_rules()),
+                  ", ".join(store.get_setting("categories") or []),
+                  "\n".join(lines)))
+    content = LLMClient()._chat(LEARN_SYSTEM + "\n\n" + context,
+                                "Propose rules matching my tagging.", json_mode=True)
+    obj = {}
+    m = re.search(r"\{.*\}", content or "", re.S)
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+        except (TypeError, ValueError):
+            obj = {}
+    reply = str(obj.get("reply") or "").strip()[:400]
+    rules = []
+    for item in (obj.get("proposed_rules") or [])[:5]:
+        norm = normalize_rule(item)
+        if norm:
+            rules.append(norm)
+    return reply, rules
+
 # ---------------------------------------------------------------- assistant
 #
 # The assistant is a streaming, tool-calling agent. It talks to the same
@@ -829,6 +1011,7 @@ How to work
 - You cannot send mail, reply to mail, or delete mail; never claim that you did.
 - Keep searches bounded: small limits, use since/before for windows. Summarize results; never dump raw rows.
 - When you read a message, never paste long verbatim quotes into the answer: give the gist in your own words, keep only short key phrases (prices, dates, rules), and cite the message as [msg:ID].
+- The user can also tag mail by hand on the Messages page. If they ask you to learn rules from their tags, call list_tagged first and base propose_rule calls on the tag-to-pattern evidence.
 - At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.
 
 Today is %(today)s (Hong Kong time). Reply in the user's language, as plain text (no markdown tables), concise and friendly.
@@ -900,6 +1083,9 @@ ASSISTANT_TOOLS = [
     _fn("list_folders",
         "List the mailbox folders with total and unseen message counts.",
         {}),
+    _fn("list_tagged",
+        "List the messages the user has manually tagged with their own labels (Messages page -> select rows -> Tag). Use when they ask to learn from their manual tagging; then turn the patterns into propose_rule calls.",
+        {"limit": {"type": "integer", "description": "max rows (default 40, max 100)"}}),
     _fn("propose_rule",
         "Propose a filter rule for the user to approve with one click. Approved rules sort matching mail automatically (top to bottom, first match wins).",
         {"name": {"type": "string", "description": "short rule name"},
@@ -1463,6 +1649,20 @@ class AssistantAgent:
         folders = self._folders_with_counts()
         return {"ok": True, "summary": "%d folders" % len(folders),
                 "result": {"folders": folders}}
+
+    def _tool_list_tagged(self, a):
+        try:
+            limit = max(1, min(int(a.get("limit") or 40), 100))
+        except (TypeError, ValueError):
+            limit = 40
+        rows = store.tagged_examples(limit)
+        items = [{"message_id": r["id"], "from": r["from_addr"], "subject": r["subject"],
+                  "date": r["date"], "tag": r["user_tag"],
+                  "snippet": _truncate(r.get("snippet"), 120)} for r in rows]
+        return {"ok": True, "summary": "%d tagged example(s)" % len(items),
+                "result": {"count": len(items),
+                           "note": "These are the user's manual labels; propose rules that reproduce them.",
+                           "tagged": items}}
 
     def _tool_propose_rule(self, a):
         norm, errors = _validate_rule(a)
