@@ -434,6 +434,7 @@ class LLMHandler(BaseHTTPRequestHandler):
                 "needs_reply": ("lunch" in t or "budget" in t),
                 "confidence": conf,
                 "summary": "mock: " + cat,
+                "reason": "because it says " + cat,
             })
         body = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
         self.send_response(200)
@@ -1070,6 +1071,14 @@ def main():
     check("single classify stored the category", rowc2b["llm_category"] == "Receipt")
     check("single classify filed when a mapping exists",
           rowc2b["status"] == "llm-moved" and rowc2b["action_taken"] == "move:Receipts")
+    check("single classify stored the reason",
+          "because it says Receipt" in (rowc2b["llm_reason"] or ""))
+    check("classify result page shows the reason",
+          b"why: because it says Receipt" in r.data)
+    r = client.get("/messages/%d" % rowc2["id"])
+    check("message page shows summary + reason",
+          b"LLM summary: mock: Receipt" in r.data
+          and b"why: because it says Receipt" in r.data)
     job = engine.ClassifyJob()
     job._run_job()
     check("batch classified the backlog", job.state["done"] >= 3)

@@ -1003,7 +1003,7 @@ MESSAGE_TMPL = """
       {% if m.llm_confidence is not none %}({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
     {% if m.llm_needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
   </div>
-  {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
+  {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_reason %} · why: {{ m.llm_reason }}{% endif %}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
   <div class="row" style="margin:10px 0 2px">
     <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
       <button class="btn small primary" type="submit">{{ 'Re-classify with LLM' if m.llm_category else 'Classify with LLM' }}</button></form>
@@ -1017,7 +1017,7 @@ MESSAGE_TMPL = """
     </form>
   </div>
   {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
-    ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
+    ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.reason %} · why: {{ classify_result.reason }}{% endif %}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
   <p class="mono" style="font-size:.85rem;white-space:pre-wrap">{{ m.snippet[:900] }}</p>
 </div>
 
@@ -1081,6 +1081,7 @@ def message_classify(mid):
             "category": res.get("category"),
             "confidence": float(res.get("confidence") or 0),
             "summary": str(res.get("summary") or ""),
+            "reason": str(res.get("reason") or ""),
             "moved": res.get("_moved_to") or "",
         })
     except Exception as exc:

@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS messages (
     llm_category TEXT DEFAULT '',
     llm_confidence REAL DEFAULT NULL,
     llm_summary TEXT DEFAULT '',
+    llm_reason TEXT DEFAULT '',
     llm_needs_reply INTEGER DEFAULT NULL,
     llm_suggested_folder TEXT DEFAULT '',
     processed_at INTEGER,
@@ -125,6 +126,8 @@ def _migrate(conn):
     if "date_ts" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN date_ts INTEGER DEFAULT 0")
         _backfill_date_ts(conn)
+    if "llm_reason" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN llm_reason TEXT DEFAULT ''")
     if "user_tag" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN user_tag TEXT NOT NULL DEFAULT ''")
 

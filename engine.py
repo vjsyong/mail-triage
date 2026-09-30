@@ -550,7 +550,8 @@ class LLMClient:
         cats = ", ".join(categories) if categories else "Action, Notification, Newsletter, Receipt, Personal, Promo"
         system = ("You triage incoming email for %s. Reply with a single JSON object and nothing else. "
                   "Shape: {\"category\": one of [%s], \"needs_reply\": true|false, "
-                  "\"confidence\": 0.0-1.0, \"summary\": \"at most 12 words\"}" % (my_name or "the user", cats))
+                  "\"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", "
+                  "\"reason\": \"why that category, max 15 words\"}" % (my_name or "the user", cats))
         user = ("From: %s\nTo: %s\nSubject: %s\nDate: %s\n\n%s"
                 % (msg.get("from_addr", ""), msg.get("to_addr", ""), msg.get("subject", ""),
                    msg.get("date", ""), (msg.get("snippet") or "")[:1500]))
@@ -716,6 +717,7 @@ def classify_and_store(msg, settings, mc=None):
         "llm_category": category,
         "llm_confidence": conf,
         "llm_summary": str(res.get("summary", ""))[:200],
+        "llm_reason": str(res.get("reason", ""))[:200],
         "llm_needs_reply": 1 if res.get("needs_reply") else 0,
         "llm_suggested_folder": folder,
         "status": "classified",
