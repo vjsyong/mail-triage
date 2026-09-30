@@ -350,7 +350,12 @@ def rule_matches(rule, fields):
         hay_raw = fields.get(field) or ""
         hay = hay_raw.lower()
         if op == "contains":
-            ok = bool(val) and val.lower() in hay
+            if val and len(val) <= 3 and re.fullmatch(r"[A-Za-z0-9]+", val):
+                # short tokens match whole words: "PO" won't match "support"
+                ok = re.search(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(val),
+                               hay_raw, re.I) is not None
+            else:
+                ok = bool(val) and val.lower() in hay
         elif op == "equals":
             ok = hay.strip() == val.strip().lower()
         elif op == "regex":
@@ -364,6 +369,15 @@ def rule_matches(rule, fields):
     if len(results) == 1:
         return results[0]
     return all(results) if (rule.get("match_mode") or "all") == "all" else any(results)
+
+
+def is_guard_rule(rule):
+    """A guard rule keeps matching mail in place and stops further rules."""
+    try:
+        acts = json.loads(rule.get("actions") or "{}")
+    except (TypeError, ValueError):
+        acts = {}
+    return (not acts) or bool(acts.get("keep"))
 
 
 def match_first(rules, fields):
@@ -673,7 +687,8 @@ def _process_folder(mc, folder, settings, rules):
             store.update_message(row["id"], status=status, rule_id=rule["id"],
                                  action_taken=",".join(taken))
             store.log_event("info", "rule '%s' → %s | %s (%s)"
-                            % (rule.get("name") or rule["id"], ", ".join(taken) or "suggest",
+                            % (rule.get("name") or rule["id"],
+                               ", ".join(taken) or ("kept (guard)" if is_guard_rule(rule) else "suggest"),
                                (meta.get("subject") or "")[:60], meta.get("from_addr")))
         else:
             store.update_message(row["id"], status="queued")
@@ -706,7 +721,19 @@ def classify_and_store(msg, settings, mc=None):
         "status": "classified",
     }
     res["_moved_to"] = ""
+    guard = None
     if settings.get("llm_apply") and folder and not already_filed:
+        # guard rules protect mail from ALL filing, including this category map
+        g_fields = {"from": msg.get("from_addr", ""), "to": msg.get("to_addr", ""),
+                    "subject": msg.get("subject", ""), "body": msg.get("snippet", "")}
+        for r in store.list_rules(enabled_only=True):
+            if is_guard_rule(r) and rule_matches(r, g_fields):
+                guard = r.get("name") or ("rule %s" % r.get("id"))
+                break
+    if guard:
+        store.log_event("info", "LLM: kept '%s' in place (guard rule '%s')"
+                        % ((msg.get("subject") or "")[:50], guard))
+    if settings.get("llm_apply") and folder and not already_filed and not guard:
         own = mc is None
         try:
             if own:
@@ -948,11 +975,12 @@ Reply with ONE JSON object and nothing else:
     "match_mode": "all" or "any",
     "conditions": [{"field": "from|to|subject|body", "op": "contains|equals|regex", "value": "..."}],
     "actions": {"move_to": "Folder name", "mark_read": true, "flag": true},
+    "placement": "top" or "bottom",
     "rationale": "one line"}]}
 
 Rules about rules:
 - 1-3 conditions each; prefer distinctive substrings (an address fragment, a subject keyword).
-- Every rule needs at least one condition AND one action.
+- Every rule needs at least one condition; a rule with NO actions is a GUARD rule: matching mail stays where it is and nothing else can move it. Use guards (with "placement": "top") to protect mail the user wants kept, e.g. "never move X".
 - Learn generalisable patterns from the tags (senders, domains, subject words): do not hardcode single message ids.
 - Max 5 proposed rules; [] when the examples are too inconsistent.
 - Prefer "move_to" a folder whose name matches the tag or the closest existing folder."""
@@ -1012,6 +1040,9 @@ How to work
 - Keep searches bounded: small limits, use since/before for windows. Summarize results; never dump raw rows.
 - When you read a message, never paste long verbatim quotes into the answer: give the gist in your own words, keep only short key phrases (prices, dates, rules), and cite the message as [msg:ID].
 - The user can also tag mail by hand on the Messages page. If they ask you to learn rules from their tags, call list_tagged first and base propose_rule calls on the tag-to-pattern evidence.
+- To PROTECT mail from being moved (any "never move X" / "keep X in the inbox" request): propose a rule with conditions only and NO actions - that is a guard rule. Guards must sit at the top, so set placement="top". A guard also stops LLM category filing for matching mail.
+- Only tell the user a rule was proposed once propose_rule has returned ok:true in this turn; never claim a proposal you did not actually make.
+- Condition values of 3 characters or fewer (letters/digits) match whole words: a value "PO" will not match "support" or "report".
 - At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.
 
 Today is %(today)s (Hong Kong time). Reply in the user's language, as plain text (no markdown tables), concise and friendly.
@@ -1087,7 +1118,7 @@ ASSISTANT_TOOLS = [
         "List the messages the user has manually tagged with their own labels (Messages page -> select rows -> Tag). Use when they ask to learn from their manual tagging; then turn the patterns into propose_rule calls.",
         {"limit": {"type": "integer", "description": "max rows (default 40, max 100)"}}),
     _fn("propose_rule",
-        "Propose a filter rule for the user to approve with one click. Approved rules sort matching mail automatically (top to bottom, first match wins).",
+        "Propose a filter rule for the user to approve with one click. Approved rules sort matching mail automatically (top to bottom, first match wins). A rule with NO actions is a GUARD: matching mail stays put and nothing else (later rules, LLM filing) can move it.",
         {"name": {"type": "string", "description": "short rule name"},
          "match_mode": {"type": "string", "enum": ["all", "any"]},
          "conditions": {"type": "array", "description": "1-4 conditions", "items": {
@@ -1096,12 +1127,15 @@ ASSISTANT_TOOLS = [
                  "field": {"type": "string", "enum": ["from", "to", "subject", "body"]},
                  "op": {"type": "string", "enum": ["contains", "equals", "regex"]},
                  "value": {"type": "string"}}}},
-         "actions": {"type": "object", "description": "what the rule does",
+         "actions": {"type": "object", "description": "what the rule does; OMIT (or {\"keep\": true}) for a guard rule that keeps matching mail in place and stops further rules",
                      "properties": {"move_to": {"type": "string"},
                                     "mark_read": {"type": "boolean"},
-                                    "flag": {"type": "boolean"}}},
+                                    "flag": {"type": "boolean"},
+                                    "keep": {"type": "boolean"}}},
+         "placement": {"type": "string", "enum": ["top", "bottom"],
+                       "description": "where the rule lands in the list; use \"top\" for guard/protection rules so they catch mail before other rules act (default bottom)"},
          "rationale": {"type": "string", "description": "one line for the user"}},
-        ("name", "conditions", "actions")),
+        ("name", "conditions")),
 ]
 
 
@@ -1192,9 +1226,11 @@ def _rules_to_text(rules):
             parts.append("mark read")
         if acts.get("flag"):
             parts.append("flag")
+        if not parts:
+            parts.append("KEEP IN PLACE (guard — stops further rules)")
         state = "" if r.get("enabled") else " [disabled]"
         lines.append("%d. %s: %s => %s%s"
-                     % (i, r.get("name") or "rule", cs, ", ".join(parts) or "noop", state))
+                     % (i, r.get("name") or "rule", cs, ", ".join(parts), state))
     return "\n".join(lines)
 
 
@@ -1242,14 +1278,20 @@ def _validate_rule(proposal):
             actions["mark_read"] = True
         if a.get("flag"):
             actions["flag"] = True
+        if a.get("keep"):
+            actions["keep"] = True
     if not conditions:
         errors.append("at least one valid condition is required")
-    if not actions:
-        errors.append("at least one action (move_to / mark_read / flag) is required")
+    # No actions = a GUARD rule: matching mail is kept in place and no further
+    # rule (or LLM filing) touches it. This is how "never move X" is expressed.
     if errors:
         return None, errors
-    return {"name": name, "match_mode": mode, "conditions": conditions, "actions": actions,
-            "rationale": str(proposal.get("rationale") or "").strip()[:300]}, []
+    out = {"name": name, "match_mode": mode, "conditions": conditions, "actions": actions,
+           "rationale": str(proposal.get("rationale") or "").strip()[:300]}
+    placement = str(proposal.get("placement") or "").lower()
+    if placement in ("top", "bottom"):
+        out["placement"] = placement
+    return out, []
 
 
 def normalize_rule(proposal):
@@ -1674,8 +1716,9 @@ class AssistantAgent:
             return {"ok": False, "summary": "rule invalid: " + "; ".join(errors[:3]),
                     "result": {"errors": errors,
                                "hint": "Every rule needs 1-4 conditions (field from/to/subject/body, "
-                                       "op contains/equals/regex) and at least one action "
-                                       "(move_to / mark_read / flag). Fix and propose again."}}
+                                       "op contains/equals/regex). Actions are optional: a rule with "
+                                       "no actions is a GUARD that keeps matching mail in place. "
+                                       "Fix and propose again."}}
         self.proposals.append(norm)
         return {"ok": True, "summary": "rule proposed: %s" % norm["name"],
                 "result": {"status": "queued for the user's one-click approval",

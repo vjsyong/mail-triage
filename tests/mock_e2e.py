@@ -1119,6 +1119,64 @@ def main():
           and any(t["tag"] == "Receipt" for t in r["result"]["tagged"]))
     agent.close()
 
+    section("T18 guard rules, top placement, short-token matching")
+    po_rule = {"conditions": json.dumps([{"field": "subject", "op": "contains", "value": "PO"}]),
+               "match_mode": "all"}
+    check("short contains value does not fire inside words",
+          engine.rule_matches(po_rule, {"subject": "support and reports"}) is False)
+    check("short contains value fires as a whole word",
+          engine.rule_matches(po_rule, {"subject": "PO D100305765 stationery"}) is True
+          and engine.rule_matches(po_rule, {"subject": "please raise (PO), thanks"}) is True)
+    long_rule = {"conditions": json.dumps([{"field": "subject", "op": "contains", "value": "portal"}]),
+                 "match_mode": "all"}
+    check("longer values still substring-match",
+          engine.rule_matches(long_rule, {"subject": "supportportal update"}) is True)
+
+    agent = engine.AssistantAgent()
+    r = agent.call_tool("propose_rule", {
+        "name": "Keep Jac in inbox", "match_mode": "any",
+        "conditions": [{"field": "from", "op": "contains", "value": "jac.leung"}],
+        "placement": "top", "rationale": "his mail always stays in the inbox"})
+    check("guard rule accepted without actions",
+          r["ok"] and r["result"]["rule"]["actions"] == {}
+          and r["result"]["rule"].get("placement") == "top")
+    agent.close()
+
+    store.set_setting("rules_apply", True)
+    store.set_setting("llm_apply", True)
+    guard_id = store.add_rule("Keep Jac in inbox", "any",
+                              [{"field": "from", "op": "contains", "value": "jac.leung"}],
+                              {}, enabled=True, position="top")
+    mover_id = store.add_rule("Jac to Notifications", "any",
+                              [{"field": "from", "op": "contains", "value": "jac.leung"}],
+                              {"move_to": "Notifications"}, enabled=True)
+    check("top placement wins the ordering", store.list_rules()[0]["id"] == guard_id)
+    jac_uid = add_msg(state, "jac.leung@ust.hk", "Absence arrangement for AISC1000B",
+                      "here is the invoice arrangement", "jac1@x")
+    engine.process_mailbox()
+    rowj = [r for r in store.messages(limit=2000) if r["uid"] == jac_uid][0]
+    rowj = store.get_message(rowj["id"])
+    check("guard keeps matching mail in the inbox",
+          rowj["status"] == "matched" and rowj["action_taken"] == ""
+          and rowj["rule_id"] == guard_id and rowj["folder"] == "INBOX")
+    notif = state.get("Notifications")
+    check("guard stopped the later move rule",
+          jac_uid in state.get("INBOX")["uids"]
+          and (notif is None or jac_uid not in notif.get("uids", [])))
+    r = client.post("/messages/%d/classify" % rowj["id"])
+    rowj2 = store.get_message(rowj["id"])
+    check("guard blocks LLM category filing",
+          r.status_code == 200 and rowj2["llm_category"] == "Receipt"
+          and rowj2["status"] == "classified"
+          and not str(rowj2["action_taken"] or "").startswith("move"))
+    r = client.get("/rules")
+    check("rules page labels the guard", b"keep in place (guard)" in r.data)
+    r = client.post("/rules/%d/move" % mover_id, data={"dir": "top"})
+    check("move-to-top reorders rules",
+          r.status_code == 302 and store.list_rules()[0]["id"] == mover_id)
+    store.delete_rule(guard_id)
+    store.delete_rule(mover_id)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

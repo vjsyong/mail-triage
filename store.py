@@ -217,16 +217,28 @@ def get_rule(rule_id):
     return dict(row) if row else None
 
 
-def add_rule(name, match_mode, conditions, actions, enabled=True):
+def add_rule(name, match_mode, conditions, actions, enabled=True, position="bottom"):
     now = int(time.time())
     with db() as conn:
-        pos = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 FROM rules").fetchone()[0]
+        if position == "top":
+            pos = conn.execute("SELECT COALESCE(MIN(position), 0) - 1 FROM rules").fetchone()[0]
+        else:
+            pos = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 FROM rules").fetchone()[0]
         cur = conn.execute(
             "INSERT INTO rules (position, enabled, name, match_mode, conditions, actions, created, updated) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (pos, 1 if enabled else 0, name, match_mode,
              json.dumps(conditions), json.dumps(actions), now, now))
         return cur.lastrowid
+
+
+def move_rule_top(rule_id):
+    with db() as conn:
+        row = conn.execute("SELECT id FROM rules WHERE id=?", (rule_id,)).fetchone()
+        if row is None:
+            return
+        mn = conn.execute("SELECT MIN(position) FROM rules").fetchone()[0] or 0
+        conn.execute("UPDATE rules SET position=? WHERE id=?", (mn - 1, rule_id))
 
 
 def update_rule(rule_id, **fields):

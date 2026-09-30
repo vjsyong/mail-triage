@@ -227,6 +227,8 @@ def summarize_actions(rule):
         parts.append("mark read")
     if actions.get("flag"):
         parts.append("flag")
+    if not parts:
+        parts.append("keep in place (guard)")
     return ", ".join(parts) or "(none)"
 
 
@@ -504,6 +506,7 @@ RULES_TMPL = """
     <td class="mono">{{ r.summary }}</td>
     <td class="sub">{{ r.actions }}</td>
     <td class="row" style="white-space:nowrap">
+      <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="top"><button class="btn small" type="submit" title="move to top">⤒</button></form>
       <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit">↑</button></form>
       <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit">↓</button></form>
       <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}"><button class="btn small" type="submit">{{ 'disable' if r.enabled else 'enable' }}</button></form>
@@ -581,7 +584,7 @@ RULE_EDIT_TMPL = """
     </div>
     {% endfor %}
   </div>
-  <label>Actions</label>
+  <label>Actions <span class="sub">— leave all blank to keep matching mail in place (a guard rule: no later rule or LLM filing can move it)</span></label>
   <div class="grid2">
     <div><label>Move to folder <span class="sub">(blank = don't move; created if missing)</span></label>
       <input type="text" name="move_to" value="{{ actions.get('move_to','') }}" placeholder="e.g. Work"></div>
@@ -685,8 +688,11 @@ def rule_delete(rule_id):
 
 @app.route("/rules/<int:rule_id>/move", methods=["POST"])
 def rule_move(rule_id):
-    direction = -1 if request.form.get("dir") == "up" else 1
-    store.move_rule(rule_id, direction)
+    d = request.form.get("dir")
+    if d == "top":
+        store.move_rule_top(rule_id)
+    else:
+        store.move_rule(rule_id, -1 if d == "up" else 1)
     return redirect(url_for("rules"))
 
 
@@ -777,7 +783,7 @@ MESSAGES_TMPL = """
   {% for p in proposals %}
   <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
     <div class="spread">
-      <div><b>{{ p.rule_obj.name }}</b> <span class="sub">({{ p.rule_obj.match_mode }})</span></div>
+      <div><b>{{ p.rule_obj.name }}</b> <span class="sub">({{ p.rule_obj.match_mode }})</span>{% if p.rule_obj.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}</div>
       <div class="row" style="white-space:nowrap">
         <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><button class="btn small primary" type="submit">Add rule</button></form>
         <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><input type="hidden" name="disabled" value="1"><button class="btn small" type="submit">Add (disabled)</button></form>
@@ -970,7 +976,7 @@ def proposal_apply(pid):
     disabled = bool(request.form.get("disabled"))
     store.add_rule(norm.get("name", "Learned rule"), norm.get("match_mode", "all"),
                    norm.get("conditions", []), norm.get("actions", {}),
-                   enabled=not disabled)
+                   enabled=not disabled, position=norm.get("placement") or "bottom")
     store.mark_rule_proposal_applied(pid)
     store.log_event("info", "rule '%s' added from tag learning (%s)"
                     % (norm.get("name"), "disabled" if disabled else "enabled"))
@@ -1169,7 +1175,7 @@ ASSISTANT_TMPL = r"""
         {% for p in m.proposals_list %}
         <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
           <div class="spread">
-            <div><b>{{ p.name }}</b> <span class="sub">({{ p.match_mode }})</span></div>
+            <div><b>{{ p.name }}</b> <span class="sub">({{ p.match_mode }})</span>{% if p.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}</div>
             <div class="row" style="white-space:nowrap">
               <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
@@ -1435,6 +1441,7 @@ def _proposal_view(p):
     return {
         "name": p.get("name", ""),
         "match_mode": p.get("match_mode", "all"),
+        "placement": p.get("placement", ""),
         "summary": summarize_conditions({"conditions": json.dumps(p.get("conditions", [])),
                                          "match_mode": p.get("match_mode", "all")}),
         "actions_summary": summarize_actions({"actions": json.dumps(p.get("actions", {}))}),
@@ -1534,7 +1541,8 @@ def assistant_apply():
         return redirect(url_for("assistant"))
     norm = engine.normalize_rule(proposals[idx]) or proposals[idx]
     store.add_rule(norm.get("name", "Assistant rule"), norm.get("match_mode", "all"),
-                   norm.get("conditions", []), norm.get("actions", {}), enabled=not disabled)
+                   norm.get("conditions", []), norm.get("actions", {}), enabled=not disabled,
+                   position=norm.get("placement") or "bottom")
     store.log_event("info", "assistant rule '%s' added (%s)"
                     % (norm.get("name"), "disabled" if disabled else "enabled"))
     flash("Rule '%s' added%s - check it on the Rules page (the Test button dry-runs it against recent mail)."
