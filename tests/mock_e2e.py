@@ -1447,6 +1447,16 @@ def main():
     stats_after = json.loads(store.get_heuristic(hid)["stats"])
     check("stats reflect the larger label set",
           (stats_after.get("trained_label_count") or 0) >= 11)
+    check("training included negative examples", (stats_after.get("negatives") or 0) > 0)
+    hx = store.add_heuristic("neg-only", "decision_list", "Promo",
+                             model=json.dumps({"conditions": [
+                                 {"token": "b:zzzqqq", "label": "__other__", "prob": 1.0,
+                                  "precision": 1.0, "support": 9, "seen": 9}]}),
+                             stats=json.dumps({"source": "test"}))
+    verdict = heuristics_mod.classify({"from_addr": "n@x.com", "subject": "no match",
+                                       "snippet": "zzzqqq boop"})
+    check("negative-only match abstains instead of mislabeling", verdict is None)
+    store.delete_heuristic(hx)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

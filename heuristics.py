@@ -39,17 +39,6 @@ boundary name filename octet stream padding attachment inline multipart alternat
 """.split())
 
 
-def _clean_body_for_features(body):
-    """Salvage decoded text from MIME-junk snippets (legacy rows) before featurizing."""
-    try:
-        import engine  # lazy: engine imports this module at load time
-        if engine.looks_like_mime_junk(body):
-            body = engine.readable_body(body, limit=2000)
-    except Exception:
-        pass
-    return body
-
-
 def featurize(msg):
     """msg: a messages row (dict). Returns token counts plus raw fields."""
     frm = (msg.get("from_addr") or "").lower().strip()
@@ -212,6 +201,22 @@ register_kind("naive_bayes", train_naive_bayes, predict_naive_bayes,
 # ------------------------------------------------------------------ training data
 
 MIN_EXAMPLES = 5
+OTHER_LABEL = "__other__"
+_MIME_SCRUB = re.compile(
+    r"(?i)\b(content[- ]type|content[- ]transfer[- ]encoding|charset|utf-8|us-ascii|"
+    r"7bit|8bit|quoted-printable|base64|multipart/\w+|text/plain|text/html|"
+    r"iso-\d+-\d+|windows-\d+)\b[:;.]?")
+
+
+def _clean_body_for_features(body):
+    """Salvage decoded text from MIME-junk snippets (legacy rows) before featurizing."""
+    try:
+        import engine  # lazy: engine imports this module at load time
+        if engine.looks_like_mime_junk(body):
+            body = engine.readable_body(body, limit=2000)
+    except Exception:
+        pass
+    return _MIME_SCRUB.sub(" ", body)
 
 
 def labels_from_tags(category, limit=500):
@@ -226,9 +231,29 @@ def labels_from_classified(category, limit=800):
             and r.get("status") in ("classified", "llm-moved")]
 
 
+def negatives_from_classified(category, limit=800):
+    return [r for r in store.messages(limit=limit)
+            if (r.get("llm_category") or "") and r.get("llm_category") != category
+            and r.get("status") in ("classified", "llm-moved")]
+
+
 def build_examples(category, source="tags", limit=500):
-    rows = labels_from_tags(category, limit) if source == "tags" else labels_from_classified(category, limit)
-    return [(category, featurize(r)) for r in rows], len(rows)
+    """(label, feats) pairs: the category's positives plus negative examples.
+
+    Negatives keep precision numbers honest - a single-class training set makes
+    every token look 100% precise. When the user's own labels are thin, other
+    classified mail fills the negative pool (marked in stats)."""
+    if source == "tags":
+        rows = labels_from_tags(category, limit)
+        others = [t for t in store.tagged_examples(limit)
+                  if (t.get("user_tag") or "").strip().lower() != (category or "").strip().lower()]
+        neg_rows = others[:max(20, 3 * len(rows))]
+    else:
+        rows = labels_from_classified(category, limit)
+        neg_rows = negatives_from_classified(category, limit)[:max(20, 3 * len(rows))]
+    examples = [(category, featurize(r)) for r in rows]
+    examples += [(OTHER_LABEL, featurize(r)) for r in neg_rows]
+    return examples, len(rows)
 
 
 def train_heuristic(kind, category, source="tags", params=None, limit=500,
@@ -240,39 +265,51 @@ def train_heuristic(kind, category, source="tags", params=None, limit=500,
                            % (n, category, MIN_EXAMPLES))
     model, stats = train(kind, examples, params or {})
     stats = dict(stats or {})
-    stats.update({"source": source, "trained_label_count": n,
+    n_neg = sum(1 for label, _f in examples if label == OTHER_LABEL)
+    stats.update({"source": source, "trained_label_count": n, "negatives": n_neg,
                   "trained_at": int(time.time()), "params": params or {},
                   "weak_labels": source != "tags"})
     return model, stats
 
 
 def evaluate_heuristic(heuristic, limit=500):
-    """In-sample evaluation against the current label source."""
+    """In-sample evaluation against the current label source.
+
+    Positives: predicted the category. Negatives: predicted anything else."""
     try:
         stats = json.loads(heuristic.get("stats") or "{}")
     except (TypeError, ValueError):
         stats = {}
     source = stats.get("source") or "tags"
+    category = heuristic.get("category") or ""
     try:
         model = json.loads(heuristic.get("model") or "{}")
     except (TypeError, ValueError):
         model = {}
-    examples, n = build_examples(heuristic.get("category") or "", source, limit)
+    examples, n = build_examples(category, source, limit)
     right, wrong, misses = 0, 0, []
+    false_positives = 0
     for label, feats in examples:
         out = predict(heuristic.get("kind") or "", model, feats)
         pred = out[0] if out else None
-        if pred == label:
+        if label == OTHER_LABEL:
+            ok = pred != category
+            if not ok:
+                false_positives += 1
+        else:
+            ok = pred == category
+            if not ok and len(misses) < 3:
+                misses.append({"subject": (feats.get("subject") or "")[:70],
+                               "expected": label, "predicted": pred or "(abstain)"})
+        if ok:
             right += 1
         else:
             wrong += 1
-            if len(misses) < 3:
-                misses.append({"subject": (feats.get("subject") or "")[:70],
-                               "expected": label, "predicted": pred or "(abstain)"})
     total = right + wrong
     return {"total": total, "correct": right, "wrong": wrong,
+            "positives": n, "negatives": total - n, "false_positives": false_positives,
             "accuracy": round(right / total, 4) if total else None,
-            "note": "in-sample over the current %s labels" % source,
+            "note": "in-sample over the current %s labels (+ negative examples)" % source,
             "mistakes": misses}
 
 
@@ -294,6 +331,8 @@ def classify(msg):
         if not out:
             continue
         label, prob, detail = out
+        if str(label).startswith("__"):
+            continue  # explicit "not this category" from the negative set: abstain
         if prob is None or prob < float(h.get("min_confidence") or DEFAULT_MIN_CONFIDENCE):
             continue
         if not best or prob > best["confidence"]:
