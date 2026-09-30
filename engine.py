@@ -1482,14 +1482,18 @@ class AssistantAgent:
         if not res.get("ok"):
             return {"ok": False, "summary": res.get("error") or "search failed",
                     "result": {"error": res.get("error")}}
+        note = (res.get("meta") or {}).get("note") or ""
         items = [{"message_id": r["message_id"], "folder": r["folder"], "from": r["from_addr"],
                   "subject": r["subject"], "date": r["date"], "excerpt": r["excerpt"]}
                  for r in res["results"]]
-        return {"ok": True,
-                "summary": "%d semantic match(es): %s"
-                           % (len(items), "; ".join((i["subject"] or "")[:40] for i in items[:3])),
+        summary = "%d semantic match(es): %s" % (
+            len(items), "; ".join((i["subject"] or "")[:40] for i in items[:3]))
+        if note:
+            summary += " [degraded: %s]" % note
+        return {"ok": True, "summary": summary,
                 "result": {"query": q, "count": len(items),
-                           "note": "Cite as [msg:ID]; use read_message with message_id for full text.",
+                           "note": ("Cite as [msg:ID]; use read_message with message_id for full text."
+                                    + (" Partial channels: %s" % note if note else "")),
                            "results": items}}
 
     def _resolve_message(self, a):
