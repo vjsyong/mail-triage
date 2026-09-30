@@ -322,6 +322,9 @@ padding:10px 16px;margin:0 8px 8px 0;text-align:center}
 .stat b{display:block;font-size:1.4rem;letter-spacing:-.02em}
 .stat span{color:var(--panel-dim);font-size:.78rem}
 .foot{margin-top:26px;color:var(--dim);font-size:.8rem;border-top:1px solid var(--line);padding-top:12px}
+.toast{position:fixed;right:18px;bottom:18px;background:#000;color:#fff;padding:11px 16px;font-size:.85rem;
+z-index:99;opacity:1;transition:opacity .6s;box-shadow:0 6px 20px rgba(0,0,0,.28);max-width:420px}
+.toast b{font-weight:600}
 .md p{margin:6px 0}
 .md .md-h{font-weight:600;margin:10px 0 4px}
 .md ul,.md ol{margin:6px 0 6px 22px;padding:0}
@@ -636,6 +639,10 @@ def classifier_delete(hid):
 
 CLASSIFIER_DATASET_TMPL = """
 <h2>{{ h.name }} <span class="sub">— dataset review</span></h2>
+{% if request.args.get('toast') %}
+<div class="toast">✓ <b>{{ request.args.get('subj') }}</b> moved to {{ 'the in-set' if request.args.get('toast') == 'in' else 'the out-of-set' }} → {{ request.args.get('cat') }}</div>
+<script>setTimeout(function(){ var t=document.querySelector('.toast'); if(t){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 700); } }, 3800);</script>
+{% endif %}
 <div class="card">
   <div class="row" style="margin-bottom:8px">
     <span class="badge">{{ h.kind }}</span>
@@ -649,9 +656,10 @@ CLASSIFIER_DATASET_TMPL = """
   </div>
   <div class="sub">{{ ds.pos_total }} positive sample(s){% if ds.pos_excluded %} ({{ ds.pos_excluded }} removed){% endif %} ·
     {{ ds.neg_total }} negative sample(s){% if ds.neg_excluded %} ({{ ds.neg_excluded }} removed){% endif %}.
-    {% if ds.weak %}These labels come from the LLM's own auto-classification. Remove anything that is actually a different
-    category so it never trains the model - retraining applies the removals.{% else %}Removals stick across retraining;
-    re-include anything you removed by mistake.{% endif %}</div>
+    Change a sample's label in the dropdown to reclassify it — it moves between the sets immediately
+    {% if request.args.get('toast') %}{% else %}(and you get a toast){% endif %}; retrain to apply the new dataset to the model.
+    {% if ds.weak %}These labels come from the LLM's own auto-classification, so correcting them here fixes both the
+    dataset and the message's record.{% endif %}</div>
 </div>
 
 <div class="card">
@@ -663,7 +671,10 @@ CLASSIFIER_DATASET_TMPL = """
     <tr{% if s.excluded %} style="opacity:.45"{% endif %}>
       <td><a href="{{ url_for('message_detail', mid=s.msg_id) }}">{{ s.subject or '(no subject)' }}</a>{% if s.summary %}<div class="sub" style="font-size:.75rem">{{ s.summary }}</div>{% endif %}</td>
       <td class="sub">{{ s.from }}</td>
-      <td class="sub">{{ s.llm_category }}{% if s.confidence is not none %} ({{ '%.0f' % (s.confidence*100) }}%){% endif %}{% if s.tag %} · tag: {{ s.tag }}{% endif %}</td>
+      <td>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
+        <div class="sub" style="font-size:.72rem;margin-top:2px">{% if ds.source == 'tags' %}tag{% else %}LLM label{% endif %}{% if s.confidence is not none %} · {{ '%.0f' % (s.confidence*100) }}%{% endif %}{% if s.excluded %} · removed{% endif %}</div>
+      </td>
       <td>{% if s.excluded %}
         <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">re-include</button></form>
       {% else %}
@@ -685,7 +696,10 @@ CLASSIFIER_DATASET_TMPL = """
     <tr{% if s.excluded %} style="opacity:.45"{% endif %}>
       <td><a href="{{ url_for('message_detail', mid=s.msg_id) }}">{{ s.subject or '(no subject)' }}</a></td>
       <td class="sub">{{ s.from }}</td>
-      <td class="sub">{{ s.llm_category }}{% if s.confidence is not none %} ({{ '%.0f' % (s.confidence*100) }}%){% endif %}{% if s.tag %} · tag: {{ s.tag }}{% endif %}</td>
+      <td>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
+        <div class="sub" style="font-size:.72rem;margin-top:2px">{% if ds.source == 'tags' %}tag{% else %}LLM label{% endif %}{% if s.confidence is not none %} · {{ '%.0f' % (s.confidence*100) }}%{% endif %}{% if s.excluded %} · removed{% endif %}</div>
+      </td>
       <td>{% if s.excluded %}
         <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">re-include</button></form>
       {% else %}
@@ -707,7 +721,40 @@ def classifier_dataset(hid):
         flash("No such classifier.", "err")
         return redirect(url_for("classifiers"))
     ds = heuristics.dataset_for(row)
-    return render(render_template_string(CLASSIFIER_DATASET_TMPL, h=heuristics.view(row), ds=ds))
+    options = list(store.get_setting("categories") or [])
+    if row.get("category") and row["category"] not in options:
+        options.insert(0, row["category"])
+    return render(render_template_string(CLASSIFIER_DATASET_TMPL, h=heuristics.view(row),
+                                         ds=ds, options=options))
+
+
+@app.route("/classifiers/<int:hid>/dataset/relabel", methods=["POST"])
+def classifier_dataset_relabel(hid):
+    row = store.get_heuristic(hid)
+    if row:
+        try:
+            mid = int(request.form.get("msg_id") or 0)
+        except ValueError:
+            mid = 0
+        cat = (request.form.get("category") or "").strip()[:60]
+        msg = store.get_message(mid) if mid else None
+        if msg and cat:
+            try:
+                stats = json.loads(row.get("stats") or "{}")
+            except (TypeError, ValueError):
+                stats = {}
+            if (stats.get("source") or "tags") == "tags":
+                store.update_message(mid, user_tag=cat)
+            else:
+                store.update_message(mid, llm_category=cat, classified_by="user",
+                                     llm_confidence=1.0)
+            store.log_event("info", "dataset: message %d relabelled to '%s' (classifier '%s', by ui)"
+                            % (mid, cat, row.get("name") or hid))
+            in_set = cat.strip().lower() == (row.get("category") or "").strip().lower()
+            return redirect(url_for("classifier_dataset", hid=hid,
+                                    toast="in" if in_set else "out",
+                                    subj=(msg.get("subject") or "(no subject)")[:70], cat=cat))
+    return redirect(url_for("classifier_dataset", hid=hid))
 
 
 def _dataset_edit(hid, add):

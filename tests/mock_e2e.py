@@ -1486,6 +1486,41 @@ def main():
     check("classifiers page links the dataset page",
           ("/classifiers/%d/dataset" % hid).encode() in client.get("/classifiers").data)
 
+    section("T25 dataset relabel: dropdown reclassification + toast")
+    pos_ids = [s["msg_id"] for s in heuristics_mod.dataset_for(store.get_heuristic(hid))["positives"]]
+    rid = [i for i in pos_ids if i != sample_id][0]
+    r = client.post("/classifiers/%d/dataset/relabel" % hid,
+                    data={"msg_id": rid, "category": "Personal"})
+    check("relabel redirects with an out-of-set toast",
+          r.status_code == 302 and "toast=out" in (r.headers.get("Location") or ""))
+    ds3 = heuristics_mod.dataset_for(store.get_heuristic(hid))
+    check("relabelled sample moved to the negatives",
+          any(s["msg_id"] == rid for s in ds3["negatives"])
+          and not any(s["msg_id"] == rid for s in ds3["positives"]))
+    r = client.get("/classifiers/%d/dataset?toast=out&subj=x&cat=Personal" % hid)
+    check("toast markup renders on the page",
+          b'class="toast"' in r.data and b"moved to" in r.data)
+    r = client.post("/classifiers/%d/dataset/relabel" % hid,
+                    data={"msg_id": rid, "category": "Promo"})
+    check("relabel back redirects with an in-set toast",
+          r.status_code == 302 and "toast=in" in (r.headers.get("Location") or ""))
+    check("sample moved back up into the positives",
+          any(s["msg_id"] == rid and s["tag"] == "Promo"
+              for s in heuristics_mod.dataset_for(store.get_heuristic(hid))["positives"]))
+    hcl = store.add_heuristic("NL weak", "decision_list", "Newsletter",
+                              model=json.dumps({"conditions": []}),
+                              stats=json.dumps({"source": "classified", "weak_labels": True}))
+    dsn = heuristics_mod.dataset_for(store.get_heuristic(hcl))
+    nid = dsn["positives"][0]["msg_id"] if dsn["positives"] else 0
+    ok_relabel = False
+    if nid:
+        r = client.post("/classifiers/%d/dataset/relabel" % hcl,
+                        data={"msg_id": nid, "category": "Personal"})
+        rowx = store.get_message(nid)
+        ok_relabel = (rowx["llm_category"] == "Personal" and rowx["classified_by"] == "user")
+    check("classified-source relabel corrects the LLM label on the message", ok_relabel)
+    store.delete_heuristic(hcl)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:
