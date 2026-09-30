@@ -1448,7 +1448,7 @@ function run(text){
   var detSum = mk('summary','','Reasoning'); det.appendChild(detSum);
   var pre = mk('pre'); det.appendChild(pre);
   var toolsBox = mk('div','tools'); toolsBox.style.display='none';
-  var content = mk('div'); content.style.whiteSpace='pre-wrap';
+  var content = mk('div','md'); content.style.whiteSpace='pre-wrap'; var rawText='';
   var meta = mk('div','meta'); meta.style.display='none';
   box.appendChild(status); box.appendChild(det); box.appendChild(toolsBox);
   box.appendChild(content); box.appendChild(meta);
@@ -1517,7 +1517,7 @@ function run(text){
     if(content.textContent) content.innerHTML = mdRender(content.textContent);
     content.style.whiteSpace='';
     meta.style.display='';
-    var cp = mk('button','copy','copy'); cp.type='button'; cp.dataset.copy = content.textContent;
+    var cp = mk('button','copy','copy'); cp.type='button'; cp.dataset.copy = rawText || content.textContent;
     meta.appendChild(cp);
     meta.appendChild(mk('span','', new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})));
     if(proposals.length && doneMsgId != null) proposals.forEach(function(p,i){ addProposal(p, i, doneMsgId); });
@@ -1547,15 +1547,15 @@ function run(text){
     }
     else if(ev === 'content'){
       if(det.style.display !== 'none' && det.open){ det.open = false; detSum.textContent = 'Reasoning'; }
-      content.textContent += (d.text||''); label('writing…');
+      content.textContent += (d.text||''); rawText += (d.text||''); label('writing…');
     }
-    else if(ev === 'content_break'){ if(content.textContent) content.textContent += '\n\n'; }
+    else if(ev === 'content_break'){ if(content.textContent){ content.textContent += '\n\n'; rawText += '\n\n'; } }
     else if(ev === 'tool_start'){ label('running ' + d.name + '…'); toolCard(d.id, d.name, d.args); }
     else if(ev === 'tool_end'){ toolDone(d.id, d.ok, d.summary, d.dry_run); label('thinking…'); }
     else if(ev === 'proposals'){ proposals = d.proposals || []; }
     else if(ev === 'done'){
       doneMsgId = d.message_id;
-      if(d.reply && !content.textContent) content.textContent = d.reply;
+      if(d.reply && !content.textContent){ content.textContent = d.reply; rawText = d.reply; }
       finish();
     }
     else if(ev === 'error'){ fail(d.message || 'unknown error'); }
