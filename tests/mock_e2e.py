@@ -1251,6 +1251,58 @@ def main():
     check("pager shows total and an Older link",
           b"page 1 of" in r.data and b"Older" in r.data and b"per page" in r.data)
 
+    section("T21 message viewer: decoded MIME bodies")
+    import base64 as _b64
+    payload = "Hi Sean, this is the decoded invoice text for September, please process it."
+    enc = _b64.b64encode(payload.encode()).decode()
+    enc_lines = "\r\n".join(enc[i:i+76] for i in range(0, len(enc), 76))
+    raw_b64 = ("From: siyan@connect.ust.hk\r\nTo: seanyong@ust.hk\r\n"
+               "Subject: Re: About PGTA of HMAW1905E\r\n"
+               "Date: Tue, 15 Sep 2026 13:24:40 +0000\r\nMessage-ID: <b64msg@x>\r\n"
+               "MIME-Version: 1.0\r\n"
+               "Content-Type: multipart/mixed; boundary=\"XXB\"\r\n\r\n"
+               "--XXB\r\nContent-Type: text/plain; charset=\"utf-8\"\r\n"
+               "Content-Transfer-Encoding: base64\r\n\r\n"
+               + enc_lines + "\r\n--XXB--\r\n").encode()
+    b64uid = state.add("INBOX", raw_b64)
+    engine.process_mailbox()
+    rowb64 = [r for r in store.messages(limit=3000) if r["uid"] == b64uid][0]
+    check("scan stores the decoded body as the snippet",
+          "decoded invoice text for September" in (rowb64["snippet"] or "")
+          and "Content-Transfer-Encoding" not in (rowb64["snippet"] or ""))
+    r = client.get("/messages/%d" % rowb64["id"])
+    check("message viewer shows the decoded body",
+          b"decoded invoice text for September" in r.data
+          and b"Content-Transfer-Encoding" not in r.data)
+    if not (store.get_message(rowb64["id"])["llm_category"] or ""):
+        job21 = engine.ClassifyJob()
+        job21.trigger([rowb64["id"]])
+        job21._run_job()
+    hits = [c for c in llm_server.calls if "pgta" in c["user"].lower()]
+    check("classifier received the decoded body, not base64",
+          bool(hits) and "decoded invoice text" in hits[-1]["user"].lower()
+          and enc[:40] not in hits[-1]["user"])
+    check("base64 mail classified as Receipt",
+          (store.get_message(rowb64["id"])["llm_category"] or "") == "Receipt")
+    salv = engine.readable_body(("--XXB\r\nContent-Type: text/plain\r\n"
+                                 "Content-Transfer-Encoding: base64\r\n\r\n" + enc_lines),
+                                limit=4000)
+    check("salvage decodes truncated MIME snippets", "decoded invoice text" in salv)
+    check("junk detector flags raw MIME, passes clean text",
+          engine.looks_like_mime_junk("--XXB\r\nContent-Type: text/plain") is True
+          and engine.looks_like_mime_junk("Hi Sean, readable text.") is False)
+    junk_text = ("--XXB\r\nContent-Type: text/plain; charset=utf-8\r\n"
+                 "Content-Transfer-Encoding: base64\r\n\r\n" + enc_lines)
+    jr = add_msg(state, "junktest@x.com", "Junk snippet repair", "plain body for repair test", "junkrepair@x")
+    rag.index_pass(limit=300)
+    rowjr = [r for r in store.messages(limit=3000) if r["uid"] == jr][0]
+    store.update_message(rowjr["id"], snippet=junk_text)
+    r = client.get("/messages/%d" % rowjr["id"])
+    fixed = store.get_message(rowjr["id"])
+    check("viewer repairs junk snippets from IMAP",
+          r.status_code == 200 and b"Content-Transfer-Encoding" not in r.data
+          and "plain body for repair test" in (fixed["snippet"] or ""))
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

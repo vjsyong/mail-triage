@@ -1045,7 +1045,7 @@ MESSAGE_TMPL = """
   </div>
   {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
     ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.reason %} · why: {{ classify_result.reason }}{% endif %}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
-  <p class="mono" style="font-size:.85rem;white-space:pre-wrap">{{ m.snippet[:900] }}</p>
+  <div style="white-space:pre-wrap;margin:10px 0;font-size:.92rem;line-height:1.5">{{ m.body[:4000] }}</div>
 </div>
 
 <h2>Reply</h2>
@@ -1076,7 +1076,34 @@ MESSAGE_TMPL = """
 """
 
 
+def _message_body_for_view(m):
+    """Readable body for the message viewer: use the stored snippet when it is
+    already clean; otherwise refetch the full message, extract text properly and
+    cache the result back into the snippet."""
+    stored = m.get("snippet") or ""
+    if stored and not engine.looks_like_mime_junk(stored):
+        return stored[:4000]
+    try:
+        mc = engine.MailClient().connect()
+        try:
+            mc.select(m["folder"])
+            text = mc.fetch_body_text(m["uid"], limit=6000)
+        finally:
+            try:
+                mc.close()
+            except Exception:
+                pass
+        if text and not engine.looks_like_mime_junk(text):
+            store.update_message(m["id"], snippet=text[:4000])
+            return text[:4000]
+    except Exception:
+        pass
+    return engine.readable_body(stored, limit=4000) or stored[:4000]
+
+
 def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0):
+    if "body" not in m:
+        m["body"] = _message_body_for_view(m)
     return render(render_template_string(
         MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
         draft_error=draft_error, draft_template_id=draft_template_id,

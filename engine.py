@@ -4,6 +4,7 @@ from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import calendar
+import base64
 import email
 import email.header
 import email.parser
@@ -41,7 +42,41 @@ def _decode_header(value):
         return str(value)
 
 
-def _clean_snippet(raw):
+def _decode_b64_blocks(text):
+    """Decode runs of base64 lines (MIME bodies arriving without usable part
+    headers, or truncated mid-stream). Runs that do not decode cleanly are kept."""
+    lines = text.split("\n")
+    out, buf = [], []
+
+    def flush():
+        if not buf:
+            return
+        chunk = "".join(buf)
+        chunk += "=" * (-len(chunk) % 4)
+        try:
+            dec = base64.b64decode(chunk).decode("utf-8", "replace")
+            printable = sum(1 for c in dec if c.isprintable() or c in "\r\n\t")
+            if dec.strip() and printable >= len(dec) * 0.8:
+                out.append(dec)
+                buf.clear()
+                return
+        except Exception:
+            pass
+        out.extend(buf)
+        buf.clear()
+
+    for ln in lines:
+        s = ln.strip()
+        if len(s) >= 40 and re.fullmatch(r"[A-Za-z0-9+/=]{40,}", s):
+            buf.append(s)
+        else:
+            flush()
+            out.append(ln)
+    flush()
+    return "\n".join(out)
+
+
+def _clean_snippet(raw, limit=1500):
     """Turn up to a few KB of a raw message body into readable-ish text."""
     if not raw:
         return ""
@@ -52,10 +87,49 @@ def _clean_snippet(raw):
             text = quopri.decodestring(text.encode("latin-1", "replace")).decode("utf-8", "replace")
         except Exception:
             pass
+    text = _decode_b64_blocks(text)
     text = re.sub(r"<[^>]+>", " ", text)
     text = html.unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
-    return text[:1500]
+    return text[:limit]
+
+
+def readable_body(raw, limit=6000):
+    """Readable body text KEEPING paragraph breaks (message viewer + salvage)."""
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8", "replace")
+    if not raw:
+        return ""
+    text = raw.decode("utf-8", "replace")
+    if len(re.findall(r"=[0-9A-Fa-f]{2}", text)) > 20:
+        try:
+            text = quopri.decodestring(text.encode("latin-1", "replace")).decode("utf-8", "replace")
+        except Exception:
+            pass
+    text = _decode_b64_blocks(text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text[:limit]
+
+
+def looks_like_mime_junk(s):
+    """True when stored text is raw MIME rather than a decoded body."""
+    if not s:
+        return True
+    head = s[:800]
+    if re.search(r"Content-(Type|Transfer-Encoding)\s*:", head):
+        return True
+    if re.match(r"\s*-{2,}[=_A-Za-z0-9]", s):
+        return True
+    if re.search(r"\S{80,}", s) and re.fullmatch(r"[\sA-Za-z0-9+/=]+", s or ""):
+        return True
+    return False
+
+
+def _salvage_if_junk(s):
+    return readable_body(s, limit=600) if looks_like_mime_junk(s) else (s or "")
 
 
 def html_to_text(html_text):
@@ -282,6 +356,19 @@ class MailClient:
         return b""
 
     def fetch_meta(self, uid):
+        # Full fetch + proper MIME walk (multipart mail decodes to real text;
+        # the old BODY[TEXT] prefix stored raw part headers + base64 as "snippet").
+        try:
+            raw = self._fetch_literal(uid, "(BODY.PEEK[])")
+            parsed = parse_full_message(raw, limit=4000)
+            meta = parsed.get("meta") or {}
+            if meta:
+                meta = dict(meta)
+                meta["snippet"] = parsed.get("text", "")
+                return meta
+        except RuntimeError:
+            pass
+        # fallback: headers + body prefix
         hdr_raw = self._fetch_literal(
             uid, "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
         try:
@@ -306,10 +393,19 @@ class MailClient:
 
     def fetch_body_text(self, uid, limit=6000):
         try:
+            raw = self._fetch_literal(uid, "(BODY.PEEK[])")
+        except RuntimeError:
+            raw = b""
+        if raw:
+            text = parse_full_message(raw, limit=limit).get("text") or ""
+            if text and not looks_like_mime_junk(text):
+                return text
+            return readable_body(raw, limit=limit)
+        try:
             raw = self._fetch_literal(uid, "(BODY.PEEK[TEXT]<0.%d>)" % limit)
         except RuntimeError:
             raw = self._fetch_literal(uid, "(BODY.PEEK[TEXT])")[:limit]
-        return _clean_snippet(raw)
+        return readable_body(raw, limit=limit)
 
     def fetch_full(self, uid, limit=20000):
         """Full message in one round trip: header meta + cleaned text body."""
@@ -573,9 +669,12 @@ class LLMClient:
                   "Shape: {\"category\": one of [%s], \"needs_reply\": true|false, "
                   "\"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", "
                   "\"reason\": \"why that category, max 15 words\"}" % (my_name or "the user", cats))
+        body_text = msg.get("snippet") or ""
+        if looks_like_mime_junk(body_text):
+            body_text = readable_body(body_text, limit=1500)
         user = ("From: %s\nTo: %s\nSubject: %s\nDate: %s\n\n%s"
                 % (msg.get("from_addr", ""), msg.get("to_addr", ""), msg.get("subject", ""),
-                   msg.get("date", ""), (msg.get("snippet") or "")[:1500]))
+                   msg.get("date", ""), body_text[:1500]))
         # Thinking is ON for classification (user's call): the reasoning streams in
         # `message.reasoning` (a separate channel from content, so JSON mode still
         # holds). max_tokens must cover reasoning + content: 1500 truncated long
@@ -1532,7 +1631,7 @@ class AssistantAgent:
                      "action": r["action_taken"], "category": r["llm_category"],
                      "seen_at": time.strftime("%Y-%m-%d %H:%M",
                                               time.gmtime((r["processed_at"] or 0) + 8 * 3600)),
-                     "snippet": _truncate(r["snippet"], 200)} for r in rows]
+                     "snippet": _truncate(_salvage_if_junk(r["snippet"]), 200)} for r in rows]
         return {"ok": True, "summary": "%d of %d indexed messages" % (len(messages), total),
                 "result": {"total_matched": total, "returned": len(messages), "offset": offset,
                            "note": "Local index only (what the scanner has seen). Use search_mail for the full mailbox history.",
@@ -1777,7 +1876,7 @@ class AssistantAgent:
         rows = store.tagged_examples(limit)
         items = [{"message_id": r["id"], "from": r["from_addr"], "subject": r["subject"],
                   "date": r["date"], "tag": r["user_tag"],
-                  "snippet": _truncate(r.get("snippet"), 120)} for r in rows]
+                  "snippet": _truncate(_salvage_if_junk(r.get("snippet")), 120)} for r in rows]
         return {"ok": True, "summary": "%d tagged example(s)" % len(items),
                 "result": {"count": len(items),
                            "note": "These are the user's manual labels; propose rules that reproduce them.",
