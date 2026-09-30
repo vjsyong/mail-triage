@@ -44,7 +44,9 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
   click. Actions can be switched to dry-run in Settings.
 - **LLM escalation** (Settings page): anything no rule matched gets classified into
   your categories (Action, Notification, Newsletter, Receipt, Personal, Promo by
-  default). Auto-filing by category starts off; the LLM suggests until you enable it.
+  default). Each classification carries a confidence, a one-sentence summary of what
+  the email is, and a short reason for the category ("why: ..."), shown on the message
+  page. Auto-filing by category starts off; the LLM suggests until you enable it.
 - **Semantic search (RAG)**: a local embedding index over all indexed folders
   (Qwen3-Embedding-4B on GPU 1) combined with BM25 keyword search, fused with RRF and
   reranked with a cross-encoder. The assistant uses it for content questions ("what
