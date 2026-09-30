@@ -1204,31 +1204,82 @@ def message_save(mid):
 # ---------------------------------------------------------------- assistant
 
 ASSISTANT_TMPL = r"""
+<style>
+.chat{height:calc(100vh - 280px);min-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 16px;scroll-behavior:smooth}
+.crow{display:flex;gap:10px;align-items:flex-start}
+.crow.user{flex-direction:row-reverse}
+.avatar{flex:0 0 30px;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:.66rem;font-weight:700;letter-spacing:.02em;border:1px solid var(--line)}
+.avatar.you{background:var(--card2);color:var(--dim)}
+.avatar.ai{background:#12243a;color:var(--acc);border-color:#26466e}
+.bubble{max-width:75%;border-radius:14px;padding:10px 14px;font-size:.92rem;line-height:1.55;overflow-wrap:anywhere}
+.bubble.user{background:#173252;border:1px solid #26466e;border-bottom-right-radius:5px}
+.bubble.ai{background:var(--card2);border:1px solid var(--line);border-bottom-left-radius:5px;min-width:180px}
+.bubble .meta{font-size:.72rem;color:var(--dim);margin-top:8px;display:flex;gap:10px;align-items:center;justify-content:flex-end}
+.bubble.user .meta{justify-content:flex-start}
+.status{font-size:.78rem;color:var(--dim);margin-bottom:6px}
+.think{margin:2px 0 8px}
+.think summary{cursor:pointer;font-size:.8rem;color:var(--dim);user-select:none;list-style:none}
+.think summary::-webkit-details-marker{display:none}
+.think summary::before{content:'▸ ';font-size:.7rem}
+.think[open] summary::before{content:'▾ '}
+.think pre{white-space:pre-wrap;font-family:var(--mono);font-size:.78rem;color:var(--dim);margin:6px 0 2px;
+  padding:8px 10px;background:#131a23;border:1px solid var(--line);border-radius:8px;max-height:260px;overflow:auto}
+.tools{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
+.tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);border-radius:999px;
+  padding:2px 10px;color:var(--dim);background:#131a23;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-chip.ok{color:var(--ok);border-color:#1e4a38}
+.tool-chip.err{color:var(--err);border-color:#4a2020}
+.md{overflow-wrap:anywhere}
+.copy{cursor:pointer;background:none;border:1px solid var(--line);border-radius:6px;color:var(--dim);
+  font-size:.7rem;padding:1px 7px}
+.copy:hover{color:var(--fg);border-color:var(--dim)}
+.proposal{background:#131a23;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0 2px}
+.composer{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px 8px;margin-top:10px}
+.composer textarea{width:100%;border:none;background:transparent;color:var(--fg);font:inherit;resize:none;
+  outline:none;min-height:26px;max-height:190px;display:block}
+.composer textarea::placeholder{color:var(--dim)}
+.comp-row{display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap}
+.hint{font-size:.75rem;color:var(--dim);margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
+.chat-empty{margin:auto;text-align:center;max-width:600px;padding:30px 10px}
+.ce-icon{font-size:1.8rem;opacity:.5}
+.ce-title{font-size:1.05rem;font-weight:600;margin:8px 0 6px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
+.chip{background:var(--card2);border:1px solid var(--line);border-radius:999px;color:var(--fg);
+  font-size:.82rem;padding:6px 13px;cursor:pointer}
+.chip:hover{border-color:var(--acc);color:var(--acc)}
+@media (max-width:640px){
+  .bubble{max-width:86%}
+  .chat{height:calc(100vh - 230px);padding:12px 10px}
+}
+</style>
 <h2>Mail assistant <span class="sub">streams tokens + thinking · tools: search mail, read, move, flag, folders, rules</span></h2>
-<div class="card" id="convo">
+
+<div class="chat" id="convo">
 {% if convo %}
   {% for m in convo %}
     {% if m.role == 'user' %}
-      <div class="msg ok" style="margin-left:10%"><b>You:</b> {{ m.content }}<div class="sub" style="font-size:.72rem;text-align:right">{{ m.when }}</div></div>
+    <div class="crow user">
+      <div class="avatar you">You</div>
+      <div class="bubble user">{{ m.content }}<div class="meta">{{ m.when }}</div></div>
+    </div>
     {% else %}
-      <div class="msg" style="background:var(--card2);border:1px solid var(--line)">
-        <b>Assistant:</b>
+    <div class="crow ai">
+      <div class="avatar ai">AI</div>
+      <div class="bubble ai">
         {% if m.reasoning %}
-        <details class="sub" style="margin:6px 0"><summary style="cursor:pointer">thinking</summary>
-          <pre class="mono" style="white-space:pre-wrap;font-size:.8rem;color:var(--dim);margin:6px 0">{{ m.reasoning }}</pre>
-        </details>
+        <details class="think"><summary>Reasoning</summary><pre>{{ m.reasoning }}</pre></details>
         {% endif %}
         {% if m.tool_steps %}
-        <div style="margin:6px 0">
-          {% for t in m.tool_steps %}
-          <div class="sub mono" style="font-size:.8rem">{{ '✓' if t.ok else '✗' }} {{ t.name }}({{ t.args }}){% if t.dry_run %} [dry-run]{% endif %} → {{ t.summary }}</div>
-          {% endfor %}
+        <div class="tools">
+          {% for t in m.tool_steps %}<span class="tool-chip {{ 'ok' if t.ok else 'err' }}">{{ '✓' if t.ok else '✗' }} {{ t.name }}{% if t.dry_run %} · dry-run{% endif %} → {{ t.summary }}</span>{% endfor %}
         </div>
         {% endif %}
         <div class="md">{{ md(m.content)|safe }}</div>
-        <div class="sub" style="font-size:.72rem;text-align:right">{{ m.when }}</div>
+        <div class="meta"><button type="button" class="copy" data-copy="{{ m.content|e }}">copy</button><span>{{ m.when }}</span></div>
         {% for p in m.proposals_list %}
-        <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
+        <div class="proposal">
           <div class="spread">
             <div><b>{{ p.name }}</b> <span class="sub">({{ p.match_mode }})</span>{% if p.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}</div>
             <div class="row" style="white-space:nowrap">
@@ -1250,37 +1301,62 @@ ASSISTANT_TMPL = r"""
         </div>
         {% endfor %}
       </div>
+    </div>
     {% endif %}
   {% endfor %}
 {% else %}
-  <div class="sub">Ask anything about your mail — the assistant searches your whole archive by <b>meaning</b> (not just keywords), reads messages, can create folders and move or flag mail, and proposes rules you approve with one click. Its thinking and every tool step stream live below. Examples:</div>
-  <div class="row" style="margin-top:8px">
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='What did my landlord last email me about?';return false">What did the landlord want?</a>
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Find the last invoice a vendor sent me and summarise it';return false">Find an old invoice</a>
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Search my mail for anything from the library';return false">Library mail</a>
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='What rules would you suggest for my inbox?';return false">Suggest rules for me</a>
+  <div class="chat-empty">
+    <div class="ce-icon">✉</div>
+    <div class="ce-title">Ask about your mail</div>
+    <div class="sub">Searches your whole archive by meaning (not just keywords), reads messages, creates folders,
+    moves or flags mail, and proposes rules you approve with one click. Its thinking and every tool step stream live.</div>
+    <div class="chips">
+      <button type="button" class="chip" data-fill="What did my landlord last email me about?">What did the landlord want?</button>
+      <button type="button" class="chip" data-fill="Find the last invoice a vendor sent me and summarise it">Find an old invoice</button>
+      <button type="button" class="chip" data-fill="Search my mail for anything from the library">Library mail</button>
+      <button type="button" class="chip" data-fill="What rules would you suggest for my inbox?">Suggest rules for me</button>
+    </div>
   </div>
 {% endif %}
 <div id="live"></div>
 </div>
-<div class="card">
-  <form id="aform" method="post" action="{{ url_for('assistant_send') }}">
-    <textarea name="message" id="msg" rows="3" placeholder="e.g. Find the invoice the landlord sent in August and tell me what it says"></textarea>
-    <p class="row" style="margin-top:8px">
+
+<form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
+  <textarea name="message" id="msg" rows="1" placeholder="Message the assistant…"></textarea>
+  <div class="comp-row">
+    <span class="sub" style="font-size:.78rem">Enter sends · Shift+Enter new line</span>
+    <span class="row" style="margin-left:auto">
+      <button class="btn danger" type="button" id="astop" style="display:none">Stop</button>
       <button class="btn primary" type="submit" id="asend">Send</button>
-      <span class="sub">runs on {{ cfg.LLM_MODEL }} · Ctrl+Enter sends · actions {{ 'live' if actions_live else 'in dry-run (set it in Settings)' }}</span>
-    </p>
-  </form>
-  {% if convo %}<form class="inline" method="post" action="{{ url_for('assistant_clear') }}" onsubmit="return confirm('Clear the conversation?');"><button class="btn small danger" type="submit">Clear conversation</button></form>{% endif %}
-</div>
+    </span>
+  </div>
+  <div class="hint">runs on {{ cfg.LLM_MODEL }} · actions {{ 'live' if actions_live else 'in dry-run (set it in Settings)' }}{% if convo %} · <a href="#" id="aclear">clear conversation</a>{% endif %}</div>
+</form>
+{% if convo %}<form id="clearform" method="post" action="{{ url_for('assistant_clear') }}" onsubmit="return confirm('Clear the conversation?');"></form>{% endif %}
 <script>
 (function(){
 var form=document.getElementById('aform'), ta=document.getElementById('msg'),
-    btn=document.getElementById('asend'), live=document.getElementById('live');
+    btn=document.getElementById('asend'), stopBtn=document.getElementById('astop'),
+    live=document.getElementById('live'), chat=document.getElementById('convo');
 if(!(window.fetch && window.ReadableStream && window.TextDecoder)) return;
 
+var clearLink=document.getElementById('aclear'), clearForm=document.getElementById('clearform');
+if(clearLink && clearForm) clearLink.addEventListener('click', function(e){ e.preventDefault(); clearForm.submit(); });
+document.addEventListener('click', function(e){
+  var c=e.target.closest('.copy');
+  if(!c) return;
+  var txt=c.dataset.copy||'';
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ c.textContent='copied'; setTimeout(function(){ c.textContent='copy'; },1500); }); }
+  else { c.textContent='n/a'; }
+});
+document.querySelectorAll('.chip').forEach(function(ch){
+  ch.addEventListener('click', function(){ ta.value = ch.dataset.fill||''; autosize(); ta.focus(); });
+});
+function autosize(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; }
+ta.addEventListener('input', autosize);
+function scrollBottom(){ chat.scrollTop = chat.scrollHeight; }
+
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-function linkifyText(s){ return esc(s).replace(/\[msg:(\d+)\]/g, '<a href="/messages/$1">[msg:$1]</a>'); }
 function mdRender(src){
   var raw=(src||'').replace(/\r\n/g,'\n');
   var lines=raw.split('\n'), out=[], i=0;
@@ -1339,7 +1415,6 @@ function mdRender(src){
   return out.join('\n');
 }
 function mk(tag, cls, text){var d=document.createElement(tag); if(cls) d.className=cls; if(text!=null) d.textContent=text; return d;}
-function scrollDown(){ window.scrollTo(0, document.body.scrollHeight); }
 
 form.addEventListener('submit', function(e){
   var text = ta.value.trim();
@@ -1348,63 +1423,80 @@ form.addEventListener('submit', function(e){
   run(text);
 });
 ta.addEventListener('keydown', function(e){
-  if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); }
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); form.requestSubmit(); }
 });
 
+var currentAbort=null;
+stopBtn.addEventListener('click', function(){ if(currentAbort) currentAbort.abort(); });
+
 function run(text){
-  btn.disabled = true; ta.value = '';
+  if(currentAbort) currentAbort.abort();
+  currentAbort = new AbortController();
+  btn.disabled = true; stopBtn.style.display=''; ta.value=''; ta.style.height='auto';
   live.innerHTML = '';
-  var ub = mk('div','msg ok'); ub.style.marginLeft='10%';
-  ub.innerHTML = '<b>You:</b> ' + esc(text).replace(/\n/g,'<br>');
-  live.appendChild(ub);
 
-  var box = mk('div','msg'); box.style.background='var(--card2)'; box.style.border='1px solid var(--line)';
-  var head = mk('div'); head.innerHTML = '<b>Assistant:</b> ';
-  var phase = mk('span','sub'); head.appendChild(phase);
-  var det = document.createElement('details'); det.className='sub'; det.open=true; det.style.display='none';
-  var detSum = mk('summary','','thinking'); detSum.style.cursor='pointer'; det.appendChild(detSum);
-  var pre = mk('pre','mono'); pre.style.whiteSpace='pre-wrap'; pre.style.fontSize='.8rem';
-  pre.style.color='var(--dim)'; pre.style.margin='6px 0'; det.appendChild(pre);
-  var toolsBox = mk('div'); var content = mk('div'); content.style.whiteSpace='pre-wrap';
-  var propsBox = mk('div');
-  box.appendChild(head); box.appendChild(det); box.appendChild(toolsBox);
-  box.appendChild(content); box.appendChild(propsBox);
-  live.appendChild(box);
+  var urow = mk('div','crow user');
+  urow.appendChild(mk('div','avatar you','You'));
+  var ub = mk('div','bubble user'); ub.textContent = text;
+  urow.appendChild(ub); live.appendChild(urow);
 
-  var t0 = Date.now(); var timer = null;
-  function setPhase(label){
-    phase.dataset.label = label;
-    phase.textContent = ' ' + label + ' ' + Math.round((Date.now()-t0)/1000) + 's';
-  }
-  function stopTimer(){ if(timer){ clearInterval(timer); timer = null; } }
-  timer = setInterval(function(){ if(phase.dataset.label && !phase.dataset.final) setPhase(phase.dataset.label); }, 500);
-  setPhase('starting…');
-  scrollDown();
+  var arow = mk('div','crow ai');
+  arow.appendChild(mk('div','avatar ai','AI'));
+  var box = mk('div','bubble ai');
+  var status = mk('div','status sub','thinking…');
+  var det = document.createElement('details'); det.className='think'; det.open=true; det.style.display='none';
+  var detSum = mk('summary','','Reasoning'); det.appendChild(detSum);
+  var pre = mk('pre'); det.appendChild(pre);
+  var toolsBox = mk('div','tools'); toolsBox.style.display='none';
+  var content = mk('div'); content.style.whiteSpace='pre-wrap';
+  var meta = mk('div','meta'); meta.style.display='none';
+  box.appendChild(status); box.appendChild(det); box.appendChild(toolsBox);
+  box.appendChild(content); box.appendChild(meta);
+  arow.appendChild(box); live.appendChild(arow);
+
+  var t0 = Date.now(); var timer = null; var finished = false;
+  function secs(){ return Math.round((Date.now()-t0)/1000); }
+  function setStatus(label){ if(!finished) status.textContent = label + ' · ' + secs() + 's'; }
+  setStatus('thinking…');
+  scrollBottom();
+  timer = setInterval(function(){ if(!finished && status.dataset.label) status.textContent = status.dataset.label + ' · ' + secs() + 's'; }, 500);
+  function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
+  var lastLabel='thinking…';
+  function label(x){ lastLabel=x; if(!finished){ status.dataset.label=x; status.textContent = x + ' · ' + secs() + 's'; } }
 
   var cards = [];
   function toolCard(id, name, args){
-    var c = mk('div','sub mono');
-    c.style.fontSize='.82rem'; c.style.margin='4px 0'; c.style.padding='6px 8px';
-    c.style.border='1px solid var(--line)'; c.style.borderRadius='8px';
+    var c = mk('span','tool-chip');
     var a = '';
     try { a = JSON.stringify(args||{}); } catch(err) { a = ''; }
-    if(a.length > 160) a = a.slice(0,160) + '…';
-    c.textContent = '⏳ ' + name + '(' + a + ')';
+    if(a.length > 90) a = a.slice(0,90) + '…';
+    c.textContent = '⏳ ' + name + ' ' + a;
     cards[id] = c;
-    toolsBox.appendChild(c);
+    toolsBox.style.display=''; toolsBox.appendChild(c);
   }
   function toolDone(id, ok, summary, dry){
     var c = cards[id]; if(!c) return;
-    var t = c.textContent.replace(/^[⏳✓✗]\s*/, '');
+    c.className = 'tool-chip ' + (ok ? 'ok' : 'err');
+    var t = c.textContent.replace(/^[⏳✓✗]\s*/,'');
     c.textContent = (ok ? '✓ ' : '✗ ') + t + ' → ' + (dry ? '[dry-run] ' : '') + summary;
-    c.style.color = ok ? 'var(--ok)' : 'var(--err)';
   }
   function addProposal(p, idx, msgId){
-    var w = mk('div'); w.style.background='#0d1319'; w.style.border='1px solid var(--line)';
-    w.style.borderRadius='9px'; w.style.padding='10px 12px'; w.style.margin='8px 0';
-    var h = mk('div');
-    h.appendChild(mk('b','',p.name));
-    h.appendChild(document.createTextNode(' (' + (p.match_mode||'all') + ')'));
+    var w = mk('div','proposal');
+    var h = mk('div','spread');
+    var left = mk('div');
+    left.appendChild(mk('b','',p.name));
+    left.appendChild(document.createTextNode(' (' + (p.match_mode||'all') + ')'));
+    h.appendChild(left);
+    var row = mk('div','row'); row.style.whiteSpace='nowrap';
+    [[true,'Add rule'],[false,'Add (disabled)']].forEach(function(pair){
+      var f = mk('form'); f.method='post'; f.action='/assistant/apply'; f.className='inline';
+      var i1 = mk('input'); i1.type='hidden'; i1.name='msg_id'; i1.value=msgId; f.appendChild(i1);
+      var i2 = mk('input'); i2.type='hidden'; i2.name='idx'; i2.value=idx; f.appendChild(i2);
+      if(!pair[0]){ var i3 = mk('input'); i3.type='hidden'; i3.name='disabled'; i3.value='1'; f.appendChild(i3); }
+      var bt = mk('button','btn small' + (pair[0] ? ' primary' : ''), pair[1]); bt.type='submit';
+      f.appendChild(bt); row.appendChild(f);
+    });
+    h.appendChild(row);
     w.appendChild(h);
     var conds = (p.conditions||[]).map(function(c){ return c.field + ' ' + c.op + ' "' + c.value + '"'; }).join((p.match_mode==='any') ? ' OR ' : ' AND ');
     w.appendChild(mk('div','mono', conds));
@@ -1412,35 +1504,34 @@ function run(text){
     if(p.actions && p.actions.move_to) acts.push('move → ' + p.actions.move_to);
     if(p.actions && p.actions.mark_read) acts.push('mark read');
     if(p.actions && p.actions.flag) acts.push('flag');
-    w.appendChild(mk('div','sub', acts.join(', ') || '(none)'));
+    w.appendChild(mk('div','sub', acts.join(', ') || 'keep in place (guard)'));
     if(p.rationale) w.appendChild(mk('div','sub', p.rationale));
-    var row = mk('div','row'); row.style.marginTop='6px';
-    var pair;
-    for(pair of [[true,'Add rule'],[false,'Add (disabled)']]){
-      var f = mk('form'); f.method='post'; f.action='/assistant/apply'; f.className='inline';
-      var i1 = mk('input'); i1.type='hidden'; i1.name='msg_id'; i1.value=msgId; f.appendChild(i1);
-      var i2 = mk('input'); i2.type='hidden'; i2.name='idx'; i2.value=idx; f.appendChild(i2);
-      if(!pair[0]){ var i3 = mk('input'); i3.type='hidden'; i3.name='disabled'; i3.value='1'; f.appendChild(i3); }
-      var bt = mk('button','',pair[1]); bt.type='submit'; bt.className='btn small' + (pair[0] ? ' primary' : '');
-      f.appendChild(bt); row.appendChild(f);
-    }
-    w.appendChild(row);
-    propsBox.appendChild(w);
+    box.appendChild(w);
   }
-  var proposals = [], doneMsgId = null, finished = false;
+  var proposals = [], doneMsgId = null;
   function finish(){
     if(finished) return; finished = true;
-    stopTimer(); phase.dataset.final='1';
-    phase.textContent = ' done in ' + Math.round((Date.now()-t0)/1000) + 's';
+    stopTimer();
+    status.textContent = 'done in ' + secs() + 's';
+    if(det.style.display !== 'none'){ det.open = false; detSum.textContent = 'Reasoning · ' + secs() + 's'; }
     if(content.textContent) content.innerHTML = mdRender(content.textContent);
+    content.style.whiteSpace='';
+    meta.style.display='';
+    var cp = mk('button','copy','copy'); cp.type='button'; cp.dataset.copy = content.textContent;
+    meta.appendChild(cp);
+    meta.appendChild(mk('span','', new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})));
     if(proposals.length && doneMsgId != null) proposals.forEach(function(p,i){ addProposal(p, i, doneMsgId); });
-    btn.disabled = false; scrollDown();
+    btn.disabled=false; stopBtn.style.display='none'; currentAbort=null;
+    scrollBottom();
   }
   function fail(msg){
     if(finished) return; finished = true;
-    stopTimer(); phase.dataset.final='1'; phase.textContent = ' failed';
-    box.appendChild(mk('div','msg err','Assistant failed: ' + msg));
-    btn.disabled = false; scrollDown();
+    stopTimer();
+    status.textContent = 'failed';
+    var e = mk('div','msg err','Assistant failed: ' + msg);
+    box.appendChild(e);
+    btn.disabled=false; stopBtn.style.display='none'; currentAbort=null;
+    scrollBottom();
   }
   function handle(raw){
     var ev = null, data = '';
@@ -1451,11 +1542,16 @@ function run(text){
     if(!ev) return;
     var d = {};
     if(data){ try { d = JSON.parse(data); } catch(err) { return; } }
-    if(ev === 'reasoning'){ det.style.display=''; pre.textContent += (d.text||''); setPhase('thinking…'); }
-    else if(ev === 'content'){ content.textContent += (d.text||''); setPhase('writing…'); }
+    if(ev === 'reasoning'){
+      det.style.display=''; pre.textContent += (d.text||''); label('thinking…');
+    }
+    else if(ev === 'content'){
+      if(det.style.display !== 'none' && det.open){ det.open = false; detSum.textContent = 'Reasoning'; }
+      content.textContent += (d.text||''); label('writing…');
+    }
     else if(ev === 'content_break'){ if(content.textContent) content.textContent += '\n\n'; }
-    else if(ev === 'tool_start'){ setPhase('tool: ' + d.name + '…'); toolCard(d.id, d.name, d.args); }
-    else if(ev === 'tool_end'){ toolDone(d.id, d.ok, d.summary, d.dry_run); setPhase('thinking…'); }
+    else if(ev === 'tool_start'){ label('running ' + d.name + '…'); toolCard(d.id, d.name, d.args); }
+    else if(ev === 'tool_end'){ toolDone(d.id, d.ok, d.summary, d.dry_run); label('thinking…'); }
     else if(ev === 'proposals'){ proposals = d.proposals || []; }
     else if(ev === 'done'){
       doneMsgId = d.message_id;
@@ -1463,11 +1559,12 @@ function run(text){
       finish();
     }
     else if(ev === 'error'){ fail(d.message || 'unknown error'); }
-    scrollDown();
+    scrollBottom();
   }
   fetch('/assistant/stream', { method:'POST',
       headers: {'Content-Type':'application/x-www-form-urlencoded'},
-      body: 'message=' + encodeURIComponent(text)
+      body: 'message=' + encodeURIComponent(text),
+      signal: currentAbort.signal
   }).then(function(resp){
     if(!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
     var rd = resp.body.getReader(); var dec = new TextDecoder(); var buf = '';
@@ -1485,7 +1582,15 @@ function run(text){
       });
     }
     return pump();
-  }).catch(function(err){ fail('' + err); });
+  }).catch(function(err){
+    if(finished) return;
+    if(err && err.name === 'AbortError'){
+      finished = true; stopTimer(); status.textContent = 'stopped';
+      btn.disabled=false; stopBtn.style.display='none'; currentAbort=null;
+    } else {
+      fail('' + err);
+    }
+  });
 }
 })();
 </script>
