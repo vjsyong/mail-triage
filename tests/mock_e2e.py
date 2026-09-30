@@ -416,6 +416,8 @@ class LLMHandler(BaseHTTPRequestHandler):
                 ]})
         elif "connectivity test" in system:
             content = "ok"
+        elif "condense an ai assistant" in system.lower():
+            content = "Checked the budget mail and moved it"
         else:
             is_classify = True
             t = user.lower()
@@ -869,6 +871,20 @@ def main():
     check("reasoning streamed before tool calls",
           body.index("event: reasoning") < body.index("event: tool_start"))
     check("multi-turn content separated (content_break)", "event: content_break" in body)
+    r2 = client.get("/assistant")
+    check("assistant page shows the collapsed thinking summary",
+          b"Checked the budget mail and moved it" in r2.data
+          and b'<details class="think" open' not in r2.data)
+    import config as _cfg
+    _saved_base = _cfg.LLM_BASE_URL
+    _cfg.LLM_BASE_URL = "http://127.0.0.1:1/v1"
+    try:
+        _sum = engine.AssistantAgent()._summarize_thoughts(
+            "The user wants me to check the rules. Then I should answer briefly.")
+    finally:
+        _cfg.LLM_BASE_URL = _saved_base
+    check("summary falls back to the first sentence when the LLM is down",
+          _sum == "The user wants me to check the rules")
     dm = re.search(r"event: done\ndata: (.*)", body)
     done_data = json.loads(dm.group(1)) if dm else {}
     check("done names the stored message", isinstance(done_data.get("message_id"), int))
@@ -881,8 +897,12 @@ def main():
     meta = json.loads(row["meta"])
     check("meta has reasoning + 3 tool steps",
           "budget" in (meta.get("reasoning") or "").lower() and len(meta.get("tools") or []) == 3)
+    check("thought summary generated and persisted",
+          meta.get("reasoning_summary") == "Checked the budget mail and moved it")
+    check("thought_summary event streamed after done",
+          body.index("event: done") < body.index("event: thought_summary"))
     check("tool ran against real IMAP: model saw actual results",
-          "Second budget note" in json.dumps(llm_server.calls[-1]["payload"]))
+          any("Second budget note" in json.dumps(c["payload"]) for c in llm_server.calls[-4:]))
     check("assistant moved the lunch mail",
           4 in (state.get("Personal") or {"uids": []})["uids"])
     row4 = [x for x in store.messages(limit=100) if x["uid"] == 4 and x["folder"] == "INBOX"][0]

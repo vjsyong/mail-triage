@@ -1563,7 +1563,7 @@ ASSISTANT_TMPL = r"""
       <div class="avatar ai">AI</div>
       <div class="bubble ai">
         {% if m.reasoning %}
-        <details class="think"><summary>Reasoning</summary><pre>{{ m.reasoning }}</pre></details>
+        <details class="think"><summary>{{ m.reasoning_summary or 'Reasoning' }}</summary><pre>{{ m.reasoning }}</pre></details>
         {% endif %}
         {% if m.tool_steps %}
         <div class="tools">
@@ -1753,8 +1753,8 @@ function run(text){
   arow.appendChild(mk('div','avatar ai','AI'));
   var box = mk('div','bubble ai');
   var status = mk('div','status sub','thinking…');
-  var det = document.createElement('details'); det.className='think'; det.open=true; det.style.display='none';
-  var detSum = mk('summary','','Reasoning'); det.appendChild(detSum);
+  var det = document.createElement('details'); det.className='think'; det.open=false; det.style.display='none';
+  var detSum = mk('summary','','Thinking…'); det.appendChild(detSum);
   var pre = mk('pre'); det.appendChild(pre);
   var toolsBox = mk('div','tools'); toolsBox.style.display='none';
   var content = mk('div','md'); content.style.whiteSpace='pre-wrap'; var rawText='';
@@ -1844,7 +1844,7 @@ function run(text){
     if(finished) return; finished = true;
     stopTimer();
     status.textContent = 'done in ' + secs() + 's';
-    if(det.style.display !== 'none'){ det.open = false; detSum.textContent = 'Reasoning · ' + secs() + 's'; }
+    if(det.style.display !== 'none' && !det.dataset.summary){ detSum.textContent = 'Thought for ' + secs() + 's'; }
     if(content.textContent) content.innerHTML = mdRender(content.textContent);
     content.style.whiteSpace='';
     meta.style.display='';
@@ -1874,16 +1874,18 @@ function run(text){
     var d = {};
     if(data){ try { d = JSON.parse(data); } catch(err) { return; } }
     if(ev === 'reasoning'){
-      det.style.display=''; pre.textContent += (d.text||''); label('thinking…');
+      det.style.display=''; detSum.textContent = 'Thinking…'; pre.textContent += (d.text||''); label('thinking…');
     }
     else if(ev === 'content'){
-      if(det.style.display !== 'none' && det.open){ det.open = false; detSum.textContent = 'Reasoning'; }
       content.textContent += (d.text||''); rawText += (d.text||''); label('writing…');
     }
     else if(ev === 'content_break'){ if(content.textContent){ content.textContent += '\n\n'; rawText += '\n\n'; } }
     else if(ev === 'tool_start'){ label('running ' + d.name + '…'); toolCard(d.id, d.name, d.args); }
     else if(ev === 'tool_end'){ toolDone(d.id, d.ok, d.summary, d.dry_run); label('thinking…'); }
     else if(ev === 'proposals'){ proposals = d.proposals || []; }
+    else if(ev === 'thought_summary'){
+      if(det.style.display !== 'none' && d.text){ det.dataset.summary = '1'; detSum.textContent = d.text; }
+    }
     else if(ev === 'done'){
       doneMsgId = d.message_id;
       if(d.reply && !content.textContent){ content.textContent = d.reply; rawText = d.reply; }
@@ -1957,12 +1959,14 @@ def assistant():
             except (TypeError, ValueError):
                 pass
         m["reasoning"] = ""
+        m["reasoning_summary"] = ""
         m["tool_steps"] = []
         m["when"] = fmt_ts(m.get("ts"))
         if m.get("role") == "assistant" and m.get("meta"):
             try:
                 meta = json.loads(m["meta"])
                 m["reasoning"] = meta.get("reasoning") or ""
+                m["reasoning_summary"] = meta.get("reasoning_summary") or ""
                 m["tool_steps"] = meta.get("tools") or []
             except (TypeError, ValueError):
                 pass

@@ -2263,7 +2263,10 @@ class AssistantAgent:
         if not reply:
             reply = ("Proposed %d rule(s) — add them below, or ask for changes." % len(self.proposals)
                      if self.proposals else "(no reply)")
-        meta = {"reasoning": _truncate("\n".join(r for r in reasoning_all if r), 20000),
+        reasoning_text = "\n".join(r for r in reasoning_all if r)
+        thought_summary = self._summarize_thoughts(reasoning_text) if reasoning_text else ""
+        meta = {"reasoning": _truncate(reasoning_text, 20000),
+                "reasoning_summary": thought_summary,
                 "tools": self.tools_log, "steps": steps, "usage": usage,
                 "actions_live": self.actions_apply}
         msg_id = store.add_assistant_message("assistant", reply[:4000],
@@ -2272,6 +2275,30 @@ class AssistantAgent:
         if self.proposals:
             yield {"type": "proposals", "proposals": self.proposals}
         yield {"type": "done", "message_id": msg_id, "reply": reply, "steps": steps}
+        if thought_summary:
+            # after done so the final answer never waits on the summary call
+            yield {"type": "thought_summary", "text": thought_summary}
+
+    def _summarize_thoughts(self, reasoning_text):
+        """One short sentence describing what the reasoning was about (best-effort)."""
+        text = (reasoning_text or "").strip()
+        if not text:
+            return ""
+        try:
+            out = LLMClient()._chat(
+                "You condense an AI assistant's private reasoning into ONE short sentence "
+                "(max 12 words) describing what it was working on, written for the user - "
+                "e.g. \"Checked the rule list and the Promo dataset\". Plain text only, "
+                "no quotes, no preamble, no trailing period.",
+                text[:6000], json_mode=False, max_tokens=60)
+            out = re.sub(r"\s+", " ", (out or "").strip().strip('"')).strip(" .")
+            if 3 <= len(out) <= 200:
+                return out[:140]
+        except Exception:
+            pass
+        # fallback: first sentence of the thinking
+        first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
+        return re.sub(r"\s+", " ", first).strip().strip(" .")[:140]
 
 
 def assistant_respond(user_text):
