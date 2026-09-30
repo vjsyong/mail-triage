@@ -454,8 +454,13 @@ class LLMClient:
                 continue
             r.raise_for_status()
             data = r.json()
-            message = data["choices"][0]["message"]
-            return message if full else message["content"]
+            choice = data["choices"][0]
+            message = choice["message"]
+            if full:
+                message = dict(message)
+                message["_finish"] = choice.get("finish_reason")
+                return message
+            return message["content"]
         if r is not None:
             r.raise_for_status()
         raise RuntimeError("LLM request failed")
@@ -573,14 +578,22 @@ class LLMClient:
                    msg.get("date", ""), (msg.get("snippet") or "")[:1500]))
         # Thinking is ON for classification (user's call): the reasoning streams in
         # `message.reasoning` (a separate channel from content, so JSON mode still
-        # holds). The distilled reason + summary land in the stored fields.
-        message = self._chat(system, user, json_mode=True, max_tokens=1500,
+        # holds). max_tokens must cover reasoning + content: 1500 truncated long
+        # thinking runs (empty content), so 4096 with a single 8192 retry when the
+        # finish reason says "length".
+        message = self._chat(system, user, json_mode=True, max_tokens=4096,
                              full=True, thinking=True)
         content = (message.get("content") or "") if isinstance(message, dict) else (message or "")
+        m = re.search(r"\{.*\}", content, re.S)
+        if (not m and isinstance(message, dict)
+                and message.get("_finish") == "length"):
+            message = self._chat(system, user, json_mode=True, max_tokens=8192,
+                                 full=True, thinking=True)
+            content = (message.get("content") or "") if isinstance(message, dict) else (message or "")
+            m = re.search(r"\{.*\}", content, re.S)
         thinking = ""
         if isinstance(message, dict):
             thinking = message.get("reasoning") or message.get("reasoning_content") or ""
-        m = re.search(r"\{.*\}", content or "", re.S)
         if not m:
             raise RuntimeError("LLM returned no JSON: %r" % (content or "")[:200])
         result = json.loads(m.group(0))
@@ -952,7 +965,7 @@ class ClassifyJob(threading.Thread):
             self.queue = []
         self._skip = set()
         settings = store.all_settings()
-        concurrency = max(1, min(12, int(settings.get("classify_concurrency") or 6)))
+        concurrency = max(1, min(16, int(settings.get("classify_concurrency") or 8)))
         done = failed = 0
         self.state.update({"running": True, "done": 0, "failed": 0, "concurrency": concurrency,
                            "started": int(time.time()), "last_error": None, "current": ""})

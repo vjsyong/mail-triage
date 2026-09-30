@@ -1572,7 +1572,7 @@ SETTINGS_TMPL = """
     <div><label>Your name (for drafts)</label><input type="text" name="my_name" value="{{ s.my_name }}"></div>
   </div>
   <div class="grid2">
-    <div><label>Classify concurrency <span class="sub">(parallel LLM requests, 1-12)</span></label><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="12"></div>
+    <div><label>Classify concurrency <span class="sub">(parallel LLM requests, 1-16)</span></label><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16"></div>
   </div>
   <label class="row" style="color:var(--fg)"><input type="checkbox" name="rules_apply" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.rules_apply else '' }}> Apply rule actions for real (uncheck = dry-run, suggests only)</label>
@@ -1626,7 +1626,7 @@ def settings():
             pass
         try:
             store.set_setting("classify_concurrency",
-                              max(1, min(12, int(request.form.get("classify_concurrency", 6)))))
+                              max(1, min(16, int(request.form.get("classify_concurrency", 8)))))
         except ValueError:
             pass
         try:

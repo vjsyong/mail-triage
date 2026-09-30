@@ -16,7 +16,7 @@ DEFAULT_SETTINGS = {
     "llm_apply": False,           # act on LLM category -> folder mapping (off until trusted)
     "max_llm_per_hour": 40,
     "llm_batch_per_cycle": 5,
-    "classify_concurrency": 6,    # parallel LLM requests for batch classification
+    "classify_concurrency": 8,    # parallel LLM requests for batch classification
     "categories": ["Action", "Notification", "Newsletter", "Receipt", "Personal", "Promo"],
     "category_folders": {
         "Notification": "Notifications",
