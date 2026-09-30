@@ -19,6 +19,7 @@ from flask import Flask, Response, flash, jsonify, redirect, render_template_str
 
 import config
 import engine
+import heuristics
 import rag
 import store
 
@@ -308,7 +309,7 @@ padding:8px 14px;margin:0 8px 8px 0;text-align:center}
 </head><body><div class="wrap">
 <div class="top">
   <div><h1>Mail Triage</h1><div class="sub">{{ cfg.IMAP_USER }} · via proxy {{ cfg.IMAP_HOST }}:{{ cfg.IMAP_PORT }} · LLM: {{ cfg.LLM_MODEL }}</div></div>
-  <nav class="sub"><a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('assistant') }}">Assistant</a><a href="{{ url_for('rules') }}">Rules</a><a href="{{ url_for('templates') }}">Templates</a><a href="{{ url_for('messages') }}">Messages</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('log') }}">Log</a></nav>
+  <nav class="sub"><a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('assistant') }}">Assistant</a><a href="{{ url_for('rules') }}">Rules</a><a href="{{ url_for('classifiers') }}">Classifiers</a><a href="{{ url_for('templates') }}">Templates</a><a href="{{ url_for('messages') }}">Messages</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('log') }}">Log</a></nav>
 </div>
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% for cat, msg in messages %}<div class="msg {{ cat }}">{{ msg }}</div>{% endfor %}
@@ -519,6 +520,81 @@ RULES_TMPL = """
   {% else %}<div class="sub">No rules yet. Create one, e.g. “from contains newsletter@ → move to Newsletters”.</div>{% endif %}
 </div>
 """
+
+
+CLASSIFIERS_TMPL = """
+<h2>Classifiers <span class="sub">— deterministic heuristic models that run before the LLM</span></h2>
+<div class="card">
+  <div class="sub" style="margin-bottom:8px">Trained from your labels (manual tags) or existing classified mail. A confident verdict is
+  applied without any LLM call: faster, consistent, and immune to instructions hidden inside email content. The assistant can
+  train, retrain, evaluate and retire these for you ("train a classifier for Receipts", "evaluate classifier 2").</div>
+  {% if hx %}
+  <table class="tbl">
+    <tr><th>name</th><th>kind</th><th>category</th><th>samples</th><th>labels</th><th>matches on</th><th>updated</th><th></th></tr>
+    {% for h in hx %}
+    <tr>
+      <td><b>{{ h.name }}</b>{% if not h.enabled %} <span class="badge">disabled</span>{% endif %}<div class="sub" style="font-size:.75rem">min conf {{ '%.2f' % (h.min_confidence or 0.8) }} · by {{ h.created_by }}</div></td>
+      <td class="mono">{{ h.kind }}</td>
+      <td>{{ h.category }}</td>
+      <td class="sub">{{ h.samples }}</td>
+      <td class="sub">{{ h.label_source }}{% if h.weak_labels %} <span class="badge warn">weak</span>{% endif %}</td>
+      <td class="sub" style="max-width:340px">{{ h.description[:170] }}</td>
+      <td class="sub">{{ h.when }}</td>
+      <td class="row" style="white-space:nowrap">
+        <form class="inline" method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}"><button class="btn small" type="submit">{{ 'disable' if h.enabled else 'enable' }}</button></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn small" type="submit">retrain</button></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_delete', hid=h.id) }}" onsubmit="return confirm('Delete this classifier?');"><button class="btn small danger" type="submit">delete</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="sub">No classifiers yet. Tag some mail on the Messages page (or classify it), then ask the assistant to train a
+  classifier — e.g. "train a decision list for Receipts from my tags" — or it will suggest one after a tagging session.</div>
+  {% endif %}
+</div>
+"""
+
+
+@app.route("/classifiers")
+def classifiers():
+    hx = []
+    for h in store.list_heuristics():
+        v = heuristics.view(h)
+        v["when"] = fmt_ts(h.get("updated"))
+        hx.append(v)
+    return render(render_template_string(CLASSIFIERS_TMPL, hx=hx))
+
+
+@app.route("/classifiers/<int:hid>/toggle", methods=["POST"])
+def classifier_toggle(hid):
+    row = store.get_heuristic(hid)
+    if row:
+        store.update_heuristic(hid, enabled=0 if row.get("enabled") else 1)
+    return redirect(url_for("classifiers"))
+
+
+@app.route("/classifiers/<int:hid>/retrain", methods=["POST"])
+def classifier_retrain(hid):
+    row = store.get_heuristic(hid)
+    if row:
+        try:
+            stats = json.loads(row.get("stats") or "{}")
+            model, new_stats = heuristics.train_heuristic(
+                row.get("kind") or "", row.get("category") or "",
+                source=stats.get("source") or "tags", params=stats.get("params") or {},
+                min_confidence=float(row.get("min_confidence") or 0.8), created_by="ui")
+            store.update_heuristic(hid, model=json.dumps(model), stats=json.dumps(new_stats))
+            flash("Classifier '%s' retrained." % (row.get("name") or hid), "ok")
+        except Exception as exc:
+            flash("Retrain failed: %s" % exc, "err")
+    return redirect(url_for("classifiers"))
+
+
+@app.route("/classifiers/<int:hid>/delete", methods=["POST"])
+def classifier_delete(hid):
+    store.delete_heuristic(hid)
+    return redirect(url_for("classifiers"))
 
 
 @app.route("/rules")
@@ -1050,6 +1126,7 @@ MESSAGE_TMPL = """
     {% if m.action_taken %}<span class="badge">{{ m.action_taken }}</span>{% endif %}
     {% if m.llm_category %}<span class="badge acc">LLM: {{ m.llm_category }}
       {% if m.llm_confidence is not none %}({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
+    {% if m.classified_by and m.classified_by.startswith('heuristic') %}<span class="badge acc">⚙ {{ m.classified_by }}</span>{% endif %}
     {% if m.llm_needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
   </div>
   {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_reason %} · why: {{ m.llm_reason }}{% endif %}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
@@ -1817,6 +1894,10 @@ SETTINGS_TMPL = """
   </div>
   <label class="row" style="color:var(--fg)"><input type="checkbox" name="rules_apply" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.rules_apply else '' }}> Apply rule actions for real (uncheck = dry-run, suggests only)</label>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="heuristics_enabled" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.heuristics_enabled else '' }}> Run trained classifiers before the LLM (deterministic, prompt-injection safe)</label>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="heuristic_autorefine" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.heuristic_autorefine else '' }}> Auto-retrain classifiers as new tags arrive</label>
   <label class="row" style="color:var(--fg)"><input type="checkbox" name="llm_suggest" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.llm_suggest else '' }}> Classify unmatched mail with the LLM</label>
   <label class="row" style="color:var(--fg)"><input type="checkbox" name="llm_apply" value="1" style="width:auto;margin-right:8px"
@@ -1878,6 +1959,8 @@ def settings():
                           [f.strip() for f in (request.form.get("watch_folders") or "INBOX").split(",") if f.strip()])
         store.set_setting("my_name", (request.form.get("my_name") or "Sean").strip())
         store.set_setting("rules_apply", bool(request.form.get("rules_apply")))
+        store.set_setting("heuristics_enabled", bool(request.form.get("heuristics_enabled")))
+        store.set_setting("heuristic_autorefine", bool(request.form.get("heuristic_autorefine")))
         store.set_setting("llm_suggest", bool(request.form.get("llm_suggest")))
         store.set_setting("llm_apply", bool(request.form.get("llm_apply")))
         store.set_setting("assistant_actions_apply", bool(request.form.get("assistant_actions_apply")))

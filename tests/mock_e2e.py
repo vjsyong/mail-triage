@@ -685,6 +685,7 @@ def main():
     import config
     import store
     import engine
+    import heuristics as heuristics_mod
     import rag
 
     store.init_db()
@@ -794,7 +795,7 @@ def main():
     section("T8 web UI smoke (Flask test client)")
     import app as app_mod
     client = app_mod.app.test_client()
-    for path in ("/", "/assistant", "/rules", "/templates", "/messages", "/settings", "/log", "/healthz"):
+    for path in ("/", "/assistant", "/rules", "/classifiers", "/templates", "/messages", "/settings", "/log", "/healthz"):
         r = client.get(path)
         check("GET %s -> 200" % path, r.status_code == 200)
     latest = store.messages(limit=1)[0]
@@ -1362,6 +1363,90 @@ def main():
         store.list_rules())
     check("rule_similarity matches exact conditions", bool(sim) and sim["id"] == boss_rule["id"])
     agent2.close()
+
+    section("T23 heuristic classifiers: registry, pipeline order, refine")
+    ex = [("Promo", heuristics_mod.featurize({"from_addr": "deals@shop.example",
+                                              "subject": "Weekly deal blast",
+                                              "snippet": "promo code inside"})) for _ in range(3)]
+    ex += [("Receipt", heuristics_mod.featurize({"from_addr": "billing@vendor.example",
+                                                 "subject": "Your invoice receipt",
+                                                 "snippet": "invoice attached"})) for _ in range(3)]
+    m_nb, _s = heuristics_mod.train("naive_bayes", ex)
+    out = heuristics_mod.predict("naive_bayes", m_nb,
+                                 heuristics_mod.featurize({"from_addr": "deals@shop.example",
+                                                           "subject": "deal blast", "snippet": ""}))
+    check("naive_bayes predicts the right class", bool(out) and out[0] == "Promo")
+    m_dl, _s = heuristics_mod.train("decision_list", ex, {"min_support": 2, "min_precision": 0.8})
+    out = heuristics_mod.predict("decision_list", m_dl,
+                                 heuristics_mod.featurize({"from_addr": "x@y.com",
+                                                           "subject": "invoice receipt", "snippet": ""}))
+    check("decision_list predicts via a learned condition",
+          bool(out) and out[0] == "Receipt" and bool(out[2]))
+    check("decision_list abstains on unknown tokens",
+          heuristics_mod.predict("decision_list", m_dl,
+                                 heuristics_mod.featurize({"from_addr": "zz@zz.zz",
+                                                           "subject": "hello there", "snippet": ""})) is None)
+    heuristics_mod.register_kind("always_x", lambda exs, p: ({"c": 1}, {}),
+                                 lambda mo, f: ("X", 1.0, None), lambda mo, l=6: "always")
+    check("new kinds plug into the registry",
+          heuristics_mod.predict("always_x", {}, {})[0] == "X")
+
+    promo_uids = [add_msg(state, "deals@promos.example", "Mega deal blast %d" % i,
+                          "limited time promo", "hz%d@x" % i) for i in range(6)]
+    rag.index_pass(limit=300)
+    rows_h = [r for r in store.messages(limit=3000) if r["uid"] in promo_uids]
+    store.tag_messages([r["id"] for r in rows_h], "Promo")
+    model, stats = heuristics_mod.train_heuristic("decision_list", "Promo", source="tags",
+                                                  params={"min_support": 2, "min_precision": 0.8})
+    check("train_heuristic builds from tags",
+          stats["trained_label_count"] >= 6 and bool(model.get("conditions")))
+    hid = store.add_heuristic("Promo robot", "decision_list", "Promo",
+                              model=json.dumps(model), stats=json.dumps(stats))
+    check("classifier registered and enabled", bool(hid) and store.get_heuristic(hid)["enabled"] == 1)
+    newu = add_msg(state, "deals@promos.example", "Another blowout deal", "promo inside", "hz-new@x")
+    rag.index_pass(limit=300)
+    row_new = [r for r in store.messages(limit=3000) if r["uid"] == newu][0]
+    calls_before = len(llm_server.calls)
+    res = engine.classify_and_store(store.get_message(row_new["id"]), store.all_settings())
+    check("heuristic decided without any LLM call",
+          res.get("_heuristic_id") == hid and len(llm_server.calls) == calls_before)
+    row_after = store.get_message(row_new["id"])
+    check("row records the heuristic verdict",
+          row_after["llm_category"] == "Promo"
+          and (row_after["classified_by"] or "").startswith("heuristic:%d" % hid))
+
+    agent = engine.AssistantAgent()
+    r = agent.call_tool("list_classifiers", {})
+    check("assistant list_classifiers shows it",
+          r["ok"] and any(c["id"] == hid for c in r["result"]["classifiers"]))
+    r = agent.call_tool("evaluate_classifier", {"id": hid})
+    check("assistant evaluate_classifier reports accuracy",
+          r["ok"] and (r["result"]["accuracy"] or 0) >= 0.99)
+    r = agent.call_tool("manage_classifier", {"id": hid, "action": "disable"})
+    check("assistant manage_classifier disables", r["ok"] and store.get_heuristic(hid)["enabled"] == 0)
+    r = agent.call_tool("train_classifier", {"kind": "decision_list", "category": "Promo",
+                                             "source": "tags", "retrain_id": hid,
+                                             "params": {"min_support": 2, "min_precision": 0.8}})
+    check("assistant train_classifier retrains by id",
+          r["ok"] and store.get_heuristic(hid)["enabled"] == 1)
+    agent.close()
+
+    r = client.get("/classifiers")
+    check("classifiers page renders", r.status_code == 200 and b"Promo robot" in r.data)
+    r = client.get("/messages/%d" % row_new["id"])
+    check("message page shows the heuristic badge",
+          ("heuristic:%d" % hid).encode() in r.data)
+
+    more_uids = [add_msg(state, "deals@promos.example", "Mega deal blast extra %d" % i,
+                         "promo again", "hz2-%d@x" % i) for i in range(5)]
+    rag.index_pass(limit=400)
+    rows_m = [r for r in store.messages(limit=4000) if r["uid"] in more_uids]
+    store.tag_messages([r["id"] for r in rows_m], "Promo")
+    refined = heuristics_mod.auto_refine()
+    check("auto_refine retrained on new labels", any(h == hid for h, _n, _d in refined))
+    stats_after = json.loads(store.get_heuristic(hid)["stats"])
+    check("stats reflect the larger label set",
+          (stats_after.get("trained_label_count") or 0) >= 11)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

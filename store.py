@@ -17,6 +17,8 @@ DEFAULT_SETTINGS = {
     "max_llm_per_hour": 40,
     "llm_batch_per_cycle": 5,
     "classify_concurrency": 8,    # parallel LLM requests for batch classification
+    "heuristics_enabled": True,   # run trained heuristic classifiers before the LLM
+    "heuristic_autorefine": True,  # retrain tag-sourced heuristics when labels grow
     "categories": ["Action", "Notification", "Newsletter", "Receipt", "Personal", "Promo"],
     "category_folders": {
         "Notification": "Notifications",
@@ -72,12 +74,26 @@ CREATE TABLE IF NOT EXISTS messages (
     llm_thinking TEXT DEFAULT '',
     llm_needs_reply INTEGER DEFAULT NULL,
     llm_suggested_folder TEXT DEFAULT '',
+    classified_by TEXT DEFAULT '',
     processed_at INTEGER,
     UNIQUE (folder, uid, uidvalidity)
 );
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts INTEGER, level TEXT, message TEXT
+);
+CREATE TABLE IF NOT EXISTS heuristics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    min_confidence REAL DEFAULT 0.8,
+    priority INTEGER DEFAULT 0,
+    model TEXT NOT NULL DEFAULT '{}',
+    stats TEXT NOT NULL DEFAULT '{}',
+    created_by TEXT DEFAULT '',
+    created INTEGER, updated INTEGER
 );
 CREATE TABLE IF NOT EXISTS llm_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,6 +148,8 @@ def _migrate(conn):
         conn.execute("ALTER TABLE messages ADD COLUMN llm_reason TEXT DEFAULT ''")
     if "llm_thinking" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN llm_thinking TEXT DEFAULT ''")
+    if "classified_by" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN classified_by TEXT DEFAULT ''")
     if "user_tag" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN user_tag TEXT NOT NULL DEFAULT ''")
 
@@ -260,6 +278,49 @@ def update_rule(rule_id, **fields):
 def delete_rule(rule_id):
     with db() as conn:
         conn.execute("DELETE FROM rules WHERE id=?", (rule_id,))
+
+
+# ---------------------------------------------------------------- heuristics
+
+def list_heuristics(enabled_only=False):
+    q = "SELECT * FROM heuristics"
+    if enabled_only:
+        q += " WHERE enabled=1"
+    q += " ORDER BY priority, id"
+    with db() as conn:
+        return [dict(r) for r in conn.execute(q)]
+
+
+def get_heuristic(hid):
+    with db() as conn:
+        row = conn.execute("SELECT * FROM heuristics WHERE id=?", (hid,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_heuristic(name, kind, category, model="{}", stats="{}", min_confidence=0.8,
+                  enabled=True, created_by="assistant"):
+    now = int(time.time())
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO heuristics (name, kind, category, enabled, min_confidence, model, "
+            "stats, created_by, created, updated) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (name, kind, category, 1 if enabled else 0, float(min_confidence), model, stats,
+             created_by, now, now))
+        return cur.lastrowid
+
+
+def update_heuristic(hid, **fields):
+    if not fields:
+        return
+    fields["updated"] = int(time.time())
+    sets = ", ".join("%s=?" % k for k in fields)
+    with db() as conn:
+        conn.execute("UPDATE heuristics SET %s WHERE id=?" % sets, (*fields.values(), hid))
+
+
+def delete_heuristic(hid):
+    with db() as conn:
+        conn.execute("DELETE FROM heuristics WHERE id=?", (hid,))
 
 
 def move_rule(rule_id, direction):

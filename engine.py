@@ -21,6 +21,7 @@ import time
 import requests
 
 import config
+import heuristics
 import store
 
 
@@ -763,6 +764,12 @@ class Worker(threading.Thread):
         finally:
             self.state["last_cycle"] = time.time()
             self.state["running"] = False
+        try:
+            if store.get_setting("heuristic_autorefine", True):
+                for _hid, hname, delta in heuristics.auto_refine():
+                    store.log_event("info", "heuristic %r retrained (+%d new label(s))" % (hname, delta))
+        except Exception as exc:
+            store.log_event("error", "heuristic auto-refine failed: %r" % exc)
 
 
 def _fields_for(meta):
@@ -839,11 +846,21 @@ def _process_folder(mc, folder, settings, rules):
 def classify_and_store(msg, settings, mc=None):
     """Classify one message, persist the result, file it when llm_apply is on.
 
+    Order: trained heuristic classifiers first (deterministic, no LLM call for a
+    confident verdict); the LLM only sees what the heuristics abstain on.
+
     Returns the classification dict with '_moved_to' set when it was filed.
     Raises on LLM failure. Reused by the worker queue and the manual batch job.
     """
-    res = LLMClient().classify(msg, settings.get("categories") or [],
-                               settings.get("my_name", ""))
+    hres = heuristics.classify(msg) if settings.get("heuristics_enabled", True) else None
+    if hres:
+        res = {"category": hres["category"], "confidence": hres["confidence"],
+               "summary": "", "reason": hres["reason"], "needs_reply": False,
+               "_heuristic_id": hres["heuristic_id"],
+               "_heuristic_name": hres["heuristic_name"]}
+    else:
+        res = LLMClient().classify(msg, settings.get("categories") or [],
+                                   settings.get("my_name", ""))
     category = str(res.get("category", ""))
     try:
         conf = float(res.get("confidence") or 0)
@@ -859,6 +876,7 @@ def classify_and_store(msg, settings, mc=None):
         "llm_thinking": str(res.get("_thinking") or "")[:6000],
         "llm_needs_reply": 1 if res.get("needs_reply") else 0,
         "llm_suggested_folder": folder,
+        "classified_by": ("heuristic:%s %s" % (hres["heuristic_id"], hres["heuristic_name"])) if hres else "llm",
         "status": "classified",
     }
     res["_moved_to"] = ""
@@ -902,7 +920,8 @@ def _process_llm_queue(mc, settings, batch):
     for msg in store.queued_messages(batch):
         try:
             res = classify_and_store(msg, settings, mc=mc)
-            store.add_llm_log(msg["id"], True)
+            if not res.get("_heuristic_id"):
+                store.add_llm_log(msg["id"], True)
         except Exception as exc:
             store.add_llm_log(msg["id"], False, repr(exc))
             fails = store.llm_fail_count(msg["id"])
@@ -1055,7 +1074,8 @@ class ClassifyJob(threading.Thread):
 
     def _classify_one(self, msg, settings):
         res = classify_and_store(msg, settings, mc=self._mail())
-        store.add_llm_log(msg["id"], True)
+        if not res.get("_heuristic_id"):
+            store.add_llm_log(msg["id"], True)
         return res
 
     def _run_job(self):
@@ -1219,6 +1239,7 @@ How to work
 - The user can also tag mail by hand on the Messages page. If they ask you to learn rules from their tags, call list_tagged first and base propose_rule calls on the tag-to-pattern evidence.
 - To PROTECT mail from being moved (any "never move X" / "keep X in the inbox" request): propose a rule with conditions only and NO actions - that is a guard rule. Guards must sit at the top, so set placement="top". A guard also stops LLM category filing for matching mail.
 - BEFORE proposing a rule, call list_rules (or mailbox_overview) and check what already exists. If a similar rule exists (same sender/domain/subject), propose an UPDATE instead of a near-duplicate: pass updates_rule_id with the rule as it should look afterwards (name/conditions/actions). If you propose something that overlaps an existing rule without updates_rule_id, the app flags it to the user, so handle it yourself first.
+- Heuristic classifiers (train_classifier / list_classifiers / manage_classifier / evaluate_classifier): deterministic trained models that run BEFORE the LLM in triage. Suggest them when the user wants less LLM dependence, when a category has regular labelled mail (tags), or when classification feels inconsistent. decision_list suits sender/keyword patterns, naive_bayes fuzzier ones; retrain via retrain_id as labels grow; evaluate before claiming quality. After a tagging session, suggest training one when a category has around 8+ tagged examples.
 - Only tell the user a rule was proposed once propose_rule has returned ok:true in this turn; never claim a proposal you did not actually make.
 - Condition values of 3 characters or fewer (letters/digits) match whole words: a value "PO" will not match "support" or "report".
 - At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.
@@ -1319,6 +1340,34 @@ ASSISTANT_TOOLS = [
     _fn("list_rules",
         "List the user's current filter rules in order: id, name, enabled, conditions, actions. Call this BEFORE proposing a rule so you can update an existing rule rather than stacking a near-duplicate.",
         {}),
+    _fn("train_classifier",
+        "Train (or retrain) a deterministic heuristic classifier for a category, from the user's labels. Heuristics run BEFORE the LLM in the triage pipeline: a confident verdict is applied without any LLM call, so trained categories stop depending on the non-deterministic model and cannot be steered by text inside emails (prompt injection). Prefer this when a category has regular labelled mail, when the user wants less LLM dependence, or after a tagging session.",
+        {"name": {"type": "string", "description": "short name for the classifier"},
+         "kind": {"type": "string", "enum": ["decision_list", "naive_bayes"],
+                  "description": "decision_list = interpretable learned conditions (sender/keyword patterns); naive_bayes = fuzzier token patterns"},
+         "category": {"type": "string", "description": "category this classifier outputs (match the app categories)"},
+         "source": {"type": "string", "enum": ["tags", "classified"],
+                    "description": "labels from the user's manual tags (best) or existing classified mail (weak). Default tags"},
+         "min_confidence": {"type": "number", "description": "minimum probability to accept a verdict without the LLM (default 0.8)"},
+         "params": {"type": "object",
+                    "description": "decision_list: {min_precision, min_support}; naive_bayes: {max_vocab, min_df}",
+                    "properties": {}},
+         "retrain_id": {"type": "integer", "description": "existing classifier id to retrain with the latest labels"},
+         "enable": {"type": "boolean", "description": "enable after training (default true)"}},
+        ("kind", "category")),
+    _fn("list_classifiers",
+        "List the heuristic classifiers: id, name, kind, category, enabled, samples, label source, and what they match on.",
+        {}),
+    _fn("manage_classifier",
+        "Enable, disable or delete a heuristic classifier.",
+        {"id": {"type": "integer", "description": "classifier id"},
+         "action": {"type": "string", "enum": ["enable", "disable", "delete"]}},
+        ("id", "action")),
+    _fn("evaluate_classifier",
+        "Evaluate a heuristic classifier against the current labelled examples: accuracy plus example mistakes. Check before telling the user a classifier is good.",
+        {"id": {"type": "integer", "description": "classifier id"},
+         "limit": {"type": "integer", "description": "max examples to check (default 500)"}},
+        ("id",)),
 ]
 
 
@@ -2008,6 +2057,102 @@ class AssistantAgent:
         return {"ok": True,
                 "summary": "%d rule(s) (top to bottom, first match wins)" % len(items),
                 "result": {"rules": items, "text": _rules_to_text(rules)}}
+
+    def _tool_train_classifier(self, a):
+        kind = str(a.get("kind") or "").strip()
+        category = str(a.get("category") or "").strip()
+        if kind not in heuristics.kind_names():
+            return {"ok": False, "summary": "unknown kind %r" % kind,
+                    "result": {"error": "kind must be one of: %s" % ", ".join(heuristics.kind_names())}}
+        if not category:
+            return {"ok": False, "summary": "category is required",
+                    "result": {"error": "category is required"}}
+        source = a.get("source") if a.get("source") in ("tags", "classified") else "tags"
+        params = a.get("params") if isinstance(a.get("params"), dict) else {}
+        try:
+            min_conf = float(a.get("min_confidence") or 0.8)
+        except (TypeError, ValueError):
+            min_conf = 0.8
+        enable = bool(a.get("enable", True))
+        try:
+            model, stats = heuristics.train_heuristic(kind, category, source=source, params=params,
+                                                      min_confidence=min_conf, created_by="assistant")
+        except Exception as exc:
+            return {"ok": False, "summary": str(exc)[:200], "result": {"error": str(exc)}}
+        retrain_id = a.get("retrain_id")
+        if retrain_id:
+            row = store.get_heuristic(int(retrain_id)) if str(retrain_id).isdigit() else None
+            if not row:
+                return {"ok": False, "summary": "no classifier #%s" % retrain_id,
+                        "result": {"error": "classifier id not found"}}
+            store.update_heuristic(row["id"], kind=kind, category=category,
+                                   model=json.dumps(model), stats=json.dumps(stats),
+                                   min_confidence=min_conf, enabled=1 if enable else 0,
+                                   name=(a.get("name") or row["name"] or ""))
+            hid = row["id"]
+            verb = "retrained"
+        else:
+            hid = store.add_heuristic(a.get("name") or ("%s classifier" % category), kind, category,
+                                      model=json.dumps(model), stats=json.dumps(stats),
+                                      min_confidence=min_conf, enabled=enable, created_by="assistant")
+            verb = "trained"
+        view = heuristics.view(store.get_heuristic(hid) or {})
+        weak = " (weak labels from LLM-classified mail)" if stats.get("weak_labels") else ""
+        return {"ok": True,
+                "summary": "classifier #%d %r %s on %d example(s)%s - %s"
+                           % (hid, view.get("name"), verb, stats.get("samples") or 0, weak,
+                              (view.get("description") or "")[:110]),
+                "result": {"classifier": view,
+                           "note": "runs before the LLM on new mail; evaluate_classifier before claiming quality"}}
+
+    def _tool_list_classifiers(self, a):
+        rows = [heuristics.view(h) for h in store.list_heuristics()]
+        return {"ok": True, "summary": "%d classifier(s)" % len(rows),
+                "result": {"classifiers": rows,
+                           "kinds_available": heuristics.kind_names()}}
+
+    def _tool_manage_classifier(self, a):
+        try:
+            hid = int(a.get("id") or 0)
+        except (TypeError, ValueError):
+            hid = 0
+        action = str(a.get("action") or "").strip()
+        row = store.get_heuristic(hid) if hid else None
+        if not row:
+            return {"ok": False, "summary": "no classifier #%s" % a.get("id"),
+                    "result": {"error": "classifier id not found"}}
+        if action == "delete":
+            store.delete_heuristic(hid)
+        elif action == "disable":
+            store.update_heuristic(hid, enabled=0)
+        elif action == "enable":
+            store.update_heuristic(hid, enabled=1)
+        else:
+            return {"ok": False, "summary": "unknown action %r" % action,
+                    "result": {"error": "action must be enable / disable / delete"}}
+        return {"ok": True, "summary": "classifier #%d %r %sd" % (hid, row.get("name"), action.rstrip("e")),
+                "result": {"id": hid, "action": action}}
+
+    def _tool_evaluate_classifier(self, a):
+        try:
+            hid = int(a.get("id") or 0)
+        except (TypeError, ValueError):
+            hid = 0
+        row = store.get_heuristic(hid) if hid else None
+        if not row:
+            return {"ok": False, "summary": "no classifier #%s" % a.get("id"),
+                    "result": {"error": "classifier id not found"}}
+        try:
+            limit = int(a.get("limit") or 500)
+        except (TypeError, ValueError):
+            limit = 500
+        out = heuristics.evaluate_heuristic(row, limit=limit)
+        acc = out.get("accuracy")
+        return {"ok": True,
+                "summary": "classifier #%d %r: %s accuracy on %d example(s)"
+                           % (hid, row.get("name"), ("%.0f%%" % (acc * 100)) if acc is not None else "n/a",
+                              out.get("total") or 0),
+                "result": out}
 
     # ---- the main loop
 
