@@ -32,6 +32,11 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
 - **Quick filter rules** (Rules page): match on from / to / subject / body snippet
   (contains, equals, regex; ALL or ANY), then move to a folder, mark read, and/or
   flag. First matching rule wins, top to bottom. Folders are created if missing.
+  A rule with no actions is a **guard**: matching mail stays put and nothing else
+  (later rules, LLM filing) can move it — that's how "never move X out of the inbox"
+  is expressed. Guards belong at the top (⤒ button; assistant proposals land there
+  automatically when the rule asks for it). Values of 3 characters or fewer match
+  whole words only ("PO" won't fire on "support"), so short tokens are safe.
 - **Rule assistant** (Assistant page): a streaming, tool-calling chat. It shows its
   thinking and every tool step live; it can search your whole mailbox history (live
   IMAP through the proxy — not just what the app has indexed), read messages, create
