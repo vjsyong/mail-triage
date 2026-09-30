@@ -1303,6 +1303,66 @@ def main():
           r.status_code == 200 and b"Content-Transfer-Encoding" not in r.data
           and "plain body for repair test" in (fixed["snippet"] or ""))
 
+    section("T22 rule proposals consult existing rules (update vs add)")
+    rules_all = store.list_rules()
+    boss_rule = [r for r in rules_all if r["name"] == "Work from boss"][0]
+    agent = engine.AssistantAgent()
+    r = agent.call_tool("list_rules", {})
+    check("list_rules returns rules with ids",
+          r["ok"] and any(x["id"] == boss_rule["id"] for x in r["result"]["rules"]))
+    r = agent.call_tool("propose_rule", {
+        "name": "Boss mail to Budget", "match_mode": "all",
+        "conditions": [{"field": "from", "op": "contains", "value": "boss@work.com"}],
+        "actions": {"move_to": "Budget"}})
+    check("overlapping proposal is flagged with the similar rule",
+          r["ok"] and (r["result"]["rule"].get("similar_rule") or {}).get("id") == boss_rule["id"])
+    check("similar hint points at updates_rule_id",
+          "updates_rule_id" in (r["result"].get("hint") or ""))
+    r = agent.call_tool("propose_rule", {
+        "name": "Boss mail to Budget", "match_mode": "all",
+        "conditions": [{"field": "from", "op": "contains", "value": "boss@work.com"}],
+        "actions": {"move_to": "Budget"}, "updates_rule_id": boss_rule["id"]})
+    check("update proposal accepted, replaces the earlier same-name one",
+          r["ok"] and r["result"]["rule"].get("updates_rule_id") == boss_rule["id"]
+          and len([p for p in agent.proposals if p.get("name") == "Boss mail to Budget"]) == 1)
+    r = agent.call_tool("propose_rule", {
+        "name": "Nope", "match_mode": "all",
+        "conditions": [{"field": "from", "op": "contains", "value": "x@y.com"}],
+        "actions": {"move_to": "Budget"}, "updates_rule_id": 99999})
+    check("update of a missing rule is rejected", not r["ok"])
+    upd_prop = [p for p in agent.proposals if p.get("name") == "Boss mail to Budget"][0]
+    mid_upd = store.add_assistant_message("assistant", "Update the boss rule?",
+                                          proposals=json.dumps([upd_prop]))
+    r = client.get("/assistant")
+    check("update card renders with badge and button",
+          ("updates #%d" % boss_rule["id"]).encode() in r.data
+          and ("Update rule #%d" % boss_rule["id"]).encode() in r.data)
+    before_rules = len(store.list_rules())
+    r = client.post("/assistant/apply", data={"msg_id": mid_upd, "idx": 0, "mode": "update",
+                                              "rule_id": str(boss_rule["id"])})
+    check("update apply redirects", r.status_code == 302)
+    check("existing rule edited in place, nothing added",
+          len(store.list_rules()) == before_rules
+          and json.loads(store.get_rule(boss_rule["id"])["actions"]).get("move_to") == "Budget")
+    agent.close()
+
+    agent2 = engine.AssistantAgent()
+    agent2.call_tool("propose_rule", {
+        "name": "Boss to Budget (dup)", "match_mode": "all",
+        "conditions": [{"field": "from", "op": "contains", "value": "boss@work.com"}],
+        "actions": {"move_to": "Budget"}})
+    sim_prop = agent2.proposals[0]
+    store.add_assistant_message("assistant", "Maybe update?", proposals=json.dumps([sim_prop]))
+    r = client.get("/assistant")
+    check("similar-rule note renders with an update button",
+          b"Similar rule exists" in r.data
+          and ("Update rule #%d" % boss_rule["id"]).encode() in r.data)
+    sim, _reasons = engine.rule_similarity(
+        {"conditions": [{"field": "from", "op": "contains", "value": "boss@work.com"}]},
+        store.list_rules())
+    check("rule_similarity matches exact conditions", bool(sim) and sim["id"] == boss_rule["id"])
+    agent2.close()
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

@@ -783,13 +783,15 @@ MESSAGES_TMPL = """
   {% for p in proposals %}
   <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
     <div class="spread">
-      <div><b>{{ p.rule_obj.name }}</b> <span class="sub">({{ p.rule_obj.match_mode }})</span>{% if p.rule_obj.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}</div>
+      <div><b>{{ p.rule_obj.name }}</b> <span class="sub">({{ p.rule_obj.match_mode }})</span>{% if p.rule_obj.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}{% if p.similar %} <span class="badge warn">overlaps #{{ p.similar.id }}</span>{% endif %}</div>
       <div class="row" style="white-space:nowrap">
-        <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><button class="btn small primary" type="submit">Add rule</button></form>
+        {% if p.similar %}<form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><input type="hidden" name="mode" value="update"><input type="hidden" name="rule_id" value="{{ p.similar.id }}"><button class="btn small primary" type="submit">Update rule #{{ p.similar.id }}</button></form>{% endif %}
+        <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><button class="btn small{{ '' if p.similar else ' primary' }}" type="submit">Add rule</button></form>
         <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><input type="hidden" name="disabled" value="1"><button class="btn small" type="submit">Add (disabled)</button></form>
         <form class="inline" method="post" action="{{ url_for('proposal_dismiss', pid=p.id) }}"><button class="btn small danger" type="submit">Dismiss</button></form>
       </div>
     </div>
+    {% if p.similar %}<div class="note" style="border-color:var(--warn);color:var(--warn)">⚠ Similar rule exists: #{{ p.similar.id }} "{{ p.similar.name }}"{% if not p.similar.enabled %} (disabled){% endif %} — {{ p.similar_actions }}. Updating it avoids a duplicate.</div>{% endif %}
     <div class="mono" style="font-size:.85rem">{{ p.cond_text }}</div>
     <div class="sub">{{ p.act_text }}{% if p.rule_obj.rationale %} — {{ p.rule_obj.rationale }}{% endif %}</div>
   </div>
@@ -865,12 +867,15 @@ def _proposal_views():
     out = []
     for p in store.list_rule_proposals():
         ro = p["rule_obj"]
+        sim = ro.get("similar_rule") or None
         out.append({
             "id": p["id"],
             "rule_obj": ro,
             "cond_text": summarize_conditions({"conditions": json.dumps(ro.get("conditions") or []),
                                                 "match_mode": ro.get("match_mode") or "all"}),
             "act_text": summarize_actions({"actions": json.dumps(ro.get("actions") or {})}),
+            "similar": sim,
+            "similar_actions": summarize_actions({"actions": json.dumps((sim or {}).get("actions", {}))}) if sim else "",
         })
     return out
 
@@ -996,10 +1001,28 @@ def proposal_apply(pid):
     except (TypeError, ValueError):
         rule = {}
     norm = engine.normalize_rule(rule) or rule
-    if not norm.get("conditions") or not norm.get("actions"):
+    if not norm.get("conditions"):
         flash("That proposal is not valid any more.", "err")
         return redirect(url_for("messages"))
     disabled = bool(request.form.get("disabled"))
+    mode = (request.form.get("mode") or "add").strip()
+    if mode == "update":
+        try:
+            rid = int(request.form.get("rule_id") or 0)
+        except ValueError:
+            rid = 0
+        target = store.get_rule(rid) if rid else None
+        if target is None:
+            flash("That rule no longer exists - nothing updated.", "err")
+            return redirect(url_for("messages"))
+        store.update_rule(rid, name=norm.get("name") or target["name"],
+                          match_mode=norm.get("match_mode", "all"),
+                          conditions=json.dumps(norm.get("conditions", [])),
+                          actions=json.dumps(norm.get("actions", {})))
+        store.mark_rule_proposal_applied(pid)
+        store.log_event("info", "rule learned from tags updated #%d '%s'" % (rid, target["name"]))
+        flash("Rule #%d '%s' updated from your tags - no duplicate added." % (rid, target["name"]), "ok")
+        return redirect(url_for("messages"))
     store.add_rule(norm.get("name", "Learned rule"), norm.get("match_mode", "all"),
                    norm.get("conditions", []), norm.get("actions", {}),
                    enabled=not disabled, position=norm.get("placement") or "bottom")
@@ -1281,12 +1304,22 @@ ASSISTANT_TMPL = r"""
         {% for p in m.proposals_list %}
         <div class="proposal">
           <div class="spread">
-            <div><b>{{ p.name }}</b> <span class="sub">({{ p.match_mode }})</span>{% if p.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}</div>
+            <div><b>{{ p.name }}</b> <span class="sub">({{ p.match_mode }})</span>{% if p.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}{% if p.updates %} <span class="badge warn">updates #{{ p.updates.id }} "{{ p.updates.name }}"</span>{% elif p.similar %} <span class="badge warn">overlaps #{{ p.similar.id }}</span>{% endif %}</div>
             <div class="row" style="white-space:nowrap">
+              {% set tgt = p.updates if p.updates else p.similar %}
+              {% if tgt %}
               <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
-                <button class="btn small primary" type="submit">Add rule</button>
+                <input type="hidden" name="mode" value="update">
+                <input type="hidden" name="rule_id" value="{{ tgt.id }}">
+                <button class="btn small primary" type="submit">Update rule #{{ tgt.id }}</button>
+              </form>
+              {% endif %}
+              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
+                <input type="hidden" name="msg_id" value="{{ m.id }}">
+                <input type="hidden" name="idx" value="{{ loop.index0 }}">
+                <button class="btn small{{ '' if tgt else ' primary' }}" type="submit">Add rule</button>
               </form>
               <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
@@ -1296,6 +1329,11 @@ ASSISTANT_TMPL = r"""
               </form>
             </div>
           </div>
+          {% if p.updates %}
+          <div class="note" style="border-color:var(--warn);color:var(--warn)">Updates rule #{{ p.updates.id }} "{{ p.updates.name }}" — currently {{ p.updates_actions }}.</div>
+          {% elif p.similar %}
+          <div class="note" style="border-color:var(--warn);color:var(--warn)">⚠ Similar rule exists: #{{ p.similar.id }} "{{ p.similar.name }}"{% if not p.similar.enabled %} (disabled){% endif %} — {{ p.similar_actions }}. Updating it avoids a duplicate.</div>
+          {% endif %}
           <div class="mono" style="font-size:.85rem">{{ p.summary }}</div>
           <div class="sub">{{ p.actions_summary }}{% if p.rationale %} - {{ p.rationale }}{% endif %}</div>
         </div>
@@ -1480,31 +1518,53 @@ function run(text){
     var t = c.textContent.replace(/^[⏳✓✗]\s*/,'');
     c.textContent = (ok ? '✓ ' : '✗ ') + t + ' → ' + (dry ? '[dry-run] ' : '') + summary;
   }
+  function actsText(a){
+    a = a || {}; var out = [];
+    if(a.move_to) out.push('move → ' + a.move_to);
+    if(a.mark_read) out.push('mark read');
+    if(a.flag) out.push('flag');
+    return out.join(', ') || 'keep in place (guard)';
+  }
+  function makeForm(msgId, idx, extra){
+    var f = mk('form'); f.method='post'; f.action='/assistant/apply'; f.className='inline';
+    var i1 = mk('input'); i1.type='hidden'; i1.name='msg_id'; i1.value=msgId; f.appendChild(i1);
+    var i2 = mk('input'); i2.type='hidden'; i2.name='idx'; i2.value=idx; f.appendChild(i2);
+    Object.keys(extra||{}).forEach(function(k){ var i3 = mk('input'); i3.type='hidden'; i3.name=k; i3.value=extra[k]; f.appendChild(i3); });
+    return f;
+  }
   function addProposal(p, idx, msgId){
     var w = mk('div','proposal');
+    var tgt = p.updates_rule || p.similar_rule || null;
     var h = mk('div','spread');
     var left = mk('div');
     left.appendChild(mk('b','',p.name));
     left.appendChild(document.createTextNode(' (' + (p.match_mode||'all') + ')'));
+    if(p.updates_rule){ var b1=mk('span','badge warn',' updates #' + p.updates_rule.id + ' "' + p.updates_rule.name + '"'); b1.style.marginLeft='6px'; left.appendChild(b1); }
+    else if(p.similar_rule){ var b2=mk('span','badge warn',' overlaps #' + p.similar_rule.id); b2.style.marginLeft='6px'; left.appendChild(b2); }
     h.appendChild(left);
     var row = mk('div','row'); row.style.whiteSpace='nowrap';
-    [[true,'Add rule'],[false,'Add (disabled)']].forEach(function(pair){
-      var f = mk('form'); f.method='post'; f.action='/assistant/apply'; f.className='inline';
-      var i1 = mk('input'); i1.type='hidden'; i1.name='msg_id'; i1.value=msgId; f.appendChild(i1);
-      var i2 = mk('input'); i2.type='hidden'; i2.name='idx'; i2.value=idx; f.appendChild(i2);
-      if(!pair[0]){ var i3 = mk('input'); i3.type='hidden'; i3.name='disabled'; i3.value='1'; f.appendChild(i3); }
-      var bt = mk('button','btn small' + (pair[0] ? ' primary' : ''), pair[1]); bt.type='submit';
-      f.appendChild(bt); row.appendChild(f);
-    });
+    if(tgt){
+      var fu = makeForm(msgId, idx, {mode:'update', rule_id:tgt.id});
+      var bu = mk('button','btn small primary','Update rule #' + tgt.id); bu.type='submit';
+      fu.appendChild(bu); row.appendChild(fu);
+    }
+    var fa = makeForm(msgId, idx, {});
+    var ba = mk('button','btn small' + (tgt ? '' : ' primary'), 'Add rule'); ba.type='submit';
+    fa.appendChild(ba); row.appendChild(fa);
+    var fd = makeForm(msgId, idx, {disabled:'1'});
+    var bd = mk('button','btn small','Add (disabled)'); bd.type='submit';
+    fd.appendChild(bd); row.appendChild(fd);
     h.appendChild(row);
     w.appendChild(h);
+    if(p.updates_rule){
+      w.appendChild(mk('div','note','Updates rule #' + p.updates_rule.id + ' "' + p.updates_rule.name + '" — currently ' + actsText(p.updates_rule.actions) + '.'));
+    } else if(p.similar_rule){
+      var n = mk('div','note','⚠ Similar rule exists: #' + p.similar_rule.id + ' "' + p.similar_rule.name + '" — ' + actsText(p.similar_rule.actions) + '. Updating it avoids a duplicate.');
+      w.appendChild(n);
+    }
     var conds = (p.conditions||[]).map(function(c){ return c.field + ' ' + c.op + ' "' + c.value + '"'; }).join((p.match_mode==='any') ? ' OR ' : ' AND ');
     w.appendChild(mk('div','mono', conds));
-    var acts = [];
-    if(p.actions && p.actions.move_to) acts.push('move → ' + p.actions.move_to);
-    if(p.actions && p.actions.mark_read) acts.push('mark read');
-    if(p.actions && p.actions.flag) acts.push('flag');
-    w.appendChild(mk('div','sub', acts.join(', ') || 'keep in place (guard)'));
+    w.appendChild(mk('div','sub', actsText(p.actions)));
     if(p.rationale) w.appendChild(mk('div','sub', p.rationale));
     box.appendChild(w);
   }
@@ -1598,6 +1658,8 @@ function run(text){
 
 
 def _proposal_view(p):
+    sim = p.get("similar_rule") or None
+    upd = p.get("updates_rule") or None
     return {
         "name": p.get("name", ""),
         "match_mode": p.get("match_mode", "all"),
@@ -1606,6 +1668,10 @@ def _proposal_view(p):
                                          "match_mode": p.get("match_mode", "all")}),
         "actions_summary": summarize_actions({"actions": json.dumps(p.get("actions", {}))}),
         "rationale": p.get("rationale", ""),
+        "similar": sim,
+        "similar_actions": summarize_actions({"actions": json.dumps((sim or {}).get("actions", {}))}) if sim else "",
+        "updates": upd,
+        "updates_actions": summarize_actions({"actions": json.dumps((upd or {}).get("actions", {}))}) if upd else "",
     }
 
 
@@ -1700,6 +1766,23 @@ def assistant_apply():
         flash("That proposal is no longer available.", "err")
         return redirect(url_for("assistant"))
     norm = engine.normalize_rule(proposals[idx]) or proposals[idx]
+    mode = (request.form.get("mode") or "add").strip()
+    if mode == "update":
+        try:
+            rid = int(request.form.get("rule_id") or 0)
+        except ValueError:
+            rid = 0
+        target = store.get_rule(rid) if rid else None
+        if target is None:
+            flash("That rule no longer exists - nothing updated.", "err")
+            return redirect(url_for("assistant"))
+        store.update_rule(rid, name=norm.get("name") or target["name"],
+                          match_mode=norm.get("match_mode", "all"),
+                          conditions=json.dumps(norm.get("conditions", [])),
+                          actions=json.dumps(norm.get("actions", {})))
+        store.log_event("info", "assistant updated rule #%d '%s'" % (rid, target["name"]))
+        flash("Rule #%d '%s' updated - no duplicate added." % (rid, target["name"]), "ok")
+        return redirect(url_for("assistant"))
     store.add_rule(norm.get("name", "Assistant rule"), norm.get("match_mode", "all"),
                    norm.get("conditions", []), norm.get("actions", {}), enabled=not disabled,
                    position=norm.get("placement") or "bottom")

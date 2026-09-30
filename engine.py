@@ -1185,9 +1185,14 @@ def propose_rules_from_tags():
             obj = {}
     reply = str(obj.get("reply") or "").strip()[:400]
     rules = []
+    existing = store.list_rules()
     for item in (obj.get("proposed_rules") or [])[:5]:
         norm = normalize_rule(item)
         if norm:
+            sim, reasons = rule_similarity(norm, existing)
+            if sim:
+                norm["similar_rule"] = _rule_brief(sim)
+                norm["similar_reasons"] = reasons
             rules.append(norm)
     return reply, rules
 
@@ -1213,6 +1218,7 @@ How to work
 - When you read a message, never paste long verbatim quotes into the answer: give the gist in your own words, keep only short key phrases (prices, dates, rules), and cite the message as [msg:ID].
 - The user can also tag mail by hand on the Messages page. If they ask you to learn rules from their tags, call list_tagged first and base propose_rule calls on the tag-to-pattern evidence.
 - To PROTECT mail from being moved (any "never move X" / "keep X in the inbox" request): propose a rule with conditions only and NO actions - that is a guard rule. Guards must sit at the top, so set placement="top". A guard also stops LLM category filing for matching mail.
+- BEFORE proposing a rule, call list_rules (or mailbox_overview) and check what already exists. If a similar rule exists (same sender/domain/subject), propose an UPDATE instead of a near-duplicate: pass updates_rule_id with the rule as it should look afterwards (name/conditions/actions). If you propose something that overlaps an existing rule without updates_rule_id, the app flags it to the user, so handle it yourself first.
 - Only tell the user a rule was proposed once propose_rule has returned ok:true in this turn; never claim a proposal you did not actually make.
 - Condition values of 3 characters or fewer (letters/digits) match whole words: a value "PO" will not match "support" or "report".
 - At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.
@@ -1306,8 +1312,13 @@ ASSISTANT_TOOLS = [
                                     "keep": {"type": "boolean"}}},
          "placement": {"type": "string", "enum": ["top", "bottom"],
                        "description": "where the rule lands in the list; use \"top\" for guard/protection rules so they catch mail before other rules act (default bottom)"},
+         "updates_rule_id": {"type": "integer",
+                             "description": "id of an EXISTING rule this proposal changes (from list_rules). Set it when the user asks to change/adjust a rule instead of creating a near-duplicate; the proposal then replaces that rule's name/conditions/actions"},
          "rationale": {"type": "string", "description": "one line for the user"}},
         ("name", "conditions")),
+    _fn("list_rules",
+        "List the user's current filter rules in order: id, name, enabled, conditions, actions. Call this BEFORE proposing a rule so you can update an existing rule rather than stacking a near-duplicate.",
+        {}),
 ]
 
 
@@ -1406,6 +1417,55 @@ def _rules_to_text(rules):
     return "\n".join(lines)
 
 
+def _cond_norm(c):
+    return ((c.get("field") or "subject").lower(),
+            (c.get("op") or "contains").lower(),
+            re.sub(r"\s+", " ", (c.get("value") or "").strip().lower()))
+
+
+def rule_similarity(new_rule, rules):
+    """Find the existing rule most overlapping a proposed one.
+
+    Requires at least one condition pair matching exactly (same field+op+value)
+    or two looser overlaps; returns (rule_dict, reasons) or (None, [])."""
+    n_conds = new_rule.get("conditions") or []
+    best, best_score, best_reasons = None, 0, []
+    for r in rules:
+        try:
+            r_conds = json.loads(r.get("conditions") or "[]")
+        except (TypeError, ValueError):
+            continue
+        score, reasons = 0, []
+        for a in n_conds:
+            af, ao, av = _cond_norm(a)
+            if not av:
+                continue
+            for b in r_conds:
+                bf, bo, bv = _cond_norm(b)
+                if (af, ao) != (bf, bo) or not bv:
+                    continue
+                if av == bv:
+                    score += 2
+                    reasons.append('%s %s "%s"' % (af, ao, a.get("value")))
+                elif av in bv or bv in av:
+                    if min(len(av), len(bv)) >= 4:
+                        score += 1
+                        reasons.append('%s %s "%s" overlaps "%s"' % (af, ao, a.get("value"), b.get("value")))
+        if score > best_score:
+            best, best_score, best_reasons = r, score, reasons
+    if best and best_score >= 1:
+        return best, best_reasons[:3]
+    return None, []
+
+
+def _rule_brief(r):
+    """UI/prompt-friendly snapshot of a rule."""
+    return {"id": r.get("id"), "name": r.get("name") or ("rule %s" % r.get("id")),
+            "enabled": bool(r.get("enabled")), "match_mode": r.get("match_mode") or "all",
+            "conditions": _safe_json(r.get("conditions"), []),
+            "actions": _safe_json(r.get("actions"), {})}
+
+
 ALLOWED_FIELDS = ("from", "to", "subject", "body")
 ALLOWED_OPS = ("contains", "equals", "regex")
 
@@ -1463,6 +1523,12 @@ def _validate_rule(proposal):
     placement = str(proposal.get("placement") or "").lower()
     if placement in ("top", "bottom"):
         out["placement"] = placement
+    try:
+        upd_id = proposal.get("updates_rule_id")
+        if upd_id not in (None, "", 0):
+            out["updates_rule_id"] = int(upd_id)
+    except (TypeError, ValueError):
+        pass
     return out, []
 
 
@@ -1577,7 +1643,8 @@ class AssistantAgent:
             "indexed_messages": sum(counts.values()),
             "by_status": counts,
             "folders": folders,
-            "rules": [{"name": r["name"], "enabled": bool(r["enabled"])} for r in rules],
+            "rules": [{"id": r["id"], "name": r["name"], "enabled": bool(r["enabled"])} for r in rules],
+            "rules_text": _rules_to_text(rules),
             "categories": settings.get("categories"),
             "category_folders": settings.get("category_folders"),
             "watched_folders": settings.get("watch_folders"),
@@ -1891,10 +1958,56 @@ class AssistantAgent:
                                        "op contains/equals/regex). Actions are optional: a rule with "
                                        "no actions is a GUARD that keeps matching mail in place. "
                                        "Fix and propose again."}}
+        target_id = a.get("updates_rule_id")
+        if target_id not in (None, "", 0):
+            try:
+                target_id = int(target_id)
+            except (TypeError, ValueError):
+                target_id = None
+        similar = None
+        if target_id:
+            target = store.get_rule(target_id)
+            if target is None:
+                return {"ok": False, "summary": "no rule #%s to update" % target_id,
+                        "result": {"errors": ["updates_rule_id %s does not exist" % target_id],
+                                   "hint": "Call list_rules to see the current rule ids."}}
+            norm["updates_rule_id"] = target_id
+            norm["updates_rule"] = _rule_brief(target)
+        else:
+            similar, reasons = rule_similarity(norm, store.list_rules())
+            if similar:
+                norm["similar_rule"] = _rule_brief(similar)
+                norm["similar_reasons"] = reasons
+        # a re-proposal of the same name replaces the earlier one (never stacks)
+        self.proposals = [p for p in self.proposals
+                          if (p.get("name") or "").lower() != (norm.get("name") or "").lower()]
         self.proposals.append(norm)
-        return {"ok": True, "summary": "rule proposed: %s" % norm["name"],
-                "result": {"status": "queued for the user's one-click approval",
-                           "proposal_index": len(self.proposals) - 1, "rule": norm}}
+        result = {"status": "queued for the user's one-click approval",
+                  "proposal_index": len(self.proposals) - 1, "rule": norm}
+        if norm.get("updates_rule"):
+            summary = ("rule proposed as an UPDATE of #%s '%s'"
+                       % (target_id, norm["updates_rule"]["name"]))
+        else:
+            summary = "rule proposed: %s" % norm["name"]
+            if similar:
+                summary += " (similar to existing rule #%s)" % similar.get("id")
+                result["hint"] = ("An existing rule #%s '%s' already matches similar conditions. If this "
+                                  "proposal is meant to CHANGE that rule, call propose_rule again with "
+                                  "updates_rule_id=%s and the rule as it should look afterwards; otherwise "
+                                  "keep it as a separate rule."
+                                  % (similar.get("id"), similar.get("name") or "", similar.get("id")))
+        return {"ok": True, "summary": summary, "result": result}
+
+    def _tool_list_rules(self, a):
+        rules = store.list_rules()
+        items = []
+        for r in rules:
+            b = _rule_brief(r)
+            b["position"] = r.get("position")
+            items.append(b)
+        return {"ok": True,
+                "summary": "%d rule(s) (top to bottom, first match wins)" % len(items),
+                "result": {"rules": items, "text": _rules_to_text(rules)}}
 
     # ---- the main loop
 
