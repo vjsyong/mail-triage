@@ -237,28 +237,87 @@ def negatives_from_classified(category, limit=800):
             and r.get("status") in ("classified", "llm-moved")]
 
 
-def build_examples(category, source="tags", limit=500):
+def heuristic_excluded(h):
+    """Message ids the user removed from this classifier's dataset."""
+    try:
+        return set(int(x) for x in json.loads((h or {}).get("excluded") or "[]"))
+    except (TypeError, ValueError):
+        return set()
+
+
+def sample_rows(category, source="tags", limit=500, exclude=None):
+    """(positives, negatives) raw rows for training, exclusions applied."""
+    excl = set(exclude or [])
+    if source == "tags":
+        tagged = store.tagged_examples(limit)
+        cat = (category or "").strip().lower()
+        pos = [t for t in tagged if (t.get("user_tag") or "").strip().lower() == cat]
+        neg = [t for t in tagged if (t.get("user_tag") or "").strip().lower() != cat]
+    else:
+        pos = labels_from_classified(category, limit)
+        neg = negatives_from_classified(category, limit)
+    if excl:
+        pos = [r for r in pos if r.get("id") not in excl]
+        neg = [r for r in neg if r.get("id") not in excl]
+    neg = neg[:max(20, 3 * len(pos))]
+    return pos, neg
+
+
+def build_examples(category, source="tags", limit=500, exclude=None):
     """(label, feats) pairs: the category's positives plus negative examples.
 
     Negatives keep precision numbers honest - a single-class training set makes
     every token look 100% precise. When the user's own labels are thin, other
     classified mail fills the negative pool (marked in stats)."""
+    pos, neg = sample_rows(category, source, limit, exclude=exclude)
+    examples = [(category, featurize(r)) for r in pos]
+    examples += [(OTHER_LABEL, featurize(r)) for r in neg]
+    return examples, len(pos)
+
+
+def dataset_for(h, limit=1200):
+    """Reviewable dataset for a classifier: current samples + exclusion flags.
+
+    Shows a superset of what training uses (excluded samples stay visible so
+    they can be re-included). Only the first 300 positives / 250 negatives are
+    returned for display; totals are included."""
+    try:
+        stats = json.loads(h.get("stats") or "{}")
+    except (TypeError, ValueError):
+        stats = {}
+    source = stats.get("source") or "tags"
+    category = h.get("category") or ""
+    excl = heuristic_excluded(h)
     if source == "tags":
-        rows = labels_from_tags(category, limit)
-        others = [t for t in store.tagged_examples(limit)
-                  if (t.get("user_tag") or "").strip().lower() != (category or "").strip().lower()]
-        neg_rows = others[:max(20, 3 * len(rows))]
+        tagged = store.tagged_examples(limit)
+        cat = (category or "").strip().lower()
+        pos = [t for t in tagged if (t.get("user_tag") or "").strip().lower() == cat]
+        neg = [t for t in tagged if (t.get("user_tag") or "").strip().lower() != cat]
     else:
-        rows = labels_from_classified(category, limit)
-        neg_rows = negatives_from_classified(category, limit)[:max(20, 3 * len(rows))]
-    examples = [(category, featurize(r)) for r in rows]
-    examples += [(OTHER_LABEL, featurize(r)) for r in neg_rows]
-    return examples, len(rows)
+        pos = labels_from_classified(category, limit)
+        neg = negatives_from_classified(category, limit)
+    neg = neg[:max(20, 3 * len(pos))]
+
+    def row(r):
+        return {"msg_id": r.get("id"), "subject": (r.get("subject") or "")[:90],
+                "from": (r.get("from_addr") or "")[:60], "date": r.get("date") or "",
+                "llm_category": r.get("llm_category") or "", "tag": r.get("user_tag") or "",
+                "confidence": r.get("llm_confidence"),
+                "summary": (r.get("llm_summary") or "")[:110],
+                "excluded": r.get("id") in excl}
+
+    return {"source": source, "category": category,
+            "weak": bool(stats.get("weak_labels")),
+            "positives": [row(r) for r in pos[:300]],
+            "negatives": [row(r) for r in neg[:250]],
+            "pos_total": len(pos), "neg_total": len(neg),
+            "pos_excluded": sum(1 for r in pos if r.get("id") in excl),
+            "neg_excluded": sum(1 for r in neg if r.get("id") in excl)}
 
 
 def train_heuristic(kind, category, source="tags", params=None, limit=500,
-                    min_confidence=0.8, name="", created_by="assistant"):
-    examples, n = build_examples(category, source, limit)
+                    min_confidence=0.8, name="", created_by="assistant", exclude=None):
+    examples, n = build_examples(category, source, limit, exclude=exclude)
     if n < MIN_EXAMPLES:
         raise RuntimeError("only %d labelled example(s) for category %r - need >= %d "
                            "(tag mail on the Messages page, or use source='classified')"
@@ -267,6 +326,7 @@ def train_heuristic(kind, category, source="tags", params=None, limit=500,
     stats = dict(stats or {})
     n_neg = sum(1 for label, _f in examples if label == OTHER_LABEL)
     stats.update({"source": source, "trained_label_count": n, "negatives": n_neg,
+                  "excluded": len(exclude or []),
                   "trained_at": int(time.time()), "params": params or {},
                   "weak_labels": source != "tags"})
     return model, stats
@@ -369,7 +429,7 @@ def auto_refine():
                 h.get("kind") or "", h.get("category") or "", source="tags",
                 params=stats.get("params") or {},
                 min_confidence=float(h.get("min_confidence") or DEFAULT_MIN_CONFIDENCE),
-                created_by="auto-refine")
+                created_by="auto-refine", exclude=heuristic_excluded(h))
             new_stats["refined_from"] = before
             store.update_heuristic(h["id"], model=json.dumps(model), stats=json.dumps(new_stats))
             done.append((h["id"], h.get("name"), current - before))
@@ -395,5 +455,6 @@ def view(h):
             "enabled": bool(h.get("enabled")), "min_confidence": h.get("min_confidence"),
             "samples": stats.get("samples"), "label_source": stats.get("source"),
             "weak_labels": bool(stats.get("weak_labels")), "trained_at": stats.get("trained_at"),
+            "excluded": len(heuristic_excluded(h)),
             "description": describe(h.get("kind") or "", model),
             "created_by": h.get("created_by") or ""}

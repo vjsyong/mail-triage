@@ -1458,6 +1458,34 @@ def main():
     check("negative-only match abstains instead of mislabeling", verdict is None)
     store.delete_heuristic(hx)
 
+    section("T24 classifier datasets: review, remove, re-include")
+    sample_id = rows_h[0]["id"]  # a tagged Promo sample from T23
+    ds = heuristics_mod.dataset_for(store.get_heuristic(hid))
+    check("dataset view lists positives untouched",
+          ds["pos_total"] >= 11 and not any(s["excluded"] for s in ds["positives"]))
+    check("dataset view includes negatives", ds["neg_total"] > 0)
+    r = client.get("/classifiers/%d/dataset" % hid)
+    check("dataset page renders", r.status_code == 200 and b"dataset review" in r.data)
+    r = client.post("/classifiers/%d/dataset/remove" % hid, data={"msg_id": sample_id})
+    check("remove persists the exclusion",
+          sample_id in heuristics_mod.heuristic_excluded(store.get_heuristic(hid)))
+    ds2 = heuristics_mod.dataset_for(store.get_heuristic(hid))
+    check("removed sample stays visible as excluded",
+          any(s["msg_id"] == sample_id and s["excluded"] for s in ds2["positives"]))
+    n_expected = ds2["pos_total"] - ds2["pos_excluded"]
+    _ex, n = heuristics_mod.build_examples("Promo", "tags", 500,
+                                           exclude=heuristics_mod.heuristic_excluded(store.get_heuristic(hid)))
+    check("training set drops the removed sample", n == n_expected)
+    r = client.post("/classifiers/%d/retrain" % hid)
+    stats_r = json.loads(store.get_heuristic(hid)["stats"])
+    check("UI retrain respects the exclusions",
+          stats_r.get("trained_label_count") == n_expected and stats_r.get("excluded") == 1)
+    r = client.post("/classifiers/%d/dataset/reinclude" % hid, data={"msg_id": sample_id})
+    check("re-include clears the exclusion",
+          sample_id not in heuristics_mod.heuristic_excluded(store.get_heuristic(hid)))
+    check("classifiers page links the dataset page",
+          ("/classifiers/%d/dataset" % hid).encode() in client.get("/classifiers").data)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

@@ -560,11 +560,12 @@ CLASSIFIERS_TMPL = """
       <td><b>{{ h.name }}</b>{% if not h.enabled %} <span class="badge">disabled</span>{% endif %}<div class="sub" style="font-size:.75rem">min conf {{ '%.2f' % (h.min_confidence or 0.8) }} · by {{ h.created_by }}</div></td>
       <td class="mono">{{ h.kind }}</td>
       <td>{{ h.category }}</td>
-      <td class="sub">{{ h.samples }}</td>
+      <td class="sub">{{ h.samples }}{% if h.excluded %} <span class="badge">-{{ h.excluded }} removed</span>{% endif %}</td>
       <td class="sub">{{ h.label_source }}{% if h.weak_labels %} <span class="badge warn">weak</span>{% endif %}</td>
       <td class="sub" style="max-width:340px">{{ h.description[:170] }}</td>
       <td class="sub">{{ h.when }}</td>
       <td class="row" style="white-space:nowrap">
+        <a class="btn small" href="{{ url_for('classifier_dataset', hid=h.id) }}">dataset</a>
         <form class="inline" method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}"><button class="btn small" type="submit">{{ 'disable' if h.enabled else 'enable' }}</button></form>
         <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn small" type="submit">retrain</button></form>
         <form class="inline" method="post" action="{{ url_for('classifier_delete', hid=h.id) }}" onsubmit="return confirm('Delete this classifier?');"><button class="btn small danger" type="submit">delete</button></form>
@@ -573,8 +574,10 @@ CLASSIFIERS_TMPL = """
     {% endfor %}
   </table>
   {% else %}
-  <div class="sub">No classifiers yet. Tag some mail on the Messages page (or classify it), then ask the assistant to train a
-  classifier — e.g. "train a decision list for Receipts from my tags" — or it will suggest one after a tagging session.</div>
+  <div class="sub">No classifiers yet. Tag some mail on the Messages page — or run "Classify all" so the LLM
+  auto-tags older mail — then ask the assistant to train a classifier (it can use your tags or the LLM's
+  auto-tags). Every classifier gets a dataset page where you can review samples and remove anything that
+  doesn't belong.</div>
   {% endif %}
 </div>
 """
@@ -607,7 +610,8 @@ def classifier_retrain(hid):
             model, new_stats = heuristics.train_heuristic(
                 row.get("kind") or "", row.get("category") or "",
                 source=stats.get("source") or "tags", params=stats.get("params") or {},
-                min_confidence=float(row.get("min_confidence") or 0.8), created_by="ui")
+                min_confidence=float(row.get("min_confidence") or 0.8), created_by="ui",
+                exclude=heuristics.heuristic_excluded(row))
             store.update_heuristic(hid, model=json.dumps(model), stats=json.dumps(new_stats))
             flash("Classifier '%s' retrained." % (row.get("name") or hid), "ok")
         except Exception as exc:
@@ -619,6 +623,114 @@ def classifier_retrain(hid):
 def classifier_delete(hid):
     store.delete_heuristic(hid)
     return redirect(url_for("classifiers"))
+
+
+CLASSIFIER_DATASET_TMPL = """
+<h2>{{ h.name }} <span class="sub">— dataset review</span></h2>
+<div class="card">
+  <div class="row" style="margin-bottom:8px">
+    <span class="badge">{{ h.kind }}</span>
+    <span class="badge acc">{{ h.category }}</span>
+    <span class="badge {{ 'warn' if ds.weak else 'ok' }}">labels: {{ 'LLM auto-tags' if ds.weak else 'your tags' }}</span>
+    {% if not h.enabled %}<span class="badge">disabled</span>{% endif %}
+    <span class="row" style="margin-left:auto">
+      <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn small primary" type="submit">Retrain with current dataset</button></form>
+      <a class="btn small" href="{{ url_for('classifiers') }}">Back</a>
+    </span>
+  </div>
+  <div class="sub">{{ ds.pos_total }} positive sample(s){% if ds.pos_excluded %} ({{ ds.pos_excluded }} removed){% endif %} ·
+    {{ ds.neg_total }} negative sample(s){% if ds.neg_excluded %} ({{ ds.neg_excluded }} removed){% endif %}.
+    {% if ds.weak %}These labels come from the LLM's own auto-classification. Remove anything that is actually a different
+    category so it never trains the model - retraining applies the removals.{% else %}Removals stick across retraining;
+    re-include anything you removed by mistake.{% endif %}</div>
+</div>
+
+<div class="card">
+  <h3>In the set: {{ ds.category }} <span class="sub">(positives)</span></h3>
+  {% if ds.positives %}
+  <table class="tbl">
+    <tr><th>subject</th><th>from</th><th>labeled</th><th></th></tr>
+    {% for s in ds.positives %}
+    <tr{% if s.excluded %} style="opacity:.45"{% endif %}>
+      <td><a href="{{ url_for('message_detail', mid=s.msg_id) }}">{{ s.subject or '(no subject)' }}</a>{% if s.summary %}<div class="sub" style="font-size:.75rem">{{ s.summary }}</div>{% endif %}</td>
+      <td class="sub">{{ s.from }}</td>
+      <td class="sub">{{ s.llm_category }}{% if s.confidence is not none %} ({{ '%.0f' % (s.confidence*100) }}%){% endif %}{% if s.tag %} · tag: {{ s.tag }}{% endif %}</td>
+      <td>{% if s.excluded %}
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">re-include</button></form>
+      {% else %}
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_remove', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small danger" type="submit">remove</button></form>
+      {% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if ds.pos_total > ds.positives|length %}<div class="sub" style="margin-top:6px">showing the first {{ ds.positives|length }} of {{ ds.pos_total }}</div>{% endif %}
+  {% else %}<div class="sub">No positive samples yet - tag mail or let the LLM classify some first.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h3>Out of set <span class="sub">(negatives — samples of other categories)</span></h3>
+  {% if ds.negatives %}
+  <table class="tbl">
+    <tr><th>subject</th><th>from</th><th>labeled</th><th></th></tr>
+    {% for s in ds.negatives %}
+    <tr{% if s.excluded %} style="opacity:.45"{% endif %}>
+      <td><a href="{{ url_for('message_detail', mid=s.msg_id) }}">{{ s.subject or '(no subject)' }}</a></td>
+      <td class="sub">{{ s.from }}</td>
+      <td class="sub">{{ s.llm_category }}{% if s.confidence is not none %} ({{ '%.0f' % (s.confidence*100) }}%){% endif %}{% if s.tag %} · tag: {{ s.tag }}{% endif %}</td>
+      <td>{% if s.excluded %}
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">re-include</button></form>
+      {% else %}
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_remove', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small danger" type="submit">remove</button></form>
+      {% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if ds.neg_total > ds.negatives|length %}<div class="sub" style="margin-top:6px">showing the first {{ ds.negatives|length }} of {{ ds.neg_total }}</div>{% endif %}
+  {% else %}<div class="sub">No negative samples yet.</div>{% endif %}
+</div>
+"""
+
+
+@app.route("/classifiers/<int:hid>/dataset")
+def classifier_dataset(hid):
+    row = store.get_heuristic(hid)
+    if not row:
+        flash("No such classifier.", "err")
+        return redirect(url_for("classifiers"))
+    ds = heuristics.dataset_for(row)
+    return render(render_template_string(CLASSIFIER_DATASET_TMPL, h=heuristics.view(row), ds=ds))
+
+
+def _dataset_edit(hid, add):
+    row = store.get_heuristic(hid)
+    if row:
+        try:
+            mid = int(request.form.get("msg_id") or 0)
+        except ValueError:
+            mid = 0
+        if mid:
+            excl = heuristics.heuristic_excluded(row)
+            if add:
+                excl.add(mid)
+            else:
+                excl.discard(mid)
+            store.update_heuristic(hid, excluded=json.dumps(sorted(excl)))
+            store.log_event("info", "%s sample %d on classifier '%s' (%s)"
+                            % ("removed" if add else "re-included", mid,
+                               row.get("name") or hid, "retrain to apply" if add else "restored"))
+            flash(("Sample removed from the dataset - retrain to apply."
+                   if add else "Sample restored to the dataset - retrain to apply."), "ok")
+    return redirect(url_for("classifier_dataset", hid=hid))
+
+
+@app.route("/classifiers/<int:hid>/dataset/remove", methods=["POST"])
+def classifier_dataset_remove(hid):
+    return _dataset_edit(hid, True)
+
+
+@app.route("/classifiers/<int:hid>/dataset/reinclude", methods=["POST"])
+def classifier_dataset_reinclude(hid):
+    return _dataset_edit(hid, False)
 
 
 @app.route("/rules")

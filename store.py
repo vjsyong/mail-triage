@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS heuristics (
     priority INTEGER DEFAULT 0,
     model TEXT NOT NULL DEFAULT '{}',
     stats TEXT NOT NULL DEFAULT '{}',
+    excluded TEXT NOT NULL DEFAULT '[]',
     created_by TEXT DEFAULT '',
     created INTEGER, updated INTEGER
 );
@@ -150,6 +151,9 @@ def _migrate(conn):
         conn.execute("ALTER TABLE messages ADD COLUMN llm_thinking TEXT DEFAULT ''")
     if "classified_by" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN classified_by TEXT DEFAULT ''")
+    hcols = [r[1] for r in conn.execute("PRAGMA table_info(heuristics)")]
+    if hcols and "excluded" not in hcols:
+        conn.execute("ALTER TABLE heuristics ADD COLUMN excluded TEXT NOT NULL DEFAULT '[]'")
     if "user_tag" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN user_tag TEXT NOT NULL DEFAULT ''")
 

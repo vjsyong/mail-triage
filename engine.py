@@ -2074,17 +2074,21 @@ class AssistantAgent:
         except (TypeError, ValueError):
             min_conf = 0.8
         enable = bool(a.get("enable", True))
-        try:
-            model, stats = heuristics.train_heuristic(kind, category, source=source, params=params,
-                                                      min_confidence=min_conf, created_by="assistant")
-        except Exception as exc:
-            return {"ok": False, "summary": str(exc)[:200], "result": {"error": str(exc)}}
+        row = None
         retrain_id = a.get("retrain_id")
         if retrain_id:
             row = store.get_heuristic(int(retrain_id)) if str(retrain_id).isdigit() else None
             if not row:
                 return {"ok": False, "summary": "no classifier #%s" % retrain_id,
                         "result": {"error": "classifier id not found"}}
+        try:
+            model, stats = heuristics.train_heuristic(
+                kind, category, source=source, params=params, min_confidence=min_conf,
+                created_by="assistant",
+                exclude=heuristics.heuristic_excluded(row) if row else None)
+        except Exception as exc:
+            return {"ok": False, "summary": str(exc)[:200], "result": {"error": str(exc)}}
+        if row:
             store.update_heuristic(row["id"], kind=kind, category=category,
                                    model=json.dumps(model), stats=json.dumps(stats),
                                    min_confidence=min_conf, enabled=1 if enable else 0,
@@ -2097,13 +2101,16 @@ class AssistantAgent:
                                       min_confidence=min_conf, enabled=enable, created_by="assistant")
             verb = "trained"
         view = heuristics.view(store.get_heuristic(hid) or {})
-        weak = " (weak labels from LLM-classified mail)" if stats.get("weak_labels") else ""
+        weak = " (labels auto-tagged by the LLM - review the dataset to prune failures)" \
+            if stats.get("weak_labels") else ""
         return {"ok": True,
-                "summary": "classifier #%d %r %s on %d example(s)%s - %s"
-                           % (hid, view.get("name"), verb, stats.get("samples") or 0, weak,
+                "summary": "classifier #%d %r %s on %d example(s) (%d negative)%s - %s"
+                           % (hid, view.get("name"), verb, stats.get("trained_label_count") or 0,
+                              stats.get("negatives") or 0, weak,
                               (view.get("description") or "")[:110]),
                 "result": {"classifier": view,
-                           "note": "runs before the LLM on new mail; evaluate_classifier before claiming quality"}}
+                           "note": "runs before the LLM on new mail; the user can review and prune "
+                                   "samples on the classifier's dataset page (/classifiers/<id>/dataset)"}}
 
     def _tool_list_classifiers(self, a):
         rows = [heuristics.view(h) for h in store.list_heuristics()]
