@@ -26,8 +26,28 @@ import store
 
 # ------------------------------------------------------------------ features
 
-_TOKEN_RE = re.compile(r"[a-z0-9@._\-]{2,}")
+_TOKEN_RE = re.compile(r"[a-z0-9@._\-]{3,}")
 _FIELD_LABEL = {"d": "domain", "s": "sender", "t": "subject", "b": "body"}
+STOPWORDS = frozenset("""
+the and for you your our its with from this that are was were will would can could should
+have has had not but all any our out his her their they them then than there here what when
+who how why was one two via per new now get got let may might must shall very just also more
+most some such only over under about into onto off don't won't can't didn't doesn't isn't
+please thanks thank regards best hello dear hey hi ok okay
+charset content type transfer encoding plain html base64 quoted printable mime version
+boundary name filename octet stream padding attachment inline multipart alternative related
+""".split())
+
+
+def _clean_body_for_features(body):
+    """Salvage decoded text from MIME-junk snippets (legacy rows) before featurizing."""
+    try:
+        import engine  # lazy: engine imports this module at load time
+        if engine.looks_like_mime_junk(body):
+            body = engine.readable_body(body, limit=2000)
+    except Exception:
+        pass
+    return body
 
 
 def featurize(msg):
@@ -35,16 +55,18 @@ def featurize(msg):
     frm = (msg.get("from_addr") or "").lower().strip()
     dom = frm.split("@")[-1] if "@" in frm else frm
     subj = (msg.get("subject") or "").lower()
-    body = (msg.get("snippet") or "").lower()
+    body = _clean_body_for_features((msg.get("snippet") or "").lower())
     toks = {}
     if dom:
         toks["d:" + dom] = toks.get("d:" + dom, 0) + 1
     if frm:
         toks["s:" + frm] = toks.get("s:" + frm, 0) + 2
     for w in _TOKEN_RE.findall(subj)[:40]:
-        toks["t:" + w] = toks.get("t:" + w, 0) + 2
+        if w not in STOPWORDS:
+            toks["t:" + w] = toks.get("t:" + w, 0) + 2
     for w in _TOKEN_RE.findall(body)[:400]:
-        toks["b:" + w] = toks.get("b:" + w, 0) + 1
+        if w not in STOPWORDS:
+            toks["b:" + w] = toks.get("b:" + w, 0) + 1
     return {"tokens": toks, "from": frm, "domain": dom, "subject": subj, "body": body}
 
 
