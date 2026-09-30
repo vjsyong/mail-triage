@@ -361,8 +361,7 @@ def find_message_by_msgid(msgid):
     return dict(row) if row else None
 
 
-def messages(limit=50, filt="all", order="date"):
-    q = "SELECT * FROM messages"
+def _messages_filter_where(filt):
     where = ["NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coalesce(msgid,'')='')"]
     if filt == "queued":
         where.append("status='queued'")
@@ -376,16 +375,25 @@ def messages(limit=50, filt="all", order="date"):
         where.append("status='error'")
     elif filt == "tagged":
         where.append("coalesce(user_tag,'') != ''")
-    if where:
-        q += " WHERE " + " AND ".join(where)
+    return " WHERE " + " AND ".join(where)
+
+
+def messages(limit=50, filt="all", order="date", offset=0):
+    q = "SELECT * FROM messages" + _messages_filter_where(filt)
     if order == "id":
         q += " ORDER BY id DESC"
     else:
         q += (" ORDER BY (CASE WHEN coalesce(date_ts,0)>0 THEN date_ts ELSE processed_at END) "
               "DESC, id DESC")
-    q += " LIMIT ?"
+    q += " LIMIT ? OFFSET ?"
     with db() as conn:
-        return [dict(r) for r in conn.execute(q, (limit,))]
+        return [dict(r) for r in conn.execute(q, (limit, offset))]
+
+
+def count_messages(filt="all"):
+    q = "SELECT COUNT(*) FROM messages" + _messages_filter_where(filt)
+    with db() as conn:
+        return conn.execute(q).fetchone()[0]
 
 
 def queued_messages(limit=10):

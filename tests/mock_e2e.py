@@ -1232,6 +1232,25 @@ def main():
     check("single classify stores thinking",
           "mock thinking about Receipt" in (rt["llm_thinking"] or ""))
 
+    section("T20 messages list: pagination + summary line")
+    store.update_message(rows_b[0]["id"], llm_summary="Summary under the row test")
+    r = client.get("/messages?per=500")
+    check("summary line renders under the message row", b"Summary under the row test" in r.data)
+    check("count_messages matches the unfiltered list",
+          store.count_messages("all") == len(store.messages(limit=100000)))
+    check("count_messages respects filters",
+          store.count_messages("tagged") == len(store.messages(limit=1000, filt="tagged")))
+    p1 = store.messages(limit=5, offset=0)
+    p2 = store.messages(limit=5, offset=5)
+    check("offset paginates without overlap",
+          len(p1) == 5 and len(p2) == 5
+          and not ({m["id"] for m in p1} & {m["id"] for m in p2}))
+    r = client.get("/messages?per=10&page=2")
+    check("page 2 renders with pager text", r.status_code == 200 and b"page 2 of" in r.data)
+    r = client.get("/messages?per=10&page=1")
+    check("pager shows total and an Older link",
+          b"page 1 of" in r.data and b"Older" in r.data and b"per page" in r.data)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

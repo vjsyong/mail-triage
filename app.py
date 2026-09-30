@@ -824,6 +824,12 @@ MESSAGES_TMPL = """
         <a class="btn small {{ 'primary' if filt==key else '' }}" href="{{ url_for('messages', f=key) }}">{{ label }}</a>
       {% endfor %}
     </div>
+    <div class="row" style="margin-top:8px">
+      <span class="sub">{{ total }} message{{ 's' if total != 1 else '' }} · page {{ page }} of {{ pages }} · {{ per }} per page</span>
+      {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per) }}">← Newer</a>{% endif %}
+      {% if page < pages %}<a class="btn small primary" href="{{ url_for('messages', f=filt, page=page+1, per=per) }}">Older →</a>{% endif %}
+      {% if page < pages %}<a class="btn small" href="{{ url_for('messages', f=filt, page=pages, per=per) }}">Last »</a>{% endif %}
+    </div>
     <table class="tbl" style="margin-top:8px">
       <tr>
         <th><input type="checkbox" style="width:auto" onclick="for (var b of document.querySelectorAll('#bulk input[name=ids]')) b.checked = this.checked;"></th>
@@ -834,13 +840,18 @@ MESSAGES_TMPL = """
         <td><input type="checkbox" name="ids" value="{{ m.id }}" style="width:auto"></td>
         <td class="sub">{{ m.when }}</td>
         <td class="sub">{{ m.from_addr[:34] }}</td>
-        <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:84] or '(no subject)' }}</a></td>
+        <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:84] or '(no subject)' }}</a>{% if m.llm_summary %}<div class="sub" style="font-size:.78rem">{{ m.llm_summary[:150] }}</div>{% endif %}</td>
         <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
         <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
         <td class="sub">{{ m.llm }}</td>
       </tr>
       {% endfor %}
     </table>
+    <div class="row" style="margin-top:8px">
+      {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per) }}">← Newer</a>{% endif %}
+      {% if page < pages %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page+1, per=per) }}">Older →</a>{% endif %}
+      <span class="sub">page {{ page }}/{{ pages }}</span>
+    </div>
     {% if not msgs %}<div class="sub">No messages{% if filt != 'all' %} in this filter{% endif %} yet.</div>{% endif %}
   </form>
 </div>
@@ -864,7 +875,19 @@ def _proposal_views():
 @app.route("/messages")
 def messages():
     filt = request.args.get("f", "all")
-    msgs = store.messages(limit=100, filt=filt)
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    try:
+        per = int(request.args.get("per", 100))
+    except ValueError:
+        per = 100
+    per = max(10, min(500, per))
+    total = store.count_messages(filt)
+    pages = max(1, (total + per - 1) // per)
+    page = min(page, pages)
+    msgs = store.messages(limit=per, filt=filt, offset=(page - 1) * per)
     for m in msgs:
         m["when"] = fmt_ts(m.get("date_ts") or m.get("processed_at"))
         m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
@@ -880,7 +903,7 @@ def messages():
            for r in store.list_rules() if r.get("enabled")]))
     tag_options = [t for t in tag_options if t]
     return render(render_template_string(
-        MESSAGES_TMPL, msgs=msgs, filt=filt,
+        MESSAGES_TMPL, msgs=msgs, filt=filt, page=page, pages=pages, per=per, total=total,
         proposals=_proposal_views(),
         classify_state=dict(classifier.state),
         unclassified=store.unclassified_count(),
