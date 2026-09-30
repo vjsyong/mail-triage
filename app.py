@@ -13,7 +13,7 @@ import os
 import sys
 import time
 
-from flask import Flask, flash, jsonify, redirect, render_template_string, request, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template_string, request, url_for
 
 import config
 import engine
@@ -92,6 +92,7 @@ STATUS_BADGES = {
     "matched": ("ok", "sorted"),
     "matched-dry": ("warn", "rule (dry-run)"),
     "llm-moved": ("ok", "LLM → folder"),
+    "assistant-moved": ("ok", "assistant → folder"),
     "classified": ("acc", "classified"),
     "queued": ("warn", "queued"),
     "error": ("err", "error"),
@@ -716,16 +717,29 @@ def message_save(mid):
 
 # ---------------------------------------------------------------- assistant
 
-ASSISTANT_TMPL = """
-<h2>Rule assistant <span class="sub">describe what you want sorted, then add the proposed rules</span></h2>
-<div class="card">
+ASSISTANT_TMPL = r"""
+<h2>Mail assistant <span class="sub">streams tokens + thinking · tools: search mail, read, move, flag, folders, rules</span></h2>
+<div class="card" id="convo">
 {% if convo %}
   {% for m in convo %}
     {% if m.role == 'user' %}
       <div class="msg ok" style="margin-left:10%"><b>You:</b> {{ m.content }}</div>
     {% else %}
       <div class="msg" style="background:var(--card2);border:1px solid var(--line)">
-        <b>Assistant:</b> {{ m.content }}
+        <b>Assistant:</b>
+        {% if m.reasoning %}
+        <details class="sub" style="margin:6px 0"><summary style="cursor:pointer">thinking</summary>
+          <pre class="mono" style="white-space:pre-wrap;font-size:.8rem;color:var(--dim);margin:6px 0">{{ m.reasoning }}</pre>
+        </details>
+        {% endif %}
+        {% if m.tool_steps %}
+        <div style="margin:6px 0">
+          {% for t in m.tool_steps %}
+          <div class="sub mono" style="font-size:.8rem">{{ '✓' if t.ok else '✗' }} {{ t.name }}({{ t.args }}){% if t.dry_run %} [dry-run]{% endif %} → {{ t.summary }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div style="white-space:pre-wrap">{{ m.content }}</div>
         {% for p in m.proposals_list %}
         <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
           <div class="spread">
@@ -752,24 +766,182 @@ ASSISTANT_TMPL = """
     {% endif %}
   {% endfor %}
 {% else %}
-  <div class="sub">Describe the sorting you want in plain English. The assistant sees your current rules and recent senders, proposes rules below, and you add them with one click. Examples:</div>
+  <div class="sub">Ask about your mail, or describe the sorting you want. The assistant searches your mailbox for real — the app's index <i>and</i> the full history through the proxy — can create folders and move or flag messages, and proposes rules you approve with one click. Its thinking and every tool step stream live below. Examples:</div>
   <div class="row" style="margin-top:8px">
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Sort newsletters and marketing mail out of my inbox';return false">Sort newsletters out</a>
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='File receipts and invoices automatically';return false">File receipts</a>
     <a class="btn small" href="#" onclick="document.getElementById('msg').value='What rules would you suggest for my inbox?';return false">Suggest rules for me</a>
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Search my mail for anything from the library';return false">Search history (library)</a>
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Sort newsletters and marketing mail out of my inbox';return false">Sort newsletters out</a>
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Find the last invoice a vendor sent me and tell me what it says';return false">Find an old invoice</a>
   </div>
 {% endif %}
+<div id="live"></div>
 </div>
 <div class="card">
-  <form method="post" action="{{ url_for('assistant_send') }}">
-    <textarea name="message" id="msg" rows="3" placeholder="e.g. Anything from my landlord goes to Property; newsletters get filed to Newsletters"></textarea>
+  <form id="aform" method="post" action="{{ url_for('assistant_send') }}">
+    <textarea name="message" id="msg" rows="3" placeholder="e.g. Find the invoice the landlord sent in August and tell me what it says"></textarea>
     <p class="row" style="margin-top:8px">
-      <button class="btn primary" type="submit">Send</button>
-      <span class="sub">runs on {{ cfg.LLM_MODEL }} - added rules act on new mail; they are listed on the Rules page</span>
+      <button class="btn primary" type="submit" id="asend">Send</button>
+      <span class="sub">runs on {{ cfg.LLM_MODEL }} · Ctrl+Enter sends · actions {{ 'live' if actions_live else 'in dry-run (set it in Settings)' }}</span>
     </p>
   </form>
   {% if convo %}<form class="inline" method="post" action="{{ url_for('assistant_clear') }}" onsubmit="return confirm('Clear the conversation?');"><button class="btn small danger" type="submit">Clear conversation</button></form>{% endif %}
 </div>
+<script>
+(function(){
+var form=document.getElementById('aform'), ta=document.getElementById('msg'),
+    btn=document.getElementById('asend'), live=document.getElementById('live');
+if(!(window.fetch && window.ReadableStream && window.TextDecoder)) return;
+
+function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function mk(tag, cls, text){var d=document.createElement(tag); if(cls) d.className=cls; if(text!=null) d.textContent=text; return d;}
+function scrollDown(){ window.scrollTo(0, document.body.scrollHeight); }
+
+form.addEventListener('submit', function(e){
+  var text = ta.value.trim();
+  if(!text){ e.preventDefault(); return; }
+  e.preventDefault();
+  run(text);
+});
+ta.addEventListener('keydown', function(e){
+  if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); }
+});
+
+function run(text){
+  btn.disabled = true; ta.value = '';
+  live.innerHTML = '';
+  var ub = mk('div','msg ok'); ub.style.marginLeft='10%';
+  ub.innerHTML = '<b>You:</b> ' + esc(text).replace(/\n/g,'<br>');
+  live.appendChild(ub);
+
+  var box = mk('div','msg'); box.style.background='var(--card2)'; box.style.border='1px solid var(--line)';
+  var head = mk('div'); head.innerHTML = '<b>Assistant:</b> ';
+  var phase = mk('span','sub'); head.appendChild(phase);
+  var det = document.createElement('details'); det.className='sub'; det.open=true; det.style.display='none';
+  var detSum = mk('summary','','thinking'); detSum.style.cursor='pointer'; det.appendChild(detSum);
+  var pre = mk('pre','mono'); pre.style.whiteSpace='pre-wrap'; pre.style.fontSize='.8rem';
+  pre.style.color='var(--dim)'; pre.style.margin='6px 0'; det.appendChild(pre);
+  var toolsBox = mk('div'); var content = mk('div'); content.style.whiteSpace='pre-wrap';
+  var propsBox = mk('div');
+  box.appendChild(head); box.appendChild(det); box.appendChild(toolsBox);
+  box.appendChild(content); box.appendChild(propsBox);
+  live.appendChild(box);
+
+  var t0 = Date.now(); var timer = null;
+  function setPhase(label){
+    phase.dataset.label = label;
+    phase.textContent = ' ' + label + ' ' + Math.round((Date.now()-t0)/1000) + 's';
+  }
+  function stopTimer(){ if(timer){ clearInterval(timer); timer = null; } }
+  timer = setInterval(function(){ if(phase.dataset.label && !phase.dataset.final) setPhase(phase.dataset.label); }, 500);
+  setPhase('starting…');
+  scrollDown();
+
+  var cards = [];
+  function toolCard(id, name, args){
+    var c = mk('div','sub mono');
+    c.style.fontSize='.82rem'; c.style.margin='4px 0'; c.style.padding='6px 8px';
+    c.style.border='1px solid var(--line)'; c.style.borderRadius='8px';
+    var a = '';
+    try { a = JSON.stringify(args||{}); } catch(err) { a = ''; }
+    if(a.length > 160) a = a.slice(0,160) + '…';
+    c.textContent = '⏳ ' + name + '(' + a + ')';
+    cards[id] = c;
+    toolsBox.appendChild(c);
+  }
+  function toolDone(id, ok, summary, dry){
+    var c = cards[id]; if(!c) return;
+    var t = c.textContent.replace(/^[⏳✓✗]\s*/, '');
+    c.textContent = (ok ? '✓ ' : '✗ ') + t + ' → ' + (dry ? '[dry-run] ' : '') + summary;
+    c.style.color = ok ? 'var(--ok)' : 'var(--err)';
+  }
+  function addProposal(p, idx, msgId){
+    var w = mk('div'); w.style.background='#0d1319'; w.style.border='1px solid var(--line)';
+    w.style.borderRadius='9px'; w.style.padding='10px 12px'; w.style.margin='8px 0';
+    var h = mk('div');
+    h.appendChild(mk('b','',p.name));
+    h.appendChild(document.createTextNode(' (' + (p.match_mode||'all') + ')'));
+    w.appendChild(h);
+    var conds = (p.conditions||[]).map(function(c){ return c.field + ' ' + c.op + ' "' + c.value + '"'; }).join((p.match_mode==='any') ? ' OR ' : ' AND ');
+    w.appendChild(mk('div','mono', conds));
+    var acts = [];
+    if(p.actions && p.actions.move_to) acts.push('move → ' + p.actions.move_to);
+    if(p.actions && p.actions.mark_read) acts.push('mark read');
+    if(p.actions && p.actions.flag) acts.push('flag');
+    w.appendChild(mk('div','sub', acts.join(', ') || '(none)'));
+    if(p.rationale) w.appendChild(mk('div','sub', p.rationale));
+    var row = mk('div','row'); row.style.marginTop='6px';
+    var pair;
+    for(pair of [[true,'Add rule'],[false,'Add (disabled)']]){
+      var f = mk('form'); f.method='post'; f.action='/assistant/apply'; f.className='inline';
+      var i1 = mk('input'); i1.type='hidden'; i1.name='msg_id'; i1.value=msgId; f.appendChild(i1);
+      var i2 = mk('input'); i2.type='hidden'; i2.name='idx'; i2.value=idx; f.appendChild(i2);
+      if(!pair[0]){ var i3 = mk('input'); i3.type='hidden'; i3.name='disabled'; i3.value='1'; f.appendChild(i3); }
+      var bt = mk('button','',pair[1]); bt.type='submit'; bt.className='btn small' + (pair[0] ? ' primary' : '');
+      f.appendChild(bt); row.appendChild(f);
+    }
+    w.appendChild(row);
+    propsBox.appendChild(w);
+  }
+  var proposals = [], doneMsgId = null, finished = false;
+  function finish(){
+    if(finished) return; finished = true;
+    stopTimer(); phase.dataset.final='1';
+    phase.textContent = ' done in ' + Math.round((Date.now()-t0)/1000) + 's';
+    if(proposals.length && doneMsgId != null) proposals.forEach(function(p,i){ addProposal(p, i, doneMsgId); });
+    btn.disabled = false; scrollDown();
+  }
+  function fail(msg){
+    if(finished) return; finished = true;
+    stopTimer(); phase.dataset.final='1'; phase.textContent = ' failed';
+    box.appendChild(mk('div','msg err','Assistant failed: ' + msg));
+    btn.disabled = false; scrollDown();
+  }
+  function handle(raw){
+    var ev = null, data = '';
+    raw.split('\n').forEach(function(line){
+      if(line.indexOf('event:') === 0) ev = line.slice(6).trim();
+      else if(line.indexOf('data:') === 0) data += line.slice(5).trim();
+    });
+    if(!ev) return;
+    var d = {};
+    if(data){ try { d = JSON.parse(data); } catch(err) { return; } }
+    if(ev === 'reasoning'){ det.style.display=''; pre.textContent += (d.text||''); setPhase('thinking…'); }
+    else if(ev === 'content'){ content.textContent += (d.text||''); setPhase('writing…'); }
+    else if(ev === 'tool_start'){ setPhase('tool: ' + d.name + '…'); toolCard(d.id, d.name, d.args); }
+    else if(ev === 'tool_end'){ toolDone(d.id, d.ok, d.summary, d.dry_run); setPhase('thinking…'); }
+    else if(ev === 'proposals'){ proposals = d.proposals || []; }
+    else if(ev === 'done'){
+      doneMsgId = d.message_id;
+      if(d.reply && !content.textContent) content.textContent = d.reply;
+      finish();
+    }
+    else if(ev === 'error'){ fail(d.message || 'unknown error'); }
+    scrollDown();
+  }
+  fetch('/assistant/stream', { method:'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: 'message=' + encodeURIComponent(text)
+  }).then(function(resp){
+    if(!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+    var rd = resp.body.getReader(); var dec = new TextDecoder(); var buf = '';
+    function pump(){
+      return rd.read().then(function(r){
+        if(r.done){ if(!finished) fail('stream ended unexpectedly'); return; }
+        buf += dec.decode(r.value, {stream:true});
+        var i;
+        while((i = buf.indexOf('\n\n')) >= 0){
+          var raw = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          handle(raw);
+        }
+        return pump();
+      });
+    }
+    return pump();
+  }).catch(function(err){ fail('' + err); });
+}
+})();
+</script>
 """
 
 
@@ -794,7 +966,52 @@ def assistant():
                 m["proposals_list"] = [_proposal_view(p) for p in json.loads(m["proposals"])]
             except (TypeError, ValueError):
                 pass
-    return render(render_template_string(ASSISTANT_TMPL, convo=convo, cfg=config))
+        m["reasoning"] = ""
+        m["tool_steps"] = []
+        if m.get("role") == "assistant" and m.get("meta"):
+            try:
+                meta = json.loads(m["meta"])
+                m["reasoning"] = meta.get("reasoning") or ""
+                m["tool_steps"] = meta.get("tools") or []
+            except (TypeError, ValueError):
+                pass
+    return render(render_template_string(
+        ASSISTANT_TMPL, convo=convo, cfg=config,
+        actions_live=bool(store.get_setting("assistant_actions_apply", True))))
+
+
+def _sse(event, data):
+    return "event: %s\ndata: %s\n\n" % (event, json.dumps(data, ensure_ascii=False))
+
+
+@app.route("/assistant/stream", methods=["POST"])
+def assistant_stream():
+    """SSE stream of one assistant turn: reasoning/content deltas, tool
+    start/end events, rule proposals, done/error."""
+    text = (request.form.get("message") or "").strip()
+
+    def gen():
+        if not text:
+            yield _sse("error", {"message": "empty message"})
+            return
+        agent = engine.AssistantAgent()
+        try:
+            for ev in agent.stream(text):
+                etype = ev.pop("type")
+                yield _sse(etype, ev)
+        except Exception as exc:  # agent.stream handles its own errors; belt & braces
+            try:
+                store.log_event("error", "assistant stream failed: %r" % exc)
+            except Exception:
+                pass
+            yield _sse("error", {"message": "assistant failed: %r" % exc})
+        finally:
+            agent.close()
+
+    resp = Response(gen(), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
 
 
 @app.route("/assistant/send", methods=["POST"])
@@ -863,6 +1080,8 @@ SETTINGS_TMPL = """
     {{ 'checked' if s.llm_suggest else '' }}> Classify unmatched mail with the LLM</label>
   <label class="row" style="color:var(--fg)"><input type="checkbox" name="llm_apply" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.llm_apply else '' }}> Auto-file mail by LLM category (uses the folder map below)</label>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="assistant_actions_apply" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.assistant_actions_apply else '' }}> Assistant may act on mail (create folders, move, flag) — uncheck = dry-run</label>
   <div class="grid2">
     <div><label>Max LLM calls per hour</label><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0"></div>
     <div><label>LLM classifications per check</label><input type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1"></div>
@@ -909,6 +1128,7 @@ def settings():
         store.set_setting("rules_apply", bool(request.form.get("rules_apply")))
         store.set_setting("llm_suggest", bool(request.form.get("llm_suggest")))
         store.set_setting("llm_apply", bool(request.form.get("llm_apply")))
+        store.set_setting("assistant_actions_apply", bool(request.form.get("assistant_actions_apply")))
         try:
             store.set_setting("max_llm_per_hour", max(0, int(request.form.get("max_llm_per_hour", 40))))
         except ValueError:

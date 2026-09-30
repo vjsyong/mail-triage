@@ -2,6 +2,7 @@
 LLM escalation, and the background worker."""
 from collections import Counter
 
+import calendar
 import email
 import email.header
 import email.parser
@@ -158,6 +159,11 @@ class MailClient:
     def select(self, folder):
         typ, dat = self.M.select('"%s"' % folder)
         if typ != "OK":
+            # A failed SELECT leaves imaplib's state tracking stale (it marks the
+            # connection unselected before issuing the command, so a later
+            # SEARCH dies with "command SEARCH illegal in state AUTH"). Forget
+            # our cached selection so the next use re-issues SELECT.
+            self.selected = None
             raise RuntimeError("SELECT %s failed: %s %s" % (folder, typ, dat))
         self.selected = folder
         uv = 0
@@ -342,6 +348,108 @@ class LLMClient:
         if r is not None:
             r.raise_for_status()
         raise RuntimeError("LLM request failed")
+
+    # ---- streaming (used by the assistant agent) ----
+
+    def chat_stream(self, system, messages, tools=None, thinking=True):
+        """Stream one chat turn against the primary endpoint, yielding event dicts:
+        reasoning_delta / content_delta / tool_calls / turn_done. When the primary
+        fails before producing any output, the fallback endpoint serves instead."""
+        attempts = [(self.base, self.key, self.model, "primary '%s'" % self.model)]
+        if self.fallback:
+            attempts.append((*self.fallback, "fallback '%s'" % self.fallback[2]))
+        for i, (base, key, model, label) in enumerate(attempts):
+            produced = False
+            try:
+                for ev in self._stream_once(base, key, model, system, messages, tools, thinking):
+                    produced = True
+                    yield ev
+                return
+            except Exception as exc:
+                if produced or i == len(attempts) - 1:
+                    raise
+                store.log_event("info", "LLM stream: %s failed (%s) - serving from %s"
+                                % (label, type(exc).__name__, attempts[i + 1][3]))
+        raise RuntimeError("no LLM endpoint available")
+
+    def _stream_once(self, base, key, model, system, messages, tools, thinking):
+        if not key:
+            raise RuntimeError("LLM_API_KEY is not configured for %s" % base)
+        payload = {
+            "model": model,
+            "temperature": 0,
+            "max_tokens": 2500,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "messages": [{"role": "system", "content": system}] + messages,
+        }
+        if tools:
+            payload["tools"] = tools
+        if thinking:
+            # vLLM extension: lets this chat template emit the thinking channel,
+            # which the reasoning parser surfaces as delta.reasoning.
+            payload["chat_template_kwargs"] = {"enable_thinking": True}
+        r = requests.post(base + "/chat/completions", json=payload,
+                          headers={"Authorization": "Bearer " + key},
+                          timeout=config.LLM_TIMEOUT, stream=True)
+        try:
+            if r.status_code != 200:
+                raise RuntimeError("LLM HTTP %s from %s: %s"
+                                   % (r.status_code, base, (r.text or "")[:300]))
+            tool_state = {}
+            finish = None
+            usage = None
+            for raw in r.iter_lines():
+                if not raw:
+                    continue
+                line = raw.decode("utf-8", "replace").strip()
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                if not line:
+                    continue
+                if line == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(line)
+                except ValueError:
+                    continue
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                ch = choices[0]
+                delta = ch.get("delta") or {}
+                text = delta.get("reasoning") or delta.get("reasoning_content")
+                if text:
+                    yield {"type": "reasoning_delta", "text": text}
+                if delta.get("content"):
+                    yield {"type": "content_delta", "text": delta["content"]}
+                for tc in delta.get("tool_calls") or []:
+                    try:
+                        idx = int(tc.get("index") or 0)
+                    except (TypeError, ValueError):
+                        idx = 0
+                    st = tool_state.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                    if tc.get("id"):
+                        st["id"] = tc["id"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        st["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        st["arguments"] += fn["arguments"]
+                if ch.get("finish_reason"):
+                    finish = ch["finish_reason"]
+            if tool_state:
+                calls = []
+                for idx in sorted(tool_state):
+                    st = tool_state[idx]
+                    calls.append({"id": st["id"] or ("call_%d" % idx), "name": st["name"],
+                                  "arguments": st["arguments"]})
+                yield {"type": "tool_calls", "calls": calls}
+            yield {"type": "turn_done", "finish_reason": finish, "usage": usage}
+        finally:
+            r.close()
 
     def classify(self, msg, categories, my_name="Sean"):
         cats = ", ".join(categories) if categories else "Action, Notification, Newsletter, Receipt, Personal, Promo"
@@ -621,31 +729,103 @@ def save_draft(msg_id, body_text):
     return folder
 
 # ---------------------------------------------------------------- assistant
+#
+# The assistant is a streaming, tool-calling agent. It talks to the same
+# OpenAI-compatible endpoint as the classifier, but with:
+#   * stream=True  -> the UI shows tokens + the model's thinking live (SSE)
+#   * tools=[...]  -> it can search the mailbox (local index + live IMAP over
+#                     the full history), read/move/flag messages, create
+#                     folders, and propose rules for one-click approval.
+# The transcript (reasoning + tool steps) is persisted per message so the
+# chat page can render it again later.
 
-ASSISTANT_INSTRUCTIONS = """You are the rule architect for "Mail Triage", a local email-sorting app.
-The user describes how they want their mail sorted, in plain language. You turn that into filter
-rules the app executes, and explain briefly. Most mail should end up handled by simple rules; the
-LLM classifier only sees what no rule matched.
+ASSISTANT_SYSTEM = """You are the mail operations assistant for "Mail Triage", a local app that sorts the mailbox of %(user)s. You inspect the mailbox and act on it through tools, and you design the filter rules the app executes.
 
-Reply with ONE JSON object and nothing else:
-{"reply": "short plain-text message to the user",
- "proposed_rules": [
-   {"name": "short rule name",
-    "match_mode": "all" or "any",
-    "conditions": [{"field": "from|to|subject|body", "op": "contains|equals|regex", "value": "..."}],
-    "actions": {"move_to": "Folder name", "mark_read": true, "flag": true},
-    "rationale": "one line"}]}
+How to work
+- Ground every answer with tools instead of guessing. search_messages reads the app's local index (what the background scanner has seen); search_mail runs a live IMAP search over the full mailbox, any folder, including history much older than the app. For any question about the user's mail, search first.
+- You may act directly on what the user asks for: create_folder, move_message, flag_message. Moving never deletes mail. For ongoing sorting, propose a rule with propose_rule instead (the user approves proposals with one click).
+- You cannot send mail, reply to mail, or delete mail; never claim that you did.
+- Keep searches bounded: small limits, use since/before for windows. Summarize results; never dump raw rows.
+- At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.
 
-Rules about rules:
-- 1-4 conditions each; prefer "contains" on a distinctive substring (an address fragment like
-  "@linkedin.com" or a subject word). Use "regex" only if the user asks for it.
-- Every proposed rule needs at least one condition AND at least one action (move_to / mark_read / flag).
-- move_to creates the folder if missing; use short folder names ("Newsletters", "Receipts", "Work").
-- Max 3 proposed rules per turn; use [] when you are just answering or asking a clarifying question.
-- Rules are added by the user with one click and act on mail scanned after that; they are evaluated
-  top to bottom, first match wins.
-- Keep "reply" under 80 words, friendly, no fluff. Never promise capabilities the app does not have
-  (no deleting, no sending replies)."""
+Today is %(today)s (Hong Kong time). Reply in the user's language, as plain text (no markdown tables), concise and friendly. Text you write is shown to the user directly; tool calls happen through the tool interface."""
+
+
+def _fn(name, description, properties=None, required=()):
+    params = {"type": "object", "properties": properties or {}}
+    if required:
+        params["required"] = list(required)
+    return {"type": "function", "function": {"name": name, "description": description,
+                                             "parameters": params}}
+
+
+ASSISTANT_TOOLS = [
+    _fn("mailbox_overview",
+        "Snapshot of mailbox state: folders (with counts), indexed message counts by status, categories, current rules. Call this first when you need orientation.",
+        {}),
+    _fn("search_messages",
+        "Search the app's LOCAL INDEX of scanned messages (all folders it has seen, newest first). Instant; covers the window the app has processed. For older mail or other folders use search_mail.",
+        {"query": {"type": "string", "description": "free text; matches sender, subject and snippet"},
+         "sender": {"type": "string", "description": "sender address fragment"},
+         "subject": {"type": "string", "description": "subject fragment"},
+         "folder": {"type": "string", "description": "exact folder name"},
+         "status": {"type": "string", "description": "sorted / classified / queued / error …"},
+         "since": {"type": "string", "description": "YYYY-MM-DD; only messages seen on/after this date"},
+         "until": {"type": "string", "description": "YYYY-MM-DD; only messages seen on/before this date"},
+         "limit": {"type": "integer", "description": "max rows (default 20, max 100)"},
+         "offset": {"type": "integer", "description": "skip this many rows (paging)"}}),
+    _fn("search_mail",
+        "Live IMAP search over the real mailbox (full history, any folder). Criteria are ANDed. Returns the newest matches with folder + uid; use those with read_message / move_message / flag_message.",
+        {"folder": {"type": "string", "description": "mailbox folder (default INBOX); see list_folders"},
+         "from_contains": {"type": "string", "description": "substring of the sender address"},
+         "subject_contains": {"type": "string", "description": "substring of the subject"},
+         "body_contains": {"type": "string", "description": "substring of the message body"},
+         "since": {"type": "string", "description": "YYYY-MM-DD; messages on/after this date"},
+         "before": {"type": "string", "description": "YYYY-MM-DD; messages strictly before this date"},
+         "unseen_only": {"type": "boolean", "description": "only unread messages"},
+         "limit": {"type": "integer", "description": "max rows, default 20, max 50"}}),
+    _fn("read_message",
+        "Read one message: headers plus the full text body. Identify it with message_id (from search_messages) OR folder + uid (from search_mail).",
+        {"message_id": {"type": "integer"},
+         "folder": {"type": "string"},
+         "uid": {"type": "integer"}}),
+    _fn("move_message",
+        "Move one message to a folder (created if missing). Identify it with message_id OR folder + uid. Moves never delete mail.",
+        {"target_folder": {"type": "string", "description": "destination folder name"},
+         "message_id": {"type": "integer"},
+         "folder": {"type": "string"},
+         "uid": {"type": "integer"}},
+        ("target_folder",)),
+    _fn("flag_message",
+        "Set or clear flags on one message (\\Seen = read, \\Flagged = starred). Identify it with message_id OR folder + uid.",
+        {"message_id": {"type": "integer"},
+         "folder": {"type": "string"},
+         "uid": {"type": "integer"},
+         "seen": {"type": "boolean", "description": "true = mark read, false = mark unread"},
+         "flagged": {"type": "boolean", "description": "true = star, false = unstar"}}),
+    _fn("create_folder",
+        "Create a folder if it does not exist.",
+        {"name": {"type": "string"}}, ("name",)),
+    _fn("list_folders",
+        "List the mailbox folders with total and unseen message counts.",
+        {}),
+    _fn("propose_rule",
+        "Propose a filter rule for the user to approve with one click. Approved rules sort matching mail automatically (top to bottom, first match wins).",
+        {"name": {"type": "string", "description": "short rule name"},
+         "match_mode": {"type": "string", "enum": ["all", "any"]},
+         "conditions": {"type": "array", "description": "1-4 conditions", "items": {
+             "type": "object",
+             "properties": {
+                 "field": {"type": "string", "enum": ["from", "to", "subject", "body"]},
+                 "op": {"type": "string", "enum": ["contains", "equals", "regex"]},
+                 "value": {"type": "string"}}}},
+         "actions": {"type": "object", "description": "what the rule does",
+                     "properties": {"move_to": {"type": "string"},
+                                    "mark_read": {"type": "boolean"},
+                                    "flag": {"type": "boolean"}}},
+         "rationale": {"type": "string", "description": "one line for the user"}},
+        ("name", "conditions", "actions")),
+]
 
 
 def _safe_json(text, default):
@@ -653,6 +833,70 @@ def _safe_json(text, default):
         return json.loads(text) if text else default
     except (TypeError, ValueError):
         return default
+
+
+def _truncate(text, limit):
+    text = text or ""
+    return text if len(text) <= limit else text[:limit] + " …[truncated]"
+
+
+def _json_args(raw):
+    """Best-effort parse of streamed tool-call arguments (string) -> dict."""
+    if not raw:
+        return {}
+    try:
+        val = json.loads(raw)
+        return val if isinstance(val, dict) else {"value": val}
+    except (TypeError, ValueError):
+        pass
+    try:
+        import ast
+        val = ast.literal_eval(raw)
+        return val if isinstance(val, dict) else {"value": val}
+    except Exception:
+        return {}
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("1", "true", "yes", "on"):
+            return True
+        if v in ("0", "false", "no", "off"):
+            return False
+    return None
+
+
+def _imap_date(value):
+    """Accept YYYY-MM-DD (preferred) or a few common forms; return DD-Mon-YYYY."""
+    v = (value or "").strip()
+    for f in ("%Y-%m-%d", "%Y/%m/%d", "%d-%b-%Y", "%d/%m/%Y"):
+        try:
+            return time.strftime("%d-%b-%Y", time.strptime(v, f))
+        except ValueError:
+            continue
+    return v
+
+
+def _epoch_from_date(value, end=False):
+    """Parse a date string to a UTC-midnight epoch (end of day if end=True)."""
+    v = (value or "").strip()
+    for f in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y"):
+        try:
+            base = calendar.timegm(time.strptime(v, f))
+            return base + 86399 if end else base
+        except ValueError:
+            continue
+    return None
+
+
+def _looks_like_tools_unsupported(exc):
+    s = str(exc).lower()
+    return "400" in s and ("tool" in s or "function" in s)
 
 
 def _rules_to_text(rules):
@@ -681,25 +925,35 @@ ALLOWED_FIELDS = ("from", "to", "subject", "body")
 ALLOWED_OPS = ("contains", "equals", "regex")
 
 
-def normalize_rule(proposal):
-    """Validate an LLM-proposed rule; returns a clean dict or None."""
+def _validate_rule(proposal):
+    """Validate a proposed rule. Returns (normalized | None, [errors])."""
+    errors = []
     if not isinstance(proposal, dict):
-        return None
+        return None, ["proposal must be an object"]
     name = str(proposal.get("name") or "").strip()[:80] or "Assistant rule"
     mode = "any" if str(proposal.get("match_mode") or "").lower() == "any" else "all"
     conditions = []
     for c in proposal.get("conditions") or []:
         if not isinstance(c, dict):
+            errors.append("each condition must be an object")
             continue
         field = str(c.get("field") or "").lower()
         op = str(c.get("op") or "contains").lower()
         value = str(c.get("value") or "").strip()
-        if field not in ALLOWED_FIELDS or op not in ALLOWED_OPS or not value:
+        if field not in ALLOWED_FIELDS:
+            errors.append("bad field %r (use %s)" % (field, "/".join(ALLOWED_FIELDS)))
+            continue
+        if op not in ALLOWED_OPS:
+            errors.append("bad op %r (use %s)" % (op, "/".join(ALLOWED_OPS)))
+            continue
+        if not value:
+            errors.append("empty value for %s %s" % (field, op))
             continue
         if op == "regex":
             try:
                 re.compile(value)
-            except re.error:
+            except re.error as exc:
+                errors.append("bad regex %r: %s" % (value, exc))
                 continue
         conditions.append({"field": field, "op": op, "value": value[:300]})
     actions = {}
@@ -711,60 +965,519 @@ def normalize_rule(proposal):
             actions["mark_read"] = True
         if a.get("flag"):
             actions["flag"] = True
-    if not conditions or not actions:
-        return None
+    if not conditions:
+        errors.append("at least one valid condition is required")
+    if not actions:
+        errors.append("at least one action (move_to / mark_read / flag) is required")
+    if errors:
+        return None, errors
     return {"name": name, "match_mode": mode, "conditions": conditions, "actions": actions,
-            "rationale": str(proposal.get("rationale") or "").strip()[:300]}
+            "rationale": str(proposal.get("rationale") or "").strip()[:300]}, []
 
 
-def _parse_assistant_json(content):
-    m = re.search(r"\{.*\}", content or "", re.S)
-    if m:
-        try:
-            obj = json.loads(m.group(0))
-            if isinstance(obj, dict):
-                return obj
-        except (TypeError, ValueError):
-            pass
-    return {"reply": (content or "").strip()[:1500], "proposed_rules": []}
+def normalize_rule(proposal):
+    """Validate an LLM-proposed rule; returns a clean dict or None."""
+    return _validate_rule(proposal)[0]
 
 
-def assistant_respond(user_text):
-    """One turn of the rule-crafting chat. Returns (reply, normalized_proposals)."""
-    user_text = (user_text or "").strip()
-    if not user_text:
-        raise RuntimeError("empty message")
+def _assistant_context():
     settings = store.all_settings()
-    store.add_assistant_message("user", user_text[:4000])
-    msgs = store.messages(limit=200)
-    senders = Counter(m["from_addr"] for m in msgs if m.get("from_addr")).most_common(12)
-    recent = ["%s | %s" % ((m.get("from_addr") or "")[:45], (m.get("subject") or "")[:70])
-              for m in store.messages(limit=12)]
-    context = (
+    with store.db() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    return (
         "CURRENT STATE\n"
         "Rules (top to bottom, first match wins):\n%s\n\n"
         "LLM classifier categories: %s\n"
-        "Checked folders: %s | check interval: %ss\n"
-        "Recently seen senders (count): %s\n"
-        "Recent messages (sender | subject):\n%s"
+        "Category → folder map: %s\n"
+        "Watched folders: %s | check interval: %ss\n"
+        "Indexed messages: %d | assistant actions: %s\n"
         % (_rules_to_text(store.list_rules()),
            ", ".join(settings.get("categories") or []),
+           ", ".join("%s=%s" % (k, v) for k, v in (settings.get("category_folders") or {}).items()) or "(none)",
            ", ".join(settings.get("watch_folders") or ["INBOX"]),
-           settings.get("poll_interval", 90),
-           ", ".join("%s (%d)" % (s, c) for s, c in senders) or "(none)",
-           "\n".join(recent) or "(none)")
+           settings.get("poll_interval", 90), total,
+           "live" if settings.get("assistant_actions_apply", True) else "dry-run")
     )
-    convo = [{"role": r["role"], "content": r["content"]}
-             for r in store.assistant_messages(limit=24)]
-    content = LLMClient()._chat_convo(ASSISTANT_INSTRUCTIONS + "\n\n" + context, convo,
-                                      json_mode=True)
-    parsed = _parse_assistant_json(content)
-    reply = str(parsed.get("reply") or "").strip()[:2000] or "(no reply)"
-    proposals = []
-    for item in (parsed.get("proposed_rules") or [])[:3]:
-        norm = normalize_rule(item)
-        if norm:
-            proposals.append(norm)
-    store.add_assistant_message("assistant", reply, proposals=json.dumps(proposals))
-    return reply, proposals
 
+
+class AssistantAgent:
+    """Streaming tool-calling harness for the assistant chat.
+
+    One instance per user turn. Yields UI events (reasoning / content /
+    tool_start / tool_end / proposals / done / error) and persists the
+    transcript to the assistant_messages table when it finishes.
+    """
+
+    MAX_STEPS = 8             # tool-calling rounds, then one forced wrap-up turn
+    MAX_CALLS_PER_TURN = 4    # tool calls executed per model turn
+    RESULT_CHARS = 4500       # max JSON chars of a tool result fed back to the model
+    TRANSCRIPT_BUDGET = 30000  # cumulative tool-result chars before hard truncation
+
+    def __init__(self):
+        self.mc = None
+        self.proposals = []
+        self.tools_log = []
+        self.actions_apply = bool(store.get_setting("assistant_actions_apply", True))
+        self._budget = self.TRANSCRIPT_BUDGET
+        self.steps_used = 0
+
+    # ---- plumbing
+
+    def _mail(self):
+        if self.mc is None:
+            self.mc = MailClient().connect()
+        return self.mc
+
+    def close(self):
+        if self.mc is not None:
+            try:
+                self.mc.close()
+            finally:
+                self.mc = None
+
+    # ---- tool dispatch
+
+    def call_tool(self, name, args):
+        fn = getattr(self, "_tool_" + str(name or ""), None)
+        if fn is None:
+            return {"ok": False, "summary": "unknown tool %r" % name,
+                    "result": {"error": "unknown tool",
+                               "available": [t["function"]["name"] for t in ASSISTANT_TOOLS]}}
+        try:
+            out = fn(args if isinstance(args, dict) else {})
+        except Exception as exc:
+            return {"ok": False, "summary": "tool %s failed: %r" % (name, exc),
+                    "result": {"error": repr(exc)}}
+        out.setdefault("ok", True)
+        out.setdefault("summary", str(name))
+        out.setdefault("result", {})
+        return out
+
+    # ---- tool implementations
+
+    def _folders_with_counts(self):
+        mc = self._mail()
+        out = []
+        for name in sorted(mc.folders()):
+            entry = {"name": name}
+            try:
+                typ, dat = mc.M.status('"%s"' % name, "(MESSAGES UNSEEN)")
+                if typ == "OK" and dat and dat[0]:
+                    s = dat[0].decode("utf-8", "replace")
+                    mm = re.search(r"MESSAGES\s+(\d+)", s)
+                    uu = re.search(r"UNSEEN\s+(\d+)", s)
+                    if mm:
+                        entry["messages"] = int(mm.group(1))
+                    if uu:
+                        entry["unseen"] = int(uu.group(1))
+            except Exception:
+                pass
+            out.append(entry)
+        return out
+
+    def _tool_mailbox_overview(self, a):
+        settings = store.all_settings()
+        with store.db() as conn:
+            counts = {r["status"]: r["n"] for r in conn.execute(
+                "SELECT status, COUNT(*) AS n FROM messages GROUP BY status")}
+        folders = self._folders_with_counts()
+        rules = store.list_rules()
+        data = {
+            "indexed_messages": sum(counts.values()),
+            "by_status": counts,
+            "folders": folders,
+            "rules": [{"name": r["name"], "enabled": bool(r["enabled"])} for r in rules],
+            "categories": settings.get("categories"),
+            "category_folders": settings.get("category_folders"),
+            "watched_folders": settings.get("watch_folders"),
+            "assistant_actions_live": self.actions_apply,
+        }
+        return {"ok": True,
+                "summary": "%d indexed messages · %d folders · %d rules"
+                           % (data["indexed_messages"], len(folders), len(rules)),
+                "result": data}
+
+    def _tool_search_messages(self, a):
+        try:
+            limit = max(1, min(int(a.get("limit") or 20), 100))
+            offset = max(0, int(a.get("offset") or 0))
+        except (TypeError, ValueError):
+            limit, offset = 20, 0
+        clauses, params = [], []
+        q = (a.get("query") or "").strip()
+        if q:
+            clauses.append("(from_addr LIKE ? OR subject LIKE ? OR snippet LIKE ?)")
+            params += ["%" + q + "%"] * 3
+        for key, col in (("sender", "from_addr"), ("subject", "subject")):
+            v = (a.get(key) or "").strip()
+            if v:
+                clauses.append("%s LIKE ?" % col)
+                params.append("%" + v + "%")
+        v = (a.get("folder") or "").strip()
+        if v:
+            clauses.append("folder = ?")
+            params.append(v)
+        v = (a.get("status") or "").strip()
+        if v:
+            clauses.append("status = ?")
+            params.append(v)
+        for key, op, end in (("since", ">=", False), ("until", "<=", True)):
+            v = (a.get(key) or "").strip()
+            if v:
+                epoch = _epoch_from_date(v, end=end)
+                if epoch is not None:
+                    clauses.append("processed_at %s ?" % op)
+                    params.append(epoch)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        with store.db() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM messages" + where, params).fetchone()[0]
+            rows = [dict(r) for r in conn.execute(
+                "SELECT id, folder, uid, from_addr, subject, date, status, action_taken, "
+                "llm_category, processed_at, snippet FROM messages" + where +
+                " ORDER BY id DESC LIMIT ? OFFSET ?", params + [limit, offset])]
+        messages = [{"id": r["id"], "folder": r["folder"], "uid": r["uid"], "from": r["from_addr"],
+                     "subject": r["subject"], "date": r["date"], "status": r["status"],
+                     "action": r["action_taken"], "category": r["llm_category"],
+                     "seen_at": time.strftime("%Y-%m-%d %H:%M",
+                                              time.gmtime((r["processed_at"] or 0) + 8 * 3600)),
+                     "snippet": _truncate(r["snippet"], 200)} for r in rows]
+        return {"ok": True, "summary": "%d of %d indexed messages" % (len(messages), total),
+                "result": {"total_matched": total, "returned": len(messages), "offset": offset,
+                           "note": "Local index only (what the scanner has seen). Use search_mail for the full mailbox history.",
+                           "messages": messages}}
+
+    def _tool_search_mail(self, a):
+        folder = (a.get("folder") or "INBOX").strip() or "INBOX"
+        try:
+            limit = max(1, min(int(a.get("limit") or 20), 50))
+        except (TypeError, ValueError):
+            limit = 20
+        crit = []
+        for key, imap_key in (("from_contains", "FROM"), ("subject_contains", "SUBJECT"),
+                              ("body_contains", "BODY")):
+            v = (a.get(key) or "").strip()
+            if v:
+                crit += [imap_key, '"%s"' % v.replace('"', " ")]
+        for key, imap_key in (("since", "SINCE"), ("before", "BEFORE")):
+            v = (a.get(key) or "").strip()
+            if v:
+                crit += [imap_key, _imap_date(v)]
+        if _as_bool(a.get("unseen_only")):
+            crit.append("UNSEEN")
+        mc = self._mail()
+        try:
+            mc.ensure_selected(folder)
+        except Exception as exc:
+            return {"ok": False, "summary": "cannot open folder %r" % folder,
+                    "result": {"error": repr(exc), "hint": "call list_folders for valid names"}}
+        uids = mc.search(*(crit or ["ALL"]))
+        total = len(uids)
+        newest = uids[-limit:][::-1]
+        messages = []
+        for uid in newest:
+            try:
+                meta = mc.fetch_meta(uid)
+            except Exception as exc:
+                messages.append({"uid": uid, "error": repr(exc)})
+                continue
+            messages.append({"uid": uid, "folder": folder, "from": meta.get("from_addr"),
+                             "subject": meta.get("subject"), "date": meta.get("date"),
+                             "msgid": meta.get("msgid"),
+                             "snippet": _truncate(meta.get("snippet"), 200)})
+        return {"ok": True, "summary": "%d of %d in %s" % (len(messages), total, folder),
+                "result": {"folder": folder, "total_matched": total, "returned": len(messages),
+                           "note": "Newest first. Use folder + uid with read_message / move_message / flag_message.",
+                           "messages": messages}}
+
+    def _resolve_message(self, a):
+        """→ (row|None, folder, uid, error|None). Accepts message_id or
+        folder+uid; relocates by Message-ID when the uid is stale (moved mail)."""
+        mid = a.get("message_id")
+        row = None
+        if mid not in (None, "", 0, "0", "null"):
+            try:
+                row = store.get_message(int(mid))
+            except (TypeError, ValueError):
+                row = None
+            if row is None:
+                return None, None, None, "no indexed message with id %r (search_messages lists ids)" % mid
+            folder, uid = row["folder"], row["uid"]
+        else:
+            folder = (a.get("folder") or "").strip()
+            uid = a.get("uid")
+            if not folder or uid in (None, "", 0, "0"):
+                return None, None, None, "identify the message by message_id, or by folder AND uid"
+            try:
+                uid = int(uid)
+            except (TypeError, ValueError):
+                return None, None, None, "uid must be an integer"
+        mc = self._mail()
+        try:
+            mc.ensure_selected(folder)
+            present = bool(mc.search("UID", str(uid)))
+        except Exception as exc:
+            return row, folder, uid, "cannot open folder %r (%r)" % (folder, exc)
+        if present:
+            if row is None:
+                row = store.find_message_by_uid(folder, uid)
+            return row, folder, uid, None
+        reloc = self._relocate(mc, row)
+        if reloc:
+            if row is None:
+                row = store.find_message_by_uid(reloc[0], reloc[1])
+            return row, reloc[0], reloc[1], None
+        return row, folder, uid, ("message uid %s is not in %r — it may have been moved; "
+                                  "find it again with search_mail" % (uid, folder))
+
+    def _relocate(self, mc, row):
+        msgid = (row or {}).get("msgid") or ""
+        if not msgid:
+            return None
+        needle = '"<%s>"' % msgid.strip().strip("<>")
+        for folder in sorted(mc.folders()):
+            if row and folder == row.get("folder"):
+                continue
+            try:
+                mc.ensure_selected(folder)
+                hits = mc.search("HEADER", "Message-ID", needle)
+            except Exception:
+                continue
+            if hits:
+                store.log_event("debug", "assistant: relocated message %s to '%s' uid %s"
+                                % (row["id"], folder, hits[-1]))
+                return folder, hits[-1]
+        return None
+
+    def _tool_read_message(self, a):
+        row, folder, uid, err = self._resolve_message(a)
+        if err:
+            return {"ok": False, "summary": err, "result": {"error": err}}
+        mc = self._mail()
+        try:
+            meta = mc.fetch_meta(uid)
+            body = mc.fetch_body_text(uid, 10000)
+        except Exception as exc:
+            return {"ok": False, "summary": "could not read message: %r" % exc,
+                    "result": {"error": repr(exc)}}
+        if not body and row:
+            body = row.get("snippet") or ""
+        data = {"folder": folder, "uid": uid,
+                "from": meta.get("from_addr"), "to": meta.get("to_addr"),
+                "subject": meta.get("subject"), "date": meta.get("date"),
+                "msgid": meta.get("msgid"), "body": _truncate(body, 8000),
+                "indexed_id": row["id"] if row else None}
+        return {"ok": True,
+                "summary": "read %r in %s" % (_truncate(meta.get("subject") or "", 60), folder),
+                "result": data}
+
+    def _tool_move_message(self, a):
+        target = (a.get("target_folder") or "").strip()
+        if not target:
+            return {"ok": False, "summary": "target_folder is required",
+                    "result": {"error": "target_folder is required"}}
+        row, folder, uid, err = self._resolve_message(a)
+        if err:
+            return {"ok": False, "summary": err, "result": {"error": err}}
+        if not self.actions_apply:
+            store.log_event("info", "assistant (dry-run): would move %s uid %s → %s"
+                            % (folder, uid, target))
+            return {"ok": True, "dry_run": True,
+                    "summary": "dry-run: would move uid %s from %s to %s" % (uid, folder, target),
+                    "result": {"dry_run": True, "would_move": {"folder": folder, "uid": uid,
+                                                               "to": target}}}
+        mc = self._mail()
+        try:
+            mc.ensure_folder(target)
+            mc.ensure_selected(folder)
+            mc.move(uid, target)
+        except Exception as exc:
+            return {"ok": False, "summary": "move failed: %r" % exc, "result": {"error": repr(exc)}}
+        if row:
+            store.update_message(row["id"], status="assistant-moved", action_taken="move:" + target)
+        store.log_event("info", "assistant moved %s uid %s ('%s') → %s"
+                        % (folder, uid, _truncate((row or {}).get("subject") or "", 50), target))
+        return {"ok": True, "summary": "moved to %s" % target,
+                "result": {"moved": {"folder": folder, "uid": uid, "to": target}}}
+
+    def _tool_flag_message(self, a):
+        seen = _as_bool(a.get("seen"))
+        flagged = _as_bool(a.get("flagged"))
+        if seen is None and flagged is None:
+            return {"ok": False, "summary": "set seen and/or flagged",
+                    "result": {"error": "nothing to change"}}
+        row, folder, uid, err = self._resolve_message(a)
+        if err:
+            return {"ok": False, "summary": err, "result": {"error": err}}
+        ops = []
+        if seen is not None:
+            ops.append(("+FLAGS" if seen else "-FLAGS", r"(\Seen)"))
+        if flagged is not None:
+            ops.append(("+FLAGS" if flagged else "-FLAGS", r"(\Flagged)"))
+        if not self.actions_apply:
+            return {"ok": True, "dry_run": True,
+                    "summary": "dry-run: would update flags on uid %s in %s" % (uid, folder),
+                    "result": {"dry_run": True}}
+        mc = self._mail()
+        try:
+            mc.ensure_selected(folder)
+            for op, fl in ops:
+                mc.set_flags(uid, op, fl)
+        except Exception as exc:
+            return {"ok": False, "summary": "flag update failed: %r" % exc,
+                    "result": {"error": repr(exc)}}
+        store.log_event("info", "assistant set flags on %s uid %s (%s)" % (folder, uid, ops))
+        return {"ok": True, "summary": "flags updated",
+                "result": {"folder": folder, "uid": uid, "changes": [str(o) for o in ops]}}
+
+    def _tool_create_folder(self, a):
+        name = (a.get("name") or "").strip()
+        if not name:
+            return {"ok": False, "summary": "name is required", "result": {"error": "name required"}}
+        mc = self._mail()
+        existed = name in mc.folders()
+        if not existed:
+            mc.ensure_folder(name)
+            store.log_event("info", "assistant created folder '%s'" % name)
+        return {"ok": True,
+                "summary": ("folder existed: " if existed else "folder created: ") + name,
+                "result": {"folder": name, "created": not existed}}
+
+    def _tool_list_folders(self, a):
+        folders = self._folders_with_counts()
+        return {"ok": True, "summary": "%d folders" % len(folders),
+                "result": {"folders": folders}}
+
+    def _tool_propose_rule(self, a):
+        norm, errors = _validate_rule(a)
+        if not norm:
+            return {"ok": False, "summary": "rule invalid: " + "; ".join(errors[:3]),
+                    "result": {"errors": errors,
+                               "hint": "Every rule needs 1-4 conditions (field from/to/subject/body, "
+                                       "op contains/equals/regex) and at least one action "
+                                       "(move_to / mark_read / flag). Fix and propose again."}}
+        self.proposals.append(norm)
+        return {"ok": True, "summary": "rule proposed: %s" % norm["name"],
+                "result": {"status": "queued for the user's one-click approval",
+                           "proposal_index": len(self.proposals) - 1, "rule": norm}}
+
+    # ---- the main loop
+
+    def stream(self, user_text):
+        """One assistant turn, as a generator of UI events."""
+        user_text = (user_text or "").strip()
+        if not user_text:
+            yield {"type": "error", "message": "empty message"}
+            return
+        store.add_assistant_message("user", user_text[:4000])
+        today = time.strftime("%Y-%m-%d (%a)", time.gmtime(time.time() + 8 * 3600))
+        system = (ASSISTANT_SYSTEM % {"user": config.IMAP_USER, "today": today,
+                                      "max_calls": self.MAX_CALLS_PER_TURN}
+                  + "\n\n" + _assistant_context())
+        convo = [{"role": m["role"], "content": m["content"]}
+                 for m in store.assistant_messages(limit=24)]
+        llm = LLMClient()
+        reply_parts = []
+        reasoning_all = []
+        usage = None
+        steps = 0
+        tools_mode = True
+        error = None
+        try:
+            while True:
+                steps += 1
+                use_tools = ASSISTANT_TOOLS if (tools_mode and steps <= self.MAX_STEPS) else None
+                calls = []
+                turn_reasoning = []
+                turn_content = []
+                try:
+                    for ev in llm.chat_stream(system, convo, tools=use_tools, thinking=True):
+                        if ev["type"] == "reasoning_delta":
+                            turn_reasoning.append(ev["text"])
+                            yield {"type": "reasoning", "text": ev["text"]}
+                        elif ev["type"] == "content_delta":
+                            turn_content.append(ev["text"])
+                            yield {"type": "content", "text": ev["text"]}
+                        elif ev["type"] == "tool_calls":
+                            calls = ev["calls"]
+                        elif ev["type"] == "turn_done":
+                            usage = ev.get("usage") or usage
+                except Exception as exc:
+                    if use_tools and _looks_like_tools_unsupported(exc):
+                        store.log_event("info", "assistant: the model rejected tools (%s) — "
+                                        "continuing without them" % exc)
+                        tools_mode = False
+                        continue
+                    raise
+                reasoning_all.append("".join(turn_reasoning))
+                if not calls or use_tools is None:
+                    reply_parts = turn_content
+                    break
+                convo.append({"role": "assistant", "content": "".join(turn_content) or None,
+                              "reasoning": "".join(turn_reasoning) or None,
+                              "tool_calls": [{"id": c["id"], "type": "function",
+                                              "function": {"name": c["name"], "arguments": c["arguments"]}}
+                                             for c in calls]})
+                for i, c in enumerate(calls):
+                    if i >= self.MAX_CALLS_PER_TURN:
+                        res = {"ok": False, "summary": "skipped: too many tool calls in one step",
+                               "result": {"error": "per-step tool call limit reached; "
+                                                   "ask again if it is still needed"}}
+                    else:
+                        args = _json_args(c["arguments"])
+                        yield {"type": "tool_start", "id": c["id"], "name": c["name"], "args": args}
+                        t0 = time.time()
+                        res = self.call_tool(c["name"], args)
+                        res["elapsed"] = round(time.time() - t0, 2)
+                        self.tools_log.append({"name": c["name"],
+                                               "args": _truncate(json.dumps(args, ensure_ascii=False), 300),
+                                               "ok": bool(res.get("ok")),
+                                               "summary": _truncate(res.get("summary") or "", 300),
+                                               "dry_run": bool(res.get("dry_run")),
+                                               "elapsed": res["elapsed"]})
+                        yield {"type": "tool_end", "id": c["id"], "name": c["name"],
+                               "ok": bool(res.get("ok")),
+                               "summary": _truncate(res.get("summary") or "", 400),
+                               "dry_run": bool(res.get("dry_run")), "elapsed": res["elapsed"]}
+                    payload = json.dumps(res.get("result", {}), ensure_ascii=False)
+                    cap = min(self.RESULT_CHARS, max(800, self._budget))
+                    payload = _truncate(payload, cap)
+                    self._budget -= len(payload)
+                    convo.append({"role": "tool", "tool_call_id": c["id"], "name": c["name"],
+                                  "content": payload})
+        except Exception as exc:
+            error = exc
+        finally:
+            self.close()
+        if error is not None:
+            store.log_event("error", "assistant failed: %r" % error)
+            yield {"type": "error", "message": repr(error)}
+            return
+        reply = "".join(reply_parts).strip()
+        if not reply:
+            reply = ("Proposed %d rule(s) — add them below, or ask for changes." % len(self.proposals)
+                     if self.proposals else "(no reply)")
+        meta = {"reasoning": _truncate("\n".join(r for r in reasoning_all if r), 20000),
+                "tools": self.tools_log, "steps": steps, "usage": usage,
+                "actions_live": self.actions_apply}
+        msg_id = store.add_assistant_message("assistant", reply[:4000],
+                                             proposals=json.dumps(self.proposals),
+                                             meta=json.dumps(meta, ensure_ascii=False))
+        if self.proposals:
+            yield {"type": "proposals", "proposals": self.proposals}
+        yield {"type": "done", "message_id": msg_id, "reply": reply, "steps": steps}
+
+
+def assistant_respond(user_text):
+    """Run one assistant turn to completion (no streaming). Returns (reply, proposals)."""
+    agent = AssistantAgent()
+    reply_parts, proposals, err = [], [], None
+    for ev in agent.stream(user_text):
+        if ev["type"] == "content":
+            reply_parts.append(ev["text"])
+        elif ev["type"] == "proposals":
+            proposals = ev["proposals"]
+        elif ev["type"] == "error":
+            err = ev["message"]
+    if err:
+        raise RuntimeError(err)
+    return "".join(reply_parts).strip() or "(no reply)", proposals

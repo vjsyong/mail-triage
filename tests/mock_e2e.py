@@ -9,6 +9,7 @@ route smoke tests.
 
 Usage:  .venv/bin/python tests/mock_e2e.py
 """
+import email.utils
 import json
 import os
 import re
@@ -146,6 +147,22 @@ class IMAPHandler(socketserver.StreamRequestHandler):
                 self.send("%s OK CREATE completed" % tag)
             elif cmd == "SELECT":
                 self.do_select(tag, rest.strip().strip('"'))
+            elif cmd == "STATUS":
+                m = re.match(r'"?([^"]+)"?\s+\(([^)]*)\)', rest)
+                name = m.group(1) if m else rest.strip().strip('"')
+                items = (m.group(2).upper() if m else "MESSAGES")
+                f = self.server.state.get(name)
+                if f is None:
+                    self.send("%s NO no such mailbox" % tag)
+                else:
+                    parts = []
+                    if "MESSAGES" in items:
+                        parts.append("MESSAGES %d" % len(f["uids"]))
+                    if "UNSEEN" in items:
+                        parts.append("UNSEEN %d" % sum(
+                            1 for u in f["uids"] if "\\Seen" not in f["msgs"][u]["flags"]))
+                    self.send('* STATUS "%s" (%s)' % (name, " ".join(parts)))
+                    self.send("%s OK STATUS completed" % tag)
             elif cmd == "EXPUNGE":
                 self.do_expunge(tag)
             elif cmd == "APPEND":
@@ -218,7 +235,8 @@ class IMAPHandler(socketserver.StreamRequestHandler):
         arg1 = tokens[1] if len(tokens) > 1 else ""
         arg2 = tokens[2] if len(tokens) > 2 else ""
         if sub == "SEARCH":
-            uids = self.search_uids(rest.split()[1:])
+            tokens = re.findall(r'"[^"]*"|\S+', rest)[1:]
+            uids = self.search_uids(tokens)
             self.send("* SEARCH %s" % " ".join(str(u) for u in uids))
             self.send("%s OK UID SEARCH completed" % tag)
         elif sub == "FETCH":
@@ -245,22 +263,92 @@ class IMAPHandler(socketserver.StreamRequestHandler):
         else:
             self.send("%s BAD unknown UID command %s" % (tag, sub))
 
-    def search_uids(self, crit):
+    # ---- SEARCH support ---------------------------------------------------
+
+    @staticmethod
+    def header_val(header_text, name):
+        for line in header_text.split("\r\n"):
+            if line.lower().startswith(name.lower() + ":"):
+                return line.split(":", 1)[1].strip()
+        return ""
+
+    def raw_parts(self, f, uid):
+        raw = f["msgs"][uid]["raw"].decode("utf-8", "replace")
+        sep = raw.find("\r\n\r\n")
+        return (raw[:sep if sep >= 0 else len(raw)],
+                raw[sep + 4:] if sep >= 0 else "")
+
+    def msg_value(self, f, uid, kind, header_name=None):
+        header, body = self.raw_parts(f, uid)
+        if kind == "FROM":
+            return self.header_val(header, "From")
+        if kind == "TO":
+            return self.header_val(header, "To")
+        if kind == "SUBJECT":
+            return self.header_val(header, "Subject")
+        if kind == "DATE":
+            return self.header_val(header, "Date")
+        if kind == "HEADER":
+            return self.header_val(header, header_name or "")
+        return body  # BODY / TEXT
+
+    def msg_ts(self, f, uid):
+        d = self.msg_value(f, uid, "DATE")
+        try:
+            return email.utils.parsedate_to_datetime(d).timestamp()
+        except Exception:
+            return 0.0
+
+    def search_uids(self, tokens):
         f = self.server.state.get(self.cur)
         if not f:
             return []
         uids = list(f["uids"])
-        crit = [c.upper() for c in crit]
-        if "UNSEEN" in crit:
-            uids = [u for u in uids if "\\Seen" not in f["msgs"][u]["flags"]]
-        for i, c in enumerate(crit):
-            if c == "UID" and i + 1 < len(crit):
-                rng = crit[i + 1]
-                if ":" in rng:
-                    a, b = rng.split(":", 1)
+        i = 0
+        while i < len(tokens):
+            c = tokens[i].upper()
+            val = tokens[i + 1].strip('"') if i + 1 < len(tokens) else ""
+            if c == "ALL":
+                i += 1
+            elif c == "UNSEEN":
+                uids = [u for u in uids if "\\Seen" not in f["msgs"][u]["flags"]]
+                i += 1
+            elif c in ("SEEN", "FLAGGED", "UNFLAGGED"):
+                if c == "FLAGGED":
+                    uids = [u for u in uids if "\\Flagged" in f["msgs"][u]["flags"]]
+                elif c == "UNFLAGGED":
+                    uids = [u for u in uids if "\\Flagged" not in f["msgs"][u]["flags"]]
+                else:
+                    uids = [u for u in uids if "\\Seen" in f["msgs"][u]["flags"]]
+                i += 1
+            elif c == "UID":
+                if ":" in val:
+                    a, b = val.split(":", 1)
                     lo = int(a)
                     hi = max(f["uids"]) if b == "*" else int(b)
                     uids = [u for u in uids if lo <= u <= hi]
+                elif val.isdigit():
+                    uids = [u for u in uids if u == int(val)]
+                i += 2
+            elif c in ("FROM", "TO", "SUBJECT", "BODY", "TEXT"):
+                uids = [u for u in uids
+                        if val.lower() in (self.msg_value(f, u, c) or "").lower()]
+                i += 2
+            elif c == "HEADER":
+                name = val
+                needle = tokens[i + 2].strip('"') if i + 2 < len(tokens) else ""
+                uids = [u for u in uids
+                        if needle.lower() in (self.msg_value(f, u, "HEADER", name) or "").lower()]
+                i += 3
+            elif c in ("SINCE", "BEFORE"):
+                cut = time.mktime(time.strptime(val, "%d-%b-%Y"))
+                if c == "SINCE":
+                    uids = [u for u in uids if self.msg_ts(f, u) >= cut]
+                else:
+                    uids = [u for u in uids if self.msg_ts(f, u) < cut]
+                i += 2
+            else:
+                i += 1
         return uids
 
     def do_fetch(self, tag, uid, spec):
@@ -300,21 +388,19 @@ class LLMHandler(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length))
-        system = payload["messages"][0]["content"]
-        user = payload["messages"][1]["content"]
-        self.server.calls.append({"system": system, "user": user})
+        messages = payload.get("messages") or []
+        system = messages[0]["content"] if messages and isinstance(messages[0].get("content"), str) else ""
+        user = ""
+        for m in reversed(messages):
+            if m.get("role") == "user" and isinstance(m.get("content"), str):
+                user = m["content"]
+                break
+        self.server.calls.append({"system": system, "user": user, "payload": payload})
+        if payload.get("stream"):
+            self.stream_reply(payload, system, user)
+            return
         if "write email replies" in system:
             content = FAKE_DRAFT
-        elif "rule architect" in system:
-            content = json.dumps({
-                "reply": "Here is a newsletter rule you can add.",
-                "proposed_rules": [
-                    {"name": "File newsletters", "match_mode": "any",
-                     "conditions": [{"field": "subject", "op": "contains", "value": "newsletter"},
-                                    {"field": "from", "op": "contains", "value": "newsletter@"}],
-                     "actions": {"move_to": "Newsletters"}, "rationale": "bulk mail"},
-                    {"name": "Broken rule", "match_mode": "all", "conditions": [], "actions": {}},
-                ]})
         elif "connectivity test" in system:
             content = "ok"
         else:
@@ -344,6 +430,87 @@ class LLMHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    # ---- streaming (assistant agent) --------------------------------------
+
+    def sse_write(self, data):
+        self.wfile.write(data)
+        self.wfile.flush()
+
+    def sse(self, obj):
+        self.sse_write(("data: %s\n\n" % json.dumps(obj)).encode())
+
+    def sse_done(self):
+        self.sse_write(b"data: [DONE]\n\n")
+
+    def sse_start(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+    def delta(self, **kw):
+        self.sse({"choices": [{"index": 0, "delta": kw}]})
+
+    def tool_delta(self, idx, name, args, cid):
+        self.sse({"choices": [{"index": 0, "delta": {"tool_calls": [
+            {"index": idx, "id": cid, "type": "function",
+             "function": {"name": name, "arguments": ""}}]}}]})
+        args_str = json.dumps(args)
+        for i in range(0, len(args_str), 10):  # fragment the arguments like vLLM does
+            self.sse({"choices": [{"index": 0, "delta": {"tool_calls": [
+                {"index": idx, "function": {"arguments": args_str[i:i + 10]}}]}}]})
+
+    def stream_reply(self, payload, system, user):
+        if "mail operations assistant" in system:
+            return self.stream_agent(payload, user)
+        # generic streamed reply — exercises the streaming-fallback path
+        self.sse_start()
+        self.delta(role="assistant")
+        for word in ("streaming ", "from ", "the fallback ", "works."):
+            self.delta(content=word)
+        self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+        self.sse({"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 5,
+                                           "total_tokens": 6}})
+        self.sse_done()
+
+    def stream_agent(self, payload, user):
+        if "streamfail" in (user or "").lower():
+            body = b'{"error": "mock stream failure"}'
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        messages = payload["messages"]
+        step = sum(1 for m in messages
+                   if m.get("role") == "assistant" and m.get("tool_calls"))
+        self.sse_start()
+        self.delta(role="assistant")
+        if step == 0:
+            self.delta(reasoning="The user wants budget mail handled. ")
+            self.delta(reasoning="I will search the mailbox first.")
+            self.tool_delta(0, "search_mail", {"subject_contains": "budget"}, "call_%d_0" % step)
+            self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+        elif step == 1:
+            self.delta(reasoning="Found matches. I will file the lunch mail and propose a rule.")
+            self.tool_delta(0, "move_message",
+                            {"folder": "INBOX", "uid": 4, "target_folder": "Personal"},
+                            "call_%d_0" % step)
+            self.tool_delta(1, "propose_rule",
+                            {"name": "Budget mail to Budget", "match_mode": "any",
+                             "conditions": [{"field": "subject", "op": "contains", "value": "budget"}],
+                             "actions": {"move_to": "Budget"}, "rationale": "test rule"},
+                            "call_%d_1" % step)
+            self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+        else:
+            self.delta(content="Done. I moved the lunch mail to Personal and proposed a rule "
+                               "for budget mail — add it below if it looks right.")
+            self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+        self.sse({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 20,
+                                           "total_tokens": 30}})
+        self.sse_done()
 
     def log_message(self, *args):
         pass
@@ -518,26 +685,116 @@ def main():
     check("connectivity-test prompt reached the LLM",
           any("connectivity test" in c["system"] for c in llm_server.calls))
 
-    section("T9 assistant: chat -> proposal -> add rule")
+    section("T9a assistant tools (direct executor tests)")
+    agent = engine.AssistantAgent()
+    r = agent.call_tool("list_folders", {})
+    check("list_folders lists folders with counts",
+          r["ok"] and any(f["name"] == "Drafts" for f in r["result"]["folders"])
+          and all("messages" in f for f in r["result"]["folders"]))
+    r = agent.call_tool("mailbox_overview", {})
+    check("mailbox_overview ok", r["ok"] and r["result"]["indexed_messages"] >= 4)
+    r = agent.call_tool("search_messages", {"query": "lunch"})
+    check("search_messages finds indexed mail",
+          r["ok"] and any("Lunch" in (m["subject"] or "") for m in r["result"]["messages"]))
+    r = agent.call_tool("search_mail", {"subject_contains": "budget"})
+    check("search_mail searches IMAP history",
+          r["ok"] and any("budget" in (m.get("subject") or "").lower()
+                          for m in r["result"]["messages"]))
+    r = agent.call_tool("search_mail", {"subject_contains": "budget", "since": "2026-10-01"})
+    check("search_mail since filter excludes older mail", r["ok"] and r["result"]["returned"] == 0)
+    r = agent.call_tool("search_mail", {"folder": "INBOX", "unseen_only": True})
+    check("search_mail unseen filter", r["ok"] and r["result"]["total_matched"] >= 1)
+    r = agent.call_tool("search_mail", {"folder": "NoSuchBox"})
+    check("search_mail on missing folder errors cleanly", (not r["ok"]) and "error" in r["result"])
+    r = agent.call_tool("read_message", {"folder": "INBOX", "uid": 6})
+    check("read_message returns the full body",
+          r["ok"] and "Another budget item" in r["result"]["body"])
+    r = agent.call_tool("create_folder", {"name": "AgentTests"})
+    check("create_folder creates",
+          r["ok"] and r["result"]["created"] is True and state.get("AgentTests") is not None)
+    r = agent.call_tool("create_folder", {"name": "AgentTests"})
+    check("create_folder idempotent", r["ok"] and r["result"]["created"] is False)
+    r = agent.call_tool("flag_message", {"folder": "INBOX", "uid": 6, "flagged": True})
+    check("flag_message stars the message",
+          r["ok"] and "\\Flagged" in state.get("INBOX")["msgs"][6]["flags"])
+    r = agent.call_tool("propose_rule", {"name": "bad", "conditions": [], "actions": {}})
+    check("invalid rule rejected with errors", (not r["ok"]) and r["result"]["errors"])
+    r = agent.call_tool("propose_rule", {"name": "Budget rule",
+        "conditions": [{"field": "subject", "op": "contains", "value": "budget"}],
+        "actions": {"move_to": "Budget"}})
+    check("valid rule queued as proposal", r["ok"] and len(agent.proposals) == 1)
+    r = agent.call_tool("nonsense_tool", {})
+    check("unknown tool rejected", not r["ok"])
+    store.set_setting("assistant_actions_apply", False)
+    dry = engine.AssistantAgent()
+    r = dry.call_tool("move_message", {"folder": "INBOX", "uid": 6, "target_folder": "Budgets"})
+    check("dry-run move does not touch mail",
+          r["ok"] and r.get("dry_run") and 6 in state.get("INBOX")["uids"]
+          and state.get("Budgets") is None)
+    dry.close()
+    agent.close()
+    store.set_setting("assistant_actions_apply", True)
+
+    section("T9b assistant agent stream (SSE + tools + proposals)")
     rules_before = len(store.list_rules())
-    r = client.post("/assistant/send", data={"message": "Sort newsletters out of my inbox"})
-    check("assistant send redirects", r.status_code == 302)
-    convo = store.assistant_messages(limit=10)
-    check("two turns stored", len(convo) == 2 and convo[0]["role"] == "user"
-          and convo[1]["role"] == "assistant")
-    props = json.loads(convo[-1]["proposals"])
-    check("valid proposal kept, broken one dropped",
-          len(props) == 1 and props[0]["name"] == "File newsletters")
+    r = client.post("/assistant/stream", data={"message": "Sort the budget mail please"})
+    check("stream responds 200 + SSE", r.status_code == 200 and r.mimetype == "text/event-stream")
+    body = r.data.decode()
+    for ev in ("event: reasoning", "event: tool_start", "event: tool_end",
+               "event: content", "event: proposals", "event: done"):
+        check("SSE carries %s" % ev, ev in body)
+    check("reasoning streamed before tool calls",
+          body.index("event: reasoning") < body.index("event: tool_start"))
+    dm = re.search(r"event: done\ndata: (.*)", body)
+    done_data = json.loads(dm.group(1)) if dm else {}
+    check("done names the stored message", isinstance(done_data.get("message_id"), int))
+    conv = store.assistant_messages(limit=6)
+    row = conv[-1]
+    check("assistant turn persisted",
+          row["role"] == "assistant" and row["id"] == done_data.get("message_id"))
+    props = json.loads(row["proposals"])
+    check("rule proposal persisted", len(props) == 1 and props[0]["name"] == "Budget mail to Budget")
+    meta = json.loads(row["meta"])
+    check("meta has reasoning + 3 tool steps",
+          "budget" in (meta.get("reasoning") or "").lower() and len(meta.get("tools") or []) == 3)
+    check("tool ran against real IMAP: model saw actual results",
+          "Second budget note" in json.dumps(llm_server.calls[-1]["payload"]))
+    check("assistant moved the lunch mail",
+          4 in (state.get("Personal") or {"uids": []})["uids"])
+    row4 = [x for x in store.messages(limit=100) if x["uid"] == 4 and x["folder"] == "INBOX"][0]
+    check("move recorded on the row",
+          row4["status"] == "assistant-moved" and row4["action_taken"] == "move:Personal")
+    check("move logged to events", any("assistant moved" in e["message"]
+                                       for e in store.recent_events(60)))
+
+    section("T9c assistant page: transcript + one-click apply")
     r = client.get("/assistant")
-    check("assistant page renders with proposal", r.status_code == 200 and b"File newsletters" in r.data)
-    r = client.post("/assistant/apply", data={"msg_id": convo[-1]["id"], "idx": 0})
-    rules_now = store.list_rules()
-    check("rule added from chat", len(rules_now) == rules_before + 1)
-    new_rule = [x for x in rules_now if x["name"] == "File newsletters"][0]
-    conds = json.loads(new_rule["conditions"])
-    check("rule fields round-tripped", new_rule["enabled"] == 1 and conds[0]["field"] == "subject")
+    check("assistant page renders", r.status_code == 200)
+    check("page shows the thinking transcript", b"thinking" in r.data)
+    check("page shows the proposal", "Budget mail to Budget".encode() in r.data)
+    r = client.post("/assistant/apply", data={"msg_id": row["id"], "idx": 0})
+    check("one-click apply added the rule",
+          len(store.list_rules()) == rules_before + 1
+          and any(x["name"] == "Budget mail to Budget" for x in store.list_rules()))
     r = client.post("/assistant/clear")
     check("conversation cleared", len(store.assistant_messages(limit=10)) == 0)
+
+    section("T9d assistant failure is visible, not silent")
+    r = client.post("/assistant/stream", data={"message": "streamfail please"})
+    check("error event streamed, no done", b"event: error" in r.data and b"event: done" not in r.data)
+    check("failure logged", any("assistant failed" in e["message"]
+                                for e in store.recent_events(80)))
+    r = client.post("/assistant/send", data={"message": "hello again"})
+    check("buffered no-JS fallback still works", r.status_code == 302)
+
+    section("T9e streaming fallback to the secondary endpoint")
+    c = engine.LLMClient()
+    c.base = "http://127.0.0.1:1/v1"
+    c.fallback = (config.LLM_BASE_URL, config.LLM_API_KEY, config.LLM_MODEL)
+    evs = list(c.chat_stream("You are a plain test bot.", [{"role": "user", "content": "hi"}],
+                             tools=None, thinking=True))
+    txt = "".join(e.get("text", "") for e in evs if e["type"] == "content_delta")
+    check("fallback streamed a reply", "fallback" in txt)
 
     section("T10 LLM fallback")
     c = engine.LLMClient()

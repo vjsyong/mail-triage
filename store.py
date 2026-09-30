@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
     },
     "drafts_folder": "",          # blank = auto-detect the \Drafts special-use folder
     "my_name": "Sean",
+    "assistant_actions_apply": True,  # assistant may move/flag mail (False = dry-run)
 }
 
 _SCHEMA = """
@@ -78,9 +79,17 @@ CREATE TABLE IF NOT EXISTS llm_log (
 CREATE TABLE IF NOT EXISTS assistant_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts INTEGER, role TEXT NOT NULL DEFAULT 'user',
-    content TEXT NOT NULL DEFAULT '', proposals TEXT NOT NULL DEFAULT '[]'
+    content TEXT NOT NULL DEFAULT '', proposals TEXT NOT NULL DEFAULT '[]',
+    meta TEXT NOT NULL DEFAULT ''
 );
 """
+
+
+def _migrate(conn):
+    """Additive migrations for databases created by older versions."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(assistant_messages)")]
+    if "meta" not in cols:
+        conn.execute("ALTER TABLE assistant_messages ADD COLUMN meta TEXT NOT NULL DEFAULT ''")
 
 
 def db():
@@ -94,6 +103,7 @@ def db():
 def init_db():
     with db() as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
         for k, v in DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings (k, v) VALUES (?, ?)",
                          (k, json.dumps(v)))
@@ -251,6 +261,15 @@ def get_message_by_uid(folder, uid, uidvalidity):
     return dict(row) if row else None
 
 
+def find_message_by_uid(folder, uid):
+    """Latest indexed row for folder+uid regardless of uidvalidity."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM messages WHERE folder=? AND uid=? "
+            "ORDER BY uidvalidity DESC, id DESC LIMIT 1", (folder, uid)).fetchone()
+    return dict(row) if row else None
+
+
 def messages(limit=50, filt="all"):
     q = "SELECT * FROM messages"
     where = []
@@ -340,11 +359,13 @@ def retry_parked_errors():
 
 # ---------------------------------------------------------------- assistant
 
-def add_assistant_message(role, content, proposals="[]"):
+def add_assistant_message(role, content, proposals="[]", meta=""):
+    if not isinstance(meta, str):
+        meta = json.dumps(meta)
     with db() as conn:
         cur = conn.execute(
-            "INSERT INTO assistant_messages (ts, role, content, proposals) VALUES (?,?,?,?)",
-            (int(time.time()), role, content, proposals))
+            "INSERT INTO assistant_messages (ts, role, content, proposals, meta) VALUES (?,?,?,?,?)",
+            (int(time.time()), role, content, proposals, meta))
         return cur.lastrowid
 
 
