@@ -45,6 +45,14 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
   reranked with a cross-encoder. The assistant uses it for content questions ("what
   did the landlord want?"); the dashboard has an index card with Run/Rebuild. All
   local; nothing leaves the host.
+- **Classify on demand** (Messages page): tick rows and "Classify selected", or run
+  "Classify all unclassified" as a background job (newest first, progress + Stop;
+  files mail per your llm_apply setting). Message pages also have a single
+  "Classify with LLM" button and "File to <suggested folder>".
+- **Tag by hand, learn rules**: tick rows on Messages and give them a tag (Receipt,
+  Action, ...). "Learn rules from tags" asks the local LLM to infer filter rules from
+  your labels and shows them for one-click approval. The assistant can also read your
+  tags (list_tagged) and turn them into rule proposals in chat.
 - **Reply templates + LLM drafting** (Messages page): pick a message, choose a
   template (or none), hit "Draft with LLM". Review, copy, or "Save to Drafts" --
   the draft lands in your Drafts folder to send from your normal client.
@@ -77,7 +85,8 @@ gemma/                         # the model server (own compose project, one GPU)
 ## The assistant (streaming + tools)
 
 The Assistant page uses the same LLM endpoint through an agent harness: the reply
-streams token by token (SSE on `/assistant/stream`), the model's thinking renders in
+streams token by token (SSE on `/assistant/stream`), rendered as markdown (bold,
+lists, code, links; `[msg:ID]` refs become links), the model's thinking renders in
 a live "thinking" block, and every tool call shows as a card with its result. The
 transcript (thinking + tool steps) is stored per message, so it survives reloads.
 
@@ -146,7 +155,7 @@ docker restart mail-triage            # simple app restart
 docker exec mail-triage python app.py --check   # read-only IMAP health check
 docker exec mail-triage python app.py --index   # run the semantic indexer (resumable)
 docker exec mail-triage python app.py --reindex # wipe + rebuild the search index
-.venv/bin/python tests/mock_e2e.py    # 116-check E2E suite (mock IMAP + mock LLM,
+.venv/bin/python tests/mock_e2e.py    # 146-check E2E suite (mock IMAP + mock LLM,
                                       # mock TEI embed/rerank; SSE streaming agent)
 
 cd gemma                              # the model server
