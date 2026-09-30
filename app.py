@@ -250,22 +250,27 @@ BASE_TMPL = """<!doctype html>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mail Triage</title>
 <style>
-:root{--bg:#ffffff;--card:#ffffff;--card2:#fafafa;--line:#e5e5e5;--fg:#000000;--dim:#666666;
+@font-face{font-family:'Geist';src:url('/fonts/geist.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
+@font-face{font-family:'Geist Mono';src:url('/fonts/geist-mono.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
+:root{--bg:#fafafa;--card:#ffffff;--card2:#f5f5f5;--line:#e5e5e5;--fg:#000000;--dim:#666666;
 --acc:#0070f3;--ok:#067a46;--warn:#b25e09;--err:#d1242f;
 --tint-acc:#f0f7ff;--tint-ok:#edfbf2;--tint-warn:#fff8ea;--tint-err:#fff1f1;
---mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+--panel:#000000;--panel-dim:#a3a3a3;--codebg:#0a0a0a;--codefg:#ededed;
+--mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 *{box-sizing:border-box;border-radius:0 !important}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,
-"Segoe UI","Inter",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 "Geist",-apple-system,BlinkMacSystemFont,
+"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
 a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 .wrap{max-width:1060px;margin:0 auto;padding:18px 16px 80px}
 h1{font-size:1.5rem;margin:0;font-weight:700;letter-spacing:-.03em}
 h2{font-size:1.08rem;margin:26px 0 10px;font-weight:600;letter-spacing:-.02em}
 h3{font-size:1rem;margin:0 0 6px;font-weight:600;letter-spacing:-.01em}
-.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
-margin-bottom:16px;border-bottom:1px solid var(--line);padding-bottom:14px}
-nav a{margin-left:14px;color:#444;font-weight:500}
-nav a:hover{color:#000;text-decoration:none}
+.topbar{background:var(--panel);color:#fff;padding:14px 0}
+.wrap2{max-width:1060px;margin:0 auto;padding:0 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.topbar h1{color:#fff;font-size:1.25rem}
+.topbar .sub{color:var(--panel-dim)}
+nav a{margin-left:16px;color:#d4d4d4;font-weight:500}
+nav a:hover{color:#fff;text-decoration:none}
 .card{background:var(--card);border:1px solid var(--line);padding:14px 16px;margin:12px 0}
 .sub{color:var(--dim);font-size:.88rem}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -300,27 +305,29 @@ padding:1px 5px;word-break:break-all}
 .msg.err{background:var(--tint-err);border:1px solid var(--err)}
 table.tbl{width:100%;border-collapse:collapse}
 .tbl th,.tbl td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-size:.88rem;vertical-align:top}
-.tbl th{color:var(--dim);font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.tbl th{color:var(--dim);font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;background:var(--card2)}
+.tbl tr:hover td{background:#fcfcfc}
 .hidden{display:none}
-pre.log{background:var(--card2);border:1px solid var(--line);padding:12px;font-size:.78rem;
-line-height:1.4;overflow:auto;max-height:70vh;white-space:pre-wrap}
-.stat{display:inline-block;background:var(--card2);border:1px solid var(--line);
+pre.log{background:var(--codebg);border:1px solid var(--codebg);color:var(--codefg);padding:12px;font-size:.78rem;
+line-height:1.5;overflow:auto;max-height:70vh;white-space:pre-wrap}
+.stat{display:inline-block;background:var(--panel);border:1px solid var(--panel);color:#fff;
 padding:10px 16px;margin:0 8px 8px 0;text-align:center}
 .stat b{display:block;font-size:1.4rem;letter-spacing:-.02em}
-.stat span{color:var(--dim);font-size:.78rem}
+.stat span{color:var(--panel-dim);font-size:.78rem}
 .foot{margin-top:26px;color:var(--dim);font-size:.8rem;border-top:1px solid var(--line);padding-top:12px}
 .md p{margin:6px 0}
 .md .md-h{font-weight:600;margin:10px 0 4px}
 .md ul,.md ol{margin:6px 0 6px 22px;padding:0}
 .md blockquote{border-left:3px solid var(--line);margin:6px 0;padding:2px 10px;color:var(--dim)}
-.md pre.md-pre{background:var(--card2);border:1px solid var(--line);padding:10px;overflow:auto;white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
+.md pre.md-pre{background:var(--codebg);border:1px solid var(--codebg);color:var(--codefg);padding:10px;overflow:auto;white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .md code{font-family:var(--mono);font-size:.85rem;background:var(--card2);border:1px solid var(--line);padding:1px 5px}
 </style>
-</head><body><div class="wrap">
-<div class="top">
+</head><body>
+<div class="topbar"><div class="wrap2">
   <div><h1>Mail Triage</h1><div class="sub">{{ cfg.IMAP_USER }} · via proxy {{ cfg.IMAP_HOST }}:{{ cfg.IMAP_PORT }} · LLM: {{ cfg.LLM_MODEL }}</div></div>
   <nav class="sub"><a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('assistant') }}">Assistant</a><a href="{{ url_for('rules') }}">Rules</a><a href="{{ url_for('classifiers') }}">Classifiers</a><a href="{{ url_for('templates') }}">Templates</a><a href="{{ url_for('messages') }}">Messages</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('log') }}">Log</a></nav>
-</div>
+</div></div>
+<div class="wrap">
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% for cat, msg in messages %}<div class="msg {{ cat }}">{{ msg }}</div>{% endfor %}
 {% endwith %}
@@ -1316,7 +1323,7 @@ def message_save(mid):
 ASSISTANT_TMPL = r"""
 <style>
 .chat{height:calc(100vh - 280px);min-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;
-  background:#fff;border:1px solid var(--line);padding:18px 16px}
+  background:var(--bg);border:1px solid var(--line);padding:18px 16px}
 .crow{display:flex;gap:10px;align-items:flex-start}
 .crow.user{flex-direction:row-reverse}
 .avatar{flex:0 0 30px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
@@ -1326,7 +1333,7 @@ ASSISTANT_TMPL = r"""
 .bubble{max-width:75%;padding:10px 14px;font-size:.92rem;line-height:1.55;overflow-wrap:anywhere}
 .bubble.user{background:#000;border:1px solid #000;color:#fff}
 .bubble.user .meta{color:#aaa}
-.bubble.ai{background:var(--card2);border:1px solid var(--line);min-width:180px}
+.bubble.ai{background:#fff;border:1px solid var(--line);min-width:180px}
 .bubble .meta{font-size:.72rem;color:var(--dim);margin-top:8px;display:flex;gap:10px;align-items:center;justify-content:flex-end}
 .bubble.user .meta{justify-content:flex-start}
 .status{font-size:.78rem;color:var(--dim);margin-bottom:6px}
@@ -2045,6 +2052,20 @@ def log():
         e["when"] = fmt_ts(e["ts"])
         e["cls"] = {"error": "err", "info": "ok", "debug": ""}.get(e.get("level"), "")
     return render(render_template_string(LOG_TMPL, events=events, show_debug=show_debug))
+
+
+@app.route("/fonts/<name>")
+def fonts(name):
+    if name not in ("geist.woff2", "geist-mono.woff2"):
+        return Response("not found", status=404)
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", name)
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return Response("not found", status=404)
+    return Response(data, mimetype="font/woff2",
+                    headers={"Cache-Control": "public, max-age=2592000"})
 
 
 @app.route("/healthz")
