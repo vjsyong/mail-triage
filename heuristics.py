@@ -275,7 +275,7 @@ def build_examples(category, source="tags", limit=500, exclude=None):
     return examples, len(pos)
 
 
-def dataset_for(h, limit=1200):
+def dataset_for(h, limit=2000):
     """Reviewable dataset for a classifier: current samples + exclusion flags.
 
     Shows a superset of what training uses (excluded samples stay visible so
