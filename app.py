@@ -1289,21 +1289,31 @@ if __name__ == "__main__":
         if "--reindex" in sys.argv:
             rag.rebuild()
             print("index cleared (rebuild)", flush=True)
-        try:
-            last_remaining = None
-            for _ in range(2000):
+        tries, last_remaining, stall = 0, None, 0
+        while True:
+            try:
                 res = rag.index_pass(limit=40)
-                print(res["summary"], flush=True)
-                if res["remaining"] == 0:
-                    print("index complete", flush=True)
-                    break
-                if res["processed"] == 0 and res["remaining"] == last_remaining:
+            except Exception as exc:
+                tries += 1
+                print("index pass error (%d): %r" % (tries, exc), flush=True)
+                if tries > 8:
+                    print("index failed: too many errors", flush=True)
+                    sys.exit(1)
+                time.sleep(15)
+                continue
+            tries = 0
+            print(res["summary"], flush=True)
+            if res["remaining"] == 0:
+                print("index complete", flush=True)
+                break
+            if res["processed"] == 0 and res["remaining"] == last_remaining:
+                stall += 1
+                if stall >= 3:
                     print("index stalled (check the Log page)", flush=True)
                     sys.exit(1)
-                last_remaining = res["remaining"]
-        except Exception as exc:
-            print("index failed: %r" % exc, flush=True)
-            sys.exit(1)
+            else:
+                stall = 0
+            last_remaining = res["remaining"]
         sys.exit(0)
     worker.start()
     indexer.start()

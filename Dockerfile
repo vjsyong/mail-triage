@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY config.py store.py engine.py app.py ./
+COPY config.py store.py engine.py app.py rag.py ./
 
 ENV DATA_DIR=/data \
     UI_HOST=0.0.0.0 \
