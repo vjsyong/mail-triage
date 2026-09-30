@@ -310,6 +310,13 @@ table.tbl{width:100%;border-collapse:collapse}
 .hidden{display:none}
 pre.log{background:var(--codebg);border:1px solid var(--codebg);color:var(--codefg);padding:12px;font-size:.78rem;
 line-height:1.5;overflow:auto;max-height:70vh;white-space:pre-wrap}
+.logpanel{background:var(--codebg);border:1px solid var(--codebg);padding:12px 14px}
+.logpanel .logrow{font-size:.8rem;color:#d4d4d4;padding:2px 0;line-height:1.6}
+.logpanel .mono{background:none;border:0;padding:0;color:#8f8f8f;font-size:.78rem}
+.logpanel .badge{color:#a3a3a3;border-color:#3f3f46;background:none}
+.logpanel .badge.ok{color:#4ade80;border-color:#4ade80}
+.logpanel .badge.err{color:#f87171;border-color:#f87171}
+.logpanel .sub{color:#8f8f8f}
 .stat{display:inline-block;background:var(--panel);border:1px solid var(--panel);color:#fff;
 padding:10px 16px;margin:0 8px 8px 0;text-align:center}
 .stat b{display:block;font-size:1.4rem;letter-spacing:-.02em}
@@ -426,9 +433,9 @@ DASH_TMPL = """
 </div>
 
 <h2>Recent activity</h2>
-<div class="card">
+<div class="card logpanel">
   {% for e in events %}
-  <div class="sub"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> {{ e.message }}</div>
+  <div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> {{ e.message }}</div>
   {% else %}<div class="sub">No events yet.</div>{% endfor %}
 </div>
 """
@@ -2033,9 +2040,9 @@ def settings_test_llm():
 LOG_TMPL = """
 <h2>Activity log</h2>
 <p class="sub">{% if show_debug %}<a href="{{ url_for('log') }}">hide debug lines</a>{% else %}<a href="{{ url_for('log', debug='1') }}">show debug lines</a>{% endif %}</p>
-<div class="card">
+<div class="card logpanel">
   {% for e in events %}
-  <div class="sub"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> {{ e.message }}</div>
+  <div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> {{ e.message }}</div>
   {% else %}<div class="sub">No events yet.</div>{% endfor %}
 </div>
 """
