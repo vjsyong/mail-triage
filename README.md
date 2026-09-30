@@ -112,6 +112,19 @@ model + dimension).
 - Scope + rerank toggle: Settings -> "Build the semantic search index".
 - Quality harness: `tests/retrieval_eval.py` + `tests/eval_queries.json`
   (recall@1/5/10 and MRR for fts / vector / hybrid / hybrid+rerank).
+- Measured on this mailbox (48 labelled queries over the full 3,550-message index):
+
+```
+mode                R@1     R@5     R@10     MRR    ms/q
+fts               79.2%   91.7%    95.8%   0.853     13
+vector            89.6%   97.9%   100.0%   0.926     95
+hybrid            93.8%   97.9%    97.9%   0.951    101
+hybrid+rerank     89.6%  100.0%   100.0%   0.941    250
+```
+
+  Hybrid is the best single configuration; with rerank, every query's target
+  lands in the top 5 (what the assistant actually reads). Rerank can be turned
+  off in Settings for lower latency.
 
 ## Safety model
 
