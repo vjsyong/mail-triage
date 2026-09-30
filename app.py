@@ -825,10 +825,13 @@ MESSAGES_TMPL = """
       {% endfor %}
     </div>
     <div class="row" style="margin-top:8px">
-      <span class="sub">{{ total }} message{{ 's' if total != 1 else '' }} · page {{ page }} of {{ pages }} · {{ per }} per page</span>
+      <span class="sub">{{ total }} message{{ 's' if total != 1 else '' }} · page {{ page }} of {{ pages }}</span>
       {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per) }}">← Newer</a>{% endif %}
       {% if page < pages %}<a class="btn small primary" href="{{ url_for('messages', f=filt, page=page+1, per=per) }}">Older →</a>{% endif %}
       {% if page < pages %}<a class="btn small" href="{{ url_for('messages', f=filt, page=pages, per=per) }}">Last »</a>{% endif %}
+      <span class="sub">per page:
+        {% for n in [50, 100, 250, 500] %}<a class="{{ 'primary ' if per==n else '' }}btn small" style="padding:.1rem .45rem" href="{{ url_for('messages', f=filt, page=1, per=n) }}">{{ n }}</a>{% endfor %}
+      </span>
     </div>
     <table class="tbl" style="margin-top:8px">
       <tr>

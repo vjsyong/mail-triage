@@ -37,6 +37,10 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
   is expressed. Guards belong at the top (⤒ button; assistant proposals land there
   automatically when the rule asks for it). Values of 3 characters or fewer match
   whole words only ("PO" won't fire on "support"), so short tokens are safe.
+- **Message list** (Messages page): newest mail first, the whole mailbox paginated
+  (100 per page by default, `per` up to 500; pager shows totals, Newer/Older/Last),
+  with the one-line LLM summary rendered under each subject so you can see what a
+  message is at a glance.
 - **Rule assistant** (Assistant page): a streaming, tool-calling chat. It shows its
   thinking and every tool step live; it can search your whole mailbox history (live
   IMAP through the proxy — not just what the app has indexed), read messages, create
