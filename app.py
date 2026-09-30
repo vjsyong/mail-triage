@@ -597,7 +597,10 @@ def classifiers():
 def classifier_toggle(hid):
     row = store.get_heuristic(hid)
     if row:
-        store.update_heuristic(hid, enabled=0 if row.get("enabled") else 1)
+        new_state = 0 if row.get("enabled") else 1
+        store.update_heuristic(hid, enabled=new_state)
+        store.log_event("info", "classifier #%d '%s' %s (by ui)"
+                        % (hid, row.get("name") or "", "enabled" if new_state else "disabled"))
     return redirect(url_for("classifiers"))
 
 
@@ -613,6 +616,8 @@ def classifier_retrain(hid):
                 min_confidence=float(row.get("min_confidence") or 0.8), created_by="ui",
                 exclude=heuristics.heuristic_excluded(row))
             store.update_heuristic(hid, model=json.dumps(model), stats=json.dumps(new_stats))
+            store.log_event("info", "classifier #%d '%s' retrained (by ui, %d sample(s))"
+                            % (hid, row.get("name") or "", new_stats.get("trained_label_count") or 0))
             flash("Classifier '%s' retrained." % (row.get("name") or hid), "ok")
         except Exception as exc:
             flash("Retrain failed: %s" % exc, "err")
@@ -621,7 +626,11 @@ def classifier_retrain(hid):
 
 @app.route("/classifiers/<int:hid>/delete", methods=["POST"])
 def classifier_delete(hid):
+    row = store.get_heuristic(hid)
     store.delete_heuristic(hid)
+    if row:
+        store.log_event("info", "classifier #%d '%s' deleted (by ui)" % (hid, row.get("name") or ""))
+
     return redirect(url_for("classifiers"))
 
 

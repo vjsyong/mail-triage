@@ -2103,6 +2103,9 @@ class AssistantAgent:
         view = heuristics.view(store.get_heuristic(hid) or {})
         weak = " (labels auto-tagged by the LLM - review the dataset to prune failures)" \
             if stats.get("weak_labels") else ""
+        store.log_event("info", "classifier #%d '%s' %s (by assistant, %d sample(s), %d negative)"
+                        % (hid, view.get("name") or "", "retrained" if row else "trained",
+                           stats.get("trained_label_count") or 0, stats.get("negatives") or 0))
         return {"ok": True,
                 "summary": "classifier #%d %r %s on %d example(s) (%d negative)%s - %s"
                            % (hid, view.get("name"), verb, stats.get("trained_label_count") or 0,
@@ -2130,6 +2133,7 @@ class AssistantAgent:
                     "result": {"error": "classifier id not found"}}
         if action == "delete":
             store.delete_heuristic(hid)
+            store.log_event("info", "classifier #%d '%s' deleted (by assistant)" % (hid, row.get("name") or ""))
         elif action == "disable":
             store.update_heuristic(hid, enabled=0)
         elif action == "enable":

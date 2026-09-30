@@ -281,6 +281,10 @@ def dataset_for(h, limit=1200):
     Shows a superset of what training uses (excluded samples stay visible so
     they can be re-included). Only the first 300 positives / 250 negatives are
     returned for display; totals are included."""
+    if not h:
+        return {"source": "tags", "category": "", "weak": False,
+                "positives": [], "negatives": [], "pos_total": 0, "neg_total": 0,
+                "pos_excluded": 0, "neg_excluded": 0}
     try:
         stats = json.loads(h.get("stats") or "{}")
     except (TypeError, ValueError):
