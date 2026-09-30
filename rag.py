@@ -429,7 +429,9 @@ def search(query, k=8, folder=None, since=None, rerank_on=None, mode="hybrid"):
     if want_rerank and len(rows) > 1:
         try:
             head = rows[:RERANK_TOP]
-            rr = rerank(q, [r["excerpt"] for r in head])
+            chunk_texts = {c["id"]: c["text"] for c in chunks}
+            rr = rerank(q, [(chunk_texts.get(r["chunk_id"]) or r["excerpt"])[:2400]
+                            for r in head])
             if rr:
                 by_index = {item["index"]: item.get("score", 0.0) for item in rr}
                 for i, r in enumerate(head):
