@@ -55,10 +55,10 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
 - **Classify on demand** (Messages page): tick rows and "Classify selected", or run
   "Classify all unclassified" as a background job (newest first, progress + Stop;
   files mail per your llm_apply setting). The batch job classifies several messages
-  in parallel against the local model (Settings -> "Classify concurrency", default 6)
-  and each message keeps the model's reasoning, collapsible on its page. Message
-  pages also have a single "Classify with LLM" button and "File to <suggested
-  folder>".
+  in parallel against the local model (Settings -> "Classify concurrency", default 8,
+  cap 16; measured ~41 msg/min at 16 on the 3090) and each message keeps the model's
+  reasoning, collapsible on its page. Message pages also have a single "Classify with
+  LLM" button and "File to <suggested folder>".
 - **Tag by hand, learn rules**: tick rows on Messages and give them a tag (Receipt,
   Action, ...). "Learn rules from tags" asks the local LLM to infer filter rules from
   your labels and shows them for one-click approval. The assistant can also read your
