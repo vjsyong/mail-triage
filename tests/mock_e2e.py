@@ -919,6 +919,30 @@ def main():
           n == 1 and row["status"] == "queued" and store.llm_fail_count(row["id"]) == 0)
 
     section("T12 RAG: indexer, chunking, folder exclusions")
+    uid_probe = add_msg(state, "probe@x.com", "Half index probe", "probe body text", "hx@x")
+    mc = engine.MailClient().connect()
+    uv_inbox = mc.select("INBOX")
+    saved_embed = config.EMBED_BASE_URL
+    config.EMBED_BASE_URL = "http://127.0.0.1:1"
+    probe_failed = False
+    try:
+        rag._index_one(mc, "INBOX", uid_probe, uv_inbox)
+    except Exception:
+        probe_failed = True
+    config.EMBED_BASE_URL = saved_embed
+    probe_row = store.get_message_by_uid("INBOX", uid_probe, uv_inbox)
+    check("failed embed leaves no partial chunks",
+          probe_failed and probe_row is not None
+          and store.message_chunk_count(probe_row["id"]) == 0)
+    nchunks = rag._index_one(mc, "INBOX", uid_probe, uv_inbox)
+    with store.db(vec=True) as conn:
+        vcount = conn.execute(
+            "SELECT COUNT(*) FROM vec_chunks WHERE rowid IN "
+            "(SELECT id FROM chunks WHERE message_id=?)", (probe_row["id"],)).fetchone()[0]
+    check("retry after embed recovery indexes cleanly",
+          nchunks >= 1 and store.message_chunk_count(probe_row["id"]) == nchunks)
+    check("retry stored vectors too", vcount == nchunks)
+    mc.close()
     long_body = "Attendance summary for HMAW1905E. " + "The student roster lists 40 names. " * 100
     uid_long = add_msg(state, "registry@ust.hk", "Attendance report long", long_body, "lr@x")
     add_msg(state, "spam@spam.com", "You won a prize", "claim your money now", "j1@x",

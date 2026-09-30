@@ -170,18 +170,45 @@ def _index_one(mc, folder, uid, uv):
     if row is None:
         raise RuntimeError("could not record message %s uid %s" % (folder, uid))
     if store.message_chunk_count(row["id"]) > 0:
+        _repair_vectors(row["id"])
         return 0
     full = mc.fetch_full(uid)
     text = full.get("text") or row.get("snippet") or ""
     chunks = chunk_text(_header_for(row, folder), text)
     if not chunks:
         return 0
-    ids = store.add_chunks([{"message_id": row["id"], "folder": folder, "uid": uid,
-                             "seq": i, "text": c} for i, c in enumerate(chunks)])
+    # embed BEFORE inserting anything: a failed embed must leave no partial state
     vecs = embed(chunks, "document")
     _ensure_dim(len(vecs[0]))
+    ids = store.add_chunks([{"message_id": row["id"], "folder": folder, "uid": uid,
+                             "seq": i, "text": c} for i, c in enumerate(chunks)])
     store.add_vectors(list(zip(ids, vecs)))
     return len(ids)
+
+
+def _repair_vectors(message_id):
+    """Backfill vector rows for chunks that exist without vectors (partial runs)."""
+    with store.db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id, text FROM chunks WHERE message_id=? ORDER BY seq", (message_id,))]
+    if not rows:
+        return 0
+    try:
+        with store.db(vec=True) as conn:
+            q = ("SELECT rowid FROM vec_chunks WHERE rowid IN (%s)"
+                 % ",".join("?" * len(rows)))
+            have = {r[0] for r in conn.execute(q, [r["id"] for r in rows])}
+    except Exception:
+        return 0
+    missing = [r for r in rows if r["id"] not in have]
+    if not missing:
+        return 0
+    vecs = embed([r["text"] for r in missing], "document")
+    _ensure_dim(len(vecs[0]))
+    store.add_vectors([(r["id"], v) for r, v in zip(missing, vecs)])
+    store.log_event("info", "indexer: repaired %d missing vector(s) for message %s"
+                    % (len(missing), message_id))
+    return len(missing)
 
 
 def index_pass(limit=40):
@@ -291,6 +318,9 @@ class Indexer(threading.Thread):
         self.state["running"] = True
         self.state["started"] = int(time.time())
         try:
+            if not config.EMBED_BASE_URL:
+                self.state["progress"] = "embed server not configured (see .env / embed/)"
+                return
             if self.rebuild_next:
                 self.rebuild_next = False
                 rebuild()

@@ -40,6 +40,11 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
 - **LLM escalation** (Settings page): anything no rule matched gets classified into
   your categories (Action, Notification, Newsletter, Receipt, Personal, Promo by
   default). Auto-filing by category starts off; the LLM suggests until you enable it.
+- **Semantic search (RAG)**: a local embedding index over all indexed folders
+  (Qwen3-Embedding-4B on GPU 1) combined with BM25 keyword search, fused with RRF and
+  reranked with a cross-encoder. The assistant uses it for content questions ("what
+  did the landlord want?"); the dashboard has an index card with Run/Rebuild. All
+  local; nothing leaves the host.
 - **Reply templates + LLM drafting** (Messages page): pick a message, choose a
   template (or none), hit "Draft with LLM". Review, copy, or "Save to Drafts" --
   the draft lands in your Drafts folder to send from your normal client.
@@ -85,6 +90,29 @@ send); untick "Assistant may act on mail" in Settings for a dry-run. Rules are o
 proposed in chat — they go live when you click "Add rule". Each turn is capped
 (8 tool rounds, 4 calls per round) and everything is logged on the Log page.
 
+## Semantic search (RAG)
+
+`embed/` runs two HuggingFace TEI servers on the second 3090 (CDI `nvidia.com/gpu=1`;
+Gemma stays on GPU 0):
+
+```
+mail-triage-embed   :8041  Qwen/Qwen3-Embedding-4B    (dense embeddings)
+mail-triage-rerank  :8042  BAAI/bge-reranker-v2-m3    (cross-encoder rerank)
+```
+
+The app indexes every message in all folders except junk/deleted/trash/system ones:
+full body -> sentence-packed chunks (~400 tokens, each carrying a From/Date/Subject
+header) -> embeddings -> sqlite-vec (KNN) + FTS5 (BM25) inside the same `triage.db`.
+Queries hit both channels, fuse with reciprocal rank fusion (k=60), then rerank the
+top candidates. Embedding model change requires a `--reindex` (the meta table tracks
+model + dimension).
+
+- Build/refresh the index: dashboard "Index now" (resumable, folder by folder), or
+  `docker exec mail-triage python app.py --index`; `--reindex` wipes and rebuilds.
+- Scope + rerank toggle: Settings -> "Build the semantic search index".
+- Quality harness: `tests/retrieval_eval.py` + `tests/eval_queries.json`
+  (recall@1/5/10 and MRR for fts / vector / hybrid / hybrid+rerank).
+
 ## Safety model
 
 - It **never deletes mail**. Worst case it files something into a folder.
@@ -103,8 +131,10 @@ docker logs -f mail-triage            # app live logs
 docker compose up -d --build          # rebuild + start the app after code changes
 docker restart mail-triage            # simple app restart
 docker exec mail-triage python app.py --check   # read-only IMAP health check
-.venv/bin/python tests/mock_e2e.py    # 92-check E2E suite (mock IMAP + mock LLM,
-                                      # including an SSE-streaming mock of the agent)
+docker exec mail-triage python app.py --index   # run the semantic indexer (resumable)
+docker exec mail-triage python app.py --reindex # wipe + rebuild the search index
+.venv/bin/python tests/mock_e2e.py    # 116-check E2E suite (mock IMAP + mock LLM,
+                                      # mock TEI embed/rerank; SSE streaming agent)
 
 cd gemma                              # the model server
 docker compose ps && docker compose logs -f
