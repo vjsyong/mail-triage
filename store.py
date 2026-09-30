@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "llm_apply": False,           # act on LLM category -> folder mapping (off until trusted)
     "max_llm_per_hour": 40,
     "llm_batch_per_cycle": 5,
+    "classify_concurrency": 6,    # parallel LLM requests for batch classification
     "categories": ["Action", "Notification", "Newsletter", "Receipt", "Personal", "Promo"],
     "category_folders": {
         "Notification": "Notifications",
@@ -68,6 +69,7 @@ CREATE TABLE IF NOT EXISTS messages (
     llm_confidence REAL DEFAULT NULL,
     llm_summary TEXT DEFAULT '',
     llm_reason TEXT DEFAULT '',
+    llm_thinking TEXT DEFAULT '',
     llm_needs_reply INTEGER DEFAULT NULL,
     llm_suggested_folder TEXT DEFAULT '',
     processed_at INTEGER,
@@ -128,6 +130,8 @@ def _migrate(conn):
         _backfill_date_ts(conn)
     if "llm_reason" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN llm_reason TEXT DEFAULT ''")
+    if "llm_thinking" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN llm_thinking TEXT DEFAULT ''")
     if "user_tag" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN user_tag TEXT NOT NULL DEFAULT ''")
 

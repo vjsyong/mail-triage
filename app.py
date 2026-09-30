@@ -801,7 +801,7 @@ MESSAGES_TMPL = """
 <div class="card">
   <div class="row">
     <span class="badge acc">classifying…</span>
-    <span class="sub">{{ classify_state.done }}/{{ classify_state.total }}{% if classify_state.failed %} · {{ classify_state.failed }} failed{% endif %}{% if classify_state.current %} · now: {{ classify_state.current }}{% endif %}</span>
+    <span class="sub">{{ classify_state.done }}/{{ classify_state.total }}{% if classify_state.failed %} · {{ classify_state.failed }} failed{% endif %}{% if classify_state.concurrency %} · {{ classify_state.concurrency }} at a time{% endif %}{% if classify_state.current %} · now: {{ classify_state.current }}{% endif %}</span>
     <form class="inline" method="post" action="{{ url_for('classify_stop') }}"><button class="btn small danger" type="submit">Stop</button></form>
   </div>
 </div>
@@ -1004,6 +1004,7 @@ MESSAGE_TMPL = """
     {% if m.llm_needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
   </div>
   {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_reason %} · why: {{ m.llm_reason }}{% endif %}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
+  {% if m.llm_thinking %}<details class="sub" style="margin:4px 0"><summary style="cursor:pointer">classifier thinking</summary><pre class="mono" style="white-space:pre-wrap;font-size:.8rem;color:var(--dim);margin:6px 0">{{ m.llm_thinking }}</pre></details>{% endif %}
   <div class="row" style="margin:10px 0 2px">
     <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
       <button class="btn small primary" type="submit">{{ 'Re-classify with LLM' if m.llm_category else 'Classify with LLM' }}</button></form>
@@ -1570,6 +1571,9 @@ SETTINGS_TMPL = """
     <div><label>Watched folders (comma separated)</label><input type="text" name="watch_folders" value="{{ s.watch_folders|join(', ') }}"></div>
     <div><label>Your name (for drafts)</label><input type="text" name="my_name" value="{{ s.my_name }}"></div>
   </div>
+  <div class="grid2">
+    <div><label>Classify concurrency <span class="sub">(parallel LLM requests, 1-12)</span></label><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="12"></div>
+  </div>
   <label class="row" style="color:var(--fg)"><input type="checkbox" name="rules_apply" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.rules_apply else '' }}> Apply rule actions for real (uncheck = dry-run, suggests only)</label>
   <label class="row" style="color:var(--fg)"><input type="checkbox" name="llm_suggest" value="1" style="width:auto;margin-right:8px"
@@ -1618,6 +1622,11 @@ def settings():
     if request.method == "POST":
         try:
             store.set_setting("poll_interval", max(15, int(request.form.get("poll_interval", 90))))
+        except ValueError:
+            pass
+        try:
+            store.set_setting("classify_concurrency",
+                              max(1, min(12, int(request.form.get("classify_concurrency", 6)))))
         except ValueError:
             pass
         try:

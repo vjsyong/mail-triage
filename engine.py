@@ -1,6 +1,7 @@
 """Mail Triage engine: IMAP through the email-oauth2-proxy, rule matching,
 LLM escalation, and the background worker."""
 from collections import Counter
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import calendar
 import email
@@ -170,6 +171,9 @@ def build_draft_message(msg, body_text, user):
 
 # ---------------------------------------------------------------- IMAP
 
+_FOLDER_LOCK = threading.Lock()  # serialises folder CREATE across worker threads
+
+
 class MailClient:
     """Thin IMAP wrapper. Connects to the proxy with a PLAIN connection (the proxy
     performs OAuth 2.0 and secures the far side)."""
@@ -223,11 +227,12 @@ class MailClient:
         return None
 
     def ensure_folder(self, folder):
-        if folder in self.folders():
-            return
-        typ, dat = self.M.create('"%s"' % folder)
-        if typ != "OK":
-            raise RuntimeError("CREATE %s failed: %s %s" % (folder, typ, dat))
+        with _FOLDER_LOCK:  # CREATE races between classify worker threads
+            if folder in self.folders():
+                return
+            typ, dat = self.M.create('"%s"' % folder)
+            if typ != "OK":
+                raise RuntimeError("CREATE %s failed: %s %s" % (folder, typ, dat))
         self.folders(refresh=True)
 
     # ---- mailboxes / messages
@@ -400,26 +405,32 @@ class LLMClient:
                              config.LLM_FALLBACK_API_KEY,
                              config.LLM_FALLBACK_MODEL or config.LLM_MODEL)
 
-    def _chat(self, system, user, json_mode=True, history=None):
+    def _chat(self, system, user, json_mode=True, history=None, max_tokens=None,
+              full=False, thinking=False):
         convo = list(history or []) + [{"role": "user", "content": user}]
-        return self._chat_convo(system, convo, json_mode=json_mode)
+        return self._chat_convo(system, convo, json_mode=json_mode, max_tokens=max_tokens,
+                                full=full, thinking=thinking)
 
-    def _chat_convo(self, system, convo, json_mode=True):
+    def _chat_convo(self, system, convo, json_mode=True, max_tokens=None, full=False,
+                    thinking=False):
         try:
-            return self._chat_once(self.base, self.key, self.model, system, convo, json_mode)
+            return self._chat_once(self.base, self.key, self.model, system, convo,
+                                   json_mode, max_tokens, full, thinking)
         except Exception as primary_exc:
             if not self.fallback:
                 raise
             fb_base, fb_key, fb_model = self.fallback
             try:
-                out = self._chat_once(fb_base, fb_key, fb_model, system, convo, json_mode)
+                out = self._chat_once(fb_base, fb_key, fb_model, system, convo,
+                                      json_mode, max_tokens, full, thinking)
             except Exception:
                 raise primary_exc
             store.log_event("info", "LLM: primary '%s' failed (%s) - served by fallback '%s'"
                             % (self.model, type(primary_exc).__name__, fb_model))
             return out
 
-    def _chat_once(self, base, key, model, system, convo, json_mode=True):
+    def _chat_once(self, base, key, model, system, convo, json_mode=True,
+                   max_tokens=None, full=False, thinking=False):
         if not key:
             raise RuntimeError("LLM_API_KEY is not configured for %s" % base)
         payload = {
@@ -427,8 +438,12 @@ class LLMClient:
             "temperature": 0,
             "messages": [{"role": "system", "content": system}] + convo,
         }
+        if max_tokens:
+            payload["max_tokens"] = int(max_tokens)
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if thinking:
+            payload["chat_template_kwargs"] = {"enable_thinking": True}
         r = None
         for attempt in (1, 2):
             r = requests.post(base + "/chat/completions", json=payload,
@@ -439,7 +454,8 @@ class LLMClient:
                 continue
             r.raise_for_status()
             data = r.json()
-            return data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            return message if full else message["content"]
         if r is not None:
             r.raise_for_status()
         raise RuntimeError("LLM request failed")
@@ -555,13 +571,23 @@ class LLMClient:
         user = ("From: %s\nTo: %s\nSubject: %s\nDate: %s\n\n%s"
                 % (msg.get("from_addr", ""), msg.get("to_addr", ""), msg.get("subject", ""),
                    msg.get("date", ""), (msg.get("snippet") or "")[:1500]))
-        content = self._chat(system, user, json_mode=True)
+        # Thinking is ON for classification (user's call): the reasoning streams in
+        # `message.reasoning` (a separate channel from content, so JSON mode still
+        # holds). The distilled reason + summary land in the stored fields.
+        message = self._chat(system, user, json_mode=True, max_tokens=1500,
+                             full=True, thinking=True)
+        content = (message.get("content") or "") if isinstance(message, dict) else (message or "")
+        thinking = ""
+        if isinstance(message, dict):
+            thinking = message.get("reasoning") or message.get("reasoning_content") or ""
         m = re.search(r"\{.*\}", content or "", re.S)
         if not m:
             raise RuntimeError("LLM returned no JSON: %r" % (content or "")[:200])
         result = json.loads(m.group(0))
         if not isinstance(result, dict) or not result.get("category"):
             raise RuntimeError("LLM JSON missing category: %r" % result)
+        if thinking:
+            result["_thinking"] = str(thinking)[:6000]
         return result
 
     def draft_reply(self, msg, body_text, template, settings):
@@ -718,6 +744,7 @@ def classify_and_store(msg, settings, mc=None):
         "llm_confidence": conf,
         "llm_summary": str(res.get("summary", ""))[:200],
         "llm_reason": str(res.get("reason", ""))[:200],
+        "llm_thinking": str(res.get("_thinking") or "")[:6000],
         "llm_needs_reply": 1 if res.get("needs_reply") else 0,
         "llm_suggested_folder": folder,
         "status": "classified",
@@ -876,7 +903,8 @@ class ClassifyJob(threading.Thread):
         self.stop_flag = threading.Event()
         self.queue = []
         self._skip = set()
-        self._mc = None
+        self._tls = threading.local()   # per-pool-thread IMAP connection
+        self._conns = []
         self.state = {"running": False, "done": 0, "failed": 0, "total": 0,
                       "current": "", "last_error": None, "started": 0}
 
@@ -904,9 +932,19 @@ class ClassifyJob(threading.Thread):
                 store.log_event("error", "classify job crashed: %r" % exc)
 
     def _mail(self):
-        if self._mc is None:
-            self._mc = MailClient().connect()
-        return self._mc
+        """One IMAP connection per pool thread (imaplib is not thread-safe)."""
+        mc = getattr(self._tls, "mc", None)
+        if mc is None:
+            mc = MailClient().connect()
+            self._tls.mc = mc
+            with self.lock:
+                self._conns.append(mc)
+        return mc
+
+    def _classify_one(self, msg, settings):
+        res = classify_and_store(msg, settings, mc=self._mail())
+        store.add_llm_log(msg["id"], True)
+        return res
 
     def _run_job(self):
         with self.lock:
@@ -914,54 +952,74 @@ class ClassifyJob(threading.Thread):
             self.queue = []
         self._skip = set()
         settings = store.all_settings()
+        concurrency = max(1, min(12, int(settings.get("classify_concurrency") or 6)))
         done = failed = 0
-        self.state.update({"running": True, "done": 0, "failed": 0,
+        self.state.update({"running": True, "done": 0, "failed": 0, "concurrency": concurrency,
                            "started": int(time.time()), "last_error": None, "current": ""})
         self.state["total"] = len(ids) if ids else store.unclassified_count()
         try:
             pending = None
             if ids:
                 pending = [m for m in (store.get_message(i) for i in ids) if m]
-            while not self.stop_flag.is_set():
-                msg = (pending.pop(0) if pending else None) if pending is not None \
-                    else store.unclassified_next(skip=self._skip)
-                if msg is None:
-                    break
-                self.state["current"] = (msg.get("subject") or "")[:70]
-                try:
-                    res = classify_and_store(msg, settings, mc=self._mail())
-                    store.add_llm_log(msg["id"], True)
-                    done += 1
-                    store.log_event("info", "classify: '%s' → %s%s"
-                                    % ((msg.get("subject") or "")[:50], res.get("category"),
-                                       (" (moved to %s)" % res["_moved_to"]) if res.get("_moved_to") else ""))
-                except Exception as exc:
-                    failed += 1
-                    self._skip.add(msg["id"])
-                    store.add_llm_log(msg["id"], False, repr(exc))
-                    if store.llm_fail_count(msg["id"]) >= 3:
-                        store.update_message(msg["id"], status="error")
-                        store.log_event("error", "classify: '%s' parked after repeated failures"
-                                        % (msg.get("subject") or "")[:50])
-                    else:
-                        store.log_event("error", "classify: '%s' failed (retry later): %r"
-                                        % ((msg.get("subject") or "")[:50], exc))
-                self.state["done"] = done
-                self.state["failed"] = failed
-                if not self.stop_flag.is_set():
-                    time.sleep(0.05)
+            exhausted = False
+
+            def next_msg():
+                if pending is not None:
+                    return pending.pop(0) if pending else None
+                return store.unclassified_next(skip=self._skip)
+
+            with ThreadPoolExecutor(max_workers=concurrency,
+                                    thread_name_prefix="classify") as pool:
+                inflight = {}
+                while inflight or not exhausted:
+                    while (not exhausted and not self.stop_flag.is_set()
+                           and len(inflight) < concurrency):
+                        msg = next_msg()
+                        if msg is None:
+                            exhausted = True
+                            break
+                        self._skip.add(msg["id"])  # claimed: in flight counts as skip
+                        self.state["current"] = "%s%s" % (
+                            (msg.get("subject") or "")[:56],
+                            (" (+%d more)" % len(inflight)) if inflight else "")
+                        inflight[pool.submit(self._classify_one, msg, settings)] = msg
+                    if not inflight:
+                        break
+                    done_set, _ = wait(list(inflight), timeout=0.5,
+                                       return_when=FIRST_COMPLETED)
+                    for fut in done_set:
+                        msg = inflight.pop(fut)
+                        try:
+                            res = fut.result()
+                            done += 1
+                            store.log_event("info", "classify: '%s' → %s%s"
+                                            % ((msg.get("subject") or "")[:50], res.get("category"),
+                                               (" (moved to %s)" % res["_moved_to"]) if res.get("_moved_to") else ""))
+                        except Exception as exc:
+                            failed += 1
+                            store.add_llm_log(msg["id"], False, repr(exc))
+                            if store.llm_fail_count(msg["id"]) >= 3:
+                                store.update_message(msg["id"], status="error")
+                                store.log_event("error", "classify: '%s' parked after repeated failures"
+                                                % (msg.get("subject") or "")[:50])
+                            else:
+                                store.log_event("error", "classify: '%s' failed (retry later): %r"
+                                                % ((msg.get("subject") or "")[:50], exc))
+                    self.state["done"] = done
+                    self.state["failed"] = failed
             if self.stop_flag.is_set():
                 store.log_event("info", "classify: stopped after %d message(s)" % done)
             else:
                 store.log_event("info", "classify: finished - %d classified, %d failed"
                                 % (done, failed))
         finally:
-            if self._mc is not None:
+            with self.lock:
+                conns, self._conns = self._conns, []
+            for mc in conns:
                 try:
-                    self._mc.close()
+                    mc.close()
                 except Exception:
                     pass
-                self._mc = None
             self.state["running"] = False
             self.state["current"] = ""
 

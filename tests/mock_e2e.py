@@ -401,6 +401,8 @@ class LLMHandler(BaseHTTPRequestHandler):
         if payload.get("stream"):
             self.stream_reply(payload, system, user)
             return
+        is_classify = False
+        reasoning = ""
         if "write email replies" in system:
             content = FAKE_DRAFT
         elif "manually tagged" in system:
@@ -415,6 +417,7 @@ class LLMHandler(BaseHTTPRequestHandler):
         elif "connectivity test" in system:
             content = "ok"
         else:
+            is_classify = True
             t = user.lower()
             if "permfail" in t:
                 self.send_response(500)
@@ -429,6 +432,7 @@ class LLMHandler(BaseHTTPRequestHandler):
                 cat, conf = "Personal", 0.8
             else:
                 cat, conf = "Action", 0.85
+            reasoning = "mock thinking about " + cat
             content = json.dumps({
                 "category": cat,
                 "needs_reply": ("lunch" in t or "budget" in t),
@@ -436,12 +440,24 @@ class LLMHandler(BaseHTTPRequestHandler):
                 "summary": "mock: " + cat,
                 "reason": "because it says " + cat,
             })
-        body = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+        if is_classify:
+            with self.server.llm_lock:
+                self.server.inflight += 1
+                if self.server.inflight > self.server.max_inflight:
+                    self.server.max_inflight = self.server.inflight
+            time.sleep(0.05)  # widen the window so parallel workers overlap
+        message = {"content": content}
+        if reasoning:
+            message["reasoning"] = reasoning
+        body = json.dumps({"choices": [{"message": message}]}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        if is_classify:
+            with self.server.llm_lock:
+                self.server.inflight -= 1
 
     # ---- streaming (assistant agent) --------------------------------------
 
@@ -637,6 +653,9 @@ def main():
     threading.Thread(target=imap_server.serve_forever, daemon=True).start()
 
     llm_server = ThreadingHTTPServer(("127.0.0.1", 0), LLMHandler)
+    llm_server.llm_lock = threading.Lock()
+    llm_server.inflight = 0
+    llm_server.max_inflight = 0
     llm_server.calls = []
     llm_server.daemon_threads = True
     llm_port = llm_server.server_address[1]
@@ -1185,6 +1204,33 @@ def main():
           r.status_code == 302 and store.list_rules()[0]["id"] == mover_id)
     store.delete_rule(guard_id)
     store.delete_rule(mover_id)
+
+    section("T19 batch classify: parallel workers + thinking")
+    store.set_setting("classify_concurrency", 4)
+    b_uids = [add_msg(state, "batch%d@x.com" % i, "Batch newsletter item %d" % i,
+                      "weekly deals inside", "batch%d@x" % i) for i in range(6)]
+    rag.index_pass(limit=200)
+    rows_b = [r for r in store.messages(limit=2000) if r["uid"] in b_uids]
+    llm_server.max_inflight = 0
+    job = engine.ClassifyJob()
+    job.trigger([r["id"] for r in rows_b])
+    job._run_job()
+    check("parallel batch classified every message",
+          job.state["done"] == len(rows_b) and job.state["failed"] == 0)
+    check("batch state reports the concurrency", job.state.get("concurrency") == 4)
+    check("LLM saw overlapping classify requests", llm_server.max_inflight >= 2)
+    rowb0 = store.get_message(rows_b[0]["id"])
+    check("thinking stored on the row", "mock thinking about" in (rowb0["llm_thinking"] or ""))
+    r = client.get("/messages/%d" % rows_b[0]["id"])
+    check("message page shows classifier thinking",
+          b"classifier thinking" in r.data and b"mock thinking about" in r.data)
+    c19 = add_msg(state, "t19@x.com", "Invoice for T19", "invoice attached", "t19@x")
+    rag.index_pass(limit=200)
+    rowt = [r for r in store.messages(limit=2000) if r["uid"] == c19][0]
+    r = client.post("/messages/%d/classify" % rowt["id"])
+    rt = store.get_message(rowt["id"])
+    check("single classify stores thinking",
+          "mock thinking about Receipt" in (rt["llm_thinking"] or ""))
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
