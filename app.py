@@ -10,19 +10,35 @@ Run:  python app.py            (serves the UI and starts the background worker)
 """
 import json
 import os
+import re
 import sys
 import time
+from html import escape as html_escape
 
 from flask import Flask, Response, flash, jsonify, redirect, render_template_string, request, url_for
 
 import config
 import engine
+import rag
 import store
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("APP_SECRET", "mail-triage-local")
 
 worker = engine.Worker()
+indexer = rag.Indexer()
+
+MSG_REF_RE = re.compile(r"\[msg:(\d+)\]")
+
+
+def linkify(text):
+    """Escape text, then turn [msg:123] references into links to the message page."""
+    out = html_escape(text or "")
+    return MSG_REF_RE.sub(
+        lambda m: '<a href="/messages/%s">[msg:%s]</a>' % (m.group(1), m.group(1)), out)
+
+
+app.jinja_env.globals["linkify"] = linkify
 
 HKT = 8 * 3600
 
@@ -59,6 +75,24 @@ def stats():
             "errors": one("SELECT COUNT(*) FROM messages WHERE status='error'"),
             "rules": one("SELECT COUNT(*) FROM rules WHERE enabled=1"),
         }
+
+
+def index_status():
+    st = dict(indexer.state)
+    st["last_ok_r"] = rel_time(st.get("last_ok"))
+    try:
+        s = rag.index_stats()
+        st["messages"] = s["messages"]
+        st["chunks"] = s["chunks"]
+        ov = store.index_overview()
+        st["folders_done"] = sum(1 for r in ov if r.get("status") == "done")
+        st["folders_total"] = len(ov)
+    except Exception:
+        st.setdefault("messages", 0)
+        st.setdefault("chunks", 0)
+        st.setdefault("folders_done", 0)
+        st.setdefault("folders_total", 0)
+    return st
 
 
 def summarize_conditions(rule):
@@ -213,6 +247,24 @@ DASH_TMPL = """
     <a href="{{ url_for('settings') }}">change</a>
   </div>
 </div>
+
+<h2>Search index <span class="sub">— semantic search over the whole archive</span></h2>
+<div class="card">
+  <div class="spread">
+    <div class="sub">
+      {% if ix.running %}<span class="badge acc">indexing…</span> {{ ix.progress }}
+      {% elif ix.last_error %}<span class="badge err">indexer error</span> <span class="mono">{{ ix.last_error }}</span>
+      {% elif ix.chunks %}<span class="badge ok">ready</span>
+      {% else %}<span class="badge warn">not built yet</span>{% endif %}
+      <br>{{ ix.messages }} messages · {{ ix.chunks }} chunks indexed · folders {{ ix.folders_done }}/{{ ix.folders_total }} complete{% if ix.last_ok %} · last run {{ ix.last_ok_r }}{% endif %}
+    </div>
+    <div class="row" style="white-space:nowrap">
+      <form class="inline" method="post" action="{{ url_for('index_run') }}"><button class="btn" type="submit" {{ 'disabled' if ix.running else '' }}>Index now</button></form>
+      <form class="inline" method="post" action="{{ url_for('index_rebuild') }}" onsubmit="return confirm('Rebuild the search index from scratch? Mail is untouched.');"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Rebuild</button></form>
+    </div>
+  </div>
+</div>
+{% if ix.running %}<script>setTimeout(function(){location.reload();}, 8000);</script>{% endif %}
 {% if st.errors %}
 <div class="card">
   <div class="spread">
@@ -271,7 +323,7 @@ def dashboard():
         e["cls"] = {"error": "err", "info": "ok", "debug": ""}.get(e.get("level"), "")
     return render(render_template_string(
         DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
-        settings=store.all_settings()))
+        settings=store.all_settings(), ix=index_status()))
 
 
 @app.route("/check", methods=["POST"])
@@ -286,6 +338,20 @@ def retry_errors():
     n = store.retry_parked_errors()
     worker.trigger()
     flash("Re-queued %d message(s) for classification." % n, "ok")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/index/run", methods=["POST"])
+def index_run():
+    indexer.trigger()
+    flash("Indexing started — progress shows on the dashboard and the Log page.", "ok")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/index/rebuild", methods=["POST"])
+def index_rebuild():
+    indexer.trigger(rebuild=True)
+    flash("Rebuilding the search index from scratch — mail itself is untouched.", "ok")
     return redirect(url_for("dashboard"))
 
 
@@ -739,7 +805,7 @@ ASSISTANT_TMPL = r"""
           {% endfor %}
         </div>
         {% endif %}
-        <div style="white-space:pre-wrap">{{ m.content }}</div>
+        <div style="white-space:pre-wrap">{{ linkify(m.content)|safe }}</div>
         {% for p in m.proposals_list %}
         <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
           <div class="spread">
@@ -766,12 +832,12 @@ ASSISTANT_TMPL = r"""
     {% endif %}
   {% endfor %}
 {% else %}
-  <div class="sub">Ask about your mail, or describe the sorting you want. The assistant searches your mailbox for real — the app's index <i>and</i> the full history through the proxy — can create folders and move or flag messages, and proposes rules you approve with one click. Its thinking and every tool step stream live below. Examples:</div>
+  <div class="sub">Ask anything about your mail — the assistant searches your whole archive by <b>meaning</b> (not just keywords), reads messages, can create folders and move or flag mail, and proposes rules you approve with one click. Its thinking and every tool step stream live below. Examples:</div>
   <div class="row" style="margin-top:8px">
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='What did my landlord last email me about?';return false">What did the landlord want?</a>
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Find the last invoice a vendor sent me and summarise it';return false">Find an old invoice</a>
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Search my mail for anything from the library';return false">Library mail</a>
     <a class="btn small" href="#" onclick="document.getElementById('msg').value='What rules would you suggest for my inbox?';return false">Suggest rules for me</a>
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Search my mail for anything from the library';return false">Search history (library)</a>
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Sort newsletters and marketing mail out of my inbox';return false">Sort newsletters out</a>
-    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Find the last invoice a vendor sent me and tell me what it says';return false">Find an old invoice</a>
   </div>
 {% endif %}
 <div id="live"></div>
@@ -793,6 +859,7 @@ var form=document.getElementById('aform'), ta=document.getElementById('msg'),
 if(!(window.fetch && window.ReadableStream && window.TextDecoder)) return;
 
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function linkifyText(s){ return esc(s).replace(/\[msg:(\d+)\]/g, '<a href="/messages/$1">[msg:$1]</a>'); }
 function mk(tag, cls, text){var d=document.createElement(tag); if(cls) d.className=cls; if(text!=null) d.textContent=text; return d;}
 function scrollDown(){ window.scrollTo(0, document.body.scrollHeight); }
 
@@ -887,6 +954,7 @@ function run(text){
     if(finished) return; finished = true;
     stopTimer(); phase.dataset.final='1';
     phase.textContent = ' done in ' + Math.round((Date.now()-t0)/1000) + 's';
+    if(content.textContent) content.innerHTML = linkifyText(content.textContent);
     if(proposals.length && doneMsgId != null) proposals.forEach(function(p,i){ addProposal(p, i, doneMsgId); });
     btn.disabled = false; scrollDown();
   }
@@ -1083,6 +1151,12 @@ SETTINGS_TMPL = """
     {{ 'checked' if s.llm_apply else '' }}> Auto-file mail by LLM category (uses the folder map below)</label>
   <label class="row" style="color:var(--fg)"><input type="checkbox" name="assistant_actions_apply" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.assistant_actions_apply else '' }}> Assistant may act on mail (create folders, move, flag) — uncheck = dry-run</label>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="index_enabled" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.index_enabled else '' }}> Build the semantic search index (local embeddings on GPU 1)</label>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="rerank_enabled" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.rerank_enabled else '' }}> Rerank search results with the cross-encoder (better precision, slightly slower)</label>
+  <label>Indexed folders <span class="sub">(comma separated; blank = all except Junk / Deleted / Trash / system folders)</span></label>
+  <input type="text" name="index_folders" value="{{ s.index_folders|join(', ') }}">
   <div class="grid2">
     <div><label>Max LLM calls per hour</label><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0"></div>
     <div><label>LLM classifications per check</label><input type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1"></div>
@@ -1130,6 +1204,10 @@ def settings():
         store.set_setting("llm_suggest", bool(request.form.get("llm_suggest")))
         store.set_setting("llm_apply", bool(request.form.get("llm_apply")))
         store.set_setting("assistant_actions_apply", bool(request.form.get("assistant_actions_apply")))
+        store.set_setting("index_enabled", bool(request.form.get("index_enabled")))
+        store.set_setting("rerank_enabled", bool(request.form.get("rerank_enabled")))
+        store.set_setting("index_folders",
+                          [f.strip() for f in (request.form.get("index_folders") or "").split(",") if f.strip()])
         try:
             store.set_setting("max_llm_per_hour", max(0, int(request.form.get("max_llm_per_hour", 40))))
         except ValueError:
@@ -1207,5 +1285,26 @@ if __name__ == "__main__":
     if "--check" in sys.argv:
         print(json.dumps(engine.connectivity_check(), indent=1))
         sys.exit(0)
+    if "--index" in sys.argv or "--reindex" in sys.argv:
+        if "--reindex" in sys.argv:
+            rag.rebuild()
+            print("index cleared (rebuild)", flush=True)
+        try:
+            last_remaining = None
+            for _ in range(2000):
+                res = rag.index_pass(limit=40)
+                print(res["summary"], flush=True)
+                if res["remaining"] == 0:
+                    print("index complete", flush=True)
+                    break
+                if res["processed"] == 0 and res["remaining"] == last_remaining:
+                    print("index stalled (check the Log page)", flush=True)
+                    sys.exit(1)
+                last_remaining = res["remaining"]
+        except Exception as exc:
+            print("index failed: %r" % exc, flush=True)
+            sys.exit(1)
+        sys.exit(0)
     worker.start()
+    indexer.start()
     app.run(host=config.UI_HOST, port=config.UI_PORT, threaded=True)

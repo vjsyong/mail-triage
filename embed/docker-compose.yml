@@ -1,0 +1,90 @@
+# ===========================================================================
+# Mail Triage — local embedding + reranker servers for RAG
+# ===========================================================================
+# Two HuggingFace TEI (text-embeddings-inference) instances on the SECOND
+# RTX 3090 (CDI nvidia.com/gpu=1; gemma owns GPU 0):
+#
+#   mail-triage-embed   :8041  Qwen/Qwen3-Embedding-4B   (dense embeddings)
+#   mail-triage-rerank  :8042  BAAI/bge-reranker-v2-m3   (cross-encoder rerank)
+#
+# Consumed by Mail Triage via .env:
+#   EMBED_BASE_URL=http://100.93.139.49:8041
+#   RERANK_BASE_URL=http://100.93.139.49:8042
+#
+# Usage (from this directory):
+#   docker compose up -d            # start; first boot downloads ~9 GB weights
+#   docker compose logs -f embed    # watch download / readiness
+#   docker compose stop             # free GPU 1
+#   curl -s localhost:8041/embed  -H 'Content-Type: application/json' -d '{"inputs":["hello"]}'
+#   curl -s localhost:8042/rerank -H 'Content-Type: application/json' -d '{"query":"q","texts":["a","b"]}'
+# ===========================================================================
+name: mail-triage-embed
+
+services:
+  embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.9
+    container_name: mail-triage-embed
+    restart: unless-stopped
+    ports:
+      - "8041:80"
+    volumes:
+      - ./data:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              device_ids:
+                - nvidia.com/gpu=1
+              capabilities: [gpu]
+    command:
+      - --model-id
+      - Qwen/Qwen3-Embedding-4B
+      - --dtype
+      - float16
+      - --max-batch-tokens
+      - "32768"
+      - --max-concurrent-requests
+      - "256"
+      - --huggingface-hub-cache
+      - /data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 60
+      start_period: 900s
+
+  rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.9
+    container_name: mail-triage-rerank
+    restart: unless-stopped
+    ports:
+      - "8042:80"
+    volumes:
+      - ./data:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              device_ids:
+                - nvidia.com/gpu=1
+              capabilities: [gpu]
+    command:
+      - --model-id
+      - BAAI/bge-reranker-v2-m3
+      - --dtype
+      - float16
+      - --max-batch-tokens
+      - "16384"
+      - --max-concurrent-requests
+      - "256"
+      - --huggingface-hub-cache
+      - /data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 60
+      start_period: 900s

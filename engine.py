@@ -6,6 +6,7 @@ import calendar
 import email
 import email.header
 import email.parser
+import email.policy
 import email.utils
 import html
 import imaplib
@@ -54,6 +55,81 @@ def _clean_snippet(raw):
     text = html.unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:1500]
+
+
+def html_to_text(html_text):
+    """Readable text from an HTML part (BeautifulSoup when available)."""
+    if not html_text:
+        return ""
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_text, "html.parser")
+        for tag in soup(["script", "style", "head"]):
+            tag.decompose()
+        text = soup.get_text("\n")
+    except Exception:
+        text = re.sub(r"<[^>]+>", " ", html_text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n\s*\n\s*", "\n\n", text)
+    return text.strip()
+
+
+def parse_full_message(raw, limit=20000):
+    """Parse a full RFC822 message into {"meta": ..., "text": ...} in one pass.
+
+    Prefers text/plain parts; falls back to HTML -> text; skips attachments.
+    """
+    if not raw:
+        return {"meta": {}, "text": ""}
+    try:
+        msg = email.message_from_bytes(raw, policy=email.policy.default)
+    except Exception:
+        return {"meta": {}, "text": _clean_snippet(raw)}
+
+    def hdr(name):
+        v = msg.get(name)
+        return str(v).strip() if v is not None else ""
+
+    from_disp, from_addr = email.utils.parseaddr(hdr("From"))
+    _, to_addr = email.utils.parseaddr(hdr("To"))
+    meta = {
+        "msgid": hdr("Message-ID").strip("<>"),
+        "from_addr": from_addr or from_disp,
+        "from_display": from_disp,
+        "to_addr": to_addr,
+        "subject": re.sub(r"\s+", " ", _decode_header(hdr("Subject"))).strip(),
+        "date": hdr("Date"),
+    }
+    plain, html_parts = [], []
+    try:
+        for part in msg.walk():
+            if part.is_multipart():
+                continue
+            ctype = part.get_content_type()
+            if "attachment" in str(part.get("Content-Disposition") or "").lower():
+                continue
+            if ctype in ("text/plain", "text/html"):
+                try:
+                    t = part.get_content()
+                except Exception:
+                    payload = part.get_payload(decode=True)
+                    if isinstance(payload, bytes):
+                        t = payload.decode("utf-8", "replace")
+                    else:
+                        t = str(payload or "")
+                (plain if ctype == "text/plain" else html_parts).append(t or "")
+    except Exception:
+        pass
+    text = "\n".join(plain).strip()
+    if not text and html_parts:
+        text = html_to_text("\n".join(html_parts))
+    if not text:
+        text = _clean_snippet(raw)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if limit and len(text) > limit:
+        text = text[:limit]
+    return {"meta": meta, "text": text}
 
 
 class _SafeDict(dict):
@@ -229,6 +305,11 @@ class MailClient:
         except RuntimeError:
             raw = self._fetch_literal(uid, "(BODY.PEEK[TEXT])")[:limit]
         return _clean_snippet(raw)
+
+    def fetch_full(self, uid, limit=20000):
+        """Full message in one round trip: header meta + cleaned text body."""
+        raw = self._fetch_literal(uid, "(BODY.PEEK[])")
+        return parse_full_message(raw, limit=limit)
 
     def set_flags(self, uid, op, flags):
         typ, dat = self.M.uid("STORE", str(uid), op, flags)
@@ -742,7 +823,8 @@ def save_draft(msg_id, body_text):
 ASSISTANT_SYSTEM = """You are the mail operations assistant for "Mail Triage", a local app that sorts the mailbox of %(user)s. You inspect the mailbox and act on it through tools, and you design the filter rules the app executes.
 
 How to work
-- Ground every answer with tools instead of guessing. search_messages reads the app's local index (what the background scanner has seen); search_mail runs a live IMAP search over the full mailbox, any folder, including history much older than the app. For any question about the user's mail, search first.
+- Ground every answer with tools instead of guessing. semantic_search finds mail by MEANING across every indexed folder and years of history (paraphrases welcome) — use it first for content questions ("what did the landlord want", "the trip itinerary email"). search_messages reads the app's local index; search_mail runs a live IMAP search for exact tokens or folders outside the index. For any question about the user's mail, search first.
+- Reference specific messages in your answers as [msg:ID] (the message_id from tool results); the UI turns those into links. Use read_message for the full text of anything you quote.
 - You may act directly on what the user asks for: create_folder, move_message, flag_message. Moving never deletes mail. For ongoing sorting, propose a rule with propose_rule instead (the user approves proposals with one click).
 - You cannot send mail, reply to mail, or delete mail; never claim that you did.
 - Keep searches bounded: small limits, use since/before for windows. Summarize results; never dump raw rows.
@@ -786,6 +868,12 @@ ASSISTANT_TOOLS = [
          "before": {"type": "string", "description": "YYYY-MM-DD; messages strictly before this date"},
          "unseen_only": {"type": "boolean", "description": "only unread messages"},
          "limit": {"type": "integer", "description": "max rows, default 20, max 50"}}),
+    _fn("semantic_search",
+        "Semantic search over the ENTIRE indexed mail archive (all folders, years of history). It understands meaning and paraphrases: 'the tax refund email' can find messages that never use those words. Use it FIRST for content questions; results carry message_id for read_message and are cited in answers as [msg:ID].",
+        {"query": {"type": "string", "description": "natural-language description of what to find"},
+         "limit": {"type": "integer", "description": "max results (default 8, max 20)"},
+         "folder": {"type": "string", "description": "restrict to one folder (optional)"},
+         "since": {"type": "string", "description": "YYYY-MM-DD; only messages from this date on (optional)"}}),
     _fn("read_message",
         "Read one message: headers plus the full text body. Identify it with message_id (from search_messages) OR folder + uid (from search_mail).",
         {"message_id": {"type": "integer"},
@@ -1190,6 +1278,32 @@ class AssistantAgent:
                 "result": {"folder": folder, "total_matched": total, "returned": len(messages),
                            "note": "Newest first. Use folder + uid with read_message / move_message / flag_message.",
                            "messages": messages}}
+
+    def _tool_semantic_search(self, a):
+        import rag
+        q = (a.get("query") or "").strip()
+        if not q:
+            return {"ok": False, "summary": "query is required",
+                    "result": {"error": "query is required"}}
+        try:
+            limit = max(1, min(int(a.get("limit") or 8), 20))
+        except (TypeError, ValueError):
+            limit = 8
+        res = rag.search(q, k=limit,
+                         folder=(a.get("folder") or "").strip() or None,
+                         since=(a.get("since") or "").strip() or None)
+        if not res.get("ok"):
+            return {"ok": False, "summary": res.get("error") or "search failed",
+                    "result": {"error": res.get("error")}}
+        items = [{"message_id": r["message_id"], "folder": r["folder"], "from": r["from_addr"],
+                  "subject": r["subject"], "date": r["date"], "excerpt": r["excerpt"]}
+                 for r in res["results"]]
+        return {"ok": True,
+                "summary": "%d semantic match(es): %s"
+                           % (len(items), "; ".join((i["subject"] or "")[:40] for i in items[:3])),
+                "result": {"query": q, "count": len(items),
+                           "note": "Cite as [msg:ID]; use read_message with message_id for full text.",
+                           "results": items}}
 
     def _resolve_message(self, a):
         """→ (row|None, folder, uid, error|None). Accepts message_id or

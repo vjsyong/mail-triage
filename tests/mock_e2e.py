@@ -10,7 +10,9 @@ route smoke tests.
 Usage:  .venv/bin/python tests/mock_e2e.py
 """
 import email.utils
+import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -486,6 +488,24 @@ class LLMHandler(BaseHTTPRequestHandler):
         messages = payload["messages"]
         step = sum(1 for m in messages
                    if m.get("role") == "assistant" and m.get("tool_calls"))
+        if "semantic search" in (user or "").lower():
+            self.sse_start()
+            self.delta(role="assistant")
+            if step == 0:
+                self.delta(reasoning="I will look this up with semantic_search.")
+                self.tool_delta(0, "semantic_search", {"query": "vendor invoice"}, "call_%d_0" % step)
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            elif step == 1:
+                self.delta(reasoning="The invoice is message 3; I will cite it.")
+                self.delta(content="Found it: [msg:3] - the invoice from the vendor.")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            else:
+                self.delta(content="Done.")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.sse({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 5,
+                                               "total_tokens": 10}})
+            self.sse_done()
+            return
         self.sse_start()
         self.delta(role="assistant")
         if step == 0:
@@ -512,6 +532,69 @@ class LLMHandler(BaseHTTPRequestHandler):
         self.sse({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 20,
                                            "total_tokens": 30}})
         self.sse_done()
+
+    def log_message(self, *args):
+        pass
+
+
+# ---------------------------------------------------------------- mock TEI (embed + rerank)
+
+SEM_GROUPS = [
+    ["invoice", "payment", "receipt", "budget", "refund", "paid", "money"],
+    ["lunch", "dinner", "coffee", "food", "restaurant"],
+    ["newsletter", "digest", "promo", "deals", "sale", "discount"],
+    ["student", "attendance", "class", "course", "grade", "university"],
+]
+
+
+def semantic_vec(text, dim=8):
+    """Deterministic 'semantic' embedding: keyword-group axes + hash noise."""
+    t = (text or "").lower()
+    v = [0.0] * dim
+    for i, words in enumerate(SEM_GROUPS):
+        for w in words:
+            if w in t:
+                v[i] += 1.0
+    h = hashlib.sha256(t.encode()).digest()
+    for j in range(len(SEM_GROUPS), dim):
+        v[j] = 0.02 * (h[j] / 255.0)
+    n = math.sqrt(sum(x * x for x in v)) or 1.0
+    return [x / n for x in v]
+
+
+def kw_score(q, t):
+    qw = set(re.findall(r"[a-z0-9]+", (q or "").lower()))
+    tw = set(re.findall(r"[a-z0-9]+", (t or "").lower()))
+    return round(len(qw & tw) / (len(qw) or 1), 4)
+
+
+class TEIHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        payload = json.loads(self.rfile.read(length))
+        self.server.calls.append({"path": self.path, "payload": payload})
+        if self.path.startswith("/embed"):
+            inputs = payload.get("inputs") or []
+            body = json.dumps([semantic_vec(t) for t in inputs]).encode()
+        elif self.path.startswith("/rerank"):
+            q = payload.get("query") or ""
+            texts = payload.get("texts") or []
+            out = [{"index": i, "score": kw_score(q, t)} for i, t in enumerate(texts)]
+            out.sort(key=lambda x: -x["score"])
+            body = json.dumps(out).encode()
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        self.send_response(200 if self.path.startswith("/health") else 404)
+        self.end_headers()
 
     def log_message(self, *args):
         pass
@@ -549,6 +632,12 @@ def main():
     llm_port = llm_server.server_address[1]
     threading.Thread(target=llm_server.serve_forever, daemon=True).start()
 
+    tei_server = ThreadingHTTPServer(("127.0.0.1", 0), TEIHandler)
+    tei_server.calls = []
+    tei_server.daemon_threads = True
+    tei_port = tei_server.server_address[1]
+    threading.Thread(target=tei_server.serve_forever, daemon=True).start()
+
     tmp = tempfile.mkdtemp(prefix="mail-triage-test-")
     os.environ.update({
         "DATA_DIR": tmp,
@@ -560,11 +649,14 @@ def main():
         "LLM_BASE_URL": "http://127.0.0.1:%d/v1" % llm_port,
         "LLM_API_KEY": "test-key",
         "LLM_MODEL": "mock-model",
+        "EMBED_BASE_URL": "http://127.0.0.1:%d" % tei_port,
+        "RERANK_BASE_URL": "http://127.0.0.1:%d" % tei_port,
     })
     sys.path.insert(0, PROJECT)
     import config
     import store
     import engine
+    import rag
 
     store.init_db()
     store.set_setting("max_llm_per_hour", 200)
@@ -826,11 +918,86 @@ def main():
     check("retry requeues and clears failures",
           n == 1 and row["status"] == "queued" and store.llm_fail_count(row["id"]) == 0)
 
+    section("T12 RAG: indexer, chunking, folder exclusions")
+    long_body = "Attendance summary for HMAW1905E. " + "The student roster lists 40 names. " * 100
+    uid_long = add_msg(state, "registry@ust.hk", "Attendance report long", long_body, "lr@x")
+    add_msg(state, "spam@spam.com", "You won a prize", "claim your money now", "j1@x",
+            folder="Junk Email")
+    res = rag.index_pass(limit=200)
+    check("indexer walks all folders", res["remaining"] == 0 and res["processed"] >= 8)
+    total_chunks = store.chunk_count()
+    check("chunks created for indexed mail", total_chunks >= 10)
+    with store.db() as conn:
+        dupes = conn.execute("SELECT msgid, COUNT(*) c FROM messages WHERE msgid != '' "
+                             "GROUP BY msgid HAVING c > 1").fetchall()
+    check("moved mail does not create duplicate message rows", len(dupes) == 0)
+    row_long = [r for r in store.messages(limit=500)
+                if r["uid"] == uid_long and r["folder"] == "INBOX"][0]
+    with store.db() as conn:
+        long_texts = [r["text"] for r in conn.execute(
+            "SELECT text FROM chunks WHERE message_id=? ORDER BY seq", (row_long["id"],))]
+    check("long message split into multiple chunks", len(long_texts) >= 2)
+    check("every chunk carries the header prefix",
+          bool(long_texts) and all(t.startswith("From: ") for t in long_texts))
+    row_short = [r for r in store.messages(limit=500) if r["subject"] == "permfail item"][0]
+    check("short message stays one chunk", store.message_chunk_count(row_short["id"]) == 1)
+    check("junk folder excluded", store.index_state_get("Junk Email") is None)
+    with store.db() as conn:
+        junk_chunks = conn.execute("SELECT COUNT(*) FROM chunks WHERE folder='Junk Email'").fetchone()[0]
+    check("no chunks for junk mail", junk_chunks == 0)
+    drafts_rows = [r for r in store.messages(limit=500) if r["folder"] == "Drafts"]
+    check("unscanned folders got backfilled by the indexer",
+          len(drafts_rows) >= 1 and store.message_chunk_count(drafts_rows[0]["id"]) >= 1)
+    with store.db(vec=True) as conn:
+        nvec = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
+    check("vectors stored for every chunk", nvec == total_chunks)
+    res2 = rag.index_pass(limit=5)
+    check("second pass is a no-op", res2["processed"] == 0 and res2["remaining"] == 0)
+
+    section("T13 RAG: hybrid search, rerank, filters")
+    r = rag.search("payment", mode="vector")
+    check("vector search finds the invoice for a paraphrase",
+          r["ok"] and any("Invoice" in (x["subject"] or "") for x in r["results"]))
+    r = rag.search("INV-1234", mode="fts")
+    check("keyword search finds the exact token",
+          r["ok"] and any("Invoice" in (x["subject"] or "") for x in r["results"]))
+    r = rag.search("outstanding payment for the vendor")
+    check("hybrid search returns semantic matches",
+          r["ok"] and any("Invoice" in (x["subject"] or "") for x in r["results"]))
+    r = rag.search("budget")
+    check("rerank puts budget mail first",
+          r["ok"] and "budget" in (r["results"][0]["subject"] or "").lower())
+    check("rerank endpoint was called",
+          any(c["path"].startswith("/rerank") for c in tei_server.calls))
+    r = rag.search("budget", folder="AgentTests")
+    check("folder filter excludes other folders", r["ok"] and len(r["results"]) == 0)
+    r = rag.search("budget", folder="Work")
+    check("folder filter keeps matching folder", r["ok"] and len(r["results"]) >= 1)
+    r = rag.search("")
+    check("empty query rejected", not r["ok"])
+    agent = engine.AssistantAgent()
+    r = agent.call_tool("semantic_search", {"query": "the invoice from the vendor"})
+    check("assistant semantic_search tool returns matches",
+          r["ok"] and any("Invoice" in (x["subject"] or "") for x in r["result"]["results"]))
+    agent.close()
+
+    section("T14 RAG: assistant streams a semantic-search turn")
+    r = client.post("/assistant/stream",
+                    data={"message": "do a semantic search for the vendor invoice"})
+    body = r.data.decode()
+    check("semantic_search tool ran in the stream",
+          '"name": "semantic_search"' in body and '"ok": true' in body)
+    check("stream completed with done", bool(re.search(r"event: done\ndata: ", body)))
+    check("reply carries a message reference", "[msg:" in body)
+    check("linkify renders message refs as links",
+          'href="/messages/3"' in app_mod.linkify("see [msg:3]"))
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:
         imap_server.shutdown()
         llm_server.shutdown()
+        tei_server.shutdown()
     except Exception:
         pass
     if failed == 0:

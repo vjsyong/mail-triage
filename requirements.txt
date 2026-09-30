@@ -1,2 +1,4 @@
 flask>=3.0
 requests>=2.31
+sqlite-vec>=0.1.9
+beautifulsoup4>=4.12

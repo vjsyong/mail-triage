@@ -25,6 +25,9 @@ DEFAULT_SETTINGS = {
     "drafts_folder": "",          # blank = auto-detect the \Drafts special-use folder
     "my_name": "Sean",
     "assistant_actions_apply": True,  # assistant may move/flag mail (False = dry-run)
+    "index_enabled": True,        # build/refresh the semantic search index
+    "index_folders": [],          # blank = all folders except junk/system (see rag.EXCLUDE_FOLDERS)
+    "rerank_enabled": True,       # cross-encoder rerank on top of hybrid retrieval
 }
 
 _SCHEMA = """
@@ -82,6 +85,27 @@ CREATE TABLE IF NOT EXISTS assistant_messages (
     content TEXT NOT NULL DEFAULT '', proposals TEXT NOT NULL DEFAULT '[]',
     meta TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    folder TEXT NOT NULL DEFAULT '',
+    uid INTEGER NOT NULL DEFAULT 0,
+    seq INTEGER NOT NULL DEFAULT 0,
+    text TEXT NOT NULL DEFAULT '',
+    created INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_message ON chunks(message_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_folder ON chunks(folder);
+CREATE TABLE IF NOT EXISTS index_state (
+    folder TEXT PRIMARY KEY,
+    uidvalidity INTEGER NOT NULL DEFAULT 0,
+    last_uid INTEGER NOT NULL DEFAULT 0,
+    messages_indexed INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'new',
+    updated INTEGER
+);
+CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text);
 """
 
 
@@ -92,11 +116,16 @@ def _migrate(conn):
         conn.execute("ALTER TABLE assistant_messages ADD COLUMN meta TEXT NOT NULL DEFAULT ''")
 
 
-def db():
+def db(vec=False):
     os.makedirs(config.DATA_DIR, exist_ok=True)
     conn = sqlite3.connect(config.DB_PATH, timeout=20)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    if vec:
+        import sqlite_vec
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
     return conn
 
 
@@ -270,6 +299,16 @@ def find_message_by_uid(folder, uid):
     return dict(row) if row else None
 
 
+def find_message_by_msgid(msgid):
+    """Canonical row for a Message-ID (used when mail was moved between folders)."""
+    if not msgid:
+        return None
+    with db() as conn:
+        row = conn.execute("SELECT * FROM messages WHERE msgid=? ORDER BY id LIMIT 1",
+                           (msgid,)).fetchone()
+    return dict(row) if row else None
+
+
 def messages(limit=50, filt="all"):
     q = "SELECT * FROM messages"
     where = []
@@ -385,3 +424,168 @@ def get_assistant_message(mid):
 def clear_assistant():
     with db() as conn:
         conn.execute("DELETE FROM assistant_messages")
+
+
+# ---------------------------------------------------------------- RAG index
+
+def ensure_vec_table(dim):
+    """Create the sqlite-vec KNN table (dimension fixed by the embed model)."""
+    with db(vec=True) as conn:
+        conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks "
+                     "USING vec0(embedding float[%d] distance_metric=cosine)" % int(dim))
+
+
+def add_chunks(rows):
+    """rows: [{message_id, folder, uid, seq, text}] -> list of new chunk ids."""
+    now = int(time.time())
+    ids = []
+    with db() as conn:
+        for r in rows:
+            cur = conn.execute(
+                "INSERT INTO chunks (message_id, folder, uid, seq, text, created) "
+                "VALUES (?,?,?,?,?,?)",
+                (r["message_id"], r["folder"], r["uid"], r["seq"], r["text"], now))
+            cid = cur.lastrowid
+            conn.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)", (cid, r["text"]))
+            ids.append(cid)
+    return ids
+
+
+def add_vectors(pairs):
+    """pairs: [(chunk_id, [floats])] -> stored in vec_chunks (needs sqlite-vec)."""
+    import struct
+    with db(vec=True) as conn:
+        for cid, vec in pairs:
+            blob = struct.pack("%df" % len(vec), *vec)
+            conn.execute("INSERT INTO vec_chunks (rowid, embedding) VALUES (?, ?)", (cid, blob))
+
+
+def vec_search(qvec, k):
+    import struct
+    blob = struct.pack("%df" % len(qvec), *qvec)
+    with db(vec=True) as conn:
+        rows = conn.execute(
+            "SELECT rowid, distance FROM vec_chunks WHERE embedding MATCH ? AND k = ? "
+            "ORDER BY distance", (blob, k)).fetchall()
+    return [(r["rowid"], r["distance"]) for r in rows]
+
+
+def fts_search(query, k):
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT rowid, bm25(chunks_fts) AS score FROM chunks_fts "
+            "WHERE chunks_fts MATCH ? ORDER BY score LIMIT ?", (query, k)).fetchall()
+    return [(r["rowid"], r["score"]) for r in rows]
+
+
+def chunks_by_ids(ids):
+    if not ids:
+        return []
+    q = "SELECT * FROM chunks WHERE id IN (%s)" % ",".join("?" * len(ids))
+    with db() as conn:
+        return [dict(r) for r in conn.execute(q, ids)]
+
+
+def messages_by_ids(ids):
+    if not ids:
+        return {}
+    q = "SELECT * FROM messages WHERE id IN (%s)" % ",".join("?" * len(ids))
+    with db() as conn:
+        return {r["id"]: dict(r) for r in conn.execute(q, ids)}
+
+
+def chunk_count():
+    with db() as conn:
+        return conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+
+
+def message_chunk_count(message_id):
+    with db() as conn:
+        return conn.execute("SELECT COUNT(*) FROM chunks WHERE message_id=?",
+                            (message_id,)).fetchone()[0]
+
+
+def delete_chunks_folder(folder):
+    with db() as conn:
+        ids = [r[0] for r in conn.execute("SELECT id FROM chunks WHERE folder=?", (folder,))]
+        if not ids:
+            return 0
+        conn.execute("DELETE FROM chunks WHERE folder=?", (folder,))
+        conn.executemany("DELETE FROM chunks_fts WHERE rowid=?", [(i,) for i in ids])
+    try:
+        with db(vec=True) as conn:
+            conn.executemany("DELETE FROM vec_chunks WHERE rowid=?", [(i,) for i in ids])
+    except Exception:
+        pass
+    return len(ids)
+
+
+def clear_rag():
+    """Wipe chunks, vectors, FTS rows, index state and model meta (rebuild)."""
+    with db() as conn:
+        conn.execute("DELETE FROM chunks")
+        conn.execute("DELETE FROM chunks_fts")
+        conn.execute("DELETE FROM index_state")
+        conn.execute("DELETE FROM meta WHERE k IN ('embed_dim','embed_model')")
+    try:
+        with db(vec=True) as conn:
+            conn.execute("DELETE FROM vec_chunks")
+    except Exception:
+        pass
+
+
+def index_state_get(folder):
+    with db() as conn:
+        row = conn.execute("SELECT * FROM index_state WHERE folder=?", (folder,)).fetchone()
+    return dict(row) if row else None
+
+
+def index_state_put(folder, uidvalidity, last_uid, status=None):
+    now = int(time.time())
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO index_state (folder, uidvalidity, last_uid, messages_indexed, status, updated) "
+            "VALUES (?,?,?,0,?,?) ON CONFLICT(folder) DO UPDATE SET uidvalidity=excluded.uidvalidity, "
+            "last_uid=excluded.last_uid, status=COALESCE(?, index_state.status), updated=excluded.updated",
+            (folder, int(uidvalidity or 0), int(last_uid or 0), status or "working", now, status))
+        return cur
+
+
+def index_state_touch(folder, uidvalidity, last_uid):
+    now = int(time.time())
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO index_state (folder, uidvalidity, last_uid, messages_indexed, status, updated) "
+            "VALUES (?,?,?,1,'working',?) ON CONFLICT(folder) DO UPDATE SET "
+            "uidvalidity=excluded.uidvalidity, last_uid=excluded.last_uid, "
+            "messages_indexed=index_state.messages_indexed+1, status='working', updated=excluded.updated",
+            (folder, int(uidvalidity or 0), int(last_uid or 0), now))
+
+
+def index_overview(folders=None):
+    with db() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM index_state")]
+    if folders:
+        known = {r["folder"] for r in rows}
+        for f in folders:
+            if f not in known:
+                rows.append({"folder": f, "uidvalidity": 0, "last_uid": 0,
+                             "messages_indexed": 0, "status": "new", "updated": None})
+    return rows
+
+
+def meta_get(key, default=None):
+    with db() as conn:
+        row = conn.execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone()
+    if row is None:
+        return default
+    try:
+        return json.loads(row["v"])
+    except (TypeError, ValueError):
+        return row["v"]
+
+
+def meta_set(key, value):
+    with db() as conn:
+        conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) "
+                     "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (key, json.dumps(value)))

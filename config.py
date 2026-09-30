@@ -28,6 +28,14 @@ LLM_FALLBACK_BASE_URL = get("LLM_FALLBACK_BASE_URL", "")
 LLM_FALLBACK_API_KEY = get("LLM_FALLBACK_API_KEY", "")
 LLM_FALLBACK_MODEL = get("LLM_FALLBACK_MODEL", "")
 
+# RAG: local embedding + rerank servers (see embed/, TEI on GPU 1).
+EMBED_BASE_URL = get("EMBED_BASE_URL", "").rstrip("/")      # e.g. http://100.93.139.49:8041
+EMBED_MODEL = get("EMBED_MODEL", "Qwen/Qwen3-Embedding-4B")
+EMBED_TIMEOUT = int(get("EMBED_TIMEOUT", "180"))
+RERANK_BASE_URL = get("RERANK_BASE_URL", "").rstrip("/")    # e.g. http://100.93.139.49:8042
+RERANK_MODEL = get("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANK_TIMEOUT = int(get("RERANK_TIMEOUT", "90"))
+
 UI_HOST = get("UI_HOST", "0.0.0.0")
 UI_PORT = int(get("UI_PORT", "8097"))
 
