@@ -384,7 +384,10 @@
         {%- if not enable_thinking -%}
             {{- '<|channel>thought\n<channel|>' -}}
         {%- endif -%}
-    {%- elif ns.prev_message_type == 'tool_response' and enable_thinking -%}
-        {{- '<|channel>thought\n' -}}
     {%- endif -%}
 {%- endif -%}
+{#- NOTE (2026-09-30): do NOT pre-open "<|channel>thought\n" after tool responses.
+    vLLM's gemma4 streaming extractor only routes deltas to reasoning when it sees
+    the start token in the GENERATED stream; a prompt-pre-opened channel makes all
+    post-tool CoT stream as plain content (leaks into the chat window). Upstream
+    behaviour is to emit nothing here and let the model open the channel itself. #}
