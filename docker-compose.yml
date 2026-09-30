@@ -1,0 +1,10 @@
+services:
+  mail-triage:
+    build: .
+    container_name: mail-triage
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8097:8097"
+    volumes:
+      - ./data:/data

@@ -1,0 +1,109 @@
+# ===========================================================================
+# Mail Triage — Gemma 4 26B-A4B model server (single RTX 3090)
+# ===========================================================================
+# Standalone, self-contained copy of the serving stack this host uses for
+# gemma-4-26b-a4b, trimmed to ONE replica on GPU 0. No litellm, no model-pool.
+# Mail Triage talks to this container directly at :8040.
+#
+#   Model:     gemma-4-26b-a4b-awq-4bit (cyankiwi AWQ-4bit, compressed-tensors)
+#   Engine:    vLLM v0.22.0 + vendored PR #40391 overlay (int8_per_token_head
+#              KV on sm_86 — stock v0.22.0 cannot serve this KV dtype)
+#   Topology:  single card (TP=1), CDI-pinned to nvidia.com/gpu=0
+#   Drafter:   none · Vision: off · Max ctx: 16384 (mail workload)
+#   Mem util:  0.96 (~232K-token KV pool, validated without a drafter)
+#   Weights:   /home/xrim/models/gemma-4-26b-a4b-awq-4bit (host HF cache)
+#
+# Usage (from this directory):
+#   docker compose up -d          # start (auto-starts on boot: unless-stopped)
+#   docker compose stop           # stop / free the GPU
+#   docker compose logs -f        # watch boot ("Application startup complete")
+#   curl -s localhost:8040/v1/models
+#
+# Consumed by Mail Triage via .env:
+#   LLM_BASE_URL=http://100.93.139.49:8040/v1   LLM_MODEL=gemma-4-26b-a4b
+# ===========================================================================
+name: mail-triage-gemma
+
+services:
+  gemma:
+    image: vllm/vllm-openai:v0.22.0
+    container_name: mail-triage-gemma
+    restart: unless-stopped
+    shm_size: "16gb"
+    ipc: host
+    ports:
+      - "8040:8000"
+    volumes:
+      - /home/xrim/models:/root/.cache/huggingface
+      - ./chat_template.jinja:/etc/club3090/gemma-canonical-template.jinja:ro
+      - ./patches/vllm-pr40391-v0.22.0:/etc/club3090/pr40391:ro
+      - ./cache/torch_compile_int8:/root/.cache/vllm/torch_compile_cache
+      - ./cache/triton_int8:/root/.triton/cache
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+      - HF_HUB_OFFLINE=${OFFLINE:-0}
+      - TRANSFORMERS_OFFLINE=${OFFLINE:-0}
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_NO_USAGE_STATS=1
+      - OMP_NUM_THREADS=1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
+      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+      - TRITON_CACHE_DIR=/root/.triton/cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              device_ids:
+                - nvidia.com/gpu=0
+              capabilities: [gpu]
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        bash /etc/club3090/pr40391/install.sh
+        exec vllm serve "$@"
+      - --
+    command:
+      - --override-generation-config
+      - '{"temperature":${TEMP:-1.0},"top_p":${TOP_P:-0.95},"top_k":${TOP_K:-64},"min_p":${MIN_P:-0.0},"repetition_penalty":${REPEAT_PENALTY:-1.0}}'
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --model
+      - /root/.cache/huggingface/gemma-4-26b-a4b-awq-4bit
+      - --served-model-name
+      - gemma-4-26b-a4b
+      - --tensor-parallel-size
+      - "1"
+      - --kv-cache-dtype
+      - int8_per_token_head
+      - --max-model-len
+      - "16384"
+      - --gpu-memory-utilization
+      - "0.96"
+      - --max-num-seqs
+      - "256"
+      - --max-num-batched-tokens
+      - "8192"
+      - --limit-mm-per-prompt
+      - '{"image":0,"audio":0}'
+      - --trust-remote-code
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - gemma4
+      - --reasoning-parser
+      - gemma4
+      - --chat-template
+      - /etc/club3090/gemma-canonical-template.jinja
+      - --enable-prefix-caching
+      - --enable-chunked-prefill
+      - --long-prefill-token-threshold
+      - "2048"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 300s

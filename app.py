@@ -1,0 +1,990 @@
+#!/usr/bin/env python3
+"""
+Mail Triage — smart email management on top of the email-oauth2-proxy.
+
+Container-friendly web app: quick filter rules (move/flag/read), LLM escalation for
+classification of the rest, reply templates with LLM-drafted replies saved to Drafts.
+
+Run:  python app.py            (serves the UI and starts the background worker)
+      python app.py --check    (read-only connectivity check, prints JSON)
+"""
+import json
+import os
+import sys
+import time
+
+from flask import Flask, flash, jsonify, redirect, render_template_string, request, url_for
+
+import config
+import engine
+import store
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("APP_SECRET", "mail-triage-local")
+
+worker = engine.Worker()
+
+HKT = 8 * 3600
+
+
+def fmt_ts(ts):
+    if not ts:
+        return "—"
+    return time.strftime("%m-%d %H:%M", time.gmtime(int(ts) + HKT))
+
+
+def rel_time(ts):
+    if not ts:
+        return "never"
+    delta = int(time.time()) - int(ts)
+    if delta < 60:
+        return "%ds ago" % delta
+    if delta < 3600:
+        return "%dm ago" % (delta // 60)
+    if delta < 86400:
+        return "%dh ago" % (delta // 3600)
+    return "%dd ago" % (delta // 86400)
+
+
+def stats():
+    with store.db() as conn:
+        def one(q, *args):
+            return conn.execute(q, args).fetchone()[0]
+        return {
+            "total": one("SELECT COUNT(*) FROM messages"),
+            "queued": one("SELECT COUNT(*) FROM messages WHERE status='queued'"),
+            "classified": one("SELECT COUNT(*) FROM messages WHERE status IN ('classified','llm-moved')"),
+            "moved": one("SELECT COUNT(*) FROM messages WHERE action_taken LIKE 'move%'"),
+            "needs_reply": one("SELECT COUNT(*) FROM messages WHERE llm_needs_reply=1"),
+            "errors": one("SELECT COUNT(*) FROM messages WHERE status='error'"),
+            "rules": one("SELECT COUNT(*) FROM rules WHERE enabled=1"),
+        }
+
+
+def summarize_conditions(rule):
+    try:
+        conds = json.loads(rule.get("conditions") or "[]")
+    except (TypeError, ValueError):
+        conds = []
+    if not conds:
+        return "(no conditions — never matches)"
+    joiner = " AND " if (rule.get("match_mode") or "all") == "all" else " OR "
+    return joiner.join('%s %s "%s"' % (c.get("field", "?"), c.get("op", "?"), c.get("value", ""))
+                       for c in conds)
+
+
+def summarize_actions(rule):
+    try:
+        actions = json.loads(rule.get("actions") or "{}")
+    except (TypeError, ValueError):
+        actions = {}
+    parts = []
+    if actions.get("move_to"):
+        parts.append("move → %s" % actions["move_to"])
+    if actions.get("mark_read"):
+        parts.append("mark read")
+    if actions.get("flag"):
+        parts.append("flag")
+    return ", ".join(parts) or "(none)"
+
+
+STATUS_BADGES = {
+    "matched": ("ok", "sorted"),
+    "matched-dry": ("warn", "rule (dry-run)"),
+    "llm-moved": ("ok", "LLM → folder"),
+    "classified": ("acc", "classified"),
+    "queued": ("warn", "queued"),
+    "error": ("err", "error"),
+    "new": ("", "new"),
+}
+
+
+BASE_TMPL = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mail Triage</title>
+<style>
+:root{--bg:#10151b;--card:#181f28;--card2:#1e2732;--line:#2a3646;--fg:#dde6ef;--dim:#8ea2b8;
+--acc:#57a6ff;--ok:#41d392;--warn:#ffb454;--err:#ff6b6b;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
+.wrap{max-width:1060px;margin:0 auto;padding:18px 16px 80px}
+h1{font-size:1.25rem;margin:0} h2{font-size:1.05rem;margin:20px 0 8px}
+h3{font-size:1rem;margin:0 0 6px}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+nav a{margin-left:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:12px 0}
+.sub{color:var(--dim);font-size:.9rem}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.spread{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.badge{display:inline-block;font-size:.78rem;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.badge.ok{color:var(--ok);border-color:var(--ok)} .badge.err{color:var(--err);border-color:var(--err)}
+.badge.warn{color:var(--warn);border-color:var(--warn)} .badge.acc{color:var(--acc);border-color:var(--acc)}
+.btn{display:inline-block;border:1px solid var(--line);background:var(--card2);color:var(--fg);border-radius:9px;
+padding:8px 13px;font-size:.92rem;cursor:pointer}
+.btn:hover{border-color:var(--acc)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#08111c;font-weight:600}
+.btn.danger{color:var(--err)}
+.btn.small{padding:4px 9px;font-size:.82rem}
+form.inline{display:inline}
+input[type=text],input[type=number],select,textarea{background:#0d1319;border:1px solid var(--line);
+color:var(--fg);border-radius:8px;padding:8px 10px;font-size:.93rem;width:100%}
+textarea{font-family:var(--mono);font-size:.87rem;min-height:140px}
+label{display:block;font-size:.85rem;color:var(--dim);margin:10px 0 4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:700px){.grid2{grid-template-columns:1fr}}
+.grid3{display:grid;grid-template-columns:150px 130px 1fr;gap:8px}
+code,.mono{font-family:var(--mono);font-size:.85rem;background:#0d1319;border:1px solid var(--line);
+border-radius:6px;padding:1px 5px;word-break:break-all}
+.note{background:#12202e;border:1px solid #234a6b;border-radius:9px;padding:10px 12px;font-size:.88rem;color:#bcd4ee}
+.msg{border-radius:9px;padding:10px 12px;margin:10px 0;font-size:.92rem}
+.msg.ok{background:#10241a;border:1px solid var(--ok)}
+.msg.warn{background:#26200f;border:1px solid var(--warn)}
+.msg.err{background:#2a1414;border:1px solid var(--err)}
+table.tbl{width:100%;border-collapse:collapse}
+.tbl th,.tbl td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:.88rem;vertical-align:top}
+.tbl th{color:var(--dim);font-weight:500;white-space:nowrap}
+.hidden{display:none}
+pre.log{background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:12px;font-size:.78rem;
+line-height:1.4;overflow:auto;max-height:70vh;white-space:pre-wrap}
+.stat{display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:10px;
+padding:8px 14px;margin:0 8px 8px 0;text-align:center}
+.stat b{display:block;font-size:1.35rem}
+.stat span{color:var(--dim);font-size:.8rem}
+.foot{margin-top:26px;color:var(--dim);font-size:.8rem}
+</style>
+</head><body><div class="wrap">
+<div class="top">
+  <div><h1>Mail Triage</h1><div class="sub">{{ cfg.IMAP_USER }} · via proxy {{ cfg.IMAP_HOST }}:{{ cfg.IMAP_PORT }} · LLM: {{ cfg.LLM_MODEL }}</div></div>
+  <nav class="sub"><a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('assistant') }}">Assistant</a><a href="{{ url_for('rules') }}">Rules</a><a href="{{ url_for('templates') }}">Templates</a><a href="{{ url_for('messages') }}">Messages</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('log') }}">Log</a></nav>
+</div>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}<div class="msg {{ cat }}">{{ msg }}</div>{% endfor %}
+{% endwith %}
+{{ body|safe }}
+<div class="foot">Times shown in HKT · app data in {{ cfg.DATA_DIR }} · never deletes mail (worst case: files it into a folder)</div>
+</div></body></html>
+"""
+
+
+def render(body):
+    return render_template_string(BASE_TMPL, body=body, cfg=config)
+
+
+# ---------------------------------------------------------------- dashboard
+
+DASH_TMPL = """
+{% set ws = worker_state %}
+<div class="card">
+  <div class="spread">
+    <div>
+      <h3>Status</h3>
+      <div class="sub">
+        {% if ws.running %}<span class="badge acc">checking now…</span>
+        {% elif ws.last_error %}<span class="badge err">last check failed</span>
+          <span class="mono">{{ ws.last_error }}</span>
+        {% elif ws.last_ok %}<span class="badge ok">connected</span>
+        {% else %}<span class="badge warn">starting up…</span>{% endif %}
+        &nbsp;last check: {{ ws.last_ok_r }} · next in ~{{ ws.next_in }}s · every {{ ws.interval }}s
+        {% if ws.last_summary %}<br>last pass: {{ ws.last_summary }}{% endif %}
+      </div>
+    </div>
+    <form class="inline" method="post" action="{{ url_for('check_now') }}">{% if false %}{% endif %}
+      <button class="btn primary" type="submit" {{ 'disabled' if ws.running else '' }}>Check now</button></form>
+  </div>
+  {% if ws.last_error %}<div class="msg err">The last pass failed: {{ ws.last_error }} — see the Log page.</div>{% endif %}
+</div>
+
+<div class="card">
+  <div class="row">
+    <div class="stat"><b>{{ st.total }}</b><span>seen</span></div>
+    <div class="stat"><b>{{ st.moved }}</b><span>sorted by rules</span></div>
+    <div class="stat"><b>{{ st.classified }}</b><span>LLM classified</span></div>
+    <div class="stat"><b>{{ st.queued }}</b><span>waiting for LLM</span></div>
+    <div class="stat"><b>{{ st.needs_reply }}</b><span>need a reply</span></div>
+    <div class="stat"><b>{{ st.rules }}</b><span>rules enabled</span></div>
+  </div>
+  <div class="sub">
+    Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} ·
+    LLM classification {{ 'on' if settings.llm_suggest else 'off' }} ·
+    LLM auto-filing {{ 'ON' if settings.llm_apply else 'off (suggests only)' }} ·
+    <a href="{{ url_for('settings') }}">change</a>
+  </div>
+</div>
+{% if st.errors %}
+<div class="card">
+  <div class="spread">
+    <div class="sub">{{ st.errors }} message(s) parked after repeated LLM failures - fix the LLM endpoint, then retry.</div>
+    <form class="inline" method="post" action="{{ url_for('retry_errors') }}"><button class="btn" type="submit">Retry parked</button></form>
+  </div>
+</div>
+{% endif %}
+
+<h2>Recent messages</h2>
+<div class="card">
+  {% if messages %}
+  <table class="tbl"><tr><th>when</th><th>from</th><th>subject</th><th>status</th><th>LLM</th></tr>
+  {% for m in messages %}
+  <tr>
+    <td class="sub">{{ m.when }}</td>
+    <td class="sub">{{ m.from_addr[:40] }}</td>
+    <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:80] or '(no subject)' }}</a></td>
+    <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
+    <td class="sub">{{ m.llm }}</td>
+  </tr>
+  {% endfor %}</table>
+  {% else %}<div class="sub">Nothing processed yet — the first pass will pick up your recent inbox ({% if true %}{{ settings.lookback_hours }}h lookback{% endif %}).</div>{% endif %}
+  <p><a class="btn" href="{{ url_for('messages') }}">All messages →</a></p>
+</div>
+
+<h2>Recent activity</h2>
+<div class="card">
+  {% for e in events %}
+  <div class="sub"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> {{ e.message }}</div>
+  {% else %}<div class="sub">No events yet.</div>{% endfor %}
+</div>
+"""
+
+
+@app.route("/")
+def dashboard():
+    ws = dict(worker.state)
+    ws["last_ok_r"] = rel_time(ws.get("last_ok"))
+    interval = int(store.get_setting("poll_interval", 90))
+    ws["interval"] = interval
+    ws["next_in"] = max(0, int(interval - (time.time() - ws.get("last_cycle", 0))))
+    msgs = store.messages(limit=15)
+    for m in msgs:
+        m["when"] = fmt_ts(m.get("processed_at"))
+        m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
+        llm = m.get("llm_category") or ""
+        if llm and m.get("llm_confidence") is not None:
+            llm += " (%.0f%%)" % (m["llm_confidence"] * 100)
+        if m.get("llm_needs_reply"):
+            llm += " · needs reply"
+        m["llm"] = llm
+    events = [e for e in store.recent_events(40) if e.get("level") != "debug"][:14]
+    for e in events:
+        e["when"] = fmt_ts(e["ts"])
+        e["cls"] = {"error": "err", "info": "ok", "debug": ""}.get(e.get("level"), "")
+    return render(render_template_string(
+        DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
+        settings=store.all_settings()))
+
+
+@app.route("/check", methods=["POST"])
+def check_now():
+    worker.trigger()
+    flash("Check triggered — give it a few seconds and reload.", "ok")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/retry-errors", methods=["POST"])
+def retry_errors():
+    n = store.retry_parked_errors()
+    worker.trigger()
+    flash("Re-queued %d message(s) for classification." % n, "ok")
+    return redirect(url_for("dashboard"))
+
+
+# ---------------------------------------------------------------- rules
+
+RULES_TMPL = """
+<h2>Filter rules <span class="sub">— evaluated top to bottom, first match wins; most mail should be sorted by these</span></h2>
+<div class="card">
+  <div class="spread">
+    <div class="sub">Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} — see Settings.</div>
+    <div class="row">
+      <form class="inline" method="post" action="{{ url_for('rules_test') }}">
+        <button class="btn" type="submit">Test against last {{ test_limit }} messages</button></form>
+      <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
+    </div>
+  </div>
+</div>
+{% if test_results %}
+<div class="card">
+  <h3>Dry-run test <span class="sub">(nothing was changed)</span></h3>
+  <table class="tbl"><tr><th>rule</th><th>matches</th></tr>
+  {% for t in test_results %}<tr><td>{{ t.name }}</td><td>{{ t.count }}</td></tr>{% endfor %}
+  <tr><td class="sub">unmatched (would go to LLM)</td><td>{{ test_unmatched }}</td></tr>
+  </table>
+</div>
+{% endif %}
+<div class="card">
+  {% if rules %}
+  <table class="tbl"><tr><th>#</th><th>name</th><th>matches</th><th>actions</th><th></th></tr>
+  {% for r in rules %}
+  <tr>
+    <td class="sub">{{ loop.index }}</td>
+    <td>
+      {% if r.enabled %}{{ r.name }}{% else %}<span class="sub">{{ r.name }} (disabled)</span>{% endif %}
+    </td>
+    <td class="mono">{{ r.summary }}</td>
+    <td class="sub">{{ r.actions }}</td>
+    <td class="row" style="white-space:nowrap">
+      <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit">↑</button></form>
+      <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit">↓</button></form>
+      <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}"><button class="btn small" type="submit">{{ 'disable' if r.enabled else 'enable' }}</button></form>
+      <a class="btn small" href="{{ url_for('rule_edit', rule_id=r.id) }}">edit</a>
+      <form class="inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
+            onsubmit="return confirm('Delete rule {{ r.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
+    </td>
+  </tr>
+  {% endfor %}</table>
+  {% else %}<div class="sub">No rules yet. Create one, e.g. “from contains newsletter@ → move to Newsletters”.</div>{% endif %}
+</div>
+"""
+
+
+@app.route("/rules")
+def rules():
+    rules_list = store.list_rules()
+    for r in rules_list:
+        r["summary"] = summarize_conditions(r)
+        r["actions"] = summarize_actions(r)
+    tr, tu = None, None
+    if request.args.get("tested") == "1":
+        with store.db() as conn:
+            rows = [dict(r) for r in conn.execute("SELECT * FROM messages ORDER BY id DESC LIMIT 200")]
+        enabled = [r for r in rules_list if r["enabled"]]
+        tr = []
+        matched_ids = set()
+        for r in enabled:
+            cnt = 0
+            for m in rows:
+                if m["id"] in matched_ids:
+                    continue
+                fields = {"from": m["from_addr"], "to": m["to_addr"],
+                          "subject": m["subject"], "body": m["snippet"]}
+                if engine.rule_matches(r, fields):
+                    cnt += 1
+                    matched_ids.add(m["id"])
+            tr.append({"name": r["name"], "count": cnt})
+        tu = len(rows) - len(matched_ids)
+    return render(render_template_string(
+        RULES_TMPL, rules=rules_list, settings=store.all_settings(),
+        test_results=tr, test_unmatched=tu, test_limit=200))
+
+
+@app.route("/rules/test", methods=["POST"])
+def rules_test():
+    return redirect(url_for("rules", tested="1"))
+
+
+RULE_EDIT_TMPL = """
+<h2>{{ 'Edit rule' if rule else 'New rule' }}</h2>
+<form method="post" class="card">
+  <div class="grid2">
+    <div><label>Name</label><input type="text" name="name" value="{{ rule.name if rule else '' }}" placeholder="e.g. Boss → Work"></div>
+    <div><label>Match mode</label>
+      <select name="match_mode">
+        <option value="all" {{ 'selected' if (rule.match_mode if rule else 'all')=='all' else '' }}>ALL conditions must match</option>
+        <option value="any" {{ 'selected' if rule and rule.match_mode=='any' else '' }}>ANY condition matches</option>
+      </select></div>
+  </div>
+  <label>Conditions <span class="sub">(empty rows are ignored)</span></label>
+  <div id="conds">
+    {% for i in range(5) %}
+    {% set c = conditions[i] if conditions|length > i else {} %}
+    <div class="grid3" style="margin-bottom:6px">
+      <select name="cond_field_{{ i }}">
+        {% for f in ['from','to','subject','body'] %}
+        <option value="{{ f }}" {{ 'selected' if c.get('field')==f else '' }}>{{ f }}</option>{% endfor %}
+      </select>
+      <select name="cond_op_{{ i }}">
+        {% for o in ['contains','equals','regex'] %}
+        <option value="{{ o }}" {{ 'selected' if c.get('op')==o else '' }}>{{ o }}</option>{% endfor %}
+      </select>
+      <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}">
+    </div>
+    {% endfor %}
+  </div>
+  <label>Actions</label>
+  <div class="grid2">
+    <div><label>Move to folder <span class="sub">(blank = don't move; created if missing)</span></label>
+      <input type="text" name="move_to" value="{{ actions.get('move_to','') }}" placeholder="e.g. Work"></div>
+    <div>
+      <label class="row" style="color:var(--fg)"><input type="checkbox" name="mark_read" value="1" style="width:auto;margin-right:8px"
+        {{ 'checked' if actions.get('mark_read') else '' }}> Mark as read</label>
+      <label class="row" style="color:var(--fg)"><input type="checkbox" name="flag" value="1" style="width:auto;margin-right:8px"
+        {{ 'checked' if actions.get('flag') else '' }}> Flag / star</label>
+      <label class="row" style="color:var(--fg)"><input type="checkbox" name="enabled" value="1" style="width:auto;margin-right:8px"
+        {{ 'checked' if (rule.enabled if rule else True) else '' }}> Enabled</label>
+    </div>
+  </div>
+  <p style="margin-top:14px"><button class="btn primary" type="submit">Save rule</button>
+  <a class="btn" href="{{ url_for('rules') }}">Back</a></p>
+</form>
+"""
+
+
+def _rule_from_form():
+    name = (request.form.get("name") or "").strip() or "Untitled rule"
+    match_mode = request.form.get("match_mode", "all")
+    conditions = []
+    for i in range(5):
+        val = (request.form.get("cond_value_%d" % i) or "").strip()
+        if not val:
+            continue
+        conditions.append({"field": request.form.get("cond_field_%d" % i, "subject"),
+                           "op": request.form.get("cond_op_%d" % i, "contains"),
+                           "value": val})
+    actions = {}
+    if (request.form.get("move_to") or "").strip():
+        actions["move_to"] = request.form.get("move_to").strip()
+    if request.form.get("mark_read"):
+        actions["mark_read"] = True
+    if request.form.get("flag"):
+        actions["flag"] = True
+    enabled = bool(request.form.get("enabled"))
+    return name, match_mode, conditions, actions, enabled
+
+
+def _rule_form_context(rule=None):
+    conditions, actions = [], {}
+    if rule:
+        try:
+            conditions = json.loads(rule.get("conditions") or "[]")
+        except (TypeError, ValueError):
+            conditions = []
+        try:
+            actions = json.loads(rule.get("actions") or "{}")
+        except (TypeError, ValueError):
+            actions = {}
+    return {"rule": rule, "conditions": conditions, "actions": actions}
+
+
+@app.route("/rules/new", methods=["GET", "POST"])
+def rule_new():
+    if request.method == "POST":
+        name, mode, conds, actions, enabled = _rule_from_form()
+        if not conds:
+            flash("Add at least one condition with a value.", "err")
+            return redirect(url_for("rule_new"))
+        store.add_rule(name, mode, conds, actions, enabled)
+        store.log_event("info", "rule '%s' added" % name)
+        flash("Rule added.", "ok")
+        return redirect(url_for("rules"))
+    return render(render_template_string(RULE_EDIT_TMPL, **_rule_form_context()))
+
+
+@app.route("/rules/<int:rule_id>/edit", methods=["GET", "POST"])
+def rule_edit(rule_id):
+    rule = store.get_rule(rule_id)
+    if not rule:
+        flash("No such rule.", "err")
+        return redirect(url_for("rules"))
+    if request.method == "POST":
+        name, mode, conds, actions, enabled = _rule_from_form()
+        if not conds:
+            flash("Add at least one condition with a value.", "err")
+            return redirect(url_for("rule_edit", rule_id=rule_id))
+        store.update_rule(rule_id, name=name, match_mode=mode,
+                          conditions=json.dumps(conds), actions=json.dumps(actions),
+                          enabled=1 if enabled else 0)
+        flash("Rule saved.", "ok")
+        return redirect(url_for("rules"))
+    return render(render_template_string(RULE_EDIT_TMPL, **_rule_form_context(rule)))
+
+
+@app.route("/rules/<int:rule_id>/toggle", methods=["POST"])
+def rule_toggle(rule_id):
+    rule = store.get_rule(rule_id)
+    if rule:
+        store.update_rule(rule_id, enabled=0 if rule["enabled"] else 1)
+    return redirect(url_for("rules"))
+
+
+@app.route("/rules/<int:rule_id>/delete", methods=["POST"])
+def rule_delete(rule_id):
+    store.delete_rule(rule_id)
+    return redirect(url_for("rules"))
+
+
+@app.route("/rules/<int:rule_id>/move", methods=["POST"])
+def rule_move(rule_id):
+    direction = -1 if request.form.get("dir") == "up" else 1
+    store.move_rule(rule_id, direction)
+    return redirect(url_for("rules"))
+
+
+# ---------------------------------------------------------------- templates
+
+TEMPLATES_TMPL = """
+<h2>Reply templates <span class="sub">— placeholders: {sender} {subject} {date} {my_name}</span></h2>
+<div class="card">
+  <div class="spread"><div class="sub">Used as guidance when the LLM drafts a reply, or fill them in yourself.</div>
+  <a class="btn primary" href="{{ url_for('template_new') }}">New template</a></div>
+</div>
+<div class="card">
+  {% if templates %}
+  <table class="tbl"><tr><th>name</th><th>body preview</th><th></th></tr>
+  {% for t in templates %}
+  <tr><td>{{ t.name }}</td><td class="sub">{{ t.body[:120] }}</td>
+  <td class="row" style="white-space:nowrap">
+    <a class="btn small" href="{{ url_for('template_edit', tid=t.id) }}">edit</a>
+    <form class="inline" method="post" action="{{ url_for('template_delete', tid=t.id) }}"
+          onsubmit="return confirm('Delete template {{ t.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
+  </td></tr>
+  {% endfor %}</table>
+  {% else %}<div class="sub">No templates yet.</div>{% endif %}
+</div>
+"""
+
+TEMPLATE_EDIT_TMPL = """
+<h2>{{ 'Edit template' if template else 'New template' }}</h2>
+<form method="post" class="card">
+  <div class="grid2">
+    <div><label>Name</label><input type="text" name="name" value="{{ template.name if template else '' }}" placeholder="e.g. Meeting ack"></div>
+    <div><label>Subject (optional; {subject} works)</label><input type="text" name="subject" value="{{ template.subject if template else '' }}" placeholder="Re: {subject}"></div>
+  </div>
+  <label>Body</label>
+  <textarea name="body" rows="10">{{ template.body if template else '' }}</textarea>
+  <p><button class="btn primary" type="submit">Save template</button>
+  <a class="btn" href="{{ url_for('templates') }}">Back</a></p>
+  <div class="sub">Tip: keep templates short — the LLM adapts them to the actual email.</div>
+</form>
+"""
+
+
+@app.route("/templates")
+def templates():
+    return render(render_template_string(TEMPLATES_TMPL, templates=store.list_templates()))
+
+
+@app.route("/templates/new", methods=["GET", "POST"])
+def template_new():
+    if request.method == "POST":
+        store.add_template((request.form.get("name") or "").strip() or "Untitled",
+                           (request.form.get("subject") or "").strip(),
+                           request.form.get("body") or "")
+        flash("Template added.", "ok")
+        return redirect(url_for("templates"))
+    return render(render_template_string(TEMPLATE_EDIT_TMPL, template=None))
+
+
+@app.route("/templates/<int:tid>/edit", methods=["GET", "POST"])
+def template_edit(tid):
+    t = store.get_template(tid)
+    if not t:
+        flash("No such template.", "err")
+        return redirect(url_for("templates"))
+    if request.method == "POST":
+        store.update_template(tid, (request.form.get("name") or "").strip() or "Untitled",
+                              (request.form.get("subject") or "").strip(),
+                              request.form.get("body") or "")
+        flash("Template saved.", "ok")
+        return redirect(url_for("templates"))
+    return render(render_template_string(TEMPLATE_EDIT_TMPL, template=t))
+
+
+@app.route("/templates/<int:tid>/delete", methods=["POST"])
+def template_delete(tid):
+    store.delete_template(tid)
+    return redirect(url_for("templates"))
+
+
+# ---------------------------------------------------------------- messages
+
+MESSAGES_TMPL = """
+<h2>Messages</h2>
+<div class="card">
+  <div class="row">
+    {% for key, label in [('all','All'),('queued','Awaiting LLM'),('needs_reply','Needs reply'),('moved','Sorted'),('errors','Errors')] %}
+      <a class="btn small {{ 'primary' if filt==key else '' }}" href="{{ url_for('messages', f=key) }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+<div class="card">
+  {% if msgs %}
+  <table class="tbl"><tr><th>when</th><th>from</th><th>subject</th><th>status</th><th>LLM</th></tr>
+  {% for m in msgs %}
+  <tr>
+    <td class="sub">{{ m.when }}</td>
+    <td class="sub">{{ m.from_addr[:40] }}</td>
+    <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:90] or '(no subject)' }}</a></td>
+    <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
+    <td class="sub">{{ m.llm }}</td>
+  </tr>
+  {% endfor %}</table>
+  {% else %}<div class="sub">No messages{% if filt != 'all' %} in this filter{% endif %} yet.</div>{% endif %}
+</div>
+"""
+
+
+@app.route("/messages")
+def messages():
+    filt = request.args.get("f", "all")
+    msgs = store.messages(limit=100, filt=filt)
+    for m in msgs:
+        m["when"] = fmt_ts(m.get("processed_at"))
+        m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
+        llm = m.get("llm_category") or ""
+        if llm and m.get("llm_confidence") is not None:
+            llm += " (%.0f%%)" % (m["llm_confidence"] * 100)
+        m["llm"] = llm
+    return render(render_template_string(MESSAGES_TMPL, msgs=msgs, filt=filt))
+
+
+MESSAGE_TMPL = """
+<h2>{{ m.subject[:100] or '(no subject)' }}</h2>
+<div class="card">
+  <div class="kv sub">From <b>{{ m.from_addr }}</b> · {{ m.date }} · folder {{ m.folder }} · uid {{ m.uid }}</div>
+  <div class="row" style="margin:8px 0">
+    <span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>
+    {% if m.action_taken %}<span class="badge">{{ m.action_taken }}</span>{% endif %}
+    {% if m.llm_category %}<span class="badge acc">LLM: {{ m.llm_category }}
+      {% if m.llm_confidence is not none %}({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
+    {% if m.llm_needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
+  </div>
+  {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
+  <p class="mono" style="font-size:.85rem;white-space:pre-wrap">{{ m.snippet[:900] }}</p>
+</div>
+
+<h2>Reply</h2>
+<div class="card">
+  <div class="row">
+    <form class="inline" method="post" action="{{ url_for('message_draft', mid=m.id) }}">
+      <select name="template_id" style="width:auto;min-width:220px">
+        <option value="">(no template — freeform)</option>
+        {% for t in templates %}<option value="{{ t.id }}" {{ 'selected' if draft_template_id==t.id else '' }}>{{ t.name }}</option>{% endfor %}
+      </select>
+      <button class="btn primary" type="submit">Draft with LLM</button>
+    </form>
+    <span class="sub">{% if not llm_configured %}LLM key not configured — see Settings.{% endif %}</span>
+  </div>
+  {% if draft %}
+  <form method="post" action="{{ url_for('message_save', mid=m.id) }}" style="margin-top:10px">
+    <textarea name="body" rows="12">{{ draft }}</textarea>
+    <p class="row" style="margin-top:8px">
+      <button class="btn primary" type="submit">Save to Drafts</button>
+      <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.querySelector('textarea[name=body]').value);this.textContent='copied'">Copy</button>
+      <span class="sub">Saving puts it in your Drafts folder — nothing is sent automatically; review & send from your mail client.</span>
+    </p>
+  </form>
+  {% elif draft_error %}
+  <div class="msg err" style="margin-top:10px">Draft failed: {{ draft_error }}</div>
+  {% endif %}
+</div>
+"""
+
+
+@app.route("/messages/<int:mid>")
+def message_detail(mid):
+    m = store.get_message(mid)
+    if not m:
+        flash("No such message.", "err")
+        return redirect(url_for("messages"))
+    m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
+    return render(render_template_string(
+        MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=None,
+        draft_error=None, draft_template_id=0,
+        llm_configured=bool(config.LLM_API_KEY)))
+
+
+@app.route("/messages/<int:mid>/draft", methods=["POST"])
+def message_draft(mid):
+    m = store.get_message(mid)
+    if not m:
+        flash("No such message.", "err")
+        return redirect(url_for("messages"))
+    m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
+    template_id = request.form.get("template_id") or None
+    try:
+        draft = engine.generate_draft(mid, int(template_id) if template_id else None)
+        return render(render_template_string(
+            MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
+            draft_error=None, draft_template_id=int(template_id) if template_id else 0,
+            llm_configured=bool(config.LLM_API_KEY)))
+    except Exception as exc:
+        return render(render_template_string(
+            MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=None,
+            draft_error=repr(exc), draft_template_id=0,
+            llm_configured=bool(config.LLM_API_KEY)))
+
+
+@app.route("/messages/<int:mid>/save", methods=["POST"])
+def message_save(mid):
+    try:
+        folder = engine.save_draft(mid, request.form.get("body") or "")
+        flash("Draft saved to '%s' — review it in your mail client." % folder, "ok")
+    except Exception as exc:
+        flash("Could not save the draft: %r" % exc, "err")
+    return redirect(url_for("message_detail", mid=mid))
+
+
+# ---------------------------------------------------------------- assistant
+
+ASSISTANT_TMPL = """
+<h2>Rule assistant <span class="sub">describe what you want sorted, then add the proposed rules</span></h2>
+<div class="card">
+{% if convo %}
+  {% for m in convo %}
+    {% if m.role == 'user' %}
+      <div class="msg ok" style="margin-left:10%"><b>You:</b> {{ m.content }}</div>
+    {% else %}
+      <div class="msg" style="background:var(--card2);border:1px solid var(--line)">
+        <b>Assistant:</b> {{ m.content }}
+        {% for p in m.proposals_list %}
+        <div style="background:#0d1319;border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0">
+          <div class="spread">
+            <div><b>{{ p.name }}</b> <span class="sub">({{ p.match_mode }})</span></div>
+            <div class="row" style="white-space:nowrap">
+              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
+                <input type="hidden" name="msg_id" value="{{ m.id }}">
+                <input type="hidden" name="idx" value="{{ loop.index0 }}">
+                <button class="btn small primary" type="submit">Add rule</button>
+              </form>
+              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
+                <input type="hidden" name="msg_id" value="{{ m.id }}">
+                <input type="hidden" name="idx" value="{{ loop.index0 }}">
+                <input type="hidden" name="disabled" value="1">
+                <button class="btn small" type="submit">Add (disabled)</button>
+              </form>
+            </div>
+          </div>
+          <div class="mono" style="font-size:.85rem">{{ p.summary }}</div>
+          <div class="sub">{{ p.actions_summary }}{% if p.rationale %} - {{ p.rationale }}{% endif %}</div>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endfor %}
+{% else %}
+  <div class="sub">Describe the sorting you want in plain English. The assistant sees your current rules and recent senders, proposes rules below, and you add them with one click. Examples:</div>
+  <div class="row" style="margin-top:8px">
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='Sort newsletters and marketing mail out of my inbox';return false">Sort newsletters out</a>
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='File receipts and invoices automatically';return false">File receipts</a>
+    <a class="btn small" href="#" onclick="document.getElementById('msg').value='What rules would you suggest for my inbox?';return false">Suggest rules for me</a>
+  </div>
+{% endif %}
+</div>
+<div class="card">
+  <form method="post" action="{{ url_for('assistant_send') }}">
+    <textarea name="message" id="msg" rows="3" placeholder="e.g. Anything from my landlord goes to Property; newsletters get filed to Newsletters"></textarea>
+    <p class="row" style="margin-top:8px">
+      <button class="btn primary" type="submit">Send</button>
+      <span class="sub">runs on {{ cfg.LLM_MODEL }} - added rules act on new mail; they are listed on the Rules page</span>
+    </p>
+  </form>
+  {% if convo %}<form class="inline" method="post" action="{{ url_for('assistant_clear') }}" onsubmit="return confirm('Clear the conversation?');"><button class="btn small danger" type="submit">Clear conversation</button></form>{% endif %}
+</div>
+"""
+
+
+def _proposal_view(p):
+    return {
+        "name": p.get("name", ""),
+        "match_mode": p.get("match_mode", "all"),
+        "summary": summarize_conditions({"conditions": json.dumps(p.get("conditions", [])),
+                                         "match_mode": p.get("match_mode", "all")}),
+        "actions_summary": summarize_actions({"actions": json.dumps(p.get("actions", {}))}),
+        "rationale": p.get("rationale", ""),
+    }
+
+
+@app.route("/assistant")
+def assistant():
+    convo = store.assistant_messages(limit=60)
+    for m in convo:
+        m["proposals_list"] = []
+        if m.get("role") == "assistant" and m.get("proposals"):
+            try:
+                m["proposals_list"] = [_proposal_view(p) for p in json.loads(m["proposals"])]
+            except (TypeError, ValueError):
+                pass
+    return render(render_template_string(ASSISTANT_TMPL, convo=convo, cfg=config))
+
+
+@app.route("/assistant/send", methods=["POST"])
+def assistant_send():
+    text = (request.form.get("message") or "").strip()
+    if not text:
+        flash("Type a message first.", "err")
+        return redirect(url_for("assistant"))
+    try:
+        engine.assistant_respond(text)
+    except Exception as exc:
+        flash("Assistant error: %r" % exc, "err")
+    return redirect(url_for("assistant"))
+
+
+@app.route("/assistant/apply", methods=["POST"])
+def assistant_apply():
+    try:
+        mid = int(request.form.get("msg_id") or 0)
+        idx = int(request.form.get("idx") or 0)
+    except ValueError:
+        mid, idx = 0, 0
+    disabled = bool(request.form.get("disabled"))
+    row = store.get_assistant_message(mid)
+    proposals = []
+    if row:
+        try:
+            proposals = json.loads(row.get("proposals") or "[]")
+        except (TypeError, ValueError):
+            proposals = []
+    if not (0 <= idx < len(proposals)):
+        flash("That proposal is no longer available.", "err")
+        return redirect(url_for("assistant"))
+    norm = engine.normalize_rule(proposals[idx]) or proposals[idx]
+    store.add_rule(norm.get("name", "Assistant rule"), norm.get("match_mode", "all"),
+                   norm.get("conditions", []), norm.get("actions", {}), enabled=not disabled)
+    store.log_event("info", "assistant rule '%s' added (%s)"
+                    % (norm.get("name"), "disabled" if disabled else "enabled"))
+    flash("Rule '%s' added%s - check it on the Rules page (the Test button dry-runs it against recent mail)."
+          % (norm.get("name"), " (disabled)" if disabled else ""), "ok")
+    return redirect(url_for("assistant"))
+
+
+@app.route("/assistant/clear", methods=["POST"])
+def assistant_clear():
+    store.clear_assistant()
+    return redirect(url_for("assistant"))
+
+
+# ---------------------------------------------------------------- settings
+
+SETTINGS_TMPL = """
+<h2>Settings</h2>
+<form method="post" class="card">
+  <div class="grid2">
+    <div><label>Check interval (seconds)</label><input type="number" name="poll_interval" value="{{ s.poll_interval }}" min="15"></div>
+    <div><label>First-run lookback (hours)</label><input type="number" name="lookback_hours" value="{{ s.lookback_hours }}" min="1"></div>
+  </div>
+  <div class="grid2">
+    <div><label>Watched folders (comma separated)</label><input type="text" name="watch_folders" value="{{ s.watch_folders|join(', ') }}"></div>
+    <div><label>Your name (for drafts)</label><input type="text" name="my_name" value="{{ s.my_name }}"></div>
+  </div>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="rules_apply" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.rules_apply else '' }}> Apply rule actions for real (uncheck = dry-run, suggests only)</label>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="llm_suggest" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.llm_suggest else '' }}> Classify unmatched mail with the LLM</label>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="llm_apply" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.llm_apply else '' }}> Auto-file mail by LLM category (uses the folder map below)</label>
+  <div class="grid2">
+    <div><label>Max LLM calls per hour</label><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0"></div>
+    <div><label>LLM classifications per check</label><input type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1"></div>
+  </div>
+  <label>Categories (comma separated)</label>
+  <input type="text" name="categories" value="{{ s.categories|join(', ') }}">
+  <label>Category → folder map <span class="sub">(one per line, "Category = Folder"; blank folder = keep in inbox)</span></label>
+  <textarea name="category_folders" rows="6" style="min-height:100px">{% for k, v in s.category_folders.items() %}{{ k }} = {{ v }}
+{% endfor %}</textarea>
+  <div class="grid2">
+    <div><label>Drafts folder <span class="sub">(blank = auto-detect)</span></label><input type="text" name="drafts_folder" value="{{ s.drafts_folder }}"></div>
+  </div>
+  <p style="margin-top:14px"><button class="btn primary" type="submit">Save settings</button></p>
+</form>
+
+<div class="card">
+  <h3>Connection &amp; model</h3>
+  <div class="sub mono">
+    IMAP: {{ cfg.IMAP_USER }} @ {{ cfg.IMAP_HOST }}:{{ cfg.IMAP_PORT }} (via email-oauth2-proxy) ·
+    LLM: {{ cfg.LLM_BASE_URL }} · model {{ cfg.LLM_MODEL }} · key {{ 'set' if cfg.LLM_API_KEY else 'MISSING' }}{% if cfg.LLM_FALLBACK_BASE_URL %} · fallback: {{ cfg.LLM_FALLBACK_MODEL }}{% endif %} ·
+    state: {{ engine_state }} · db: {{ cfg.DB_PATH }}
+  </div>
+  <p><form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit">Test LLM endpoint</button></form> <span class="sub">tests the primary endpoint (fallback engages automatically at runtime if it fails)</span></p>
+  <p class="sub" style="margin-bottom:0">Connection details and keys live in the container env file
+  (<code>~/.hermes</code>-style secrets stay out of the database); everything on this page is stored in SQLite.</p>
+</div>
+"""
+
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings():
+    if request.method == "POST":
+        try:
+            store.set_setting("poll_interval", max(15, int(request.form.get("poll_interval", 90))))
+        except ValueError:
+            pass
+        try:
+            store.set_setting("lookback_hours", max(1, int(request.form.get("lookback_hours", 48))))
+        except ValueError:
+            pass
+        store.set_setting("watch_folders",
+                          [f.strip() for f in (request.form.get("watch_folders") or "INBOX").split(",") if f.strip()])
+        store.set_setting("my_name", (request.form.get("my_name") or "Sean").strip())
+        store.set_setting("rules_apply", bool(request.form.get("rules_apply")))
+        store.set_setting("llm_suggest", bool(request.form.get("llm_suggest")))
+        store.set_setting("llm_apply", bool(request.form.get("llm_apply")))
+        try:
+            store.set_setting("max_llm_per_hour", max(0, int(request.form.get("max_llm_per_hour", 40))))
+        except ValueError:
+            pass
+        try:
+            store.set_setting("llm_batch_per_cycle", max(1, int(request.form.get("llm_batch_per_cycle", 5))))
+        except ValueError:
+            pass
+        store.set_setting("categories",
+                          [c.strip() for c in (request.form.get("categories") or "").split(",") if c.strip()])
+        mapping = {}
+        for line in (request.form.get("category_folders") or "").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                if k.strip():
+                    mapping[k.strip()] = v.strip()
+        store.set_setting("category_folders", mapping)
+        store.set_setting("drafts_folder", (request.form.get("drafts_folder") or "").strip())
+        flash("Settings saved.", "ok")
+        return redirect(url_for("settings"))
+    return render(render_template_string(SETTINGS_TMPL, s=store.all_settings(),
+                                         engine_state=worker.state, cfg=config))
+
+
+@app.route("/settings/test-llm", methods=["POST"])
+def settings_test_llm():
+    started = time.time()
+    try:
+        client = engine.LLMClient()
+        out = client._chat_once(client.base, client.key, client.model,
+                                "You are a connectivity test. Reply with the single word ok.",
+                                [{"role": "user", "content": "Reply with the single word ok."}],
+                                json_mode=False)
+        flash("LLM OK in %.1fs - model %s - replied: %s"
+              % (time.time() - started, client.model, (out or "").strip()[:60]), "ok")
+    except Exception as exc:
+        flash("LLM FAILED after %.1fs: %r - is the local model running? "
+              "(cd gemma && docker compose ps)" % (time.time() - started, exc), "err")
+    return redirect(url_for("settings"))
+
+
+# ---------------------------------------------------------------- log
+
+LOG_TMPL = """
+<h2>Activity log</h2>
+<p class="sub">{% if show_debug %}<a href="{{ url_for('log') }}">hide debug lines</a>{% else %}<a href="{{ url_for('log', debug='1') }}">show debug lines</a>{% endif %}</p>
+<div class="card">
+  {% for e in events %}
+  <div class="sub"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> {{ e.message }}</div>
+  {% else %}<div class="sub">No events yet.</div>{% endfor %}
+</div>
+"""
+
+
+@app.route("/log")
+def log():
+    show_debug = request.args.get("debug") == "1"
+    events = store.recent_events(1000)
+    if not show_debug:
+        events = [e for e in events if e.get("level") != "debug"]
+    events = events[:300]
+    for e in events:
+        e["when"] = fmt_ts(e["ts"])
+        e["cls"] = {"error": "err", "info": "ok", "debug": ""}.get(e.get("level"), "")
+    return render(render_template_string(LOG_TMPL, events=events, show_debug=show_debug))
+
+
+@app.route("/healthz")
+def healthz():
+    return jsonify({"ok": True, "worker": worker.state.get("last_ok"), "error": worker.state.get("last_error")})
+
+
+if __name__ == "__main__":
+    store.init_db()
+    if "--check" in sys.argv:
+        print(json.dumps(engine.connectivity_check(), indent=1))
+        sys.exit(0)
+    worker.start()
+    app.run(host=config.UI_HOST, port=config.UI_PORT, threaded=True)
