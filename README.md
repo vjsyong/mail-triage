@@ -51,6 +51,13 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
   default). Each classification carries a confidence, a one-sentence summary of what
   the email is, and a short reason for the category ("why: ..."), shown on the message
   page. Auto-filing by category starts off; the LLM suggests until you enable it.
+- **Trained classifiers** (Classifiers page): deterministic heuristic models that run BEFORE
+  the LLM. Two kinds ship: `decision_list` (learned ordered conditions with precision/support,
+  fully interpretable) and `naive_bayes` (token statistics). They train from your labels
+  (manual tags) or, weakly, from existing classified mail; a confident verdict is applied
+  with no LLM call — consistent run to run, and immune to instructions hidden inside email
+  content (prompt injection). The assistant trains, retrains and evaluates them on request;
+  the worker auto-retrains tag-sourced classifiers as new labels arrive. Toggle in Settings.
 - **Semantic search (RAG)**: a local embedding index over all indexed folders
   (Qwen3-Embedding-4B on GPU 1) combined with BM25 keyword search, fused with RRF and
   reranked with a cross-encoder. The assistant uses it for content questions ("what
