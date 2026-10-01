@@ -445,6 +445,20 @@ z-index:299;box-shadow:0 6px 20px rgba(0,0,0,.28);max-width:420px}
 .toast b{font-weight:600}
 /* ---- auth panel / copy / misc ---- */
 .auth-panel{margin-top:14px;padding:14px;border:1px dashed var(--line2);background:#fcfcfc}
+.hr{border-top:1px solid var(--line);margin:14px 0}
+.sec-h{font-size:1.04rem;font-weight:700;letter-spacing:-.02em;margin:30px 0 2px}
+.sec-desc{color:var(--dim);font-size:.86rem;margin:0 0 4px}
+section[id]{scroll-margin-top:70px}
+details.menu{position:relative;display:inline-block}
+details.menu > summary{list-style:none;cursor:pointer}
+details.menu > summary::-webkit-details-marker{display:none}
+.menu-pop{position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--line);
+box-shadow:0 10px 30px rgba(0,0,0,.14);min-width:210px;z-index:30;padding:4px;text-align:left}
+.menu-item{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;
+font:inherit;font-size:.86rem;color:var(--fg);cursor:pointer}
+.menu-item:hover{background:var(--hover)}
+.menu-item.danger{color:var(--err)}
+.menu-item.danger:hover{background:var(--tint-err)}
 .copy{cursor:pointer;user-select:none;color:var(--dim);border:1px solid var(--line);padding:1px 7px;font-size:.76rem;
 margin-left:6px;display:inline-block;background:#fff}
 .copy:hover{color:var(--acc);border-color:var(--acc)}
@@ -583,6 +597,11 @@ function cp(text, el){
   if(scrim) scrim.addEventListener('click', function(){ setOpen(false); });
   document.addEventListener('keydown', function(e){ if(e.key === 'Escape') setOpen(false); });
   document.querySelectorAll('.nav-item').forEach(function(a){ a.addEventListener('click', function(){ setOpen(false); }); });
+  document.addEventListener('click', function(e){
+    document.querySelectorAll('details.menu[open]').forEach(function(d){
+      if(!d.contains(e.target)) d.removeAttribute('open');
+    });
+  });
 })();
 </script>
 </body></html>
@@ -2517,90 +2536,162 @@ def assistant_clear():
 
 
 # ---------------------------------------------------------------- settings
-
 SETTINGS_TMPL = """
 <style>
 .savebar{position:sticky;bottom:10px;background:rgba(250,250,250,.94);backdrop-filter:blur(4px);
 border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;gap:10px;margin-top:14px;z-index:4}
-.secnav{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 4px}
 </style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Settings</h1>
-    <div class="page-desc">Everything here is stored in SQLite — endpoints, keys, behaviour and display.</div>
+    <div class="page-desc">Grouped by what you come here to do — everything is stored in SQLite.</div>
   </div>
-  <div class="row secnav">
-    <a class="chip" href="#behavior">Behaviour</a>
-    <a class="chip" href="#llm">LLM endpoint</a>
-    <a class="chip" href="#rag">RAG</a>
-    <a class="chip" href="#connection">Mail connection</a>
-    <a class="chip" href="#runtime">Runtime</a>
+  <div class="row">
+    <a class="chip" href="#mailbox">Mailbox</a>
+    <a class="chip" href="#sorting">Sorting</a>
+    <a class="chip" href="#filing">Filing</a>
+    <a class="chip" href="#search">Search</a>
+    <a class="chip" href="#general">General</a>
+    <a class="chip" href="#status">Status</a>
   </div>
 </div>
 
-<form method="post" class="card" id="behavior">
-  <input type="hidden" name="section" value="behavior">
-  <div class="card-h"><h3>Behaviour</h3><span class="sub">polling, rules and LLM triage</span></div>
-  <div class="grid2">
-    <div><label for="p-int">Check interval (seconds)</label><input id="p-int" type="number" name="poll_interval" value="{{ s.poll_interval }}" min="15"></div>
-    <div><label for="p-look">First-run lookback (hours)</label><input id="p-look" type="number" name="lookback_hours" value="{{ s.lookback_hours }}" min="1"></div>
+<section id="mailbox">
+<h2 class="sec-h">Mailbox</h2>
+<div class="sec-desc">Where mail comes from and how often it is checked.</div>
+
+<div class="card">
+  <div class="card-h"><h3>Mail source</h3>
+    <span class="badge {{ 'acc' if s.proxy_mode != 'external' else 'warn' }}">{{ 'embedded proxy' if s.proxy_mode != 'external' else 'external server' }}</span>
   </div>
-  <div class="grid2">
-    <div><label for="p-watch">Watched folders (comma separated)</label><input id="p-watch" type="text" name="watch_folders" value="{{ s.watch_folders|join(', ') }}"></div>
-    <div><label for="p-name">Your name (for drafts)</label><input id="p-name" type="text" name="my_name" value="{{ s.my_name }}"></div>
-  </div>
-  <div class="grid2">
-    <div><label for="p-conc">Classify concurrency <span class="sub">(parallel LLM requests, 1-16)</span></label><input id="p-conc" type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16"></div>
-    <div><label for="p-tz">Time display offset <span class="sub">(hours from UTC; timestamps show as {{ tz }})</span></label><input id="p-tz" type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14"></div>
-  </div>
-  <div style="margin-top:8px">
-    <label class="check"><input type="checkbox" name="rules_apply" value="1"><input type="hidden" name="rules_apply" value="0" {{ 'checked' if s.rules_apply else '' }}> <span>Apply rule actions for real — uncheck for dry-run (suggests only)</span></label>
-    <label class="check"><input type="checkbox" name="heuristics_enabled" value="1"><input type="hidden" name="heuristics_enabled" value="0" {{ 'checked' if s.heuristics_enabled else '' }}> <span>Run trained classifiers before the LLM (deterministic, prompt-injection safe)</span></label>
-    <label class="check"><input type="checkbox" name="heuristic_autorefine" value="1"><input type="hidden" name="heuristic_autorefine" value="0" {{ 'checked' if s.heuristic_autorefine else '' }}> <span>Auto-retrain classifiers as new tags arrive</span></label>
-    <label class="check"><input type="checkbox" name="llm_suggest" value="1"><input type="hidden" name="llm_suggest" value="0" {{ 'checked' if s.llm_suggest else '' }}> <span>Classify unmatched mail with the LLM</span></label>
-    <label class="check"><input type="checkbox" name="llm_apply" value="1"><input type="hidden" name="llm_apply" value="0" {{ 'checked' if s.llm_apply else '' }}> <span>Auto-file mail by LLM category (uses the folder map below)</span></label>
-    <label class="check"><input type="checkbox" name="assistant_actions_apply" value="1"><input type="hidden" name="assistant_actions_apply" value="0" {{ 'checked' if s.assistant_actions_apply else '' }}> <span>Assistant may act on mail (create folders, move, flag) — uncheck = dry-run</span></label>
-    <label class="check"><input type="checkbox" name="index_enabled" value="1"><input type="hidden" name="index_enabled" value="0" {{ 'checked' if s.index_enabled else '' }}> <span>Build the semantic search index (embeddings endpoint below)</span></label>
-    <label class="check"><input type="checkbox" name="rerank_enabled" value="1"><input type="hidden" name="rerank_enabled" value="0" {{ 'checked' if s.rerank_enabled else '' }}> <span>Rerank search results with the cross-encoder (better precision, slightly slower)</span></label>
-  </div>
-  <label for="p-ifolders">Indexed folders <span class="sub">(comma separated; blank = all except the excluded list in the RAG section)</span></label>
-  <input id="p-ifolders" type="text" name="index_folders" value="{{ s.index_folders|join(', ') }}">
-  <div class="grid2">
-    <div><label for="p-max">Max LLM calls per hour</label><input id="p-max" type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0"></div>
-    <div><label for="p-batch">LLM classifications per check</label><input id="p-batch" type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1"></div>
-  </div>
-  <label for="p-cats">Categories (comma separated)</label>
-  <input id="p-cats" type="text" name="categories" value="{{ s.categories|join(', ') }}">
-  <label for="p-cmap">Category → folder map <span class="sub">(one per line, "Category = Folder"; blank folder = keep in inbox)</span></label>
-  <textarea id="p-cmap" name="category_folders" rows="6" style="min-height:100px">{% for k, v in s.category_folders.items() %}{{ k }} = {{ v }}
-{% endfor %}</textarea>
-  <div class="grid2">
-    <div><label for="p-drafts">Drafts folder <span class="sub">(blank = auto-detect)</span></label><input id="p-drafts" type="text" name="drafts_folder" value="{{ s.drafts_folder }}"></div>
-  </div>
-  <div class="savebar"><button class="btn primary" type="submit">Save settings</button><span class="sub">Applies on the next worker cycle.</span></div>
-</form>
+  <form method="post">
+    <input type="hidden" name="section" value="connection">
+    <input type="hidden" name="scope" value="Mail source">
+    <div class="grid2">
+      <div><label for="c-mode">Mode</label>
+        <select id="c-mode" name="proxy_mode">
+          <option value="embedded" {{ 'selected' if s.proxy_mode != 'external' else '' }}>Embedded proxy (recommended)</option>
+          <option value="external" {{ 'selected' if s.proxy_mode == 'external' else '' }}>External server</option>
+        </select>
+        <div class="sub" style="margin-top:4px">Embedded keeps OAuth sign-in and tokens inside this app (Accounts page). External points the app at another IMAP server below.</div>
+      </div>
+      <div><label for="c-tailnet">Tailnet host <span class="sub">(for tailnet-mode OAuth redirect URIs)</span></label>
+        <input id="c-tailnet" type="text" name="proxy_tailnet_host" value="{{ s.proxy_tailnet_host }}" placeholder="node.tailnet.ts.net">
+        <div class="sub" style="margin-top:4px">Builds redirect URIs like <span class="mono">https://node.tailnet.ts.net:41810</span> for accounts in tailnet mode.</div>
+      </div>
+    </div>
+    <div id="extf"{% if s.proxy_mode != 'external' %} class="hidden"{% endif %}>
+      <div class="hr"></div>
+      <h4>External server</h4>
+      <div class="sub" style="margin-bottom:6px">Only used in external mode. Blank fields fall back to the container env file.</div>
+      <div class="grid2">
+        <div><label for="c-host">IMAP host</label><input id="c-host" type="text" name="imap_host" value="{{ s.imap_host }}" placeholder="{{ cfg.IMAP_HOST }}"></div>
+        <div><label for="c-port">Port</label><input id="c-port" type="text" name="imap_port" value="{{ s.imap_port }}" placeholder="{{ cfg.IMAP_PORT }}"></div>
+      </div>
+      <div class="grid2">
+        <div><label for="c-user">Username</label><input id="c-user" type="text" name="imap_user" value="{{ s.imap_user }}" placeholder="{{ cfg.IMAP_USER }}"></div>
+        <div><label for="c-pass">Password <span class="sub">(blank keeps the stored value)</span></label><input id="c-pass" type="password" name="imap_password" value="" autocomplete="new-password" placeholder="{{ 'set' if icfg.password else 'not set' }}"></div>
+      </div>
+      <div class="grid2">
+        <div><label for="c-tls">TLS</label>
+          <select id="c-tls" name="imap_tls">
+            <option value="" {{ 'selected' if s.imap_tls in ('', none) else '' }}>(env)</option>
+            <option value="0" {{ 'selected' if s.imap_tls == '0' else '' }}>0 — plain (proxy)</option>
+            <option value="1" {{ 'selected' if s.imap_tls == '1' else '' }}>1 — TLS</option>
+          </select></div>
+        <div><label class="check" style="margin-top:26px"><input type="checkbox" name="imap_password_clear" value="1"> <span>Clear the stored password</span></label></div>
+      </div>
+    </div>
+    <div class="savebar"><button class="btn primary" type="submit">Save mail source</button><span class="sub">Switching mode stops or starts the embedded proxy automatically.</span></div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Checking</h3></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Checking">
+    <div class="grid2">
+      <div><label for="p-int">Check every (seconds)</label><input id="p-int" type="number" name="poll_interval" value="{{ s.poll_interval }}" min="15">
+        <div class="sub" style="margin-top:4px">How often the watcher looks for new mail.</div></div>
+      <div><label for="p-look">First-run lookback (hours)</label><input id="p-look" type="number" name="lookback_hours" value="{{ s.lookback_hours }}" min="1">
+        <div class="sub" style="margin-top:4px">How far back the first scan (and re-scans) reach.</div></div>
+    </div>
+    <label for="p-watch">Watched folders <span class="sub">(comma separated)</span></label>
+    <input id="p-watch" type="text" name="watch_folders" value="{{ s.watch_folders|join(', ') }}">
+    <div class="sub" style="margin-top:4px">Folders scanned for new mail — usually just INBOX.</div>
+    <div class="savebar"><button class="btn primary" type="submit">Save checking</button></div>
+  </form>
+</div>
+</section>
+
+<section id="sorting">
+<h2 class="sec-h">Sorting &amp; classification</h2>
+<div class="sec-desc">What happens to arriving mail, top to bottom: rules first, then trained classifiers, then the LLM.</div>
+
+<div class="card">
+  <div class="card-h"><h3>Rules &amp; classifiers</h3><a class="sub" href="{{ url_for('rules') }}">Manage rules →</a></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Rules &amp; classifiers">
+    <h4>Rules</h4>
+    <label class="check"><input type="checkbox" name="rules_apply" value="1" {{ 'checked' if s.rules_apply else '' }}><input type="hidden" name="rules_apply" value="0"> <span>Apply rule actions for real — uncheck for dry-run (suggest only)</span></label>
+    <div class="sub" style="margin-top:2px">Rules match on from / to / subject / body and can move, read or flag mail.</div>
+    <div class="hr"></div>
+    <h4>Classifiers <a class="sub" href="{{ url_for('classifiers') }}" style="font-weight:400">manage →</a></h4>
+    <label class="check"><input type="checkbox" name="heuristics_enabled" value="1" {{ 'checked' if s.heuristics_enabled else '' }}><input type="hidden" name="heuristics_enabled" value="0"> <span>Run trained classifiers before the LLM</span></label>
+    <div class="sub" style="margin-top:2px">Deterministic verdicts from your own labels — faster and immune to prompt injection.</div>
+    <label class="check" style="margin-top:8px"><input type="checkbox" name="heuristic_autorefine" value="1" {{ 'checked' if s.heuristic_autorefine else '' }}><input type="hidden" name="heuristic_autorefine" value="0"> <span>Auto-retrain classifiers as new tags arrive</span></label>
+    <div class="savebar"><button class="btn primary" type="submit">Save rules &amp; classifiers</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>LLM classification</h3></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="LLM classification">
+    <label class="check"><input type="checkbox" name="llm_suggest" value="1" {{ 'checked' if s.llm_suggest else '' }}><input type="hidden" name="llm_suggest" value="0"> <span>Classify unmatched mail with the LLM</span></label>
+    <div class="sub" style="margin-top:2px">Anything no rule or classifier claimed gets a category, summary and confidence.</div>
+    <label class="check" style="margin-top:8px"><input type="checkbox" name="llm_apply" value="1" {{ 'checked' if s.llm_apply else '' }}><input type="hidden" name="llm_apply" value="0"> <span>Auto-file by LLM category (uses the folder map in Filing)</span></label>
+    <div class="sub" style="margin-top:2px">Off = the LLM suggests only; you decide what to file.</div>
+    <div class="hr"></div>
+    <div class="grid2">
+      <div><label for="p-max">Max automatic calls per hour</label><input id="p-max" type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0">
+        <div class="sub" style="margin-top:4px">Hourly cap for background classification.</div></div>
+      <div><label for="p-batch">Classifications per check</label><input id="p-batch" type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1">
+        <div class="sub" style="margin-top:4px">How many queued messages each cycle picks up.</div></div>
+    </div>
+    <div class="grid2">
+      <div><label for="p-conc">Classify concurrency</label><input id="p-conc" type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16">
+        <div class="sub" style="margin-top:4px">Parallel requests for “Classify all” (1–16; 16 measured best on this GPU).</div></div>
+    </div>
+    <div class="savebar"><button class="btn primary" type="submit">Save classification</button></div>
+  </form>
+</div>
 
 <div class="card" id="llm">
   <div class="card-h"><h3>LLM endpoint</h3><span class="sub">any OpenAI-compatible /chat/completions server</span></div>
   <form method="post">
     <input type="hidden" name="section" value="llm">
+    <input type="hidden" name="scope" value="LLM endpoint">
     <div class="grid2">
-      <div><label for="l-base">Base URL <span class="sub">(e.g. http://100.93.139.49:8040/v1)</span></label><input id="l-base" type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}"></div>
+      <div><label for="l-base">Base URL</label><input id="l-base" type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}"></div>
       <div><label for="l-model">Model</label><input id="l-model" type="text" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model }}"></div>
     </div>
     <div class="grid2">
-      <div><label for="l-key">API key <span class="sub">(blank keeps the stored key; enter a new one to replace)</span></label><input id="l-key" type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}"></div>
+      <div><label for="l-key">API key <span class="sub">(blank keeps the stored key)</span></label><input id="l-key" type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}"></div>
       <div><label for="l-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="l-timeout" type="number" name="llm_timeout" min="0" value="{{ s.llm_timeout or '' }}" placeholder="90"></div>
     </div>
     <div class="grid2">
       <div><label for="l-think">Thinking / reasoning channel</label>
         <select id="l-think" name="llm_thinking">
-          <option value="auto" {{ 'selected' if s.llm_thinking != 'off' else '' }}>auto — send the vLLM thinking extension, drop it if the endpoint rejects it</option>
+          <option value="auto" {{ 'selected' if s.llm_thinking != 'off' else '' }}>auto — send it, drop it if the endpoint rejects it</option>
           <option value="off" {{ 'selected' if s.llm_thinking == 'off' else '' }}>off — never send it (strict OpenAI-compatible servers)</option>
-        </select>
-      </div>
+        </select></div>
       <div><label class="check" style="margin-top:26px"><input type="checkbox" name="llm_api_key_clear" value="1"> <span>Clear the stored API key</span></label></div>
     </div>
+    <div class="hr"></div>
     <h4>Fallback endpoint <span class="sub">(optional; used automatically when the primary fails)</span></h4>
     <div class="grid2">
       <div><label for="l-fbase">Base URL</label><input id="l-fbase" type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}"></div>
@@ -2610,10 +2701,7 @@ border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;g
       <div><label for="l-fkey">API key <span class="sub">(blank keeps the stored key)</span></label><input id="l-fkey" type="password" name="llm_fallback_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if (llm.fallback and llm.fallback.key) else 'not set' }}"></div>
       <div><label class="check" style="margin-top:26px"><input type="checkbox" name="llm_fallback_api_key_clear" value="1"> <span>Clear the stored fallback key</span></label></div>
     </div>
-    <div class="savebar">
-      <button class="btn primary" type="submit">Save LLM endpoint</button>
-      <span class="sub">Blank fields fall back to the env file.</span>
-    </div>
+    <div class="savebar"><button class="btn primary" type="submit">Save LLM endpoint</button><span class="sub">Blank fields fall back to the env file.</span></div>
   </form>
   <div class="row" style="margin-top:10px">
     <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit">Test primary</button></form>
@@ -2622,10 +2710,71 @@ border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;g
   </div>
 </div>
 
+<div class="card">
+  <div class="card-h"><h3>Assistant</h3><a class="sub" href="{{ url_for('assistant') }}">Open assistant →</a></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Assistant">
+    <label class="check"><input type="checkbox" name="assistant_actions_apply" value="1" {{ 'checked' if s.assistant_actions_apply else '' }}><input type="hidden" name="assistant_actions_apply" value="0"> <span>Assistant may act on mail (create folders, move, flag) — uncheck = dry-run</span></label>
+    <div class="sub" style="margin-top:2px">Dry-run keeps every tool call read-only; the chat shows what it would have done.</div>
+    <div class="savebar"><button class="btn primary" type="submit">Save assistant</button></div>
+  </form>
+</div>
+</section>
+
+<section id="filing">
+<h2 class="sec-h">Filing &amp; drafts</h2>
+<div class="sec-desc">How mail is labelled, where LLM categories file to, and where reply drafts are saved.</div>
+
+<div class="card">
+  <div class="card-h"><h3>Categories, folders &amp; drafts</h3></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Filing &amp; drafts">
+    <label for="p-cats">Categories <span class="sub">(comma separated)</span></label>
+    <input id="p-cats" type="text" name="categories" value="{{ s.categories|join(', ') }}">
+    <div class="sub" style="margin-top:4px">The set the LLM may classify into — used by classifiers, tags and the folder map below.</div>
+    <label for="p-cmap">Category → folder map <span class="sub">(one per line, "Category = Folder"; blank folder = keep in inbox)</span></label>
+    <textarea id="p-cmap" name="category_folders" rows="6" style="min-height:100px">{% for k, v in s.category_folders.items() %}{{ k }} = {{ v }}
+{% endfor %}</textarea>
+    <div class="sub" style="margin-top:4px">Only used when “Auto-file by LLM category” is on.</div>
+    <div class="grid2">
+      <div><label for="p-drafts">Drafts folder <span class="sub">(blank = auto-detect)</span></label><input id="p-drafts" type="text" name="drafts_folder" value="{{ s.drafts_folder }}"></div>
+    </div>
+    <div class="savebar"><button class="btn primary" type="submit">Save filing &amp; drafts</button></div>
+  </form>
+</div>
+</section>
+
+<section id="search">
+<h2 class="sec-h">Search (RAG / semantic search)</h2>
+<div class="sec-desc">A local embedding index over the whole archive, fused with keyword search.</div>
+
+<div class="card">
+  <div class="card-h"><h3>Index</h3><a class="sub" href="{{ url_for('dashboard') }}">Run or rebuild from the Dashboard →</a></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Search index">
+    <label class="check"><input type="checkbox" name="index_enabled" value="1" {{ 'checked' if s.index_enabled else '' }}><input type="hidden" name="index_enabled" value="0"> <span>Build and maintain the search index</span></label>
+    <label class="check" style="margin-top:8px"><input type="checkbox" name="rerank_enabled" value="1" {{ 'checked' if s.rerank_enabled else '' }}><input type="hidden" name="rerank_enabled" value="0"> <span>Rerank results with the cross-encoder (better precision, slightly slower)</span></label>
+    <div class="hr"></div>
+    <label for="p-ifolders">Indexed folders <span class="sub">(comma separated; blank = all except the excluded list below)</span></label>
+    <input id="p-ifolders" type="text" name="index_folders" value="{{ s.index_folders|join(', ') }}">
+    <div class="grid2" style="margin-top:10px">
+      <div><label for="i-refresh">Idle refresh interval (minutes)</label><input id="i-refresh" type="number" name="index_refresh_minutes" value="{{ s.index_refresh_minutes }}" min="1">
+        <div class="sub" style="margin-top:4px">How often the index picks up newly arrived mail.</div></div>
+      <div><label for="i-excl">Excluded folders <span class="sub">(substrings, comma separated)</span></label><input id="i-excl" type="text" name="rag_exclude_folders" value="{{ s.rag_exclude_folders|join(', ') }}">
+        <div class="sub" style="margin-top:4px">Folders skipped when indexing everything.</div></div>
+    </div>
+    <div class="savebar"><button class="btn primary" type="submit">Save index</button></div>
+  </form>
+</div>
+
 <div class="card" id="rag">
-  <div class="card-h"><h3>RAG / semantic search</h3><span class="sub">embeddings + reranker endpoints</span></div>
+  <div class="card-h"><h3>Endpoints</h3><span class="sub">embeddings + reranker</span></div>
   <form method="post">
     <input type="hidden" name="section" value="rag">
+    <input type="hidden" name="scope" value="Search endpoints">
     <h4>Embeddings</h4>
     <div class="grid2">
       <div><label for="e-base">Base URL</label><input id="e-base" type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}"></div>
@@ -2636,16 +2785,17 @@ border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;g
         <select id="e-proto" name="embed_protocol">
           <option value="tei" {{ 'selected' if s.embed_protocol != 'openai' else '' }}>TEI — POST /embed {"inputs": [...]}</option>
           <option value="openai" {{ 'selected' if s.embed_protocol == 'openai' else '' }}>OpenAI — POST /embeddings {"input": [...]} (OpenAI, Ollama, LM Studio, TEI /v1)</option>
-        </select>
-      </div>
+        </select></div>
       <div><label for="e-key">API key <span class="sub">(blank keeps the stored key; only for gated endpoints)</span></label><input id="e-key" type="password" name="embed_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if ecfg.key else 'not set' }}"></div>
     </div>
     <div class="grid2">
       <div><label for="e-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="e-timeout" type="number" name="embed_timeout" min="0" value="{{ s.embed_timeout or '' }}" placeholder="180"></div>
       <div><label class="check" style="margin-top:26px"><input type="checkbox" name="embed_api_key_clear" value="1"> <span>Clear the stored key</span></label></div>
     </div>
-    <label for="e-prefix">Query instruction prefix <span class="sub">(prepended to search queries only, never to documents; Qwen3-Embedding needs one, most other models want this blank)</span></label>
+    <label for="e-prefix">Query instruction prefix <span class="sub">(prepended to search queries only, never to documents)</span></label>
     <textarea id="e-prefix" name="embed_query_prefix" rows="2" style="min-height:60px">{{ s.embed_query_prefix }}</textarea>
+    <div class="sub" style="margin-top:4px">Qwen3-Embedding needs one; most other models want this blank.</div>
+    <div class="hr"></div>
     <h4>Reranker</h4>
     <div class="grid2">
       <div><label for="r-base">Base URL</label><input id="r-base" type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}"></div>
@@ -2656,24 +2806,14 @@ border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;g
         <select id="r-proto" name="rerank_protocol">
           <option value="tei" {{ 'selected' if s.rerank_protocol != 'cohere' else '' }}>TEI — {"query", "texts"}</option>
           <option value="cohere" {{ 'selected' if s.rerank_protocol == 'cohere' else '' }}>Cohere-style — {"query", "documents"} (Cohere, Jina, Infinity)</option>
-        </select>
-      </div>
+        </select></div>
       <div><label for="r-key">API key <span class="sub">(blank keeps the stored key)</span></label><input id="r-key" type="password" name="rerank_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if rcfg.key else 'not set' }}"></div>
     </div>
     <div class="grid2">
       <div><label for="r-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="r-timeout" type="number" name="rerank_timeout" min="0" value="{{ s.rerank_timeout or '' }}" placeholder="90"></div>
       <div><label class="check" style="margin-top:26px"><input type="checkbox" name="rerank_api_key_clear" value="1"> <span>Clear the stored key</span></label></div>
     </div>
-    <h4>Index</h4>
-    <div class="grid2">
-      <div><label for="i-refresh">Idle refresh interval (minutes)</label><input id="i-refresh" type="number" name="index_refresh_minutes" value="{{ s.index_refresh_minutes }}" min="1"></div>
-    </div>
-    <label for="i-excl">Excluded folders <span class="sub">(comma separated, case-insensitive substrings; blank = index everything)</span></label>
-    <input id="i-excl" type="text" name="rag_exclude_folders" value="{{ s.rag_exclude_folders|join(', ') }}">
-    <div class="savebar">
-      <button class="btn primary" type="submit">Save RAG settings</button>
-      <span class="sub">Changing the embedding model or dimension requires an index rebuild (Dashboard).</span>
-    </div>
+    <div class="savebar"><button class="btn primary" type="submit">Save endpoints</button><span class="sub">Changing the embedding model or dimension needs an index rebuild (Dashboard).</span></div>
   </form>
   <div class="row" style="margin-top:10px">
     <form class="inline" method="post" action="{{ url_for('settings_test_embed') }}"><button class="btn" type="submit">Test embeddings</button></form>
@@ -2681,43 +2821,29 @@ border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;g
     <span class="sub">tests the saved settings</span>
   </div>
 </div>
+</section>
 
-<div class="card" id="connection">
-  <div class="card-h"><h3>Mail connection</h3><span class="sub">where mail comes from</span></div>
+<section id="general">
+<h2 class="sec-h">General</h2>
+<div class="sec-desc">About you and how the interface reads for you.</div>
+
+<div class="card">
   <form method="post">
-    <input type="hidden" name="section" value="connection">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="General">
     <div class="grid2">
-      <div><label for="c-mode">Mode</label>
-        <select id="c-mode" name="proxy_mode">
-          <option value="embedded" {{ 'selected' if s.proxy_mode != 'external' else '' }}>Embedded proxy (recommended) — accounts and OAuth are managed on the Accounts page</option>
-          <option value="external" {{ 'selected' if s.proxy_mode == 'external' else '' }}>External server — connect to the IMAP host/port below</option>
-        </select>
-      </div>
-      <div><label for="c-host">External IMAP host <span class="sub">(blank = env)</span></label><input id="c-host" type="text" name="imap_host" value="{{ s.imap_host }}" placeholder="{{ cfg.IMAP_HOST }}"></div>
+      <div><label for="p-name">Your name <span class="sub">(used when drafting replies)</span></label><input id="p-name" type="text" name="my_name" value="{{ s.my_name }}"></div>
+      <div><label for="p-tz">Time display offset <span class="sub">(hours from UTC; timestamps show as {{ tz }})</span></label><input id="p-tz" type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14"></div>
     </div>
-    <div class="grid2">
-      <div><label for="c-port">Port <span class="sub">(blank = env)</span></label><input id="c-port" type="text" name="imap_port" value="{{ s.imap_port }}" placeholder="{{ cfg.IMAP_PORT }}"></div>
-      <div><label for="c-user">External IMAP user <span class="sub">(blank = env / first account)</span></label><input id="c-user" type="text" name="imap_user" value="{{ s.imap_user }}" placeholder="{{ cfg.IMAP_USER }}"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="c-pass">External IMAP password <span class="sub">(blank keeps the stored value; env fallback)</span></label><input id="c-pass" type="password" name="imap_password" value="" autocomplete="new-password" placeholder="{{ 'set' if icfg.password else 'not set' }}"></div>
-      <div><label for="c-tls">TLS <span class="sub">(blank = env)</span></label>
-        <select id="c-tls" name="imap_tls">
-          <option value="" {{ 'selected' if s.imap_tls in ('', none) else '' }}>(env)</option>
-          <option value="0" {{ 'selected' if s.imap_tls == '0' else '' }}>0 — plain (proxy)</option>
-          <option value="1" {{ 'selected' if s.imap_tls == '1' else '' }}>1 — TLS</option>
-        </select></div>
-    </div>
-    <div class="grid2">
-      <div><label for="c-tailnet">Tailnet host <span class="sub">(for tailnet-mode OAuth redirect URIs, e.g. node.tailnet.ts.net)</span></label><input id="c-tailnet" type="text" name="proxy_tailnet_host" value="{{ s.proxy_tailnet_host }}" placeholder="node.tailnet.ts.net"></div>
-      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="imap_password_clear" value="1"> <span>Clear the stored password</span></label></div>
-    </div>
-    <div class="savebar"><button class="btn primary" type="submit">Save connection</button><span class="sub">Embedded mode reads mail through the in-app proxy; external mode wins over the container env.</span></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save general</button></div>
   </form>
 </div>
+</section>
 
-<div class="card" id="runtime">
-  <div class="card-h"><h3>Runtime</h3><span class="sub">effective values right now</span></div>
+<section id="status">
+<h2 class="sec-h">Status</h2>
+<div class="sec-desc">Effective values right now.</div>
+<div class="card">
   <div class="sub mono" style="line-height:1.9">
     IMAP: {{ icfg.user or '?' }} @ {{ icfg.host }}:{{ icfg.port }} ({{ icfg.mode }})<br>
     LLM: {{ llm.base }} · model {{ llm.model }} · key {{ 'set' if llm.key else 'MISSING' }}{% if llm.fallback %} · fallback: {{ llm.fallback.model }}{% endif %}<br>
@@ -2727,7 +2853,19 @@ border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;g
   <p class="sub" style="margin-bottom:0">Endpoints and keys set on this page are stored in SQLite (keys are shown masked only);
   blank fields fall back to the container env file, so an existing .env keeps working.</p>
 </div>
+</section>
+
+<script>
+(function(){
+  var sel = document.getElementById('c-mode'), ext = document.getElementById('extf');
+  if(!sel || !ext) return;
+  function upd(){ ext.classList.toggle('hidden', sel.value !== 'external'); }
+  sel.addEventListener('change', upd);
+})();
+</script>
 """
+
+
 
 
 
@@ -2864,15 +3002,16 @@ def _save_connection_settings():
 def settings():
     if request.method == "POST":
         section = request.form.get("section") or "behavior"
+        scope = (request.form.get("scope") or "").strip()
         if section == "llm":
             _save_llm_settings()
-            flash("LLM endpoint settings saved.", "ok")
+            flash(("%s saved." % scope) if scope else "LLM endpoint settings saved.", "ok")
         elif section == "rag":
             _save_rag_settings()
-            flash("RAG settings saved.", "ok")
+            flash(("%s saved." % scope) if scope else "RAG settings saved.", "ok")
         elif section == "connection":
             _save_connection_settings()
-            flash("Connection settings saved.", "ok")
+            flash(("%s saved." % scope) if scope else "Connection settings saved.", "ok")
             try:
                 if (store.get_setting("proxy_mode") or "embedded") == "external":
                     proxy.manager.stop()
@@ -2884,7 +3023,7 @@ def settings():
                 flash("Proxy apply failed: %r" % exc, "warn")
         else:
             _save_behavior_settings()
-            flash("Settings saved.", "ok")
+            flash(("%s saved." % scope) if scope else "Settings saved.", "ok")
         _TZ_CACHE["at"] = 0  # re-read the display timezone on the next render
         return redirect(url_for("settings"))
     return render(render_template_string(
@@ -2957,6 +3096,11 @@ def settings_test_rerank():
 
 def _accounts_view():
     accounts = []
+    try:
+        ic = engine.imap_config()
+        reading_user = (ic.get("user") or "") if ic.get("mode") == "embedded" else ""
+    except Exception:
+        reading_user = ""
     for a in proxy.list_accounts():
         cs = proxy.client_settings(a)
         tok = proxy.token_status(a["email"])
@@ -2965,6 +3109,7 @@ def _accounts_view():
         accounts.append({
             "email": a["email"],
             "sid": re.sub(r"[^A-Za-z0-9]", "-", a["email"]),
+            "reading": bool(reading_user) and a["email"].lower() == reading_user.lower(),
             "provider": a.get("provider"),
             "provider_label": cs["provider_label"],
             "redirect_uri": cs["redirect_uri"],
@@ -2987,68 +3132,83 @@ def _proxy_status_view():
         st["started_h"] = fmt_ts(st["started_at"])
     return st
 
-
 ACCOUNTS_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Accounts</h1>
-    <div class="page-desc">The embedded email proxy signs in to your providers — everything it needs is managed here.</div>
+    <div class="page-desc">Mail accounts this app reads, and the embedded OAuth proxy that signs in to them.</div>
   </div>
   <div class="row">
-    <form class="inline" method="post" action="{{ url_for('proxy_restart') }}"><button class="btn" type="submit">Restart proxy</button></form>
-    <a class="btn" href="{{ url_for('proxy_log') }}">Proxy log</a>
     <a class="btn primary" href="{{ url_for('account_new') }}">Add account</a>
   </div>
 </div>
 
+{% if not p.installed %}
+<div class="msg err">The emailproxy package is not installed in this image — accounts cannot run.</div>
+{% endif %}
+{% if ext_mode %}
+<div class="note">Mail source is set to <b>external</b> in Settings — the accounts below are idle; the app connects to the server configured there instead.</div>
+{% endif %}
+
 <div class="card">
-  <div class="card-h"><h3>Proxy</h3>
-    <span class="row">
-      {% if not p.installed %}<span class="badge err">emailproxy package missing</span>
-      {% elif p.running %}<span class="badge ok">running</span>
-      {% else %}<span class="badge warn">stopped</span>{% endif %}
-      {% if p.restarts %}<span class="badge warn">{{ p.restarts }} restart{{ 's' if p.restarts != 1 else '' }}</span>{% endif %}
-    </span>
-  </div>
-  <div class="sub">
-    {% if p.pid %}pid {{ p.pid }} · {% endif %}{% if p.started_h %}up since {{ p.started_h }} · {% endif %}listeners:
-    {% for l in p.listener_rows %}<span class="mono">127.0.0.1:{{ l.port }}</span> <span class="dot {{ 'ok' if l.up else 'err' }}" title="{{ 'up' if l.up else 'down' }}"></span>{% if not loop.last %} · {% endif %}{% else %}(none yet — add an account){% endfor %}
+  <div class="spread">
+    <div class="row" style="gap:10px">
+      {% if p.running %}<span class="badge ok">proxy running</span>{% else %}<span class="badge warn">proxy stopped</span>{% endif %}
+      <span class="sub">
+        {% for l in p.listener_rows %}<span class="mono">127.0.0.1:{{ l.port }}</span> <span class="dot {{ 'ok' if l.up else 'err' }}"></span>{% if not loop.last %} · {% endif %}{% else %}no listeners yet{% endfor %}
+        {% if p.pid %} · pid {{ p.pid }}{% endif %}{% if p.started_h %} · up since {{ p.started_h }}{% endif %}
+        {% if p.restarts %} · restarted {{ p.restarts }}×{% endif %}
+      </span>
+    </div>
+    <div class="row">
+      <form class="inline" method="post" action="{{ url_for('proxy_restart') }}"><button class="btn small" type="submit">Restart proxy</button></form>
+      <a class="btn small" href="{{ url_for('proxy_log') }}">Proxy log</a>
+    </div>
   </div>
   {% if p.last_error %}<div class="msg err" style="margin-bottom:0"><span class="mono">{{ p.last_error }}</span></div>{% endif %}
 </div>
 
 {% for a in accounts %}
 <div class="card" data-email="{{ a.email }}">
-  <div class="card-h">
+  <div class="spread">
     <div>
-      <h3>{{ a.email }} <span class="sub">· {{ a.provider_label }}</span></h3>
-      <div class="sub" style="margin-top:3px">
+      <h3>{{ a.email }} <span class="sub">· {{ a.provider_label }}</span>{% if a.reading %} <span class="badge acc">reading</span>{% endif %}</h3>
+      <div class="sub" style="margin-top:4px">
         {% if a.auth.status in ['starting','triggering','triggered','url_ready'] %}<span class="badge acc">authorising…</span>
-        {% elif a.token.authorized %}<span class="badge ok">authorised</span>{% if a.token.expires_h %} · token until {{ a.token.expires_h }}{% endif %}
-        {% else %}<span class="badge warn">not authorised</span>{% endif %}
+        {% elif a.token.authorized %}<span class="badge ok">authorised</span>{% if a.token.expires_h %} · access token until {{ a.token.expires_h }}{% endif %}
+        {% else %}<span class="badge warn">not authorised</span> — sign in once to start reading mail{% endif %}
         &nbsp;· {{ a.mode }} mode
       </div>
     </div>
     <div class="row">
-      <button class="btn primary" onclick="startAuth('{{ a.email }}', this)">Authorise</button>
+      <button class="btn primary" onclick="startAuth('{{ a.email }}', this)">{{ 'Re-authorise' if a.token.authorized else 'Authorise' }}</button>
       <a class="btn" href="{{ url_for('account_edit', email=a.email) }}">Edit</a>
-      <form class="inline" method="post" action="{{ url_for('account_reset_tokens', email=a.email) }}"
-            onsubmit="return confirm('Forget the cached OAuth tokens for {{ a.email }}? You will need to authorise again.');">
-        <button class="btn" type="submit">Reset tokens</button></form>
-      <form class="inline" method="post" action="{{ url_for('account_delete', email=a.email) }}"
-            onsubmit="return confirm('Remove account {{ a.email }}? Its tokens and config entry are deleted.');">
-        <button class="btn danger" type="submit">Remove</button></form>
+      <details class="menu">
+        <summary class="btn" aria-haspopup="menu">More</summary>
+        <div class="menu-pop" role="menu">
+          <button class="menu-item" type="button" onclick="cp('{{ a.password }}', this); this.closest('details').removeAttribute('open')">Copy local password</button>
+          <button class="menu-item" type="button" onclick="cp('{{ a.redirect_uri }}', this); this.closest('details').removeAttribute('open')">Copy redirect URI</button>
+          <form method="post" action="{{ url_for('account_reset_tokens', email=a.email) }}"
+                onsubmit="return confirm('Forget the cached OAuth tokens for {{ a.email }}? You will need to authorise again.');">
+            <button class="menu-item" type="submit">Reset tokens</button></form>
+          <form method="post" action="{{ url_for('account_delete', email=a.email) }}"
+                onsubmit="return confirm('Remove account {{ a.email }}? Its tokens and config entry are deleted.');">
+            <button class="menu-item danger" type="submit">Remove account…</button></form>
+        </div>
+      </details>
     </div>
   </div>
-  <details class="sub" style="margin-top:6px">
-    <summary style="cursor:pointer">Account details</summary>
+
+  <details class="sub" style="margin-top:8px">
+    <summary style="cursor:pointer">Setup details</summary>
     <div class="kv">
-      <div class="k">Redirect URI</div><div><code>{{ a.redirect_uri }}</code> <span class="sub">— register exactly this at your provider</span></div>
-      <div class="k">Local password</div><div><code>{{ a.password }}</code> <span class="copy" data-copy="{{ a.password }}">copy</span> <span class="sub">— the app signs in with it automatically</span></div>
+      <div class="k">Redirect URI</div><div><code>{{ a.redirect_uri }}</code> <span class="sub">— register exactly this at your provider (when using your own OAuth app)</span></div>
+      <div class="k">Local password</div><div><code>{{ a.password }}</code> <span class="sub">— the app signs in with it automatically</span></div>
       <div class="k">Listener</div><div><code>127.0.0.1:{{ a.imap_local_port }}</code> IMAP{% if a.smtp_local_port %} · <code>127.0.0.1:{{ a.smtp_local_port }}</code> SMTP{% endif %}</div>
       <div class="k">Mode</div><div class="sub">{{ a.mode_note }}</div>
     </div>
   </details>
+
   <div class="auth-panel hidden" id="panel-{{ a.sid }}">
     <div class="auth-msg sub">…</div>
     <div class="auth-url hidden" style="margin-top:8px">
@@ -3074,19 +3234,19 @@ ACCOUNTS_TMPL = """
 <div class="card">
   <div class="empty">
     <h4>No accounts yet</h4>
-    <p>Add your mail account here and sign in once — the watcher and the assistant pick it up automatically.</p>
+    <p>Add your mail account and sign in once — the watcher and the assistant pick it up automatically.</p>
     <a class="btn primary" href="{{ url_for('account_new') }}">Add account</a>
   </div>
 </div>
 {% endfor %}
 
-<div class="card">
-  <div class="card-h"><h3>How this works</h3></div>
-  <div class="sub">The embedded <b>email-oauth2-proxy</b> signs in to your provider with OAuth 2.0 and
+<details class="card">
+  <summary style="cursor:pointer;font-weight:600;list-style:none">How the proxy works <span class="sub">(click to read)</span></summary>
+  <div class="sub" style="margin-top:10px">The embedded <b>email-oauth2-proxy</b> signs in to your provider with OAuth 2.0 and
   exposes a PLAIN local IMAP listener; Mail Triage reads mail through that listener and never stores a
   provider password. OAuth tokens live in <code>{{ p.cache_file }}</code> and the generated config in
   <code>{{ p.config_file }}</code> (log: <code>{{ p.log_file }}</code>). Account changes restart the proxy automatically.</div>
-</div>
+</details>
 
 <script>
 function cp(text, el){
@@ -3098,19 +3258,16 @@ function cp(text, el){
     document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); done();
   }
 }
-document.addEventListener('click', function(e){
-  const el = e.target && e.target.closest ? e.target.closest('.copy') : null;
-  if(el && el.dataset && el.dataset.copy !== undefined){ cp(el.dataset.copy, el); }
-});
 function startAuth(email, btn){
+  if(!btn.dataset.label){ btn.dataset.label = btn.textContent.trim(); }
   btn.disabled = true; btn.textContent = 'Starting…';
   fetch('/api/proxy/auth/' + encodeURIComponent(email), {method:'POST'})
     .then(r => r.json())
     .then(j => {
-      if(!j.ok){ toast(j.message || 'Could not start authorisation', 'err'); btn.disabled=false; btn.textContent='Authorise'; return; }
+      if(!j.ok){ toast(j.message || 'Could not start authorisation', 'err'); btn.disabled=false; btn.textContent=btn.dataset.label; return; }
       pollAuth(email, btn);
     })
-    .catch(e => { toast('Request failed: ' + e, 'err'); btn.disabled=false; btn.textContent='Authorise'; });
+    .catch(e => { toast('Request failed: ' + e, 'err'); btn.disabled=false; btn.textContent=btn.dataset.label; });
 }
 function pollAuth(email, btn){
   const sid = email.replace(/[^A-Za-z0-9]/g, '-');
@@ -3130,7 +3287,7 @@ function pollAuth(email, btn){
         }
         if(['success','failed','timeout'].indexOf(j.status) !== -1){
           clearInterval(timer);
-          btn.disabled = false; btn.textContent = 'Authorise';
+          btn.disabled = false; btn.textContent = btn.dataset.label || 'Authorise';
           if(j.status === 'success'){
             msg.innerHTML = '<span class="badge ok">authorised</span> ' + (j.message||'');
             setTimeout(function(){ location.reload(); }, 1800);
@@ -3163,6 +3320,8 @@ function submitPaste(email){
 }
 </script>
 """
+
+
 
 
 
@@ -3348,8 +3507,9 @@ PROXY_LOG_TMPL = """
 
 @app.route("/accounts")
 def accounts():
+    ext_mode = (store.get_setting("proxy_mode") or "embedded") == "external"
     return render(render_template_string(ACCOUNTS_TMPL, accounts=_accounts_view(),
-                                         p=_proxy_status_view()))
+                                         p=_proxy_status_view(), ext_mode=ext_mode))
 
 
 @app.route("/accounts/new", methods=["GET", "POST"])

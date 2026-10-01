@@ -87,3 +87,28 @@ Keep: "not authorised", "LLM endpoint", "RAG / semantic search", '<details class
 thinking", "page X of Y" + "Older" + "per page", '<div class="toast">' + "moved to",
 "keep in place (guard)", "classified this as", "dataset review", "Similar rule exists".
 Run the full suite after each page rebuild.
+
+
+## Second pass: Settings & Accounts regrouping (2026-10, same day)
+
+Follow-up research: Eleken "Settings Page UI Design Guide" (group by the tasks users come
+to do; labeled sections; helper text under each control; reveal rarely-used fields on
+demand; show integration status plainly; set risky actions apart; save feedback) plus
+connection-status patterns (Shopify "account connection", Stripe/Auth0 connected-accounts
+status docs). Inventory of the old pages: Settings had 53 fields in 4 flat forms whose
+headings mixed tasks (Behaviour / LLM endpoint / RAG / Mail connection / Runtime);
+Accounts buried the status-driven action (Authorise) among four equal-weight buttons.
+
+Settings regrouped into task sections, each card a scoped save:
+  Mailbox (Mail source · Checking) — Sorting & classification (Rules & classifiers ·
+  LLM classification · LLM endpoint · Assistant) — Filing & drafts (Categories & folders)
+  — Search (Index · Endpoints) — General (You) — Status (effective values).
+Every control got a one-line helper; external-server fields reveal only in external mode;
+the behaviour form was split into scoped partial saves (handler already skipped absent
+keys, so each card saves only its own fields); flashes name the saved scope.
+
+Accounts regrouped around status: compact proxy strip (badges + listener dots + restart
++ log), then per-account cards with a status-driven primary action (Authorise /
+Re-authorise), Edit, and a More menu (copy password/redirect URI, reset tokens, remove —
+destructive last), a "reading" badge on the account the app actually uses, an external-mode
+notice, Setup details kept behind a disclosure, and the explainer collapsed.
