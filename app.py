@@ -341,6 +341,7 @@ a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 #bulk .tbl th:nth-child(2),#bulk .tbl td:nth-child(2){white-space:nowrap}
 #classifiers .tbl th:nth-child(7),#classifiers .tbl td:nth-child(7){white-space:nowrap}
 #classifiers .tbl th:nth-child(2),#classifiers .tbl td:nth-child(2){white-space:nowrap}
+.dashgrid .tbl th:nth-child(1),.dashgrid .tbl td:nth-child(1){white-space:nowrap}
 .skip:focus{left:8px}
 /* ---- app shell ---- */
 .app{display:flex;min-height:100vh}
@@ -845,6 +846,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .toast2{max-width:none}
   body:has(.assistant-main) .toasts{top:calc(env(safe-area-inset-top) + 8px);bottom:auto}
   .page-desc.msgfrom{display:block;font-size:.8rem;overflow-wrap:anywhere}
+  .page-desc.logdesc{display:block;font-size:.8rem}
   .cond-head{display:none}
   .row{flex-wrap:wrap}
   .msgrid>*{min-width:0}
@@ -5134,7 +5136,7 @@ SETTINGS_TMPL = """
       <input type="hidden" name="scope" value="General">
       <div class="setrow"><div class="st-l"><b>Your name</b><span class="sub">Used when drafting replies and filling template placeholders.</span></div>
         <div class="st-c"><input type="text" name="my_name" value="{{ s.my_name }}" aria-label="Your name"></div></div>
-      <div class="setrow"><div class="st-l"><b>Time display offset</b><span class="sub">Hours from UTC; timestamps show as {{ tz }}.</span></div>
+      <div class="setrow"><div class="st-l"><b>Time display offset (hours)</b><span class="sub">Hours from UTC; timestamps show as {{ tz }}.</span></div>
         <div class="st-c"><input type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14" aria-label="Time display offset"></div></div>
       <div class="setrow"><div class="st-l"><b>Remote images in the viewer</b><span class="sub">When off, every message keeps a &ldquo;Load images&rdquo; button instead.</span></div>
         <div class="st-c"><label class="check"><input type="checkbox" name="render_images" value="1" {{ 'checked' if s.render_images else '' }}><input type="hidden" name="render_images" value="0"> <span>Always load</span></label></div></div>
@@ -6138,7 +6140,7 @@ LOG_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Activity log</h1>
-    <div class="page-desc">Everything Mail Triage did, newest first{% if not show_debug %} (debug lines hidden){% endif %}.</div>
+    <div class="page-desc logdesc">Everything Mail Triage did, newest first · times in {{ tz }}{% if not show_debug %} (debug lines hidden){% endif %}.</div>
   </div>
   <div class="row chiprow">
     <a class="chip{{ ' active' if lvl == 'all' else '' }}" href="{{ url_for('log', debug=('1' if show_debug else none)) }}">All</a>
@@ -6178,7 +6180,7 @@ def log():
         e["when"] = fmt_ts(e["ts"])
         e["cls"] = {"error": "err", "info": "ok", "warn": "warn", "debug": ""}.get(e.get("level"), "")
     return render(_render_src(LOG_TMPL, events=events, show_debug=show_debug,
-                                         errors=errors, warns=warns, lvl=lvl))
+                                         errors=errors, warns=warns, lvl=lvl, tz=tz_label()))
 
 
 @app.route("/fonts/<name>")
