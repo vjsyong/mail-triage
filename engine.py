@@ -984,6 +984,73 @@ def _process_folder(mc, folder, settings, rules):
     return scanned, moved
 
 
+def heal_snippets(workers=6):
+    """One-shot maintenance: refetch + decode raw-MIME snippet rows (legacy data).
+    Work is grouped by folder; each worker owns whole folders so SELECT happens
+    once per folder per worker. Returns {"fixed", "skipped", "remaining"}."""
+    def junk_rows():
+        return [r for r in store.messages(limit=999999)
+                if looks_like_mime_junk(r.get("snippet") or "")]
+
+    rows = junk_rows()
+    if not rows:
+        return {"fixed": 0, "skipped": 0, "remaining": 0}
+    by_folder = {}
+    for r in rows:
+        by_folder.setdefault(r["folder"], []).append(r)
+    groups = sorted(by_folder.items(), key=lambda kv: -len(kv[1]))
+    buckets = [[] for _ in range(max(1, min(workers, len(groups))))]
+    for i, g in enumerate(groups):
+        buckets[i % len(buckets)].append(g)
+    fixed, skipped = [0], [0]
+    lock = threading.Lock()
+
+    def run_bucket(bucket):
+        for folder, items in bucket:
+            try:
+                mc = MailClient().connect()
+            except Exception as exc:
+                store.log_event("error", "heal: connect failed: %r" % exc)
+                with lock:
+                    skipped[0] += len(items)
+                continue
+            try:
+                try:
+                    mc.select(folder)
+                except Exception:
+                    with lock:
+                        skipped[0] += len(items)
+                    continue
+                for r in items:
+                    try:
+                        text = mc.fetch_body_text(r["uid"], limit=6000)
+                    except Exception:
+                        text = ""
+                    if text and not looks_like_mime_junk(text):
+                        store.update_message(r["id"], snippet=text[:4000])
+                        with lock:
+                            fixed[0] += 1
+                    else:
+                        with lock:
+                            skipped[0] += 1
+            finally:
+                try:
+                    mc.close()
+                except Exception:
+                    pass
+
+    threads = [threading.Thread(target=run_bucket, args=(b,), daemon=True)
+               for b in buckets if b]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    remaining = len(junk_rows())
+    store.log_event("info", "heal: %d snippet(s) repaired, %d skipped, %d remaining"
+                    % (fixed[0], skipped[0], remaining))
+    return {"fixed": fixed[0], "skipped": skipped[0], "remaining": remaining}
+
+
 def classify_and_store(msg, settings, mc=None):
     """Classify one message, persist the result, file it when llm_apply is on.
 

@@ -1374,6 +1374,17 @@ def main():
           and "decoded invoice text" in (fixedmv["snippet"] or "")
           and b"Content-Transfer-Encoding" not in r.data)
 
+    # bulk snippet heal (maintenance CLI: app.py --heal-snippets)
+    heal_uid = add_msg(state, "heal@x.com", "Heal me", "healthy heal body text", "heal@x")
+    engine.process_mailbox()
+    healrow = [r for r in store.messages(limit=3000) if r["uid"] == heal_uid][0]
+    store.update_message(healrow["id"], snippet=junk_text)
+    hres = engine.heal_snippets(workers=2)
+    healed = store.get_message(healrow["id"])
+    check("bulk heal repairs legacy junk snippets",
+          hres["fixed"] >= 1 and "healthy heal body text" in (healed["snippet"] or "")
+          and hres["remaining"] == 0)
+
     # collapsed base64 salvage (legacy snippets lost their line breaks)
     collapsed = ("------=_NextPart_9ZZ Content-Type: text/plain; charset=\"utf-8\" "
                  "Content-Transfer-Encoding: base64 " + enc_lines.replace("\r\n", " "))

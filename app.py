@@ -3949,6 +3949,9 @@ if __name__ == "__main__":
             sys.exit(1)
         print(json.dumps(proxy.import_legacy_state(args[0]), indent=1))
         sys.exit(0)
+    if "--heal-snippets" in sys.argv:
+        print(json.dumps(engine.heal_snippets(workers=6)))
+        sys.exit(0)
     if "--index" in sys.argv or "--reindex" in sys.argv:
         if "--reindex" in sys.argv:
             rag.rebuild()
