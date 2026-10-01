@@ -291,7 +291,7 @@ STATUS_BADGES = {
 }
 
 
-BASE_TMPL = """<!doctype html>
+BASE_TMPL = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mail Triage</title>
@@ -527,6 +527,73 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 @media(prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
 }
+
+/* ---- assistant chat (shared: page + drawer) ---- */
+.assistant-shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}
+.assistant-rail{position:sticky;top:14px;display:flex;flex-direction:column;border:1px solid var(--line);background:#fff;max-height:calc(100vh - 120px);overflow:auto}
+.assistant-rail .arow{display:flex;gap:8px;align-items:center;padding:9px 11px;border-bottom:1px solid var(--line)}
+.assistant-rail .arow:last-child{border-bottom:0}
+.assistant-rail .arow.cur{background:var(--hover)}
+.assistant-rail .arow .t{flex:1;min-width:0;font-size:.84rem;font-weight:500;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.assistant-rail .arow .t:hover{text-decoration:underline}
+.assistant-rail .arow .when{font-size:.7rem;color:var(--dim);white-space:nowrap}
+.assistant-flex{display:flex;flex-direction:column;height:calc(100vh - 300px);min-height:480px}
+.jumpwrap{position:relative;flex:1;min-height:0;display:flex}
+.chat{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:18px;background:var(--bg);border:1px solid var(--line);padding:18px 16px;scroll-behavior:smooth}
+#jump{position:absolute;right:16px;bottom:12px;z-index:5;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+.crow{display:flex;gap:10px;align-items:flex-start}
+.crow.user{flex-direction:row-reverse}
+.avatar{flex:0 0 30px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;letter-spacing:.05em;border:1px solid var(--line)}
+.avatar.you{background:#000;color:#fff;border-color:#000}
+.avatar.ai{background:var(--acc);color:#fff;border-color:var(--acc)}
+.bubble{max-width:75%;padding:10px 14px;font-size:.92rem;line-height:1.55;overflow-wrap:anywhere}
+.bubble.user{background:#000;border:1px solid #000;color:#fff}
+.bubble.user .meta{color:#aaa}
+.bubble.ai{background:#fff;border:1px solid var(--line);min-width:180px}
+.bubble .meta{font-size:.72rem;color:var(--dim);margin-top:8px;display:flex;gap:10px;align-items:center;justify-content:flex-end}
+.bubble.user .meta{justify-content:flex-start}
+.status{font-size:.78rem;color:var(--dim);margin-bottom:6px}
+.think{margin:2px 0 8px}
+.think summary{cursor:pointer;font-size:.8rem;color:var(--dim);user-select:none;list-style:none}
+.think summary::-webkit-details-marker{display:none}
+.think summary::before{content:'\25B8 ';font-size:.7rem}
+.think[open] summary::before{content:'\25BE '}
+.think pre{white-space:pre-wrap;font-family:var(--mono);font-size:.78rem;color:#444;margin:6px 0 2px;padding:8px 10px;background:#fff;border:1px solid var(--line);max-height:260px;overflow:auto}
+.tools{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
+.tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-chip.ok{color:var(--ok);border-color:var(--ok)}
+.tool-chip.err{color:var(--err);border-color:var(--err)}
+.copy{cursor:pointer;background:#fff;border:1px solid var(--line);color:var(--dim);font-size:.7rem;padding:1px 7px}
+.copy:hover{color:#000;border-color:#000}
+.proposal{background:#fff;border:1px solid var(--line);padding:10px 12px;margin:10px 0 2px}
+.composer{background:#fff;border:1px solid var(--line);padding:10px 12px 8px;margin-top:10px}
+.composer:focus-within{border-color:#000}
+.composer textarea{width:100%;border:none;background:transparent;color:var(--fg);font:inherit;resize:none;outline:none;min-height:26px;max-height:190px;display:block}
+.composer textarea::placeholder{color:#999}
+.comp-row{display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap}
+.hint{font-size:.75rem;color:var(--dim);margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
+.chat-empty{margin:auto;text-align:center;max-width:600px;padding:30px 10px}
+.ce-icon{font-size:1.8rem;opacity:.35}
+.ce-title{font-size:1.15rem;font-weight:700;letter-spacing:-.02em;margin:8px 0 6px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
+@media (max-width:640px){.bubble{max-width:86%}.assistant-flex{height:calc(100vh - 250px);min-height:400px}.chat{padding:12px 10px}
+  .assistant-shell{grid-template-columns:1fr}.assistant-rail{position:static;max-height:180px}}
+/* ---- assistant drawer ---- */
+.fab{position:fixed;right:16px;bottom:16px;z-index:60;background:#000;color:#fff;border:1px solid #000;padding:9px 15px;font-size:.84rem;font-weight:600;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.fab:hover{background:#222}
+.drawer{position:fixed;top:0;right:0;height:100vh;width:min(430px, 97vw);background:#fff;border-left:1px solid var(--line);z-index:70;display:none;flex-direction:column;box-shadow:-8px 0 24px rgba(0,0,0,.08)}
+.drawer.open{display:flex}
+.dw-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
+.dw-hist{border-bottom:1px solid var(--line);max-height:42vh;overflow:auto;background:#fff}
+.dhist-item{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.dhist-item:hover{background:var(--hover)}
+.dhist-item .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem}
+.dhist-item .when{font-size:.7rem;color:var(--dim);white-space:nowrap}
+.dhist-item.cur{background:var(--hover)}
+.dw-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#fff}
+.dw-body .chat{border:0;background:#fff;padding:14px 12px}
+.dw-comp{margin:0;border-left:0;border-right:0;border-bottom:0}
+@media (max-width:640px){.drawer{width:100vw}.fab{right:12px;bottom:12px}}
 </style>
 </head><body>
 <a class="skip" href="#main">Skip to content</a>
@@ -633,6 +700,385 @@ function cp(text, el){
       if(!d.contains(e.target)) d.removeAttribute('open');
     });
   });
+})();
+</script>
+
+<button type="button" id="dtoggle" class="fab" aria-label="Open the assistant">&#10022; Assistant</button>
+<aside id="drawer" class="drawer" aria-label="Assistant drawer">
+  <div class="dw-head">
+    <b style="font-size:.9rem">Assistant</b>
+    <span class="row" style="margin-left:auto;gap:6px">
+      <button type="button" class="btn small" id="dnew">New</button>
+      <button type="button" class="btn small" id="dhist">History</button>
+      <button type="button" class="btn small" id="dclose" aria-label="Close">&#10005;</button>
+    </span>
+  </div>
+  <div id="dhistlist" class="dw-hist hidden"></div>
+  <div class="dw-body"><div class="chat" id="dchat"></div></div>
+  <form id="dform" class="composer dw-comp">
+    <textarea id="dmsg" rows="1" placeholder="Message the assistant&hellip;"></textarea>
+    <div class="comp-row">
+      <span class="sub" style="font-size:.75rem">Enter sends &middot; Shift+Enter new line</span>
+      <span class="row" style="margin-left:auto">
+        <button class="btn danger" type="button" id="dstop" style="display:none">Stop</button>
+        <button class="btn primary" type="submit" id="dsend">Send</button>
+      </span>
+    </div>
+  </form>
+</aside>
+
+<script>
+/* ---- assistant chat: shared engine for the page and the drawer ---- */
+(function(){
+function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function mdRender(src){
+  var raw=(src||'').replace(/\r\n/g,'\n');
+  var lines=raw.split('\n'), out=[], i=0;
+  function link(s){return s.replace(/\[msg:(\d+)\]/g,'<a href="/messages/$1">[msg:$1]</a>');}
+  function inline(s){
+    s=esc(s);
+    var spans=[];
+    s=s.replace(/`([^`\n]+)`/g,function(m,p1){spans.push(p1);return '\x01I'+(spans.length-1)+'\x01';});
+    s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+    s=s.replace(/__([^_]+)__/g,'<b>$1</b>');
+    s=s.replace(/(^|[^\w*])\*([^*\n]+)\*(?![\w*])/g,'$1<i>$2</i>');
+    s=s.replace(/(^|[^\w_])_([^_\n]+)_(?![\w_])/g,'$1<i>$2</i>');
+    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    for(var k=0;k<spans.length;k++) s=s.replace('\x01I'+k+'\x01','<code>'+spans[k]+'</code>');
+    return s;
+  }
+  while(i<lines.length){
+    var st=lines[i].trim();
+    if(!st){i++;continue;}
+    if(/^```/.test(st)){
+      var buf=[]; i++;
+      while(i<lines.length && !/^\s*```/.test(lines[i])){buf.push(lines[i]);i++;}
+      i++;
+      out.push('<pre class="md-pre">'+esc(buf.join('\n'))+'</pre>');
+      continue;
+    }
+    if(/^(-{3,}|\*{3,})$/.test(st)){out.push('<hr>');i++;continue;}
+    var hm=st.match(/^#{1,6}\s+(.*)$/);
+    if(hm){out.push('<div class="md-h">'+link(inline(hm[1]))+'</div>');i++;continue;}
+    if(/^>/.test(st)){
+      var bq=[];
+      while(i<lines.length && /^\s*>/.test(lines[i])){bq.push(link(inline(lines[i].trim().replace(/^>\s?/,''))));i++;}
+      out.push('<blockquote>'+bq.join('<br>')+'</blockquote>');
+      continue;
+    }
+    if(/^[-*+]\s+/.test(st)){
+      var ul=[];
+      while(i<lines.length && /^\s*[-*+]\s+/.test(lines[i])){ul.push('<li>'+link(inline(lines[i].trim().replace(/^[-*+]\s+/,'')))+'</li>');i++;}
+      out.push('<ul>'+ul.join('')+'</ul>');
+      continue;
+    }
+    if(/^\d+[.)]\s+/.test(st)){
+      var ol=[];
+      while(i<lines.length && /^\s*\d+[.)]\s+/.test(lines[i])){ol.push('<li>'+link(inline(lines[i].trim().replace(/^\d+[.)]\s+/,'')))+'</li>');i++;}
+      out.push('<ol>'+ol.join('')+'</ol>');
+      continue;
+    }
+    var par=[];
+    while(i<lines.length){
+      var s2=lines[i].trim();
+      if(!s2 || /^([-*+]\s+|\d+[.)]\s+|#{1,6}\s+|>|```)/.test(s2) || /^(-{3,}|\*{3,})$/.test(s2)) break;
+      par.push(link(inline(s2))); i++;
+    }
+    if(par.length) out.push('<p>'+par.join('<br>')+'</p>');
+  }
+  return out.join('\n');
+}
+window.mdRender = mdRender;
+
+document.addEventListener('click', function(e){
+  var c=e.target.closest('.copy');
+  if(!c) return;
+  var txt=c.dataset.copy||'';
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ c.textContent='copied'; setTimeout(function(){ c.textContent='copy'; },1500); }); }
+  else { c.textContent='n/a'; }
+});
+
+window.assistantChat = function(opts){
+  var root=opts.root, form=opts.form, ta=opts.ta, btn=opts.sendBtn, stopBtn=opts.stopBtn,
+      jumpBtn=opts.jump||null, sid=opts.sessionId||0, onSession=opts.onSession||null;
+  if(!root||!form||!ta) return null;
+  if(!(window.fetch && window.ReadableStream && window.TextDecoder)) return null;
+  if(form.__chat){ form.__chat.setSession(sid); return form.__chat; }
+  var live=document.createElement('div'); live.setAttribute('aria-live','polite'); live.setAttribute('aria-atomic','false');
+  root.appendChild(live);
+  function mk(tag,cls,text){var d=document.createElement(tag); if(cls) d.className=cls; if(text!=null) d.textContent=text; return d;}
+  function autosize(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; }
+  ta.addEventListener('input', autosize);
+  ta.addEventListener('keydown', function(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); form.requestSubmit(); } });
+  root.addEventListener('click', function(e){
+    var ch=e.target.closest('[data-fill]');
+    if(!ch) return;
+    ta.value=ch.dataset.fill||''; autosize(); ta.focus();
+  });
+  function nearBottom(){ return (root.scrollHeight - root.scrollTop - root.clientHeight) < 120; }
+  function scrollBottom(force){ if(force||nearBottom()){ root.scrollTop=root.scrollHeight; } if(jumpBtn){ jumpBtn.classList.toggle('hidden', nearBottom()); } }
+  root.addEventListener('scroll', function(){ if(jumpBtn){ jumpBtn.classList.toggle('hidden', nearBottom()); } });
+  if(jumpBtn){ jumpBtn.addEventListener('click', function(){ root.scrollTop=root.scrollHeight; }); }
+  var currentAbort=null;
+  if(stopBtn){ stopBtn.addEventListener('click', function(){ if(currentAbort) currentAbort.abort(); }); }
+  form.addEventListener('submit', function(e){
+    var text=ta.value.trim();
+    if(!text){ e.preventDefault(); return; }
+    e.preventDefault();
+    run(text);
+  });
+  function run(text){
+    if(currentAbort) currentAbort.abort();
+    currentAbort=new AbortController();
+    if(btn) btn.disabled=true; if(stopBtn) stopBtn.style.display='';
+    ta.value=''; ta.style.height='auto';
+    var urow=mk('div','crow user');
+    urow.appendChild(mk('div','avatar you','You'));
+    var ub=mk('div','bubble user'); ub.textContent=text;
+    urow.appendChild(ub); live.appendChild(urow);
+    var arow=mk('div','crow ai');
+    arow.appendChild(mk('div','avatar ai','AI'));
+    var box=mk('div','bubble ai');
+    var status=mk('div','status sub','thinking\u2026');
+    var det=document.createElement('details'); det.className='think'; det.open=false; det.style.display='none';
+    var detSum=mk('summary','','Thinking\u2026'); det.appendChild(detSum);
+    var pre=mk('pre'); det.appendChild(pre);
+    var toolsBox=mk('div','tools'); toolsBox.style.display='none';
+    var content=mk('div','md'); content.style.whiteSpace='pre-wrap'; var rawText='';
+    var meta=mk('div','meta'); meta.style.display='none';
+    box.appendChild(status); box.appendChild(det); box.appendChild(toolsBox);
+    box.appendChild(content); box.appendChild(meta);
+    arow.appendChild(box); live.appendChild(arow);
+    var t0=Date.now(); var timer=null; var finished=false;
+    function secs(){ return Math.round((Date.now()-t0)/1000); }
+    function setStatus(label){ if(!finished) status.textContent=label+' \u00b7 '+secs()+'s'; }
+    setStatus('thinking\u2026');
+    scrollBottom(true);
+    timer=setInterval(function(){ if(!finished && status.dataset.label) status.textContent=status.dataset.label+' \u00b7 '+secs()+'s'; }, 500);
+    function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
+    function label(x){ if(!finished){ status.dataset.label=x; status.textContent=x+' \u00b7 '+secs()+'s'; } }
+    var cards=[];
+    function toolCard(id,name,args){
+      var c=mk('span','tool-chip');
+      var a='';
+      try{ a=JSON.stringify(args||{}); }catch(err){ a=''; }
+      if(a.length>90) a=a.slice(0,90)+'\u2026';
+      c.textContent='\u23f3 '+name+' '+a;
+      cards[id]=c;
+      toolsBox.style.display=''; toolsBox.appendChild(c);
+    }
+    function toolDone(id,ok,summary,dry){
+      var c=cards[id]; if(!c) return;
+      c.className='tool-chip '+(ok?'ok':'err');
+      var tx=c.textContent.replace(/^[\u23f3\u2713\u2717]\s*/,'');
+      c.textContent=(ok?'\u2713 ':'\u2717 ')+tx+' \u2192 '+(dry?'[dry-run] ':'')+summary;
+    }
+    function actsText(a){
+      a=a||{}; var out=[];
+      if(a.move_to) out.push('move \u2192 '+a.move_to);
+      if(a.mark_read) out.push('mark read');
+      if(a.flag) out.push('flag');
+      return out.join(', ')||'keep in place (guard)';
+    }
+    function makeForm(msgId,idx,extra){
+      var f=mk('form'); f.method='post'; f.action='/assistant/apply'; f.className='inline';
+      var i1=mk('input'); i1.type='hidden'; i1.name='msg_id'; i1.value=msgId; f.appendChild(i1);
+      var i2=mk('input'); i2.type='hidden'; i2.name='idx'; i2.value=idx; f.appendChild(i2);
+      var i3=mk('input'); i3.type='hidden'; i3.name='session'; i3.value=sid; f.appendChild(i3);
+      Object.keys(extra||{}).forEach(function(k){ var i4=mk('input'); i4.type='hidden'; i4.name=k; i4.value=extra[k]; f.appendChild(i4); });
+      return f;
+    }
+    function addProposal(p,idx,msgId){
+      var w=mk('div','proposal');
+      var tgt=p.updates_rule||p.similar_rule||null;
+      var h=mk('div','spread');
+      var left=mk('div');
+      left.appendChild(mk('b','',p.name));
+      left.appendChild(document.createTextNode(' ('+(p.match_mode||'all')+')'));
+      if(p.updates_rule){ var b1=mk('span','badge warn',' updates #'+p.updates_rule.id+' "'+p.updates_rule.name+'"'); b1.style.marginLeft='6px'; left.appendChild(b1); }
+      else if(p.similar_rule){ var b2=mk('span','badge warn',' overlaps #'+p.similar_rule.id); b2.style.marginLeft='6px'; left.appendChild(b2); }
+      h.appendChild(left);
+      var row=mk('div','row'); row.style.whiteSpace='nowrap';
+      if(tgt){
+        var fu=makeForm(msgId,idx,{mode:'update',rule_id:tgt.id});
+        var bu=mk('button','btn small primary','Update rule #'+tgt.id); bu.type='submit';
+        fu.appendChild(bu); row.appendChild(fu);
+      }
+      var fa=makeForm(msgId,idx,{});
+      var ba=mk('button','btn small'+(tgt?'':' primary'),'Add rule'); ba.type='submit';
+      fa.appendChild(ba); row.appendChild(fa);
+      var fd=makeForm(msgId,idx,{disabled:'1'});
+      var bd=mk('button','btn small','Add (disabled)'); bd.type='submit';
+      fd.appendChild(bd); row.appendChild(fd);
+      h.appendChild(row);
+      w.appendChild(h);
+      if(p.updates_rule){
+        w.appendChild(mk('div','note','Updates rule #'+p.updates_rule.id+' "'+p.updates_rule.name+'" \u2014 currently '+actsText(p.updates_rule.actions)+'.'));
+      } else if(p.similar_rule){
+        w.appendChild(mk('div','note','\u26a0 Similar rule exists: #'+p.similar_rule.id+' "'+p.similar_rule.name+'" \u2014 '+actsText(p.similar_rule.actions)+'. Updating it avoids a duplicate.'));
+      }
+      var conds=(p.conditions||[]).map(function(c){ return c.field+' '+c.op+' "'+c.value+'"'; }).join((p.match_mode==='any')?' OR ':' AND ');
+      w.appendChild(mk('div','mono',conds));
+      w.appendChild(mk('div','sub',actsText(p.actions)));
+      if(p.rationale) w.appendChild(mk('div','sub',p.rationale));
+      box.appendChild(w);
+    }
+    var proposals=[], doneMsgId=null;
+    function finish(){
+      if(finished) return; finished=true;
+      stopTimer();
+      status.textContent='done in '+secs()+'s';
+      if(det.style.display!=='none' && !det.dataset.summary){ detSum.textContent='Thought for '+secs()+'s'; }
+      if(content.textContent) content.innerHTML=mdRender(content.textContent);
+      content.style.whiteSpace='';
+      meta.style.display='';
+      var cp=mk('button','copy','copy'); cp.type='button'; cp.dataset.copy=rawText||content.textContent;
+      meta.appendChild(cp);
+      meta.appendChild(mk('span','',new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})));
+      if(proposals.length && doneMsgId!=null) proposals.forEach(function(p,i){ addProposal(p,i,doneMsgId); });
+      if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null;
+      scrollBottom();
+    }
+    function fail(msg){
+      if(finished) return; finished=true;
+      stopTimer();
+      status.textContent='failed';
+      var e2=mk('div','msg err','Assistant failed: '+msg);
+      box.appendChild(e2);
+      if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null;
+      scrollBottom();
+    }
+    function handle(raw){
+      var ev=null, data='';
+      raw.split('\n').forEach(function(line){
+        if(line.indexOf('event:')===0) ev=line.slice(6).trim();
+        else if(line.indexOf('data:')===0) data+=line.slice(5).trim();
+      });
+      if(!ev) return;
+      var d={};
+      if(data){ try{ d=JSON.parse(data); }catch(err){ return; } }
+      if(ev==='session'){ sid=d.sid; if(onSession) onSession(sid); }
+      else if(ev==='reasoning'){ det.style.display=''; detSum.textContent='Thinking\u2026'; pre.textContent+=(d.text||''); label('thinking\u2026'); }
+      else if(ev==='content'){ content.textContent+=(d.text||''); rawText+=(d.text||''); label('writing\u2026'); }
+      else if(ev==='content_break'){ if(content.textContent){ content.textContent+='\n\n'; rawText+='\n\n'; } }
+      else if(ev==='tool_start'){ label('running '+d.name+'\u2026'); toolCard(d.id,d.name,d.args); }
+      else if(ev==='tool_end'){ toolDone(d.id,d.ok,d.summary,d.dry_run); label('thinking\u2026'); }
+      else if(ev==='proposals'){ proposals=d.proposals||[]; }
+      else if(ev==='thought_summary'){ if(det.style.display!=='none' && d.text){ det.dataset.summary='1'; detSum.textContent=d.text; } }
+      else if(ev==='done'){
+        doneMsgId=d.message_id;
+        if(d.reply && !content.textContent){ content.textContent=d.reply; rawText=d.reply; }
+        finish();
+      }
+      else if(ev==='error'){ fail(d.message||'unknown error'); }
+      scrollBottom();
+    }
+    fetch('/assistant/stream', { method:'POST',
+        headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body: 'message='+encodeURIComponent(text)+'&session='+encodeURIComponent(sid),
+        signal: currentAbort.signal
+    }).then(function(resp){
+      if(!resp.ok || !resp.body) throw new Error('HTTP '+resp.status);
+      var rd=resp.body.getReader(); var dec=new TextDecoder(); var buf='';
+      function pump(){
+        return rd.read().then(function(r){
+          if(r.done){ if(!finished) fail('stream ended unexpectedly'); return; }
+          buf+=dec.decode(r.value,{stream:true});
+          var i;
+          while((i=buf.indexOf('\n\n'))>=0){
+            var raw2=buf.slice(0,i);
+            buf=buf.slice(i+2);
+            handle(raw2);
+          }
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function(err){
+      if(finished) return;
+      if(err && err.name==='AbortError'){
+        finished=true; stopTimer(); status.textContent='stopped';
+        if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null;
+      } else { fail(''+err); }
+    });
+  }
+  var inst = { liveEl: live, setSession: function(ns){ sid=ns; }, refreshLive: function(){ if(!live.parentNode) root.appendChild(live); } };
+  form.__chat = inst;
+  return inst;
+};
+
+/* ---- drawer ---- */
+(function(){
+  var fab=document.getElementById('dtoggle'), drawer=document.getElementById('drawer');
+  if(!fab||!drawer) return;
+  var chat=document.getElementById('dchat'), histList=document.getElementById('dhistlist');
+  var inited=false, curSid=null;
+  function setOpen(open){ drawer.classList.toggle('open', open); try{ localStorage.setItem('assistant_open', open?'1':'0'); }catch(e){} }
+  fab.addEventListener('click', function(){ var open=!drawer.classList.contains('open'); setOpen(open); if(open) ensure(); });
+  document.getElementById('dclose').addEventListener('click', function(){ setOpen(false); });
+  function post(url, data){ return fetch(url, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:data||''}); }
+  function newSid(){ return post('/assistant/new.json').then(function(r){ return r.json(); }).then(function(d){ return d.sid; }); }
+  function loadHist(){
+    return fetch('/assistant/sessions.json').then(function(r){ return r.json(); }).then(function(d){
+      histList.innerHTML='';
+      (d.sessions||[]).forEach(function(s){
+        var row=document.createElement('div'); row.className='dhist-item'+(String(s.id)===String(curSid)?' cur':'');
+        var t1=document.createElement('span'); t1.className='t'; t1.textContent=s.title||'Untitled chat'; row.appendChild(t1);
+        var w=document.createElement('span'); w.className='when'; w.textContent=s.when||''; row.appendChild(w);
+        var del=document.createElement('button'); del.type='button'; del.className='btn small'; del.textContent='\u2715';
+        del.addEventListener('click', function(ev){ ev.stopPropagation();
+          if(!confirm('Delete this chat?')) return;
+          post('/assistant/session/'+s.id+'/delete', 'json=1').then(function(){
+            if(String(curSid)===String(s.id)) curSid=null;
+            loadHist();
+          });
+        });
+        row.appendChild(del);
+        row.addEventListener('click', function(){ openSession(s.id); });
+        histList.appendChild(row);
+      });
+    });
+  }
+  function bind(){
+    var form=document.getElementById('dform');
+    if(form.__chat){ form.__chat.setSession(curSid); form.__chat.refreshLive(); return form.__chat; }
+    return window.assistantChat({ root: chat, form: form, ta: document.getElementById('dmsg'),
+      sendBtn: document.getElementById('dsend'), stopBtn: document.getElementById('dstop'), sessionId: curSid,
+      onSession: function(ns){ curSid=ns; try{ localStorage.setItem('assistant_sid', String(ns)); }catch(e){} loadHist(); } });
+  }
+  function loadPanel(sid){
+    return fetch('/assistant/panel?sid='+sid).then(function(r){ if(!r.ok) throw new Error('gone'); return r.text(); }).then(function(html){
+      chat.innerHTML=html;
+      chat.scrollTop=chat.scrollHeight;
+    });
+  }
+  function openSession(sid){
+    curSid=sid;
+    try{ localStorage.setItem('assistant_sid', String(sid)); }catch(e){}
+    loadPanel(sid).then(function(){ bind(); loadHist(); }).catch(function(){
+      newSid().then(function(ns){ curSid=ns; return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+    });
+  }
+  function ensure(){
+    if(inited) return;
+    inited=true;
+    var sid=null; try{ sid=parseInt(localStorage.getItem('assistant_sid')||'',10)||null; }catch(e){}
+    if(sid){
+      loadPanel(sid).then(function(){ curSid=sid; bind(); loadHist(); }).catch(function(){
+        newSid().then(function(ns){ curSid=ns; return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+      });
+    } else {
+      newSid().then(function(ns){ curSid=ns; return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+    }
+  }
+  document.getElementById('dnew').addEventListener('click', function(){ newSid().then(function(ns){ openSession(ns); }); });
+  document.getElementById('dhist').addEventListener('click', function(){
+    histList.classList.toggle('hidden');
+    if(!histList.classList.contains('hidden')) loadHist();
+  });
+  var pref=null; try{ pref=localStorage.getItem('assistant_open'); }catch(e){}
+  if(pref==='1'){ setOpen(true); ensure(); }
+})();
 })();
 </script>
 </body></html>
@@ -2786,74 +3232,7 @@ def message_save(mid):
 
 # ---------------------------------------------------------------- assistant
 
-ASSISTANT_TMPL = r"""
-<style>
-.assistant-flex{display:flex;flex-direction:column;height:calc(100vh - 330px);min-height:520px}
-.jumpwrap{position:relative;flex:1;min-height:0;display:flex}
-.chat{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:18px;
-  background:var(--bg);border:1px solid var(--line);padding:18px 16px;scroll-behavior:smooth}
-#jump{position:absolute;right:16px;bottom:12px;z-index:5;box-shadow:0 4px 14px rgba(0,0,0,.15)}
-.crow{display:flex;gap:10px;align-items:flex-start}
-.crow.user{flex-direction:row-reverse}
-.avatar{flex:0 0 30px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
-  font-size:.62rem;font-weight:700;letter-spacing:.05em;border:1px solid var(--line)}
-.avatar.you{background:#000;color:#fff;border-color:#000}
-.avatar.ai{background:var(--acc);color:#fff;border-color:var(--acc)}
-.bubble{max-width:75%;padding:10px 14px;font-size:.92rem;line-height:1.55;overflow-wrap:anywhere}
-.bubble.user{background:#000;border:1px solid #000;color:#fff}
-.bubble.user .meta{color:#aaa}
-.bubble.ai{background:#fff;border:1px solid var(--line);min-width:180px}
-.bubble .meta{font-size:.72rem;color:var(--dim);margin-top:8px;display:flex;gap:10px;align-items:center;justify-content:flex-end}
-.bubble.user .meta{justify-content:flex-start}
-.status{font-size:.78rem;color:var(--dim);margin-bottom:6px}
-.think{margin:2px 0 8px}
-.think summary{cursor:pointer;font-size:.8rem;color:var(--dim);user-select:none;list-style:none}
-.think summary::-webkit-details-marker{display:none}
-.think summary::before{content:'▸ ';font-size:.7rem}
-.think[open] summary::before{content:'▾ '}
-.think pre{white-space:pre-wrap;font-family:var(--mono);font-size:.78rem;color:#444;margin:6px 0 2px;
-  padding:8px 10px;background:#fff;border:1px solid var(--line);max-height:260px;overflow:auto}
-.tools{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
-.tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);
-  padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tool-chip.ok{color:var(--ok);border-color:var(--ok)}
-.tool-chip.err{color:var(--err);border-color:var(--err)}
-.md{overflow-wrap:anywhere}
-.copy{cursor:pointer;background:#fff;border:1px solid var(--line);color:var(--dim);
-  font-size:.7rem;padding:1px 7px}
-.copy:hover{color:#000;border-color:#000}
-.proposal{background:#fff;border:1px solid var(--line);padding:10px 12px;margin:10px 0 2px}
-.composer{background:#fff;border:1px solid var(--line);padding:10px 12px 8px;margin-top:10px}
-.composer:focus-within{border-color:#000}
-.composer textarea{width:100%;border:none;background:transparent;color:var(--fg);font:inherit;resize:none;
-  outline:none;min-height:26px;max-height:190px;display:block}
-.composer textarea::placeholder{color:#999}
-.comp-row{display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap}
-.hint{font-size:.75rem;color:var(--dim);margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
-.chat-empty{margin:auto;text-align:center;max-width:600px;padding:30px 10px}
-.ce-icon{font-size:1.8rem;opacity:.35}
-.ce-title{font-size:1.15rem;font-weight:700;letter-spacing:-.02em;margin:8px 0 6px}
-.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
-.chip{background:#fff;border:1px solid var(--line);color:var(--fg);
-  font-size:.82rem;padding:6px 13px;cursor:pointer}
-.chip:hover{border-color:#000;color:#000;background:var(--card2)}
-@media (max-width:640px){
-  .bubble{max-width:86%}
-  .assistant-flex{height:calc(100vh - 270px);min-height:420px}
-  .chat{padding:12px 10px}
-}
-</style>
-<div class="page-head">
-  <div>
-    <h1 class="page-title">Assistant</h1>
-    <div class="page-desc">Streams its thinking and every tool step live · tools: search mail, read, move, flag, folders, rules</div>
-  </div>
-</div>
-
-<div class="assistant-flex">
-<div class="jumpwrap">
-<button type="button" class="btn small hidden" id="jump">↓ Jump to latest</button>
-<div class="chat" id="convo">
+CONVO_TMPL = r"""
 {% if convo %}
   {% for m in convo %}
     {% if m.role == 'user' %}
@@ -2887,18 +3266,21 @@ ASSISTANT_TMPL = r"""
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                 <input type="hidden" name="mode" value="update">
                 <input type="hidden" name="rule_id" value="{{ tgt.id }}">
+                <input type="hidden" name="session" value="{{ sid }}">
                 <button class="btn small primary" type="submit">Update rule #{{ tgt.id }}</button>
               </form>
               {% endif %}
               <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
+                <input type="hidden" name="session" value="{{ sid }}">
                 <button class="btn small{{ '' if tgt else ' primary' }}" type="submit">Add rule</button>
               </form>
               <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                 <input type="hidden" name="disabled" value="1">
+                <input type="hidden" name="session" value="{{ sid }}">
                 <button class="btn small" type="submit">Add (disabled)</button>
               </form>
             </div>
@@ -2930,310 +3312,64 @@ ASSISTANT_TMPL = r"""
     </div>
   </div>
 {% endif %}
-<div id="live" aria-live="polite" aria-atomic="false"></div>
-</div>
-</div>
+"""
 
-<form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
-  <textarea name="message" id="msg" rows="1" placeholder="Message the assistant…"></textarea>
-  <div class="comp-row">
-    <span class="sub" style="font-size:.78rem">Enter sends · Shift+Enter new line</span>
-    <span class="row" style="margin-left:auto">
-      <button class="btn danger" type="button" id="astop" style="display:none">Stop</button>
-      <button class="btn primary" type="submit" id="asend">Send</button>
-    </span>
+ASSISTANT_TMPL = r"""
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Assistant</h1>
+    <div class="page-desc">Streams its thinking and every tool step live \u00b7 chats are saved \u2014 resume any of them from the list, or open the drawer anywhere</div>
   </div>
-  <div class="hint">runs on {{ llm.model }} · actions {{ 'live' if actions_live else 'in dry-run (set it in Settings)' }}{% if convo %} · <a href="#" id="aclear">clear conversation</a>{% endif %}</div>
-</form>
+  <div class="row">
+    <a class="btn primary" href="{{ url_for('assistant') }}">New chat</a>
+  </div>
 </div>
-{% if convo %}<form id="clearform" method="post" action="{{ url_for('assistant_clear') }}" onsubmit="return confirm('Clear the conversation?');"></form>{% endif %}
+<div class="assistant-shell">
+  <aside class="assistant-rail" aria-label="Chat history">
+    {% for s in sessions %}
+    <div class="arow{{ ' cur' if s.id == sid else '' }}">
+      <a class="t" href="{{ url_for('assistant_session', sid=s.id) }}" title="{{ s.title or 'Untitled chat' }}">{{ s.title or 'Untitled chat' }}</a>
+      <span class="when">{{ s.when }}</span>
+      <form class="inline" method="post" action="{{ url_for('assistant_session_delete', sid=s.id) }}" onsubmit="return confirm('Delete this chat?');"><button class="btn small" type="submit" aria-label="Delete chat">\u2715</button></form>
+    </div>
+    {% endfor %}
+  </aside>
+  <div class="assistant-main">
+    <div class="assistant-flex">
+      <div class="jumpwrap">
+        <button type="button" class="btn small hidden" id="jump">\u2193 Jump to latest</button>
+        <div class="chat" id="convo">{{ convo_html|safe }}</div>
+      </div>
+      <form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
+        <input type="hidden" name="session" value="{{ sid }}">
+        <textarea name="message" id="msg" rows="1" placeholder="Message the assistant\u2026"></textarea>
+        <div class="comp-row">
+          <span class="sub" style="font-size:.78rem">Enter sends \u00b7 Shift+Enter new line</span>
+          <span class="row" style="margin-left:auto">
+            <button class="btn danger" type="button" id="astop" style="display:none">Stop</button>
+            <button class="btn primary" type="submit" id="asend">Send</button>
+          </span>
+        </div>
+        <div class="hint">runs on {{ llm.model }} \u00b7 actions {{ 'live' if actions_live else 'in dry-run (set it in Settings)' }}{% if convo %} \u00b7 <a href="#" id="aclear">clear this chat</a>{% endif %}</div>
+      </form>
+      {% if convo %}<form id="clearform" method="post" action="{{ url_for('assistant_clear') }}"><input type="hidden" name="session" value="{{ sid }}"></form>{% endif %}
+    </div>
+  </div>
+</div>
 <script>
 (function(){
-var form=document.getElementById('aform'), ta=document.getElementById('msg'),
-    btn=document.getElementById('asend'), stopBtn=document.getElementById('astop'),
-    live=document.getElementById('live'), chat=document.getElementById('convo');
-if(!(window.fetch && window.ReadableStream && window.TextDecoder)) return;
-
-var clearLink=document.getElementById('aclear'), clearForm=document.getElementById('clearform');
-if(clearLink && clearForm) clearLink.addEventListener('click', function(e){ e.preventDefault(); clearForm.submit(); });
-document.addEventListener('click', function(e){
-  var c=e.target.closest('.copy');
-  if(!c) return;
-  var txt=c.dataset.copy||'';
-  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ c.textContent='copied'; setTimeout(function(){ c.textContent='copy'; },1500); }); }
-  else { c.textContent='n/a'; }
-});
-document.querySelectorAll('.chip').forEach(function(ch){
-  ch.addEventListener('click', function(){ ta.value = ch.dataset.fill||''; autosize(); ta.focus(); });
-});
-function autosize(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; }
-ta.addEventListener('input', autosize);
-var jumpBtn = document.getElementById('jump');
-function nearBottom(){ return (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 120; }
-function scrollBottom(force){ if(force || nearBottom()){ chat.scrollTop = chat.scrollHeight; } if(jumpBtn){ jumpBtn.classList.toggle('hidden', nearBottom()); } }
-chat.addEventListener('scroll', function(){ if(jumpBtn){ jumpBtn.classList.toggle('hidden', nearBottom()); } });
-if(jumpBtn){ jumpBtn.addEventListener('click', function(){ chat.scrollTop = chat.scrollHeight; }); }
-
-function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-function mdRender(src){
-  var raw=(src||'').replace(/\r\n/g,'\n');
-  var lines=raw.split('\n'), out=[], i=0;
-  function link(s){return s.replace(/\[msg:(\d+)\]/g,'<a href="/messages/$1">[msg:$1]</a>');}
-  function inline(s){
-    s=esc(s);
-    var spans=[];
-    s=s.replace(/`([^`\n]+)`/g,function(m,p1){spans.push(p1);return '\x01I'+(spans.length-1)+'\x01';});
-    s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
-    s=s.replace(/__([^_]+)__/g,'<b>$1</b>');
-    s=s.replace(/(^|[^\w*])\*([^*\n]+)\*(?![\w*])/g,'$1<i>$2</i>');
-    s=s.replace(/(^|[^\w_])_([^_\n]+)_(?![\w_])/g,'$1<i>$2</i>');
-    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
-    for(var k=0;k<spans.length;k++) s=s.replace('\x01I'+k+'\x01','<code>'+spans[k]+'</code>');
-    return s;
-  }
-  while(i<lines.length){
-    var st=lines[i].trim();
-    if(!st){i++;continue;}
-    if(/^```/.test(st)){
-      var buf=[]; i++;
-      while(i<lines.length && !/^\s*```/.test(lines[i])){buf.push(lines[i]);i++;}
-      i++;
-      out.push('<pre class="md-pre">'+esc(buf.join('\n'))+'</pre>');
-      continue;
-    }
-    if(/^(-{3,}|\*{3,})$/.test(st)){out.push('<hr>');i++;continue;}
-    var hm=st.match(/^#{1,6}\s+(.*)$/);
-    if(hm){out.push('<div class="md-h">'+link(inline(hm[1]))+'</div>');i++;continue;}
-    if(/^>/.test(st)){
-      var bq=[];
-      while(i<lines.length && /^\s*>/.test(lines[i])){bq.push(link(inline(lines[i].trim().replace(/^>\s?/,''))));i++;}
-      out.push('<blockquote>'+bq.join('<br>')+'</blockquote>');
-      continue;
-    }
-    if(/^[-*+]\s+/.test(st)){
-      var ul=[];
-      while(i<lines.length && /^\s*[-*+]\s+/.test(lines[i])){ul.push('<li>'+link(inline(lines[i].trim().replace(/^[-*+]\s+/,'')))+'</li>');i++;}
-      out.push('<ul>'+ul.join('')+'</ul>');
-      continue;
-    }
-    if(/^\d+[.)]\s+/.test(st)){
-      var ol=[];
-      while(i<lines.length && /^\s*\d+[.)]\s+/.test(lines[i])){ol.push('<li>'+link(inline(lines[i].trim().replace(/^\d+[.)]\s+/,'')))+'</li>');i++;}
-      out.push('<ol>'+ol.join('')+'</ol>');
-      continue;
-    }
-    var par=[];
-    while(i<lines.length){
-      var s2=lines[i].trim();
-      if(!s2 || /^([-*+]\s+|\d+[.)]\s+|#{1,6}\s+|>|```)/.test(s2) || /^(-{3,}|\*{3,})$/.test(s2)) break;
-      par.push(link(inline(s2))); i++;
-    }
-    if(par.length) out.push('<p>'+par.join('<br>')+'</p>');
-  }
-  return out.join('\n');
-}
-function mk(tag, cls, text){var d=document.createElement(tag); if(cls) d.className=cls; if(text!=null) d.textContent=text; return d;}
-
-form.addEventListener('submit', function(e){
-  var text = ta.value.trim();
-  if(!text){ e.preventDefault(); return; }
-  e.preventDefault();
-  run(text);
-});
-ta.addEventListener('keydown', function(e){
-  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); form.requestSubmit(); }
-});
-
-var currentAbort=null;
-stopBtn.addEventListener('click', function(){ if(currentAbort) currentAbort.abort(); });
-
-function run(text){
-  if(currentAbort) currentAbort.abort();
-  currentAbort = new AbortController();
-  btn.disabled = true; stopBtn.style.display=''; ta.value=''; ta.style.height='auto';
-  live.innerHTML = '';
-
-  var urow = mk('div','crow user');
-  urow.appendChild(mk('div','avatar you','You'));
-  var ub = mk('div','bubble user'); ub.textContent = text;
-  urow.appendChild(ub); live.appendChild(urow);
-
-  var arow = mk('div','crow ai');
-  arow.appendChild(mk('div','avatar ai','AI'));
-  var box = mk('div','bubble ai');
-  var status = mk('div','status sub','thinking…');
-  var det = document.createElement('details'); det.className='think'; det.open=false; det.style.display='none';
-  var detSum = mk('summary','','Thinking…'); det.appendChild(detSum);
-  var pre = mk('pre'); det.appendChild(pre);
-  var toolsBox = mk('div','tools'); toolsBox.style.display='none';
-  var content = mk('div','md'); content.style.whiteSpace='pre-wrap'; var rawText='';
-  var meta = mk('div','meta'); meta.style.display='none';
-  box.appendChild(status); box.appendChild(det); box.appendChild(toolsBox);
-  box.appendChild(content); box.appendChild(meta);
-  arow.appendChild(box); live.appendChild(arow);
-
-  var t0 = Date.now(); var timer = null; var finished = false;
-  function secs(){ return Math.round((Date.now()-t0)/1000); }
-  function setStatus(label){ if(!finished) status.textContent = label + ' · ' + secs() + 's'; }
-  setStatus('thinking…');
-  scrollBottom(true);
-  timer = setInterval(function(){ if(!finished && status.dataset.label) status.textContent = status.dataset.label + ' · ' + secs() + 's'; }, 500);
-  function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
-  var lastLabel='thinking…';
-  function label(x){ lastLabel=x; if(!finished){ status.dataset.label=x; status.textContent = x + ' · ' + secs() + 's'; } }
-
-  var cards = [];
-  function toolCard(id, name, args){
-    var c = mk('span','tool-chip');
-    var a = '';
-    try { a = JSON.stringify(args||{}); } catch(err) { a = ''; }
-    if(a.length > 90) a = a.slice(0,90) + '…';
-    c.textContent = '⏳ ' + name + ' ' + a;
-    cards[id] = c;
-    toolsBox.style.display=''; toolsBox.appendChild(c);
-  }
-  function toolDone(id, ok, summary, dry){
-    var c = cards[id]; if(!c) return;
-    c.className = 'tool-chip ' + (ok ? 'ok' : 'err');
-    var t = c.textContent.replace(/^[⏳✓✗]\s*/,'');
-    c.textContent = (ok ? '✓ ' : '✗ ') + t + ' → ' + (dry ? '[dry-run] ' : '') + summary;
-  }
-  function actsText(a){
-    a = a || {}; var out = [];
-    if(a.move_to) out.push('move → ' + a.move_to);
-    if(a.mark_read) out.push('mark read');
-    if(a.flag) out.push('flag');
-    return out.join(', ') || 'keep in place (guard)';
-  }
-  function makeForm(msgId, idx, extra){
-    var f = mk('form'); f.method='post'; f.action='/assistant/apply'; f.className='inline';
-    var i1 = mk('input'); i1.type='hidden'; i1.name='msg_id'; i1.value=msgId; f.appendChild(i1);
-    var i2 = mk('input'); i2.type='hidden'; i2.name='idx'; i2.value=idx; f.appendChild(i2);
-    Object.keys(extra||{}).forEach(function(k){ var i3 = mk('input'); i3.type='hidden'; i3.name=k; i3.value=extra[k]; f.appendChild(i3); });
-    return f;
-  }
-  function addProposal(p, idx, msgId){
-    var w = mk('div','proposal');
-    var tgt = p.updates_rule || p.similar_rule || null;
-    var h = mk('div','spread');
-    var left = mk('div');
-    left.appendChild(mk('b','',p.name));
-    left.appendChild(document.createTextNode(' (' + (p.match_mode||'all') + ')'));
-    if(p.updates_rule){ var b1=mk('span','badge warn',' updates #' + p.updates_rule.id + ' "' + p.updates_rule.name + '"'); b1.style.marginLeft='6px'; left.appendChild(b1); }
-    else if(p.similar_rule){ var b2=mk('span','badge warn',' overlaps #' + p.similar_rule.id); b2.style.marginLeft='6px'; left.appendChild(b2); }
-    h.appendChild(left);
-    var row = mk('div','row'); row.style.whiteSpace='nowrap';
-    if(tgt){
-      var fu = makeForm(msgId, idx, {mode:'update', rule_id:tgt.id});
-      var bu = mk('button','btn small primary','Update rule #' + tgt.id); bu.type='submit';
-      fu.appendChild(bu); row.appendChild(fu);
-    }
-    var fa = makeForm(msgId, idx, {});
-    var ba = mk('button','btn small' + (tgt ? '' : ' primary'), 'Add rule'); ba.type='submit';
-    fa.appendChild(ba); row.appendChild(fa);
-    var fd = makeForm(msgId, idx, {disabled:'1'});
-    var bd = mk('button','btn small','Add (disabled)'); bd.type='submit';
-    fd.appendChild(bd); row.appendChild(fd);
-    h.appendChild(row);
-    w.appendChild(h);
-    if(p.updates_rule){
-      w.appendChild(mk('div','note','Updates rule #' + p.updates_rule.id + ' "' + p.updates_rule.name + '" — currently ' + actsText(p.updates_rule.actions) + '.'));
-    } else if(p.similar_rule){
-      var n = mk('div','note','⚠ Similar rule exists: #' + p.similar_rule.id + ' "' + p.similar_rule.name + '" — ' + actsText(p.similar_rule.actions) + '. Updating it avoids a duplicate.');
-      w.appendChild(n);
-    }
-    var conds = (p.conditions||[]).map(function(c){ return c.field + ' ' + c.op + ' "' + c.value + '"'; }).join((p.match_mode==='any') ? ' OR ' : ' AND ');
-    w.appendChild(mk('div','mono', conds));
-    w.appendChild(mk('div','sub', actsText(p.actions)));
-    if(p.rationale) w.appendChild(mk('div','sub', p.rationale));
-    box.appendChild(w);
-  }
-  var proposals = [], doneMsgId = null;
-  function finish(){
-    if(finished) return; finished = true;
-    stopTimer();
-    status.textContent = 'done in ' + secs() + 's';
-    if(det.style.display !== 'none' && !det.dataset.summary){ detSum.textContent = 'Thought for ' + secs() + 's'; }
-    if(content.textContent) content.innerHTML = mdRender(content.textContent);
-    content.style.whiteSpace='';
-    meta.style.display='';
-    var cp = mk('button','copy','copy'); cp.type='button'; cp.dataset.copy = rawText || content.textContent;
-    meta.appendChild(cp);
-    meta.appendChild(mk('span','', new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})));
-    if(proposals.length && doneMsgId != null) proposals.forEach(function(p,i){ addProposal(p, i, doneMsgId); });
-    btn.disabled=false; stopBtn.style.display='none'; currentAbort=null;
-    scrollBottom();
-  }
-  function fail(msg){
-    if(finished) return; finished = true;
-    stopTimer();
-    status.textContent = 'failed';
-    var e = mk('div','msg err','Assistant failed: ' + msg);
-    box.appendChild(e);
-    btn.disabled=false; stopBtn.style.display='none'; currentAbort=null;
-    scrollBottom();
-  }
-  function handle(raw){
-    var ev = null, data = '';
-    raw.split('\n').forEach(function(line){
-      if(line.indexOf('event:') === 0) ev = line.slice(6).trim();
-      else if(line.indexOf('data:') === 0) data += line.slice(5).trim();
-    });
-    if(!ev) return;
-    var d = {};
-    if(data){ try { d = JSON.parse(data); } catch(err) { return; } }
-    if(ev === 'reasoning'){
-      det.style.display=''; detSum.textContent = 'Thinking…'; pre.textContent += (d.text||''); label('thinking…');
-    }
-    else if(ev === 'content'){
-      content.textContent += (d.text||''); rawText += (d.text||''); label('writing…');
-    }
-    else if(ev === 'content_break'){ if(content.textContent){ content.textContent += '\n\n'; rawText += '\n\n'; } }
-    else if(ev === 'tool_start'){ label('running ' + d.name + '…'); toolCard(d.id, d.name, d.args); }
-    else if(ev === 'tool_end'){ toolDone(d.id, d.ok, d.summary, d.dry_run); label('thinking…'); }
-    else if(ev === 'proposals'){ proposals = d.proposals || []; }
-    else if(ev === 'thought_summary'){
-      if(det.style.display !== 'none' && d.text){ det.dataset.summary = '1'; detSum.textContent = d.text; }
-    }
-    else if(ev === 'done'){
-      doneMsgId = d.message_id;
-      if(d.reply && !content.textContent){ content.textContent = d.reply; rawText = d.reply; }
-      finish();
-    }
-    else if(ev === 'error'){ fail(d.message || 'unknown error'); }
-    scrollBottom();
-  }
-  fetch('/assistant/stream', { method:'POST',
-      headers: {'Content-Type':'application/x-www-form-urlencoded'},
-      body: 'message=' + encodeURIComponent(text),
-      signal: currentAbort.signal
-  }).then(function(resp){
-    if(!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
-    var rd = resp.body.getReader(); var dec = new TextDecoder(); var buf = '';
-    function pump(){
-      return rd.read().then(function(r){
-        if(r.done){ if(!finished) fail('stream ended unexpectedly'); return; }
-        buf += dec.decode(r.value, {stream:true});
-        var i;
-        while((i = buf.indexOf('\n\n')) >= 0){
-          var raw = buf.slice(0, i);
-          buf = buf.slice(i + 2);
-          handle(raw);
-        }
-        return pump();
-      });
-    }
-    return pump();
-  }).catch(function(err){
-    if(finished) return;
-    if(err && err.name === 'AbortError'){
-      finished = true; stopTimer(); status.textContent = 'stopped';
-      btn.disabled=false; stopBtn.style.display='none'; currentAbort=null;
-    } else {
-      fail('' + err);
-    }
+  var clearLink=document.getElementById('aclear'), clearForm=document.getElementById('clearform');
+  if(clearLink && clearForm) clearLink.addEventListener('click', function(e){ e.preventDefault(); if(confirm('Clear this chat?')) clearForm.submit(); });
+  window.assistantChat({
+    root: document.getElementById('convo'),
+    form: document.getElementById('aform'),
+    ta: document.getElementById('msg'),
+    sendBtn: document.getElementById('asend'),
+    stopBtn: document.getElementById('astop'),
+    jump: document.getElementById('jump'),
+    sessionId: {{ sid }},
+    onSession: function(ns){ try{ history.replaceState(null, '', '/assistant/s/' + ns); }catch(e){} }
   });
-}
 })();
 </script>
 """
@@ -3259,7 +3395,11 @@ def _proposal_view(p):
 
 @app.route("/assistant")
 def assistant():
-    convo = store.assistant_messages(limit=60)
+    # clicking the Assistant tab starts a fresh chat (a recent empty chat is reused)
+    return redirect(url_for("assistant_session", sid=store.find_or_create_session()))
+
+
+def _assistant_prep(convo):
     for m in convo:
         m["proposals_list"] = []
         if m.get("role") == "assistant" and m.get("proposals"):
@@ -3279,9 +3419,72 @@ def assistant():
                 m["tool_steps"] = meta.get("tools") or []
             except (TypeError, ValueError):
                 pass
+    return convo
+
+
+def _assistant_fragment(sid):
+    convo = _assistant_prep(store.session_messages(sid))
+    return convo, _render_src(CONVO_TMPL, convo=convo, sid=sid)
+
+
+@app.route("/assistant/s/<int:sid>")
+def assistant_session(sid):
+    if not store.get_session(sid):
+        flash("That chat no longer exists.", "err")
+        return redirect(url_for("assistant"))
+    sessions = store.list_sessions()
+    for s in sessions:
+        s["when"] = fmt_ts(s["last_ts"] or s["created"])
+    convo, convo_html = _assistant_fragment(sid)
     return render(_render_src(
-        ASSISTANT_TMPL, convo=convo, cfg=config, llm=engine.llm_config(),
+        ASSISTANT_TMPL, sid=sid, sessions=sessions, convo=convo, convo_html=convo_html,
+        llm=engine.llm_config(),
         actions_live=bool(store.get_setting("assistant_actions_apply", True))))
+
+
+@app.route("/assistant/panel")
+def assistant_panel():
+    try:
+        sid = int(request.args.get("sid") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    if not sid or not store.get_session(sid):
+        return ("no such chat", 404)
+    _, convo_html = _assistant_fragment(sid)
+    return Response(convo_html, mimetype="text/html")
+
+
+@app.route("/assistant/sessions.json")
+def assistant_sessions_json():
+    out = []
+    for s in store.list_sessions():
+        out.append({"id": s["id"], "title": s["title"] or "Untitled chat",
+                    "when": fmt_ts(s["last_ts"] or s["created"]), "n": s["n"]})
+    return Response(json.dumps({"sessions": out}), mimetype="application/json")
+
+
+@app.route("/assistant/new.json", methods=["POST"])
+def assistant_new_json():
+    return Response(json.dumps({"sid": store.find_or_create_session()}),
+                    mimetype="application/json")
+
+
+@app.route("/assistant/session/<int:sid>/delete", methods=["POST"])
+def assistant_session_delete(sid):
+    store.delete_session(sid)
+    if request.form.get("json"):
+        return Response(json.dumps({"ok": True}), mimetype="application/json")
+    return redirect(url_for("assistant"))
+
+
+def _assistant_sid_from_form():
+    try:
+        sid = int(request.form.get("session") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    if not sid or not store.get_session(sid):
+        sid = store.find_or_create_session()
+    return sid
 
 
 def _sse(event, data):
@@ -3291,14 +3494,16 @@ def _sse(event, data):
 @app.route("/assistant/stream", methods=["POST"])
 def assistant_stream():
     """SSE stream of one assistant turn: reasoning/content deltas, tool
-    start/end events, rule proposals, done/error."""
+    start/end events, rule proposals, done/error. Scoped to a chat session."""
     text = (request.form.get("message") or "").strip()
+    sid = _assistant_sid_from_form()
 
     def gen():
+        yield _sse("session", {"sid": sid})
         if not text:
             yield _sse("error", {"message": "empty message"})
             return
-        agent = engine.AssistantAgent()
+        agent = engine.AssistantAgent(session_id=sid)
         try:
             for ev in agent.stream(text):
                 etype = ev.pop("type")
@@ -3321,14 +3526,15 @@ def assistant_stream():
 @app.route("/assistant/send", methods=["POST"])
 def assistant_send():
     text = (request.form.get("message") or "").strip()
+    sid = _assistant_sid_from_form()
     if not text:
         flash("Type a message first.", "err")
-        return redirect(url_for("assistant"))
+        return redirect(url_for("assistant_session", sid=sid))
     try:
-        engine.assistant_respond(text)
+        engine.assistant_respond(text, session_id=sid)
     except Exception as exc:
         flash("Assistant error: %r" % exc, "err")
-    return redirect(url_for("assistant"))
+    return redirect(url_for("assistant_session", sid=sid))
 
 
 @app.route("/assistant/apply", methods=["POST"])
@@ -3338,6 +3544,12 @@ def assistant_apply():
         idx = int(request.form.get("idx") or 0)
     except ValueError:
         mid, idx = 0, 0
+    try:
+        sid = int(request.form.get("session") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    back = (url_for("assistant_session", sid=sid)
+            if sid and store.get_session(sid) else url_for("assistant"))
     disabled = bool(request.form.get("disabled"))
     row = store.get_assistant_message(mid)
     proposals = []
@@ -3348,7 +3560,7 @@ def assistant_apply():
             proposals = []
     if not (0 <= idx < len(proposals)):
         flash("That proposal is no longer available.", "err")
-        return redirect(url_for("assistant"))
+        return redirect(back)
     norm = engine.normalize_rule(proposals[idx]) or proposals[idx]
     mode = (request.form.get("mode") or "add").strip()
     if mode == "update":
@@ -3359,14 +3571,14 @@ def assistant_apply():
         target = store.get_rule(rid) if rid else None
         if target is None:
             flash("That rule no longer exists - nothing updated.", "err")
-            return redirect(url_for("assistant"))
+            return redirect(back)
         store.update_rule(rid, name=norm.get("name") or target["name"],
                           match_mode=norm.get("match_mode", "all"),
                           conditions=json.dumps(norm.get("conditions", [])),
                           actions=json.dumps(norm.get("actions", {})))
         store.log_event("info", "assistant updated rule #%d '%s'" % (rid, target["name"]))
         flash("Rule #%d '%s' updated - no duplicate added." % (rid, target["name"]), "ok")
-        return redirect(url_for("assistant"))
+        return redirect(back)
     store.add_rule(norm.get("name", "Assistant rule"), norm.get("match_mode", "all"),
                    norm.get("conditions", []), norm.get("actions", {}), enabled=not disabled,
                    position=norm.get("placement") or "bottom")
@@ -3374,16 +3586,157 @@ def assistant_apply():
                     % (norm.get("name"), "disabled" if disabled else "enabled"))
     flash("Rule '%s' added%s - check it on the Rules page (the Test button dry-runs it against recent mail)."
           % (norm.get("name"), " (disabled)" if disabled else ""), "ok")
-    return redirect(url_for("assistant"))
+    return redirect(back)
 
 
 @app.route("/assistant/clear", methods=["POST"])
 def assistant_clear():
+    try:
+        sid = int(request.form.get("session") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    if sid and store.get_session(sid):
+        store.clear_assistant(session_id=sid)
+        store.log_event("info", "assistant chat #%d cleared" % sid)
+        return redirect(url_for("assistant_session", sid=sid))
     store.clear_assistant()
     return redirect(url_for("assistant"))
 
+def _form_int(name, default, lo=None, hi=None):
+    raw = (request.form.get(name) or "").strip()
+    try:
+        v = int(float(raw))
+    except (TypeError, ValueError):
+        return default
+    if lo is not None:
+        v = max(lo, v)
+    if hi is not None:
+        v = min(hi, v)
+    return v
 
-# ---------------------------------------------------------------- settings
+
+
+def _form_float(name, default):
+    raw = (request.form.get(name) or "").strip()
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+
+def _save_secret(name):
+    """Password-style field: blank keeps the stored value; the paired <name>_clear checkbox clears it."""
+    if name + "_clear" in request.form:
+        store.set_setting(name, "")
+        return
+    if name in request.form:
+        val = (request.form.get(name) or "").strip()
+        if val:
+            store.set_setting(name, val)
+
+
+
+def _save_behavior_settings():
+    f = request.form
+
+    def has(k):
+        return k in f
+
+    if has("poll_interval"):
+        store.set_setting("poll_interval", _form_int("poll_interval", 90, lo=15))
+    if has("classify_concurrency"):
+        store.set_setting("classify_concurrency", _form_int("classify_concurrency", 8, lo=1, hi=16))
+    if has("lookback_hours"):
+        store.set_setting("lookback_hours", _form_int("lookback_hours", 48, lo=1))
+    if has("display_tz_offset"):
+        store.set_setting("display_tz_offset", max(-14.0, min(14.0, _form_float("display_tz_offset", 8))))
+    if has("watch_folders"):
+        store.set_setting("watch_folders",
+                          [x.strip() for x in (f.get("watch_folders") or "INBOX").split(",") if x.strip()])
+    if has("my_name"):
+        store.set_setting("my_name", (f.get("my_name") or "Sean").strip())
+    for k in ("rules_apply", "heuristics_enabled", "heuristic_autorefine", "llm_suggest",
+              "llm_apply", "assistant_actions_apply", "index_enabled", "rerank_enabled",
+              "render_images", "flows_apply"):
+        if has(k):
+            store.set_setting(k, f.get(k) not in (None, "", "0"))
+    if has("index_folders"):
+        store.set_setting("index_folders",
+                          [x.strip() for x in (f.get("index_folders") or "").split(",") if x.strip()])
+    if has("max_llm_per_hour"):
+        store.set_setting("max_llm_per_hour", _form_int("max_llm_per_hour", 40, lo=0))
+    if has("llm_batch_per_cycle"):
+        store.set_setting("llm_batch_per_cycle", _form_int("llm_batch_per_cycle", 5, lo=1))
+    if has("categories"):
+        store.set_setting("categories",
+                          [c.strip() for c in (f.get("categories") or "").split(",") if c.strip()])
+    if has("category_folders"):
+        mapping = {}
+        for line in (f.get("category_folders") or "").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                if k.strip():
+                    mapping[k.strip()] = v.strip()
+        store.set_setting("category_folders", mapping)
+    if has("drafts_folder"):
+        store.set_setting("drafts_folder", (f.get("drafts_folder") or "").strip())
+
+
+
+def _save_llm_settings():
+    f = request.form
+    for k in ("llm_base_url", "llm_model", "llm_fallback_base_url", "llm_fallback_model"):
+        if k in f:
+            store.set_setting(k, (f.get(k) or "").strip())
+    if "llm_thinking" in f:
+        store.set_setting("llm_thinking", "off" if f.get("llm_thinking") == "off" else "auto")
+    if "llm_timeout" in f:
+        store.set_setting("llm_timeout", _form_int("llm_timeout", 0, lo=0))
+    _save_secret("llm_api_key")
+    _save_secret("llm_fallback_api_key")
+
+
+
+def _save_rag_settings():
+    f = request.form
+    for k in ("embed_base_url", "embed_model", "rerank_base_url", "rerank_model"):
+        if k in f:
+            store.set_setting(k, (f.get(k) or "").strip())
+    if "embed_protocol" in f and f.get("embed_protocol") in ("tei", "openai"):
+        store.set_setting("embed_protocol", f.get("embed_protocol"))
+    if "rerank_protocol" in f and f.get("rerank_protocol") in ("tei", "cohere"):
+        store.set_setting("rerank_protocol", f.get("rerank_protocol"))
+    if "embed_timeout" in f:
+        store.set_setting("embed_timeout", _form_int("embed_timeout", 0, lo=0))
+    if "rerank_timeout" in f:
+        store.set_setting("rerank_timeout", _form_int("rerank_timeout", 0, lo=0))
+    if "embed_query_prefix" in f:
+        store.set_setting("embed_query_prefix", f.get("embed_query_prefix") or "")
+    if "index_refresh_minutes" in f:
+        store.set_setting("index_refresh_minutes", _form_int("index_refresh_minutes", 10, lo=1))
+    if "rag_exclude_folders" in f:
+        store.set_setting("rag_exclude_folders",
+                          [x.strip() for x in (f.get("rag_exclude_folders") or "").split(",") if x.strip()])
+    _save_secret("embed_api_key")
+    _save_secret("rerank_api_key")
+
+
+
+def _save_connection_settings():
+    f = request.form
+    if "proxy_mode" in f:
+        store.set_setting("proxy_mode",
+                          "external" if f.get("proxy_mode") == "external" else "embedded")
+    for k in ("imap_host", "imap_port", "imap_user", "proxy_tailnet_host"):
+        if k in f:
+            store.set_setting(k, (f.get(k) or "").strip())
+    if "imap_tls" in f:
+        v = (f.get("imap_tls") or "").strip()
+        store.set_setting("imap_tls", v if v in ("0", "1") else "")
+    _save_secret("imap_password")
+
+
 SETTINGS_TMPL = """
 <style>
 .settings-grid{display:grid;grid-template-columns:216px minmax(0,1fr);gap:26px;align-items:start;margin-top:14px}
@@ -3728,139 +4081,6 @@ SETTINGS_TMPL = """
 })();
 </script>
 """
-
-
-
-
-
-
-def _form_int(name, default, lo=None, hi=None):
-    raw = (request.form.get(name) or "").strip()
-    try:
-        v = int(float(raw))
-    except (TypeError, ValueError):
-        return default
-    if lo is not None:
-        v = max(lo, v)
-    if hi is not None:
-        v = min(hi, v)
-    return v
-
-
-def _form_float(name, default):
-    raw = (request.form.get(name) or "").strip()
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return default
-
-
-def _save_secret(name):
-    """Password-style field: blank keeps the stored value; the paired <name>_clear checkbox clears it."""
-    if name + "_clear" in request.form:
-        store.set_setting(name, "")
-        return
-    if name in request.form:
-        val = (request.form.get(name) or "").strip()
-        if val:
-            store.set_setting(name, val)
-
-
-def _save_behavior_settings():
-    f = request.form
-
-    def has(k):
-        return k in f
-
-    if has("poll_interval"):
-        store.set_setting("poll_interval", _form_int("poll_interval", 90, lo=15))
-    if has("classify_concurrency"):
-        store.set_setting("classify_concurrency", _form_int("classify_concurrency", 8, lo=1, hi=16))
-    if has("lookback_hours"):
-        store.set_setting("lookback_hours", _form_int("lookback_hours", 48, lo=1))
-    if has("display_tz_offset"):
-        store.set_setting("display_tz_offset", max(-14.0, min(14.0, _form_float("display_tz_offset", 8))))
-    if has("watch_folders"):
-        store.set_setting("watch_folders",
-                          [x.strip() for x in (f.get("watch_folders") or "INBOX").split(",") if x.strip()])
-    if has("my_name"):
-        store.set_setting("my_name", (f.get("my_name") or "Sean").strip())
-    for k in ("rules_apply", "heuristics_enabled", "heuristic_autorefine", "llm_suggest",
-              "llm_apply", "assistant_actions_apply", "index_enabled", "rerank_enabled",
-              "render_images", "flows_apply"):
-        if has(k):
-            store.set_setting(k, f.get(k) not in (None, "", "0"))
-    if has("index_folders"):
-        store.set_setting("index_folders",
-                          [x.strip() for x in (f.get("index_folders") or "").split(",") if x.strip()])
-    if has("max_llm_per_hour"):
-        store.set_setting("max_llm_per_hour", _form_int("max_llm_per_hour", 40, lo=0))
-    if has("llm_batch_per_cycle"):
-        store.set_setting("llm_batch_per_cycle", _form_int("llm_batch_per_cycle", 5, lo=1))
-    if has("categories"):
-        store.set_setting("categories",
-                          [c.strip() for c in (f.get("categories") or "").split(",") if c.strip()])
-    if has("category_folders"):
-        mapping = {}
-        for line in (f.get("category_folders") or "").splitlines():
-            if "=" in line:
-                k, v = line.split("=", 1)
-                if k.strip():
-                    mapping[k.strip()] = v.strip()
-        store.set_setting("category_folders", mapping)
-    if has("drafts_folder"):
-        store.set_setting("drafts_folder", (f.get("drafts_folder") or "").strip())
-
-
-def _save_llm_settings():
-    f = request.form
-    for k in ("llm_base_url", "llm_model", "llm_fallback_base_url", "llm_fallback_model"):
-        if k in f:
-            store.set_setting(k, (f.get(k) or "").strip())
-    if "llm_thinking" in f:
-        store.set_setting("llm_thinking", "off" if f.get("llm_thinking") == "off" else "auto")
-    if "llm_timeout" in f:
-        store.set_setting("llm_timeout", _form_int("llm_timeout", 0, lo=0))
-    _save_secret("llm_api_key")
-    _save_secret("llm_fallback_api_key")
-
-
-def _save_rag_settings():
-    f = request.form
-    for k in ("embed_base_url", "embed_model", "rerank_base_url", "rerank_model"):
-        if k in f:
-            store.set_setting(k, (f.get(k) or "").strip())
-    if "embed_protocol" in f and f.get("embed_protocol") in ("tei", "openai"):
-        store.set_setting("embed_protocol", f.get("embed_protocol"))
-    if "rerank_protocol" in f and f.get("rerank_protocol") in ("tei", "cohere"):
-        store.set_setting("rerank_protocol", f.get("rerank_protocol"))
-    if "embed_timeout" in f:
-        store.set_setting("embed_timeout", _form_int("embed_timeout", 0, lo=0))
-    if "rerank_timeout" in f:
-        store.set_setting("rerank_timeout", _form_int("rerank_timeout", 0, lo=0))
-    if "embed_query_prefix" in f:
-        store.set_setting("embed_query_prefix", f.get("embed_query_prefix") or "")
-    if "index_refresh_minutes" in f:
-        store.set_setting("index_refresh_minutes", _form_int("index_refresh_minutes", 10, lo=1))
-    if "rag_exclude_folders" in f:
-        store.set_setting("rag_exclude_folders",
-                          [x.strip() for x in (f.get("rag_exclude_folders") or "").split(",") if x.strip()])
-    _save_secret("embed_api_key")
-    _save_secret("rerank_api_key")
-
-
-def _save_connection_settings():
-    f = request.form
-    if "proxy_mode" in f:
-        store.set_setting("proxy_mode",
-                          "external" if f.get("proxy_mode") == "external" else "embedded")
-    for k in ("imap_host", "imap_port", "imap_user", "proxy_tailnet_host"):
-        if k in f:
-            store.set_setting(k, (f.get(k) or "").strip())
-    if "imap_tls" in f:
-        v = (f.get("imap_tls") or "").strip()
-        store.set_setting("imap_tls", v if v in ("0", "1") else "")
-    _save_secret("imap_password")
 
 
 @app.route("/settings", methods=["GET", "POST"])

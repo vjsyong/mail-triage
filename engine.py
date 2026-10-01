@@ -2278,8 +2278,9 @@ class AssistantAgent:
     RESULT_CHARS = 4500       # max JSON chars of a tool result fed back to the model
     TRANSCRIPT_BUDGET = 30000  # cumulative tool-result chars before hard truncation
 
-    def __init__(self):
+    def __init__(self, session_id=0):
         self.mc = None
+        self.session_id = int(session_id or 0)
         self.proposals = []
         self.tools_log = []
         self.actions_apply = bool(store.get_setting("assistant_actions_apply", True))
@@ -2835,13 +2836,13 @@ class AssistantAgent:
         if not user_text:
             yield {"type": "error", "message": "empty message"}
             return
-        store.add_assistant_message("user", user_text[:4000])
+        store.add_assistant_message("user", user_text[:4000], session_id=self.session_id)
         today = time.strftime("%Y-%m-%d (%a)", time.gmtime(time.time() + 8 * 3600))
         system = (ASSISTANT_SYSTEM % {"user": imap_config()["user"], "today": today,
                                       "max_calls": self.MAX_CALLS_PER_TURN}
                   + "\n\n" + _assistant_context())
         convo = [{"role": m["role"], "content": m["content"]}
-                 for m in store.assistant_messages(limit=24)]
+                 for m in store.assistant_messages(limit=24, session_id=self.session_id)]
         llm = LLMClient()
         reply_parts = []
         reasoning_all = []
@@ -2933,7 +2934,8 @@ class AssistantAgent:
                 "actions_live": self.actions_apply}
         msg_id = store.add_assistant_message("assistant", reply[:4000],
                                              proposals=json.dumps(self.proposals),
-                                             meta=json.dumps(meta, ensure_ascii=False))
+                                             meta=json.dumps(meta, ensure_ascii=False),
+                                             session_id=self.session_id)
         if self.proposals:
             yield {"type": "proposals", "proposals": self.proposals}
         yield {"type": "done", "message_id": msg_id, "reply": reply, "steps": steps}
@@ -2963,9 +2965,9 @@ class AssistantAgent:
         return re.sub(r"\s+", " ", first).strip().strip(" .")[:140]
 
 
-def assistant_respond(user_text):
+def assistant_respond(user_text, session_id=0):
     """Run one assistant turn to completion (no streaming). Returns (reply, proposals)."""
-    agent = AssistantAgent()
+    agent = AssistantAgent(session_id=session_id)
     reply_parts, proposals, err = [], [], None
     for ev in agent.stream(user_text):
         if ev["type"] == "content":

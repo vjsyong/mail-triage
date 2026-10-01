@@ -159,6 +159,11 @@ CREATE TABLE IF NOT EXISTS llm_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts INTEGER, msg_id INTEGER, ok INTEGER, error TEXT
 );
+CREATE TABLE IF NOT EXISTS assistant_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT '',
+    created INTEGER, updated INTEGER
+);
 CREATE TABLE IF NOT EXISTS assistant_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts INTEGER, role TEXT NOT NULL DEFAULT 'user',
@@ -221,6 +226,17 @@ def _migrate(conn):
     cols = [r[1] for r in conn.execute("PRAGMA table_info(assistant_messages)")]
     if "meta" not in cols:
         conn.execute("ALTER TABLE assistant_messages ADD COLUMN meta TEXT NOT NULL DEFAULT ''")
+    if cols and "session_id" not in cols:
+        conn.execute("ALTER TABLE assistant_messages ADD COLUMN session_id INTEGER NOT NULL DEFAULT 0")
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(assistant_messages)")]
+    if cols and "session_id" in cols:
+        orphan = conn.execute("SELECT COUNT(*) FROM assistant_messages WHERE session_id=0").fetchone()[0]
+        if orphan:
+            ts = conn.execute("SELECT COALESCE(MIN(ts), 0) FROM assistant_messages").fetchone()[0]
+            now = int(time.time())
+            cur = conn.execute("INSERT INTO assistant_sessions (title, created, updated) VALUES (?,?,?)",
+                               ("Earlier conversation", ts or now, now))
+            conn.execute("UPDATE assistant_messages SET session_id=? WHERE session_id=0", (cur.lastrowid,))
     mcols = [r[1] for r in conn.execute("PRAGMA table_info(messages)")]
     if "date_ts" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN date_ts INTEGER DEFAULT 0")
@@ -708,21 +724,98 @@ def retry_parked_errors():
 
 # ---------------------------------------------------------------- assistant
 
-def add_assistant_message(role, content, proposals="[]", meta=""):
+def add_assistant_message(role, content, proposals="[]", meta="", session_id=0):
     if not isinstance(meta, str):
         meta = json.dumps(meta)
     with db() as conn:
         cur = conn.execute(
-            "INSERT INTO assistant_messages (ts, role, content, proposals, meta) VALUES (?,?,?,?,?)",
-            (int(time.time()), role, content, proposals, meta))
+            "INSERT INTO assistant_messages (ts, role, content, proposals, meta, session_id) "
+            "VALUES (?,?,?,?,?,?)",
+            (int(time.time()), role, content, proposals, meta, int(session_id or 0)))
+        msg_id = cur.lastrowid
+    if session_id:
+        # first user message names the chat (touch_session keeps an existing title)
+        touch_session(session_id, title=(content or "")[:70] if role == "user" else None)
+    return msg_id
+
+
+def assistant_messages(limit=40, session_id=None):
+    q = "SELECT * FROM assistant_messages"
+    args = []
+    if session_id is not None:
+        q += " WHERE session_id=?"
+        args.append(int(session_id))
+    q += " ORDER BY id DESC LIMIT ?"
+    args.append(limit)
+    with db() as conn:
+        rows = [dict(r) for r in conn.execute(q, args)]
+    return list(reversed(rows))
+
+
+def session_messages(session_id, limit=400):
+    with db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM assistant_messages WHERE session_id=? ORDER BY id ASC LIMIT ?",
+            (int(session_id), limit))]
+    return rows
+
+
+# ------------------------------------------------- assistant chat sessions
+
+def create_session(title=""):
+    now = int(time.time())
+    with db() as conn:
+        cur = conn.execute("INSERT INTO assistant_sessions (title, created, updated) VALUES (?,?,?)",
+                           (title, now, now))
         return cur.lastrowid
 
 
-def assistant_messages(limit=40):
+def get_session(session_id):
     with db() as conn:
-        rows = [dict(r) for r in conn.execute(
-            "SELECT * FROM assistant_messages ORDER BY id DESC LIMIT ?", (limit,))]
-    return list(reversed(rows))
+        row = conn.execute("SELECT * FROM assistant_sessions WHERE id=?", (int(session_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def find_or_create_session():
+    """The most recent empty chat, else a fresh one ("new chat" semantics that
+    never piles up empty sessions)."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT s.id FROM assistant_sessions s WHERE "
+            "(SELECT COUNT(*) FROM assistant_messages m WHERE m.session_id = s.id) = 0 "
+            "ORDER BY s.id DESC LIMIT 1").fetchone()
+    if row:
+        return row["id"]
+    return create_session()
+
+
+def list_sessions(limit=60):
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT s.*, "
+            "(SELECT COUNT(*) FROM assistant_messages m WHERE m.session_id=s.id) AS n, "
+            "(SELECT COALESCE(MAX(ts),0) FROM assistant_messages m WHERE m.session_id=s.id) AS last_ts "
+            "FROM assistant_sessions s ORDER BY COALESCE(last_ts, s.created) DESC, s.id DESC LIMIT ?",
+            (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def touch_session(session_id, title=None):
+    now = int(time.time())
+    with db() as conn:
+        if title is not None:
+            conn.execute(
+                "UPDATE assistant_sessions SET updated=?, "
+                "title=CASE WHEN title='' THEN ? ELSE title END WHERE id=?",
+                (now, title, int(session_id)))
+        else:
+            conn.execute("UPDATE assistant_sessions SET updated=? WHERE id=?", (now, int(session_id)))
+
+
+def delete_session(session_id):
+    with db() as conn:
+        conn.execute("DELETE FROM assistant_messages WHERE session_id=?", (int(session_id),))
+        conn.execute("DELETE FROM assistant_sessions WHERE id=?", (int(session_id),))
 
 
 def get_assistant_message(mid):
@@ -731,9 +824,12 @@ def get_assistant_message(mid):
     return dict(row) if row else None
 
 
-def clear_assistant():
+def clear_assistant(session_id=None):
     with db() as conn:
-        conn.execute("DELETE FROM assistant_messages")
+        if session_id is None:
+            conn.execute("DELETE FROM assistant_messages")
+        else:
+            conn.execute("DELETE FROM assistant_messages WHERE session_id=?", (int(session_id),))
 
 
 # ---------------------------------------------------------------- RAG index

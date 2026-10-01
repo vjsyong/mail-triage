@@ -901,11 +901,14 @@ def main():
     section("T8 web UI smoke (Flask test client)")
     import app as app_mod
     client = app_mod.app.test_client()
-    for path in ("/", "/assistant", "/rules", "/flows", "/flows/new", "/classifiers", "/templates",
+    for path in ("/", "/rules", "/flows", "/flows/new", "/classifiers", "/templates",
                  "/messages", "/accounts", "/accounts/new", "/settings", "/log", "/proxy/log",
                  "/healthz"):
         r = client.get(path)
         check("GET %s -> 200" % path, r.status_code == 200)
+    r = client.get("/assistant")
+    check("GET /assistant -> fresh chat redirect", r.status_code == 302
+          and "/assistant/s/" in r.headers.get("Location", ""))
     latest = store.messages(limit=1)[0]
     r = client.get("/messages/%d" % latest["id"])
     check("message detail renders", r.status_code == 200)
@@ -977,7 +980,11 @@ def main():
     check("reasoning streamed before tool calls",
           body.index("event: reasoning") < body.index("event: tool_start"))
     check("multi-turn content separated (content_break)", "event: content_break" in body)
-    r2 = client.get("/assistant")
+    sm = re.search(r"event: session\ndata: (.*)", body)
+    t9_sid = json.loads(sm.group(1))["sid"] if sm else 0
+    check("stream announces its session first", isinstance(t9_sid, int) and t9_sid > 0
+          and body.index("event: session") < body.index("event: reasoning"))
+    r2 = client.get("/assistant/s/%d" % t9_sid)
     check("assistant page shows the collapsed thinking summary",
           b"Checked the budget mail and moved it" in r2.data
           and b'<details class="think" open' not in r2.data)
@@ -1018,16 +1025,19 @@ def main():
                                        for e in store.recent_events(60)))
 
     section("T9c assistant page: transcript + one-click apply")
-    r = client.get("/assistant")
-    check("assistant page renders", r.status_code == 200)
+    r = client.get("/assistant/s/%d" % t9_sid)
+    check("assistant session page renders", r.status_code == 200)
     check("page shows the thinking transcript", b"thinking" in r.data)
     check("page shows the proposal", "Budget mail to Budget".encode() in r.data)
-    r = client.post("/assistant/apply", data={"msg_id": row["id"], "idx": 0})
+    check("page shows the session rail", b"assistant-rail" in r.data)
+    r = client.post("/assistant/apply", data={"msg_id": row["id"], "idx": 0,
+                                              "session": str(t9_sid)})
     check("one-click apply added the rule",
           len(store.list_rules()) == rules_before + 1
           and any(x["name"] == "Budget mail to Budget" for x in store.list_rules()))
-    r = client.post("/assistant/clear")
-    check("conversation cleared", len(store.assistant_messages(limit=10)) == 0)
+    r = client.post("/assistant/clear", data={"session": str(t9_sid)})
+    check("clear empties only this chat", len(store.session_messages(t9_sid)) == 0
+          and store.get_session(t9_sid) is not None)
 
     section("T9d assistant failure is visible, not silent")
     r = client.post("/assistant/stream", data={"message": "streamfail please"})
@@ -1594,9 +1604,10 @@ def main():
         "actions": {"move_to": "Budget"}, "updates_rule_id": 99999})
     check("update of a missing rule is rejected", not r["ok"])
     upd_prop = [p for p in agent.proposals if p.get("name") == "Boss mail to Budget"][0]
+    t22_sid = store.find_or_create_session()
     mid_upd = store.add_assistant_message("assistant", "Update the boss rule?",
-                                          proposals=json.dumps([upd_prop]))
-    r = client.get("/assistant")
+                                          proposals=json.dumps([upd_prop]), session_id=t22_sid)
+    r = client.get("/assistant/s/%d" % t22_sid)
     check("update card renders with badge and button",
           ("updates #%d" % boss_rule["id"]).encode() in r.data
           and ("Update rule #%d" % boss_rule["id"]).encode() in r.data)
@@ -1615,8 +1626,9 @@ def main():
         "conditions": [{"field": "from", "op": "contains", "value": "boss@work.com"}],
         "actions": {"move_to": "Budget"}})
     sim_prop = agent2.proposals[0]
-    store.add_assistant_message("assistant", "Maybe update?", proposals=json.dumps([sim_prop]))
-    r = client.get("/assistant")
+    store.add_assistant_message("assistant", "Maybe update?", proposals=json.dumps([sim_prop]),
+                                session_id=t22_sid)
+    r = client.get("/assistant/s/%d" % t22_sid)
     check("similar-rule note renders with an update button",
           b"Similar rule exists" in r.data
           and ("Update rule #%d" % boss_rule["id"]).encode() in r.data)
@@ -2001,6 +2013,43 @@ def main():
           drow["folder"] == "INBOX" and drow["status"] == "flow-dry"
           and len(state.appended) == before_appends + 1)
     store.set_setting("flows_apply", True)
+
+    section("T29 assistant chats: sessions, panel fragment, drawer")
+    r = client.get("/assistant")
+    check("assistant tab starts a chat", r.status_code == 302
+          and "/assistant/s/" in r.headers.get("Location", ""))
+    loc1 = r.headers.get("Location", "")
+    r = client.get("/assistant")
+    check("consecutive clicks reuse the same empty chat (no pile-up)",
+          r.headers.get("Location", "") == loc1)
+    sid29 = int(loc1.rstrip("/").split("/")[-1])
+    r = client.post("/assistant/stream", data={"message": "hello sessions", "session": str(sid29)})
+    check("stream into the chosen session", b"event: session" in r.data and b"event: done" in r.data)
+    s29 = store.get_session(sid29)
+    check("chat titled from the first user message", "hello sessions" in (s29["title"] or ""))
+    r = client.get("/assistant/s/%d" % sid29)
+    check("session page shows the transcript", b"hello sessions" in r.data)
+    r = client.get("/assistant")
+    check("next assistant click starts a genuinely new chat",
+          r.headers.get("Location", "") != loc1)
+    r = client.get("/assistant/sessions.json")
+    check("sessions.json lists chats with titles",
+          r.status_code == 200 and b"hello sessions" in r.data)
+    r = client.get("/assistant/panel?sid=%d" % sid29)
+    check("panel fragment returns the conversation (for the drawer)",
+          r.status_code == 200 and b"hello sessions" in r.data and b"chat-empty" not in r.data)
+    r = client.get("/assistant/panel?sid=99999")
+    check("panel 404s for unknown chats", r.status_code == 404)
+    r = client.post("/assistant/new.json")
+    check("new.json returns a session id", r.status_code == 200
+          and "sid" in json.loads(r.data))
+    junk_sid = int(json.loads(client.post("/assistant/new.json").data)["sid"])
+    r = client.post("/assistant/session/%d/delete" % junk_sid, data={"json": "1"})
+    check("chat delete works (json)", r.status_code == 200 and store.get_session(junk_sid) is None)
+    r = client.get("/messages")
+    check("drawer + fab present on every page",
+          b'id="drawer"' in r.data and b'id="dtoggle"' in r.data
+          and b"assistantChat" in r.data and b"I'd" not in r.data[:200])
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
