@@ -724,8 +724,9 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .think pre{white-space:pre-wrap;font-family:var(--mono);font-size:.78rem;color:#444;margin:6px 0 2px;padding:8px 10px;background:#fff;border:1px solid var(--line);max-height:260px;overflow:auto}
 /* audit rows + reasoning traces (viewer + simulator) - keep in the base sheet: a page
    <style> block is only served on its own page (the audit <pre> overflowed this way) */
-.arow2{display:grid;grid-template-columns:auto auto 1fr;gap:2px 8px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);font-size:.84rem}
+.arow2{display:flex;flex-direction:column;gap:6px;padding:9px 0;border-top:1px solid var(--line);font-size:.84rem}
 .arow2:first-of-type{border-top:0;padding-top:2px}
+.arow2 .ahead{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
 .arow2 .atime{font-size:.72rem;color:var(--dim)}
 .arow2 .adetail{min-width:0;overflow-wrap:anywhere}
 .audit-pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.78rem;color:var(--dim);margin:6px 0 0;max-height:280px;overflow:auto}
@@ -4045,11 +4046,17 @@ MESSAGE_TMPL = """
       <div class="card-h"><h3>Audit trail</h3><span class="sub">How this email was triaged, oldest first{% if m.audit %} · {{ m.audit|length }} event{{ 's' if m.audit|length != 1 else '' }}{% endif %}</span></div>
       {% for ev in m.audit %}
       <div class="arow2">
-        <span class="mono atime">{{ ev.when }}</span>
-        <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','wake':'ok','tag':'warn','draft':'acc'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
+        <div class="ahead">
+          <span class="mono atime">{{ ev.when }}</span>
+          <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','wake':'ok','tag':'warn','draft':'acc'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
+          {% if ev.meta %}
+          {% if ev.meta.needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
+          <span class="sub">{% if ev.meta.confidence is not none %}{{ '%.0f' % (ev.meta.confidence * 100) }}% · {% endif %}{{ ev.meta.by }}</span>
+          {% endif %}
+        </div>
         <div class="adetail">
           {% if ev.meta %}
-          <b>{{ ev.meta.category or '(no category)' }}</b>{% if ev.meta.confidence is not none %} <span class="sub">{{ '%.0f' % (ev.meta.confidence * 100) }}%</span>{% endif %}{% if ev.meta.needs_reply %} <span class="badge warn">needs reply</span>{% endif %} <span class="sub">· {{ ev.meta.by }}</span>
+          <b>{{ ev.meta.category or '(no category)' }}</b>
           {% if ev.meta.reason %}<div class="sub">why: {{ ev.meta.reason }}</div>{% endif %}
           {% if ev.meta.thinking %}<details><summary class="sub" style="cursor:pointer">full reasoning</summary><pre class="mono audit-pre">{{ ev.meta.thinking }}</pre></details>{% endif %}
           {% else %}{{ ev.detail }}{% endif %}
