@@ -50,6 +50,19 @@ def _gzip_response(resp):
         pass
     return resp
 
+
+@app.after_request
+def _no_store_html(resp):
+    """Dynamic pages: never let a browser/tab serve a stale shell from cache or
+    bfcache - inline CSS+JS means a cached HTML pins the whole old UI."""
+    try:
+        if resp.mimetype == "text/html":
+            resp.headers["Cache-Control"] = "no-store, must-revalidate"
+            resp.headers.pop("ETag", None)
+    except Exception:
+        pass
+    return resp
+
 app.secret_key = os.environ.get("APP_SECRET", "mail-triage-local")
 
 worker = engine.Worker()
