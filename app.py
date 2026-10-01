@@ -2599,9 +2599,10 @@ function condTexts(){
     var val = row.querySelector('.k-val').value.trim();
     if(!val) return;
     var sc = row.querySelector('.k-score').value;
-    if(kind === 'category') out.push('✦ classified as "' + val + '"' + (sc ? ' (≥' + Math.round(sc * 100) + '%)' : ''));
-    else if(kind === 'topic') out.push('✦ about "' + val + '"' + (sc ? ' (≥' + sc + ')' : ''));
-    else out.push(row.querySelector('[name^="cond_field_"]').value + ' ' + row.querySelector('[name^="cond_op_"]').value + ' "' + val + '"');
+    var shown = (val.length > 60) ? (val.slice(0, 60) + '…') : val;
+    if(kind === 'category') out.push('✦ classified as "' + shown + '"' + (sc ? ' (≥' + Math.round(sc * 100) + '%)' : ''));
+    else if(kind === 'topic') out.push('✦ about "' + shown + '"' + (sc ? ' (≥' + sc + ')' : ''));
+    else out.push(row.querySelector('[name^="cond_field_"]').value + ' ' + row.querySelector('[name^="cond_op_"]').value + ' "' + shown + '"');
   });
   return out;
 }
@@ -2764,10 +2765,19 @@ document.addEventListener('click', function(ev){
 var e0 = document.getElementById('fl-edge-0');
 if(e0){
   var b0 = el('button','fl-ins','+'); b0.type = 'button'; b0.setAttribute('aria-label','Add a filter');
-  b0.onclick = function(ev){ ev.stopPropagation(); condAdd('field'); var v = document.querySelector('.cond-row.extra .k-val') || document.querySelector('.cond-row .k-val'); if(v) v.focus(); };
-  e0.appendChild(b0);
+  var m0 = el('div','fl-insert-menu');
+  [['field','+ match text'],['category','+ ✦ AI category'],['topic','+ ✦ about (topic)']].forEach(function(t){
+    var x = el('button','btn small', t[1]); x.type = 'button';
+    x.onclick = function(ev){ ev.stopPropagation(); m0.classList.remove('on'); b0.classList.remove('on'); condAdd(t[0]); };
+    m0.appendChild(x);
+  });
+  b0.onclick = function(ev){ ev.stopPropagation(); m0.classList.toggle('on'); b0.classList.toggle('on', m0.classList.contains('on')); };
+  e0.appendChild(b0); e0.appendChild(m0);
 }
 document.querySelectorAll('.cond-row .k-sel').forEach(condKind);
+document.querySelectorAll('.cond-row .k-val, .cond-row .k-score').forEach(function(i){
+  i.addEventListener('input', function(){ condEmpty(); renderSummary(); });
+});
 document.querySelectorAll('input[name=match_mode]').forEach(function(r){ r.addEventListener('change', renderSummary); });
 CATS.forEach(function(c){ var o = document.createElement('option'); o.value = c; document.getElementById('fl-cats').appendChild(o); });
 render(); condEmpty();
