@@ -332,6 +332,7 @@ a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 .skip{position:absolute;left:-9999px;top:0;background:#000;color:#fff;padding:8px 12px;z-index:200}
 .vh{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .backlink{margin:0 0 4px;font-size:.84rem}
+#rules th:nth-child(1),#rules td:nth-child(1){white-space:nowrap}
 .skip:focus{left:8px}
 /* ---- app shell ---- */
 .app{display:flex;min-height:100vh}
@@ -563,7 +564,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .r-head{flex-direction:column;align-items:stretch}
   .r-head .row{display:flex;gap:8px}
   .r-head .row .btn{flex:1;justify-content:center;text-align:center}
-  .ra-inline{display:none}
+  .rowacts .ra-inline{display:none}
   .rowacts .ra-menu{display:inline-block}
   #rules .tbl.mcards tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
   #rules .tbl.mcards td{display:block;padding:1px 0}
@@ -1847,7 +1848,7 @@ RULES_TMPL = """
 <div class="card flush" id="rules">
   {% if rules %}
   <div class="tablewrap"><table class="tbl mcards">
-    <thead><tr><th style="width:34px">#</th><th>rule</th><th>matches</th><th>actions</th><th class="r"></th></tr></thead>
+    <thead><tr><th style="width:44px">#</th><th>rule</th><th>matches</th><th>actions</th><th class="r"></th></tr></thead>
     <tbody>
     {% for r in rules %}
     <tr{% if not r.enabled %} style="opacity:.55"{% endif %}>
@@ -4320,6 +4321,7 @@ SETTINGS_TMPL = """
 .setnav{position:sticky;top:14px;display:flex;flex-direction:column;gap:1px}
 .setnav a{padding:6px 10px;color:var(--dim);font-size:.86rem;font-weight:500;display:block}
 .setnav a:hover{background:var(--hover);color:var(--ink)}
+.setnav a.on{background:var(--hover);color:var(--ink);font-weight:600}
 .setnav a.sn-sub{padding-left:24px;font-size:.79rem}
 .setnav .sn-h{font-size:.72rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);padding:0 10px 6px}
 .setbody{min-width:0}
@@ -4693,7 +4695,19 @@ SETTINGS_TMPL = """
   sel.addEventListener('change', upd);
 })();
 </script>
-"""
+
+<script>
+(function(){
+  var links=Array.prototype.slice.call(document.querySelectorAll('.setnav a'));
+  var secs=['general','ai','mail','sorting','searchidx','status'].map(function(id){return document.getElementById(id);}).filter(Boolean);
+  if(!links.length || !secs.length || !window.IntersectionObserver) return;
+  function set(id){ links.forEach(function(a){ a.classList.toggle('on', a.getAttribute('href')==='#'+id); }); }
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting) set(e.target.id); });
+  },{rootMargin:'-25% 0px -60% 0px'});
+  secs.forEach(function(s){ io.observe(s); });
+})();
+</script>"""
 
 
 _SETTINGS_ANCHORS = {"llm": "ai-model", "rag": "ai-search", "connection": "mail-src", "behavior": "general"}
@@ -4743,7 +4757,7 @@ def settings():
         return redirect(url_for("settings") + ("#" + anchor if anchor else ""))
     return render(_render_src(
         SETTINGS_TMPL, s=store.all_settings(), engine_state=worker.state, cfg=config,
-        agcaps=engine.AGENT_CAPS,
+        tz=tz_label(), agcaps=engine.AGENT_CAPS,
         llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config(),
         icfg=engine.imap_config()))
 
