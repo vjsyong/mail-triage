@@ -3465,14 +3465,25 @@ def proxy_auth_complete(email):
 # ---------------------------------------------------------------- log
 
 LOG_TMPL = """
-<h2>Activity log</h2>
-<p class="sub">{% if show_debug %}<a href="{{ url_for('log') }}">hide debug lines</a>{% else %}<a href="{{ url_for('log', debug='1') }}">show debug lines</a>{% endif %}</p>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Activity log</h1>
+    <div class="page-desc">Everything Mail Triage did, newest first{% if not show_debug %} (debug lines hidden){% endif %}.</div>
+  </div>
+  <div class="row">
+    <span class="badge {{ 'err' if errors else '' }}">{{ errors }} error{{ 's' if errors != 1 else '' }}</span>
+    {% if show_debug %}<a class="chip" href="{{ url_for('log') }}">hide debug lines</a>
+    {% else %}<a class="chip" href="{{ url_for('log', debug='1') }}">show debug lines</a>{% endif %}
+    <a class="btn small" href="{{ url_for('log') }}">Refresh</a>
+  </div>
+</div>
 <div class="card logpanel">
   {% for e in events %}
-  <div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> {{ e.message }}</div>
+  <div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span class="lmsg">{{ e.message }}</span></div>
   {% else %}<div class="sub">No events yet.</div>{% endfor %}
 </div>
 """
+
 
 
 @app.route("/log")
