@@ -2559,6 +2559,8 @@ def main():
           b".chat-del.armed" in d and b"Press again to delete this chat" in d)
     check("turbo drive wired (SPA navigation)", b"/static/turbo.js" in d and b"turbo-cache-control" in d)
     check("view transitions opted in (direction-aware)", b'name="view-transition" content="same-origin"' in d and b"mtvt-in" in d and b"mtvt-fwd-in" in d and b"data-vt-dir" in d and b"vtDir" in d)
+    check("keyboard-follow: composer rides above the on-screen keyboard",
+          b"--kb-h" in d and b"__mtKbFit" in d and b"kb-open:has(.assistant-main)" in d)
     rt = client.get("/static/turbo.js")
     check("turbo.js served", rt.status_code == 200 and b"Turbo" in rt.data[:400])
     check("singleton guards present (no duplicate listeners across swaps)",

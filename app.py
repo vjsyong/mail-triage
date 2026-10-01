@@ -828,6 +828,8 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .chat{display:flex;flex-direction:column}
   body:has(.assistant-main) .topbar{display:none}
   body:has(.assistant-main) .assistant-main{height:calc(100vh - 115px);height:calc(100dvh - 115px)}
+  body.kb-open:has(.assistant-main){overflow:hidden}
+  body.kb-open:has(.assistant-main) .assistant-main{height:var(--kb-h, calc(100dvh - 115px))}
   .crow .avatar{display:none}
   .crow.user{justify-content:flex-end}
   .bubble{max-width:88%}
@@ -858,6 +860,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .cond-extra{display:none}
   .cond-more{display:inline-flex;margin:2px 0 6px}
   .jumpwrap{min-height:420px}
+  body.kb-open .jumpwrap{min-height:0}
   .setrow input:not([type=checkbox]):not([type=radio]),
   input[type=text],input[type=number],input[type=password],input[type=search],
   input[type=email],input[type=url],input[type=tel],select,textarea{font-size:16px}
@@ -1558,23 +1561,43 @@ window.guardApply = function(f){
 })();
 </script>
 <script>
-/* keyboard-follow: lift composers + savebars above the on-screen keyboard, hide the tab bar while typing */
+/* keyboard-follow: with the on-screen keyboard up, the tab bar hides and the
+   page composer must stay visible above it. Two strategies:
+   - .assistant-main (assistant page) is resized to the visual viewport height
+     (CSS var --kb-h), so its last-chain composer always lands above the keyboard;
+   - #dform (drawer) + .savebar are lifted with translateY(-kb).
+   iOS never fires reliable events alone, so we also poll briefly on focus. */
 (function(){
   if(!window.visualViewport || !window.matchMedia || !matchMedia('(pointer:coarse)').matches) return;
-  var vv = window.visualViewport;
+  var root = document.documentElement, poll = null;
   function fit(){
+    var vv = window.visualViewport; if(!vv) return;
     var kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     var open = kb > 40;
     document.body.classList.toggle('kb-open', open);
-    document.querySelectorAll('#aform,#dform,.savebar').forEach(function(el){
+    document.querySelectorAll('#dform,.savebar').forEach(function(el){
       el.style.transform = open ? ('translateY(-' + Math.round(kb) + 'px)') : '';
     });
+    var main = document.querySelector('.assistant-main');
+    if(open && main){
+      // rect.top is in visual-viewport coords, so this lands the container's
+      // bottom exactly on the visible bottom edge (works even when panned)
+      var h = Math.round(vv.height - main.getBoundingClientRect().top);
+      if(h > 160) root.style.setProperty('--kb-h', h + 'px');
+    } else {
+      root.style.removeProperty('--kb-h');
+    }
   }
+  window.__mtKbFit = fit;
+  function startPoll(){ stopPoll(); var n = 0; poll = setInterval(function(){ fit(); if(++n > 12) stopPoll(); }, 250); }
+  function stopPoll(){ if(poll){ clearInterval(poll); poll = null; } }
   if(!window.__mtKb){
     window.__mtKb = 1;
-    vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit);
-    document.addEventListener('focusin', function(){ setTimeout(fit, 250); });
-    document.addEventListener('focusout', function(){ setTimeout(fit, 80); });
+    var vv0 = window.visualViewport;
+    vv0.addEventListener('resize', fit); vv0.addEventListener('scroll', fit);
+    window.addEventListener('resize', fit);
+    document.addEventListener('focusin', function(){ setTimeout(fit, 120); setTimeout(fit, 400); startPoll(); });
+    document.addEventListener('focusout', function(){ setTimeout(fit, 80); setTimeout(fit, 450); stopPoll(); });
   }
   fit();
 })();

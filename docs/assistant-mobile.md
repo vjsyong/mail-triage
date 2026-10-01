@@ -58,3 +58,20 @@ silently fell back to a plain form POST (no streaming). Init is now deferred to
 topbar 30 < fab 60 < bottom-nav 180 < sheet 190 < drawer 220 < toasts 300.
 Any new full-screen overlay must sit above 180, or the tab bar punches through it
 (this bit both the history sheet and the assistant drawer during review).
+
+
+### Keyboard-safe composer (2026-10-01, evening)
+Report: on iPhone, focusing the composer buried the input behind/below the tab bar
+with the keyboard up. Old mechanism lifted `#aform` with translateY but the
+container (`height: calc(100dvh - 115px)`) never shrank, `.jumpwrap` kept a
+`min-height:420px` floor, and iOS keyboard events could arrive late.
+
+Now: while the keyboard is up (`body.kb-open`), `.assistant-main` is resized to the
+visual viewport (`--kb-h` = vv.height - rect.top, computed in `fit()`), so the
+composer - last child of the flex chain - always lands exactly on the keyboard line;
+`.jumpwrap{min-height:0}` releases the floor; the tab bar hides. `#dform`/`.savebar`
+keep their translateY lift. iOS flakiness covered with focusin retries (120/400ms)
+and a 250ms poll for ~3s after focus. `window.__mtKbFit` is exposed for tests:
+emulate a keyboard by overriding `window.visualViewport` ({height, offsetTop}) and
+calling `__mtKbFit()` - verified composer bottom == keyboard line, nav none, restore
+clears everything.
