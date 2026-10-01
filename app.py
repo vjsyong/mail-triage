@@ -6263,23 +6263,23 @@ LOG_TMPL = """
     <div class="page-desc logdesc">Everything Mail Triage did, newest first · times in {{ tz }}{% if not show_debug %} (debug lines hidden){% endif %}.</div>
   </div>
   <div class="row chiprow">
+    <form class="inline" method="get" action="{{ url_for('log') }}">
+      {% if lvl != 'all' %}<input type="hidden" name="lvl" value="{{ lvl }}">{% endif %}
+      {% if show_debug %}<input type="hidden" name="debug" value="1">{% endif %}
+      {% if mins %}<input type="hidden" name="mins" value="{{ mins }}">{% endif %}
+      <input type="search" name="q" value="{{ q }}" placeholder="Filter lines&hellip;" aria-label="Filter log lines" style="width:170px">
+      <button class="btn small" type="submit">Find</button>
+    </form>
+    <button class="btn small" id="logpause" type="button">Pause</button>
     <a class="chip{{ ' active' if lvl == 'all' and not mins else '' }}" href="{{ url_for('log', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">All</a>
     <a class="chip{{ ' active' if lvl == 'error' else '' }}" href="{{ url_for('log', lvl='error', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Errors{% if errors %} <span class="n">{{ errors }}</span>{% endif %}</a>
     <a class="chip{{ ' active' if lvl == 'warn' else '' }}" href="{{ url_for('log', lvl='warn', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Warnings{% if warns %} <span class="n">{{ warns }}</span>{% endif %}</a>
     <a class="chip{{ ' active' if lvl == 'info' else '' }}" href="{{ url_for('log', lvl='info', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Info</a>
     {% if show_debug %}<a class="chip" href="{{ url_for('log', lvl=lvl, q=(q or none), mins=(mins or none)) }}">hide debug lines</a>
     {% else %}<a class="chip" href="{{ url_for('log', lvl=lvl, debug='1', q=(q or none), mins=(mins or none)) }}">show debug lines</a>{% endif %}
-    <form class="inline" method="get" action="{{ url_for('log') }}">
-      {% if lvl != 'all' %}<input type="hidden" name="lvl" value="{{ lvl }}">{% endif %}
-      {% if show_debug %}<input type="hidden" name="debug" value="1">{% endif %}
-      {% if mins %}<input type="hidden" name="mins" value="{{ mins }}">{% endif %}
-      <input type="search" name="q" value="{{ q }}" placeholder="Filter lines&hellip;" aria-label="Filter log lines" style="width:180px">
-      <button class="btn small" type="submit">Find</button>
-    </form>
     <a class="chip{{ ' active' if mins == '15' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='15') }}">15m</a>
     <a class="chip{{ ' active' if mins == '60' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='60') }}">1h</a>
     <a class="chip{{ ' active' if mins == '1440' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='1440') }}">24h</a>
-    <button class="btn small" id="logpause" type="button">Pause</button>
     <a class="btn small" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Refresh</a>
   </div>
 </div>
