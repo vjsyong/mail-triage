@@ -2924,7 +2924,7 @@ def main():
     engine.process_mailbox()
     ar = [r for r in store.messages(limit=5000) if r["subject"] == "Shadow audit question"][0]
     sdecs = store.list_decisions(msg_id=ar["id"], source_type="specialist")
-    sysdecs = [d for d in store.list_decisions(msg_id=ar["id"])
+    sysdecs = [d for d in store.list_decisions(msg_id=ar["id"], task="needs_reply")
                if d["source_type"] in ("llm", "heuristic")]
     rtdecs = store.list_decisions(msg_id=ar["id"], task="route")
     check("shadow decision stored with provenance + version",
@@ -2962,6 +2962,43 @@ def main():
     check("retire transition works from the page route",
           store.get_specialist(sid)["status"] == "retired"
           and not store.get_specialist(sid)["enabled"])
+
+    section("T45 learning: second task (category) + next-step proposals")
+
+    props_before = learning_mod.proposals()
+    check("proposals offer the category model before training",
+          any(p["task"] == "category" and p.get("trainable") for p in props_before))
+    res2 = learning_mod.train_specialist("category", created_by="test")
+    sid2 = res2["specialist_id"]
+    check("category specialist trained (multi-class logreg_ovr, validated)",
+          store.get_specialist(sid2)["status"] == "validated" and res2["kind"] == "logreg_ovr")
+    v2m = res2["val"]
+    check("multi-class metrics on the temporal holdout",
+          (v2m.get("n") or 0) >= 1 and v2m.get("accuracy") is not None
+          and isinstance(v2m.get("classes"), dict) and len(v2m["classes"]) >= 2)
+    learning_mod.transition(sid2, "shadow", reason="test")
+    add_msg(state, "cat.audit@x.com", "Weekly newsletter: campus updates",
+            "top deals and events inside", "cat@1")
+    engine.process_mailbox()
+    crow2 = [r for r in store.messages(limit=5000)
+             if r["subject"] == "Weekly newsletter: campus updates"][0]
+    cdecs = store.list_decisions(msg_id=crow2["id"], task="category", source_type="specialist")
+    check("category shadow decision recorded with provenance",
+          bool(cdecs) and cdecs[0]["source_id"].startswith("category_")
+          and cdecs[0]["model_version"] == "1")
+    syscat = [d for d in store.list_decisions(msg_id=crow2["id"], task="category")
+              if d["source_type"] in ("llm", "heuristic")]
+    check("system category decision recorded alongside", bool(syscat))
+    check("router runs with both tasks present",
+          bool(store.list_decisions(msg_id=crow2["id"], task="route")))
+    props = learning_mod.proposals()
+    check("deployed category leaves the list; priority stays blocked",
+          not any(p["task"] == "category" for p in props)
+          and any(p["task"] == "priority" and p["status"] == "blocked" for p in props))
+    r = client.get("/learning")
+    check("learning page shows both models + the next-step list",
+          b"Category sorter" in r.data and b"What can be trained next" in r.data
+          and b"needs_reply_logreg" in r.data)
 
 
 

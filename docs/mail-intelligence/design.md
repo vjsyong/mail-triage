@@ -343,3 +343,16 @@ job, plain-language scores, "ceiling not truth" honesty note, actions) -> **fold
 with subjects, raw numbers, all versions, how-it-works + guard-rails). Hero always shows the
 RUNNING version; a retrain produces a `validated` candidate deployable from the Versions fold;
 deploying any version supersedes other running versions of the same task (one runner per task).
+
+## Second task shipped (same day): category + the first discovery surface
+
+`TASKS["category"]` (multi-class) with a new kind `logreg_ovr` (one-vs-rest, one JSON
+weight vector per class, shared scaler). Multi-class dataset split + metrics (accuracy,
+macro-F1, per-class P/R/F1). The shadow hook now decides and records EVERY enabled
+task per classify call (specialist + system + router rows for category and needs_reply)
+and the router covers `category` from either heuristics or the specialist. Live stats
+and disagreements are per task. The `/learning` page renders one card per running
+model and gained **"What can be trained next"** — the first, data-driven discovery
+surface (candidates with evidence: ready / low-gain / blocked-on-signal; e.g.
+priority is blocked until user corrections exist). The LLM-driven pattern-discovery
+proposal engine (design §7) remains the next milestone on top of this.

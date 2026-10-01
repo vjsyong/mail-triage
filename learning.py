@@ -242,10 +242,50 @@ def _scaled(model, x):
     return [(x[j] - model["mean"][j]) / model["std"][j] for j in range(len(x))]
 
 
+def _fit_binary(xs, ys, ws, params, dim):
+    """Full-batch gradient descent on pre-scaled rows -> (w, b, iters, log_loss)."""
+    iters = int(params.get("iters") or 120)
+    lr0 = float(params.get("lr") or 0.25)
+    l2 = float(params.get("l2") or 0.001)
+    n = len(xs)
+    w = [0.0] * dim
+    b = 0.0
+    wsum = sum(ws) or 1.0
+    prev_loss = None
+    used = 0
+    for it in range(iters):
+        grad = [0.0] * dim
+        gb = 0.0
+        loss = 0.0
+        for i in range(n):
+            x = xs[i]
+            z = b
+            for j in range(dim):
+                z += w[j] * x[j]
+            p = _sigmoid(z)
+            err = (p - ys[i]) * ws[i]
+            for j in range(dim):
+                grad[j] += err * x[j]
+            gb += err
+            if ys[i] > 0.5:
+                loss -= ws[i] * math.log(max(p, 1e-9))
+            else:
+                loss -= ws[i] * math.log(max(1.0 - p, 1e-9))
+        loss = loss / wsum + l2 * sum(v * v for v in w)
+        lr = lr0 / (1.0 + 0.02 * it)
+        for j in range(dim):
+            w[j] -= lr * (grad[j] / wsum + l2 * w[j])
+        b -= lr * (gb / wsum)
+        used = it + 1
+        if prev_loss is not None and abs(prev_loss - loss) < 1e-5:
+            break
+        prev_loss = loss
+    return w, b, used, prev_loss
+
+
 def train_logreg(examples, params):
-    """examples: [(y 0/1, weight, feats-dict)]. Full-batch gradient descent,
-    deterministic (zero init, fixed order), L2; features standardized. Model is
-    a JSON artifact: weights + bias + scaler - no pickle, fully auditable."""
+    """examples: [(y 0/1, weight, feats-dict)]. Deterministic L2 logistic
+    regression; model = JSON weights + bias + scaler (no pickle, auditable)."""
     feats_list = params.get("features") or FEATURE_ORDER
     X, Y, W = [], [], []
     for y, w, feats in examples:
@@ -255,49 +295,13 @@ def train_logreg(examples, params):
     if not X:
         raise RuntimeError("no training examples")
     mean, std = _standardize_fit(X)
-    Xs = [[ (row[j] - mean[j]) / std[j] for j in range(len(row)) ] for row in X]
-    iters = int(params.get("iters") or 120)
-    lr0 = float(params.get("lr") or 0.25)
-    l2 = float(params.get("l2") or 0.001)
-    n = len(Xs)
-    dim = len(feats_list)
-    w = [0.0] * dim
-    b = 0.0
-    wsum = sum(W) or 1.0
-    prev_loss = None
-    used_iters = 0
-    for it in range(iters):
-        grad = [0.0] * dim
-        gb = 0.0
-        loss = 0.0
-        for i in range(n):
-            x = Xs[i]
-            z = b
-            for j in range(dim):
-                z += w[j] * x[j]
-            p = _sigmoid(z)
-            err = (p - Y[i]) * W[i]
-            for j in range(dim):
-                grad[j] += err * x[j]
-            gb += err
-            if Y[i] > 0.5:
-                loss -= W[i] * math.log(max(p, 1e-9))
-            else:
-                loss -= W[i] * math.log(max(1.0 - p, 1e-9))
-        loss = loss / wsum + l2 * sum(v * v for v in w)
-        lr = lr0 / (1.0 + 0.02 * it)
-        for j in range(dim):
-            w[j] -= lr * (grad[j] / wsum + l2 * w[j])
-        b -= lr * (gb / wsum)
-        used_iters = it + 1
-        if prev_loss is not None and abs(prev_loss - loss) < 1e-5:
-            break
-        prev_loss = loss
+    Xs = [[(row[j] - mean[j]) / std[j] for j in range(len(row))] for row in X]
+    w, b, used_iters, prev_loss = _fit_binary(Xs, Y, W, params, len(feats_list))
     model = {"kind": "logreg", "features": list(feats_list), "weights": [round(v, 6) for v in w],
              "bias": round(b, 6), "mean": [round(v, 6) for v in mean],
              "std": [round(v, 6) for v in std], "trained_at": int(time.time()),
-             "samples": n, "iters": used_iters, "log_loss": round(prev_loss or 0, 6)}
-    stats = {"samples": n, "features": dim, "iters": used_iters,
+             "samples": len(X), "iters": used_iters, "log_loss": round(prev_loss or 0, 6)}
+    stats = {"samples": len(X), "features": len(feats_list), "iters": used_iters,
              "log_loss": round(prev_loss or 0, 6), "kind": "logreg"}
     return model, stats
 
@@ -329,6 +333,73 @@ def describe_logreg(model, limit=8):
 
 register_kind("logreg", train_logreg, predict_logreg, describe_logreg,
               "L2 logistic regression, standardized features, JSON weights (interpretable)")
+
+
+def train_logreg_ovr(examples, params):
+    """One-vs-rest logistic regression for multi-class tasks. examples:
+    [(label-str, weight, feats)]. One shared scaler; one JSON weight vector per
+    class - the artifact stays inspectable end to end."""
+    feats_list = params.get("features") or FEATURE_ORDER
+    labels, X, W = [], [], []
+    for lab, w, feats in examples:
+        s = str(lab)
+        if s not in labels:
+            labels.append(s)
+        X.append([float(feats.get(n, 0.0)) for n in feats_list])
+        W.append(max(0.0, float(w)))
+    if not X:
+        raise RuntimeError("no training examples")
+    labels.sort()
+    mean, std = _standardize_fit(X)
+    Xs = [[(row[j] - mean[j]) / std[j] for j in range(len(row))] for row in X]
+    dim = len(feats_list)
+    models = {}
+    for lab in labels:
+        ys = [1.0 if str(e[0]) == lab else 0.0 for e in examples]
+        w, b, used, ll = _fit_binary(Xs, ys, W, params, dim)
+        models[lab] = {"weights": [round(v, 6) for v in w], "bias": round(b, 6),
+                       "iters": used, "log_loss": round(ll or 0, 6)}
+    model = {"kind": "logreg_ovr", "features": list(feats_list), "classes": labels,
+             "models": models, "mean": [round(v, 6) for v in mean],
+             "std": [round(v, 6) for v in std], "trained_at": int(time.time()),
+             "samples": len(X)}
+    stats = {"samples": len(X), "classes": len(labels), "features": dim, "kind": "logreg_ovr"}
+    return model, stats
+
+
+def predict_logreg_ovr(model, feats):
+    x = _row_x(model, feats)
+    xs = [(x[j] - model["mean"][j]) / model["std"][j] for j in range(len(x))]
+    best_lab, best_p = None, -1.0
+    for lab in model.get("classes") or []:
+        m = model["models"][lab]
+        z = float(m.get("bias") or 0.0)
+        for j, _name in enumerate(model["features"]):
+            z += float(m["weights"][j]) * xs[j]
+        p = _sigmoid(z)
+        if p > best_p:
+            best_lab, best_p = lab, p
+    if best_lab is None:
+        return None
+    m = model["models"][best_lab]
+    contrib = {}
+    for j, name in enumerate(model["features"]):
+        c = float(m["weights"][j]) * xs[j]
+        if abs(c) >= 0.05:
+            contrib[name] = round(c, 3)
+    return {"prediction": best_lab, "proba": round(best_p, 4),
+            "confidence": round(best_p, 4), "contributions": contrib}
+
+
+def describe_logreg_ovr(model, limit=6):
+    if not model or model.get("kind") != "logreg_ovr":
+        return "(empty model)"
+    return "one-vs-rest logreg over %d classes: %s" % (
+        len(model.get("classes") or []), ", ".join((model.get("classes") or [])[:limit]))
+
+
+register_kind("logreg_ovr", train_logreg_ovr, predict_logreg_ovr, describe_logreg_ovr,
+              "one-vs-rest logistic regression over JSON weight vectors (multi-class)")
 
 # ---------------------------------------------------------------- metrics
 
@@ -401,6 +472,37 @@ def evaluate_probs(y_true, probs):
     return m
 
 
+def multiclass_metrics(y_true, y_pred):
+    """Accuracy + per-class precision/recall/F1 for multi-class tasks."""
+    classes = sorted(set(y_true) | set(y_pred))
+    acc = {c: {"tp": 0, "fp": 0, "fn": 0} for c in classes}
+    correct = 0
+    for y, p in zip(y_true, y_pred):
+        if y == p:
+            correct += 1
+        for c in classes:
+            if p == c and y == c:
+                acc[c]["tp"] += 1
+            elif p == c:
+                acc[c]["fp"] += 1
+            elif y == c:
+                acc[c]["fn"] += 1
+    per = {}
+    f1s = []
+    for c in classes:
+        tp, fp, fn = acc[c]["tp"], acc[c]["fp"], acc[c]["fn"]
+        prec = tp / (tp + fp) if (tp + fp) else None
+        rec = tp / (tp + fn) if (tp + fn) else None
+        f1 = (2 * prec * rec / (prec + rec)) if (prec and rec) else None
+        if f1 is not None:
+            f1s.append(f1)
+        per[c] = {"precision": _r(prec), "recall": _r(rec), "f1": _r(f1), "n": tp + fn}
+    n = len(y_true)
+    return {"n": n, "accuracy": _r(correct / n if n else None),
+            "macro_f1": _r(sum(f1s) / len(f1s) if f1s else None),
+            "classes": per}
+
+
 # ---------------------------------------------------------------- tasks
 # One entry per learning task. Task config is deliberately small and explicit;
 # routing thresholds are policy, evaluated in reports before being trusted.
@@ -410,12 +512,32 @@ TASKS = {
         "name": "needs_reply",
         "description": "Does this email need a reply from the user?",
         "weak_label_column": "llm_needs_reply",
+        "kind": "logreg",
         "positive": "needs a reply",
         "min_accept": 0.97,   # router: accept specialist without LLM
         "min_verify": 0.75,   # router: moderate confidence -> LLM verify
         "min_samples": 40,
         "holdout": 0.2,
     },
+    "category": {
+        "name": "category",
+        "description": "Which of the user's categories does this email belong to?",
+        "weak_label_column": "llm_category",
+        "kind": "logreg_ovr",
+        "multi": True,        # one-vs-rest over the label set
+        "positive": "",
+        "min_accept": 0.85,   # router: accept specialist without LLM
+        "min_verify": 0.55,   # router: moderate confidence -> LLM verify
+        "min_samples": 30,
+        "holdout": 0.2,
+    },
+}
+
+TASK_TITLES = {
+    "needs_reply": "Reply detector",
+    "category": "Category sorter",
+    "priority": "Importance ranker",
+    "newsletter": "Newsletter splitter",
 }
 
 STATUS_FLOW = {
@@ -437,14 +559,22 @@ def build_dataset(task, limit=6000):
     if not t:
         raise RuntimeError("unknown task %r" % task)
     col = t["weak_label_column"]
+    multi = bool(t.get("multi"))
     # raw scan on purpose: this is training data, so list filters (snooze etc.)
     # must not silently drop samples
+    if multi:
+        sql = ("SELECT id, from_addr, to_addr, subject, snippet, date_ts, sort_ts, processed_at, "
+               "llm_category FROM messages WHERE coalesce(llm_category,'')!='' "
+               "ORDER BY id DESC LIMIT ?")
+        args = (int(limit),)
+    else:
+        sql = ("SELECT id, from_addr, to_addr, subject, snippet, date_ts, sort_ts, processed_at, "
+               "llm_category, %s FROM messages "
+               "WHERE coalesce(llm_category,'')!='' AND %s IN (0,1) "
+               "ORDER BY id DESC LIMIT ?" % (col, col))
+        args = (int(limit),)
     with store.db() as conn:
-        rows = [dict(r) for r in conn.execute(
-            "SELECT id, from_addr, to_addr, subject, snippet, date_ts, sort_ts, processed_at, "
-            "llm_category, %s FROM messages "
-            "WHERE coalesce(llm_category,'')!='' AND %s IN (0,1) "
-            "ORDER BY id DESC LIMIT ?" % (col, col), (int(limit),))]
+        rows = [dict(r) for r in conn.execute(sql, args)]
     labels_by_msg = {}
     try:
         for lab in store.list_labels(task=task, limit=20000):
@@ -453,26 +583,33 @@ def build_dataset(task, limit=6000):
         pass
     samples, meta = [], []
     for r in rows:
+        raw = r["llm_category"] if multi else r[col]
         strong = labels_by_msg.get(r["id"]) or []
         if strong:
             best = max(strong, key=lambda l: label_weight(l["source"]))
             src = best["source"]
             try:
-                val = int(json.loads(best["label"]))
+                val = json.loads(best["label"])
             except (TypeError, ValueError):
                 continue
+            val = str(val) if multi else (1 if val in (True, 1, "1") else 0)
             weight = label_weight(src)
         else:
-            src, val, weight = "llm_annotation", int(r[col]), label_weight("llm_annotation")
+            src, weight = "llm_annotation", label_weight("llm_annotation")
+            val = str(raw) if multi else int(raw)
         feats = extract_features(r)
-        samples.append({"msg_id": r["id"], "y": val, "weight": weight, "source": src,
+        samples.append({"msg_id": r["id"], "label": val, "weight": weight, "source": src,
                         "ts": _ts_of(r), "feats": feats})
         meta.append((src, val))
     samples.sort(key=lambda s: s["ts"] or 0)
-    return samples, {"n": len(samples),
-                     "by_source": {s: sum(1 for x, _v in meta if x == s)
-                                   for s in sorted(set(x for x, _v in meta))},
-                     "positives": sum(1 for _s, v in meta if v == 1)}
+    out_meta = {"n": len(samples),
+                "by_source": {s: sum(1 for x, _v in meta if x == s)
+                              for s in sorted(set(x for x, _v in meta))}}
+    if multi:
+        out_meta["classes"] = sorted(set(v for _s, v in meta))
+    else:
+        out_meta["positives"] = sum(1 for _s, v in meta if v == 1)
+    return samples, out_meta
 
 
 def _split(samples, holdout):
@@ -481,33 +618,43 @@ def _split(samples, holdout):
     return samples[:cut], samples[cut:]
 
 
+def _eval_chunk(t, kind, model, chunk):
+    """Metrics for one split: binary -> threshold metrics, multi -> accuracy +
+    per-class P/R/F1."""
+    ys, preds, probs = [], [], []
+    for s in chunk:
+        res = predict(kind, model, s["feats"])
+        if res is None:
+            continue
+        ys.append(s["label"])
+        preds.append(res["prediction"])
+        probs.append(res.get("proba"))
+    if not ys:
+        return {"n": 0}
+    if t.get("multi"):
+        return multiclass_metrics(ys, preds)
+    return evaluate_probs([int(bool(y)) for y in ys], probs)
+
+
 def _fit_and_eval(kind, samples, params):
-    train_rows, val_rows = _split(samples, TASKS[params.get("task") or "needs_reply"]["holdout"])
-    ex = [(s["y"], s["weight"], s["feats"]) for s in train_rows]
+    t = TASKS[params.get("task") or "needs_reply"]
+    train_rows, val_rows = _split(samples, t["holdout"])
+    ex = [(s["label"], s["weight"], s["feats"]) for s in train_rows]
     model, stats = train(kind, ex, params)
     out = {"train": {}, "val": {}, "stats": stats}
     for name, chunk in (("train", train_rows), ("val", val_rows)):
-        if not chunk:
-            out[name] = {"n": 0}
-            continue
-        y, probs = [], []
-        for s in chunk:
-            res = predict(kind, model, s["feats"])
-            if res is None:
-                raise RuntimeError("kind %r returned no prediction" % kind)
-            y.append(s["y"])
-            probs.append(res["proba"])
-        out[name] = evaluate_probs(y, probs)
+        out[name] = _eval_chunk(t, kind, model, chunk) if chunk else {"n": 0}
     return model, out
 
 
-def train_specialist(task, kind="logreg", name="", params=None, limit=6000, created_by="ui"):
+def train_specialist(task, kind="", name="", params=None, limit=6000, created_by="ui"):
     """Train + VALIDATE a candidate. Stored as a new version with status
     `validated` (enabled=0): it must be deployed to shadow explicitly, and can
     never jump straight to active from here."""
     t = TASKS.get(task)
     if not t:
         raise RuntimeError("unknown task %r (have: %s)" % (task, ", ".join(TASKS)))
+    kind = kind or t.get("kind") or "logreg"
     if kind not in KINDS:
         raise RuntimeError("unknown kind %r (have: %s)" % (kind, ", ".join(kind_names())))
     samples, meta = build_dataset(task, limit=limit)
@@ -530,8 +677,9 @@ def train_specialist(task, kind="logreg", name="", params=None, limit=6000, crea
         feature_schema_version=FEATURE_SCHEMA_VERSION,
         model=json.dumps(model), stats=json.dumps(stats), metrics=json.dumps(ev),
         min_confidence=float(t["min_accept"]), enabled=False, created_by=created_by)
-    store.log_event("info", "learning: trained %s %s v%d on %d samples (val F1 %s) - status validated"
-                    % (task, kind, version, meta["n"], ev["val"].get("f1")))
+    store.log_event("info", "learning: trained %s %s v%d on %d samples (val %s) - status validated"
+                    % (task, kind, version, meta["n"],
+                       ev["val"].get("f1") if ev["val"].get("f1") is not None else ev["val"].get("accuracy")))
     return {"specialist_id": sid, "name": name, "version": version, "task": task, "kind": kind,
             "dataset": meta, "val": ev["val"], "train": ev["train"]}
 
@@ -551,14 +699,7 @@ def evaluate_specialist(sid, limit=6000):
     train_rows, val_rows = _split(samples, t["holdout"])
     out = {"dataset": meta}
     for name, chunk in (("train", train_rows), ("val", val_rows)):
-        y, probs = [], []
-        for s in chunk:
-            res = predict(row["kind"], model, s["feats"])
-            if res is None:
-                continue
-            y.append(s["y"])
-            probs.append(res["proba"])
-        out[name] = evaluate_probs(y, probs) if y else {"n": 0}
+        out[name] = _eval_chunk(t, row["kind"], model, chunk) if chunk else {"n": 0}
     return out
 
 
@@ -608,9 +749,8 @@ ROUTE_SPECIALISTS = "specialists"
 
 def call_task_policy():
     """The tasks ONE classify call answers, with their routing thresholds."""
-    return {"category": {"min_verify": 0.75, "min_accept": 0.95},
-            "needs_reply": {"min_verify": TASKS["needs_reply"]["min_verify"],
-                            "min_accept": TASKS["needs_reply"]["min_accept"]}}
+    return {t: {"min_verify": TASKS[t]["min_verify"], "min_accept": TASKS[t]["min_accept"]}
+            for t in ("category", "needs_reply")}
 
 
 def route_decision(task_policy, coverage):
@@ -653,10 +793,10 @@ def observe_classification(msg, fields, res, hres, settings):
         return None
     try:
         msg_id = int(msg["id"])
-        specs = enabled_specialists("needs_reply")
+        specs = enabled_specialists()
         feats = extract_features(msg)
         mode = settings.get("learning_route_mode") or "shadow"
-        spec_out = None
+        best = {}
         for spec in specs:
             try:
                 model = json.loads(spec["model"] or "{}")
@@ -667,42 +807,47 @@ def observe_classification(msg, fields, res, hres, settings):
                 continue
             acting = (mode == "enforce" and spec["status"] == "active")
             did = store.record_decision(
-                msg_id, "needs_reply", json.dumps(out["prediction"]), out["confidence"],
+                msg_id, spec["task"], json.dumps(out["prediction"]), out["confidence"],
                 "specialist", "%s@v%d" % (spec["name"], spec["version"]),
                 model_version=str(spec["version"]), feature_version=FEATURE_SCHEMA_VERSION,
                 shadow=0 if acting else 1, routed=("" if acting else ROUTE_LLM))
             top = sorted(out["contributions"].items(), key=lambda kv: -abs(kv[1]))[:8]
             store.record_decision_evidence(did, [(n, json.dumps(feats.get(n)), c) for n, c in top])
-            if spec["task"] == "needs_reply" and not spec_out:
-                spec_out = {"spec": spec, "out": out, "decision_id": did, "acting": acting}
-        # (b) the system's decision for the same task (provenance for agreement)
-        sys_val = bool(res.get("needs_reply"))
+            prev = best.get(spec["task"])
+            if not prev or out["confidence"] > prev["out"]["confidence"]:
+                best[spec["task"]] = {"spec": spec, "out": out, "decision_id": did, "acting": acting}
+        # (b) the system's decision per task (provenance for agreement)
         sys_src = ("heuristic:%s %s" % (hres["heuristic_id"], hres["heuristic_name"])) if hres else "llm"
-        store.record_decision(msg_id, "needs_reply", json.dumps(sys_val),
-                              float(res.get("confidence") or 0),
-                              "heuristic" if hres else "llm", sys_src,
-                              model_version="", feature_version=0, shadow=0)
+        sys_by = "heuristic" if hres else "llm"
+        sys_nr = bool(res.get("needs_reply"))
+        store.record_decision(msg_id, "needs_reply", json.dumps(sys_nr),
+                              float(res.get("confidence") or 0), sys_by, sys_src, shadow=0)
+        store.record_decision(msg_id, "category", json.dumps(str(res.get("category") or "")),
+                              float(res.get("confidence") or 0), sys_by, sys_src, shadow=0)
         # (c) router intent for the whole classify call
         coverage = {}
         if hres:
             coverage["category"] = {"by": "heuristic", "confidence": float(hres.get("confidence") or 0)}
-        if spec_out:
-            coverage["needs_reply"] = {"by": "specialist", "confidence": spec_out["out"]["confidence"]}
+        for task in ("category", "needs_reply"):
+            c = best.get(task)
+            if c and (task not in coverage or c["out"]["confidence"] > coverage[task]["confidence"]):
+                coverage[task] = {"by": "specialist", "confidence": c["out"]["confidence"]}
         would, detail = route_decision(call_task_policy(), coverage)
         store.record_decision(msg_id, "route", json.dumps(would),
                               min([c["confidence"] for c in coverage.values()]) if coverage else 0.0,
                               "router", "route_v1", shadow=1,
                               routed=json.dumps({"missing": detail}) if detail else "")
         # enforce: fill the needs_reply slot the heuristic path hard-codes False
-        if (mode == "enforce" and hres and spec_out and spec_out["acting"]
-                and spec_out["out"]["confidence"] >= TASKS["needs_reply"]["min_accept"]):
-            if sys_val != spec_out["out"]["prediction"]:
-                store.update_message(msg_id, llm_needs_reply=1 if spec_out["out"]["prediction"] else 0)
+        nr = best.get("needs_reply")
+        if (mode == "enforce" and hres and nr and nr["acting"]
+                and nr["out"]["confidence"] >= TASKS["needs_reply"]["min_accept"]):
+            if sys_nr != nr["out"]["prediction"]:
+                store.update_message(msg_id, llm_needs_reply=1 if nr["out"]["prediction"] else 0)
                 store.log_msg_event(msg_id, "specialist",
                                     "needs_reply set by %s@v%d (%.2f) on the heuristic path"
-                                    % (spec_out["spec"]["name"], spec_out["spec"]["version"],
-                                       spec_out["out"]["confidence"]))
-        return {"specialist": (spec_out["out"] if spec_out else None)}
+                                    % (nr["spec"]["name"], nr["spec"]["version"],
+                                       nr["out"]["confidence"]))
+        return {"specialists": {t: best[t]["out"] for t in best}}
     except Exception as exc:
         try:
             store.log_event("debug", "learning: observe failed for msg %s: %r" % (msg.get("id"), exc))
@@ -721,21 +866,32 @@ def system_decision(msg_id, task="needs_reply"):
 
 def specialist_live_stats(name=None, sid=None, window=500):
     """Shadow agreement vs the system's own decision, from stored evidence."""
+    row = None
     if sid is not None:
         row = store.get_specialist(sid)
-        if not row:
-            return {"n": 0}
-        name = "%s@v%d" % (row["name"], row["version"])
-    if "@v" not in str(name or ""):
+    elif name:
+        nm = str(name)
         with store.db() as conn:
-            v = conn.execute("SELECT MAX(version) FROM specialists WHERE name=?",
-                             (name,)).fetchone()[0]
-        name = "%s@v%d" % (name, int(v or 1))
-    decs = store.list_decisions(task="needs_reply", source_type="specialist",
+            if "@v" in nm:
+                base, _sep, ver = nm.rpartition("@v")
+                try:
+                    r = conn.execute("SELECT * FROM specialists WHERE name=? AND version=?",
+                                     (base, int(ver))).fetchone()
+                except (TypeError, ValueError):
+                    r = None
+            else:
+                r = conn.execute("SELECT * FROM specialists WHERE name=? "
+                                 "ORDER BY version DESC LIMIT 1", (nm,)).fetchone()
+        row = dict(r) if r else None
+    if not row:
+        return {"n": 0}
+    task = row["task"]
+    name = "%s@v%d" % (row["name"], row["version"])
+    decs = store.list_decisions(task=task, source_type="specialist",
                                 source_id=name, limit=window)
     n = agree = 0
     for d in decs:
-        sysd = system_decision(d["msg_id"])
+        sysd = system_decision(d["msg_id"], task)
         if not sysd:
             continue
         n += 1
@@ -762,26 +918,31 @@ def routing_stats(window=500):
 
 
 def recent_disagreements(limit=15):
-    """Shadow specialist vs system disagreements on the same message."""
+    """Shadow specialist vs system disagreements, across every running model."""
     out = []
-    for d in store.list_decisions(task="needs_reply", source_type="specialist", limit=limit * 4):
-        sysd = system_decision(d["msg_id"])
-        if not sysd:
-            continue
-        try:
-            a, b = json.loads(d["predicted_value"]), json.loads(sysd["predicted_value"])
-        except (TypeError, ValueError):
-            continue
-        if a != b:
-            row = store.get_message(d["msg_id"]) or {}
-            out.append({"msg_id": d["msg_id"], "specialist": a, "specialist_conf": d["confidence"],
-                        "system": b, "system_source": sysd["source_id"], "ts": d["ts"],
-                        "source_id": d["source_id"],
-                        "subject": (row.get("subject") or "")[:90],
-                        "from_addr": (row.get("from_addr") or "")[:70]})
-        if len(out) >= limit:
-            break
-    return out
+    for spec in enabled_specialists():
+        key = "%s@v%d" % (spec["name"], spec["version"])
+        for d in store.list_decisions(task=spec["task"], source_type="specialist",
+                                      source_id=key, limit=limit * 3):
+            sysd = system_decision(d["msg_id"], spec["task"])
+            if not sysd:
+                continue
+            try:
+                a, b = json.loads(d["predicted_value"]), json.loads(sysd["predicted_value"])
+            except (TypeError, ValueError):
+                continue
+            if a != b:
+                row = store.get_message(d["msg_id"]) or {}
+                out.append({"msg_id": d["msg_id"], "task": spec["task"],
+                            "specialist": a, "specialist_conf": d["confidence"],
+                            "system": b, "system_source": sysd["source_id"], "ts": d["ts"],
+                            "source_id": d["source_id"],
+                            "subject": (row.get("subject") or "")[:90],
+                            "from_addr": (row.get("from_addr") or "")[:70]})
+            if len(out) >= limit * 2:
+                break
+    out.sort(key=lambda x: -(x["ts"] or 0))
+    return out[:limit]
 
 
 def reconcile(limit=5000):
@@ -811,6 +972,47 @@ def reconcile(limit=5000):
 
 # ---------------------------------------------------------------- reporting
 
+def proposals():
+    """Data-driven 'what could be trained next' for the Learning page: what has
+    labels, what it would buy, and what is blocked on missing signal. Nothing
+    here trains anything - this is the discovery layer's first honest step."""
+    specs = store.list_specialists()
+
+    def state(t):
+        rows = [x for x in specs if x["task"] == t]
+        if any(x["status"] in ("shadow", "active", "degraded") for x in rows):
+            return "watching"
+        return "ready"
+
+    with store.db() as conn:
+        n_cat = conn.execute("SELECT COUNT(*) FROM messages "
+                             "WHERE coalesce(llm_category,'')!=''").fetchone()[0]
+        n_news = conn.execute("SELECT COUNT(*) FROM messages "
+                              "WHERE llm_category='Newsletter'").fetchone()[0]
+        n_fdbk = (conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+                  + conn.execute("SELECT COUNT(*) FROM labels").fetchone()[0])
+    out = []
+    if state("category") != "watching":
+        out.append({"task": "category", "title": TASK_TITLES.get("category", "category"),
+                    "status": "ready", "trainable": n_cat >= TASKS["category"]["min_samples"],
+                    "evidence": "%s labelled emails · 6 categories" % "{:,}".format(n_cat),
+                    "why": "the other half of the AI's job — with the reply detector, "
+                           "confident emails could skip the AI entirely."})
+    if state("newsletter") != "watching":
+        out.append({"task": "newsletter", "title": TASK_TITLES.get("newsletter", "newsletter"),
+                    "status": "ready" if n_news >= 100 else "blocked", "trainable": False,
+                    "evidence": "%s newsletter examples" % "{:,}".format(n_news),
+                    "why": "low gain — the existing fast-path rules already catch most "
+                           "newsletters. Train only if those start slipping."})
+    out.append({"task": "priority", "title": TASK_TITLES.get("priority", "priority"),
+                "status": "blocked", "trainable": False,
+                "evidence": "%s corrections so far" % "{:,}".format(n_fdbk),
+                "why": ("no signal yet — tag, reclassify or undo the mail that matters; "
+                        "your corrections make this trainable.") if n_fdbk < 150 else
+                       "signal collected — the ranker itself is the next milestone."})
+    return out
+
+
 def status_report():
     specs = store.list_specialists()
     for s in specs:
@@ -831,11 +1033,13 @@ def status_report():
     except Exception:
         pass
     current = None
-    for st in ("active", "shadow", "degraded"):
-        current = next((x for x in specs if x["status"] == st), None)
-        if current:
-            break
-    if current is None and specs:
+    srank = {"active": 0, "shadow": 1, "degraded": 2}
+    trank = {"needs_reply": 0, "category": 1}
+    running = [x for x in specs if x["status"] in srank]
+    running.sort(key=lambda x: (srank[x["status"]], trank.get(x["task"], 9), x["id"]))
+    if running:
+        current = running[0]
+    elif specs:
         current = specs[0]
     return {
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
@@ -843,6 +1047,7 @@ def status_report():
         "enabled": bool(store.get_setting("learning_enabled", True)),
         "specialists": specs,
         "current": current,
+        "proposals": proposals(),
         "routing": routing_stats(),
         "library": {
             "decisions": store.count_decisions(),
@@ -874,17 +1079,25 @@ def _cli(argv):
                  r["counts"]))
         for s in rep["specialists"]:
             m = s["metrics_parsed"].get("val") or {}
-            print("#%s %-24s %s v%s [%s] val: P=%s R=%s F1=%s n=%s live: %s"
+            if m.get("classes"):
+                score = "acc=%s macroF1=%s" % (m.get("accuracy"), m.get("macro_f1"))
+            else:
+                score = "P=%s R=%s F1=%s" % (m.get("precision"), m.get("recall"), m.get("f1"))
+            print("#%s %-24s %s v%s [%s] val: %s n=%s live: %s"
                   % (s["id"], s["name"], s["task"], s["version"], s["status"],
-                     m.get("precision"), m.get("recall"), m.get("f1"), m.get("n"), s["live"]))
+                     score, m.get("n"), s["live"]))
         return 0
     if argv[0] == "train":
         task = argv[1] if len(argv) > 1 else "needs_reply"
         res = train_specialist(task, created_by="cli")
         v = res["val"]
-        print("trained %s v%d (#%d): val precision=%s recall=%s f1=%s n=%s"
-              % (res["name"], res["version"], res["specialist_id"],
-                 v.get("precision"), v.get("recall"), v.get("f1"), v.get("n")))
+        if v.get("classes"):
+            score = "accuracy=%s macro_f1=%s" % (v.get("accuracy"), v.get("macro_f1"))
+        else:
+            score = "precision=%s recall=%s f1=%s" % (v.get("precision"), v.get("recall"), v.get("f1"))
+        print("trained %s v%d (#%d): val %s n=%s classes=%s"
+              % (res["name"], res["version"], res["specialist_id"], score, v.get("n"),
+                 len(v.get("classes") or []) or ""))
         print("status=validated - deploy to shadow with: learning.py deploy %d" % res["specialist_id"])
         return 0
     if argv[0] == "deploy":

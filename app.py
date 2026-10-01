@@ -6876,6 +6876,7 @@ LEARN_TMPL = """<style>
 @media(max-width:767px){.ltbl .hide-m{display:none}.lstep{padding:9px 0}}
 </style>
 {% set s = rep.current %}
+{% set titles = {'needs_reply': 'Reply detector', 'category': 'Category sorter'} %}
 {% set m = (s.metrics_parsed.val or {}) if s else {} %}
 {% set ds = (s.stats_parsed.dataset or {}) if s else {} %}
 {% set live = s.live if s else {} %}
@@ -6885,7 +6886,7 @@ LEARN_TMPL = """<style>
     <h1 class="page-title">Learning</h1>
     <div class="page-desc">The AI reads every email today. Here, small cheap models are being taught to take that work over — one task at a time. Nothing on this page changes your mail until you explicitly let it.</div>
   </div>
-  {% if s %}<form method="post" action="{{ url_for('learning_train') }}"><button class="btn primary" type="submit">Retrain reply detector</button></form>{% endif %}
+  {% if s %}<form method="post" action="{{ url_for('learning_train') }}"><input type="hidden" name="task" value="{{ s.task }}"><button class="btn primary" type="submit">Retrain {{ titles.get(s.task, s.task)|lower }}</button></form>{% endif %}
 </div>
 {% if not s %}
 <div class="card">
@@ -6904,12 +6905,12 @@ LEARN_TMPL = """<style>
     {% elif s.status == 'degraded' %}Quality dropped below its bar — it is back to watching until retrained.
     {% elif s.status == 'retired' %}Retired — kept for the record. Retrain to bring it back.
     {% else %}Prepared but not running.{% endif %}</div>
-  <div class="sub" style="margin:2px 0 4px">Reply detector · version {{ s.version }}{% if live.last_at %} · last check {{ fmt_ts(live.last_at) }}{% elif s.created %} · trained {{ fmt_ts(s.created) }}{% endif %}</div>
+  <div class="sub" style="margin:2px 0 4px">{{ titles.get(s.task, s.task) }} · version {{ s.version }}{% if live.last_at %} · last check {{ fmt_ts(live.last_at) }}{% elif s.created %} · trained {{ fmt_ts(s.created) }}{% endif %}</div>
   <div class="lsteps">
     <div class="lstep done"><span class="dot ok"></span><div><b>1 · Learned from your past mail</b>
       <div class="sub">{{ "{:,}".format(ds.n or 0) }} classifications to study — every label was written by the AI itself, not by you.</div></div></div>
     <div class="lstep done"><span class="dot ok"></span><div><b>2 · Scored against history</b>
-      <div class="sub">Checked on the newest {{ m.n or 0 }} emails: it catches {{ '%.0f' % (m.recall * 100) if m.recall else '—' }}% of the AI's “needs a reply” flags, and is right {{ '%.0f' % (m.precision * 100) if m.precision else '—' }}% of the times it raises one.</div></div></div>
+      <div class="sub">{% if s.task == 'category' %}Checked on the newest {{ m.n or 0 }} emails: it sorts {{ '%.0f' % (m.accuracy * 100) if m.accuracy else '—' }}% the same way the AI does.{% else %}Checked on the newest {{ m.n or 0 }} emails: it catches {{ '%.0f' % (m.recall * 100) if m.recall else '—' }}% of the AI's “needs a reply” flags, and is right {{ '%.0f' % (m.precision * 100) if m.precision else '—' }}% of the times it raises one.{% endif %}</div></div></div>
     {% if s.status in ('shadow', 'active') %}
     <div class="lstep now"><span class="dot acc"></span><div><b>3 · Watching new mail</b> <span class="badge acc">now</span>
       <div class="sub">{% if live.n %}Checked {{ live.n }} so far, agrees with the AI on {{ live.agree }} of them ({{ '%.0f' % (live.agreement * 100) }}%). Every check is recorded below.{% else %}Running — the first check appears with the next classified email.{% endif %}</div></div></div>
@@ -6921,26 +6922,47 @@ LEARN_TMPL = """<style>
       <div class="sub">{{ 'Emails it is confident about stop going to the AI. The rest still escalate.' if s.status == 'active' else 'The end goal: emails it is confident about stop going to the AI. Needs more watching time and your go-ahead.' }}</div></div></div>
   </div>
 </div>
-<div class="card">
-  <div class="card-h"><h3>Reply detector</h3><span class="sub">one job: does this email need a reply from you?</span></div>
-  <div class="sub" style="margin-bottom:8px">The same call the AI makes on every email today. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.</div>
-  <div class="dsrow"><span class="dsk">Catches the AI's “needs a reply” flags</span><span class="dsv">{{ '%.0f' % (m.recall * 100) if m.recall else '—' }}%</span></div>
-  <div class="dsrow"><span class="dsk">Right when it raises a flag</span><span class="dsv">{{ '%.0f' % (m.precision * 100) if m.precision else '—' }}%</span></div>
-  <div class="dsrow"><span class="dsk">Agrees with the AI on new mail</span><span class="dsv">{% if live.n %}{{ live.agree }} of {{ live.n }}{% else %}no checks yet{% endif %}</span></div>
-  <div class="sub" style="margin-top:8px">These compare it to the AI's answers on your newest 20% of mail — a ceiling, not the truth: the AI is not always right. Corrections from you weigh several times more than the AI's own labels when retraining.</div>
-  <div class="row" style="margin-top:12px;align-items:center;gap:8px">
-    {% if s.status == 'validated' %}
-    <form method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching new mail</button></form>
+{% macro spec_actions(sp) %}{% if sp.status == 'validated' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching new mail</button></form>
     <span class="sub">Changes nothing — it only records what it would decide.</span>
-    {% elif s.status == 'shadow' %}
-    <form method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="active"><button class="btn small" type="submit">Let it take over confident calls</button></form>
-    <form method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+    {% elif sp.status == 'shadow' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="active"><button class="btn small" type="submit">Let it take over confident calls</button></form>
+    <form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
     <span class="sub">Takes effect once live routing is on; everything is reversible.</span>
-    {% elif s.status == 'active' %}
-    <form method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+    {% elif sp.status == 'active' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
     <span class="sub">Retiring keeps every version and all history.</span>
-    {% endif %}
+    {% endif %}{% endmacro %}
+{% macro spec_stats(sp, spm, sp_live) %}{% if sp.task == 'category' %}<div class="dsrow"><span class="dsk">Sorts the newest emails like the AI</span><span class="dsv">{{ '%.0f' % (spm.accuracy * 100) if spm.accuracy else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Categories it chooses from</span><span class="dsv">{{ spm.classes|length if spm.classes else '—' }}</span></div>
+  {% else %}<div class="dsrow"><span class="dsk">Catches the AI's “needs a reply” flags</span><span class="dsv">{{ '%.0f' % (spm.recall * 100) if spm.recall else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Right when it raises a flag</span><span class="dsv">{{ '%.0f' % (spm.precision * 100) if spm.precision else '—' }}%</span></div>
+  {% endif %}<div class="dsrow"><span class="dsk">Agrees with the AI on new mail</span><span class="dsv">{% if sp_live.n %}{{ sp_live.agree }} of {{ sp_live.n }}{% else %}no checks yet{% endif %}</span></div>{% endmacro %}
+<div class="card">
+  <div class="card-h"><h3>{{ titles.get(s.task, s.task) }}</h3><span class="sub">{% if s.task == 'category' %}one job: which category does this email belong to?{% else %}one job: does this email need a reply from you?{% endif %}</span></div>
+  <div class="sub" style="margin-bottom:8px">{% if s.task == 'category' %}It guesses the same six categories the AI uses. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% else %}The same call the AI makes on every email today. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% endif %}</div>
+  {{ spec_stats(s, m, live) }}
+  <div class="sub" style="margin-top:8px">These compare it to the AI's answers on your newest 20% of mail — a ceiling, not the truth: the AI is not always right. Corrections from you weigh several times more than the AI's own labels when retraining.</div>
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(s) }}</div>
+</div>
+{% for sp in rep.specialists if s and sp.id != s.id and sp.task != s.task and sp.status in ('shadow', 'active', 'degraded') %}
+{% set spm = sp.metrics_parsed.val or {} %}
+<div class="card">
+  <div class="card-h"><h3>{{ titles.get(sp.task, sp.task) }}</h3><span class="sub">watching quietly · v{{ sp.version }}{% if sp.live.n %} · {{ sp.live.agree }} of {{ sp.live.n }} agree{% endif %}</span></div>
+  {{ spec_stats(sp, spm, sp.live) }}
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(sp) }}</div>
+</div>
+{% endfor %}
+<div class="card">
+  <div class="card-h"><h3>What can be trained next</h3><span class="sub">candidates found in your data — nothing trains without you</span></div>
+  {% for p in rep.proposals %}
+  <div class="dsrow">
+    <span class="dsk"><b>{{ p.title }}</b><div class="sub">{{ p.evidence }} · {{ p.why }}</div></span>
+    <span class="dsv">
+      {% if p.status == 'ready' and p.trainable %}<form class="inline" method="post" action="{{ url_for('learning_train') }}"><input type="hidden" name="task" value="{{ p.task }}"><button class="btn small primary" type="submit">Train</button></form>
+      {% elif p.status == 'ready' %}<span class="badge">low gain</span>
+      {% elif p.status == 'watching' %}<span class="badge warn">watching</span>
+      {% else %}<span class="badge">blocked</span>{% endif %}
+    </span>
   </div>
+  {% endfor %}
 </div>
 <div class="card">
   <details class="lfold">
@@ -6952,7 +6974,7 @@ LEARN_TMPL = """<style>
         <tr><th>Email</th><th>This model said</th><th>The AI said</th><th class="hide-m">When</th></tr>
         {% for d in rep.disagreements %}
         <tr>
-          <td><a href="{{ url_for('message_detail', mid=d.msg_id) }}">{{ d.subject or ('#' ~ d.msg_id) }}</a><div class="sub">{{ d.from_addr }}</div></td>
+          <td><a href="{{ url_for('message_detail', mid=d.msg_id) }}">{{ d.subject or ('#' ~ d.msg_id) }}</a><div class="sub">{{ titles.get(d.task, d.task) }} · {{ d.from_addr }}</div></td>
           <td><span class="badge warn">{{ 'needs reply' if d.specialist else 'no reply' }}</span> <span class="sub">{{ '%.2f' % d.specialist_conf }}</span></td>
           <td><span class="badge">{{ 'needs reply' if d.system else 'no reply' }}</span> <span class="sub">{{ d.system_source }}</span></td>
           <td class="sub hide-m">{{ fmt_ts(d.ts) }}</td>
@@ -7017,11 +7039,13 @@ def learning_page():
 
 @app.route("/learning/train", methods=["POST"])
 def learning_train():
+    task = (request.form.get("task") or "needs_reply").strip()
     try:
-        res = learning.train_specialist("needs_reply", created_by="ui")
+        res = learning.train_specialist(task, created_by="ui")
         v = res["val"]
-        flash("Trained %s v%d - validation F1 %s on %d held-out sample(s) of %d. "
-              "Deploy to shadow when ready." % (res["name"], res["version"], v.get("f1"),
+        score = v.get("f1") if v.get("f1") is not None else v.get("accuracy")
+        flash("Trained %s v%d - validation score %s on %d held-out sample(s) of %d. "
+              "Deploy to shadow when ready." % (res["name"], res["version"], score,
                                                 v.get("n") or 0, res["dataset"]["n"]), "ok")
     except Exception as exc:
         flash("Training failed: %s" % exc, "err")
