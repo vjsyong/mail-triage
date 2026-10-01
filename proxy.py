@@ -639,6 +639,8 @@ def remove_account(email):
         delete_account(email)
 
     ok, err = manager.apply(edit_fn=_edit)
+    if not ok and err == "no accounts configured yet":
+        ok, err = True, None  # nothing left to serve: a clean outcome
     if ok:
         store.log_event("info", "emailproxy: account %s removed" % email)
     return ok, err

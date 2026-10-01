@@ -1730,7 +1730,8 @@ def main():
           and b"not authorised" in r.data)
     r = client.post("/api/proxy/auth/nobody@example.com")
     check("auth start rejects unknown accounts", r.status_code == 404)
-    proxy_mod.delete_account("acct@example.com")
+    ok, rerr = proxy_mod.remove_account("acct@example.com")
+    check("removing the last account is a clean outcome", ok and not rerr)
     check("account removed", proxy_mod.list_accounts() == [])
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
