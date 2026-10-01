@@ -2569,6 +2569,56 @@ def main():
     check("singleton guards present (no duplicate listeners across swaps)",
           b"__mtChatDel" in d and b"__mtTicker" in d)
 
+    section("T36 undo trail: file -> undo -> kept from re-filing")
+    und_uid = add_msg(state, "undo.tester@x.com", "Undo me please", "please undo", "und1@x")
+    engine.process_mailbox()
+    urow = [r for r in store.messages(limit=3000) if r["uid"] == und_uid][0]
+    urow = store.get_message(urow["id"])
+    check("undo fixture landed in INBOX", urow["folder"] == "INBOX")
+    state.ensure("Archive", "\\HasNoChildren")
+    store.update_message(urow["id"], llm_suggested_folder="Archive")
+    r = client.post("/messages/%d/file" % urow["id"])
+    urow2 = store.get_message(urow["id"])
+    check("manual file moved it + recorded the undo entry",
+          r.status_code == 302 and urow2["folder"] == "Archive")
+    ent = [e for e in store.recent_moves(limit=30) if e["msg_id"] == urow["id"]]
+    check("undo entry pending with source + origin",
+          bool(ent) and ent[0]["source"] == "manual" and ent[0]["from_folder"] == "INBOX"
+          and ent[0]["to_folder"] == "Archive" and not ent[0]["stale"])
+    r = client.get("/")
+    check("dashboard lists the pending filing with an Undo button",
+          b"Recent filings" in r.data and b"Undo" in r.data
+          and ("/undo/%d" % ent[0]["id"]).encode() in r.data)
+    r = client.post("/undo/%d" % ent[0]["id"])
+    urow3 = store.get_message(urow["id"])
+    check("undo moved it back to INBOX and cleared the filing",
+          r.status_code == 302 and urow3["folder"] == "INBOX"
+          and not str(urow3["action_taken"] or "").startswith("move"))
+    check("undo guard registered by Message-ID", store.is_kept(urow3["msgid"]))
+    check("undone entry left the pending list",
+          not [e for e in store.recent_moves(limit=30) if e["msg_id"] == urow["id"]])
+    ok2, _m2 = engine.undo_filing(ent[0]["id"])
+    check("second undo refuses gracefully", ok2 is False)
+    # kept messages survive a later move rule: force a fresh scan of INBOX
+    keeper_rid = store.add_rule("Move undo-tester", "any",
+                                [{"field": "from", "op": "contains", "value": "undo.tester"}],
+                                {"move_to": "Archive"}, enabled=True)
+    store.reset_folder_index("INBOX")
+    mc2 = engine.MailClient().connect()
+    try:
+        engine._process_folder(mc2, "INBOX", store.all_settings(),
+                               store.list_rules(enabled_only=True), store.list_flows(enabled_only=True))
+    finally:
+        mc2.close()
+    rows4 = [r for r in store.messages(limit=3000) if r["uid"] == und_uid]
+    urow4 = store.get_message(rows4[0]["id"]) if rows4 else None
+    arch = state.get("Archive") or {"uids": []}
+    check("kept message survives a matching move rule",
+          bool(urow4) and urow4["folder"] == "INBOX" and urow4["status"] == "kept"
+          and und_uid not in arch.get("uids", []))
+    store.update_rule(keeper_rid, enabled=0)
+
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

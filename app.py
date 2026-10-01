@@ -298,6 +298,7 @@ STATUS_BADGES = {
     "matched-dry": ("warn", "rule (dry-run)"),
     "llm-moved": ("ok", "LLM → folder"),
     "assistant-moved": ("ok", "assistant → folder"),
+    "kept": ("ok", "kept (undo)"),
     "classified": ("acc", "classified"),
     "queued": ("warn", "queued"),
     "error": ("err", "error"),
@@ -1800,6 +1801,12 @@ DASH_TMPL = """
 .dschip.off{color:var(--dim)} .dschip.off::before{background:var(--line2)}
 .dschip.chg{color:var(--acc)}
 .dschip.chg::before{display:none}
+.frow{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
+.frow:first-of-type{border-top:0;padding-top:2px}
+.frow .fmain{flex:1;min-width:0}
+.frow .fmain b{display:block;font-size:.86rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .fmain .sub{display:block;font-size:.76rem;margin-top:1px}
+.frow .fsrc{display:inline-block;font-size:.68rem;font-weight:500;color:var(--dim);border:1px solid var(--line);padding:1px 6px;margin-right:6px;vertical-align:1px}
 .dashgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
 @media(max-width:1023px){.dashgrid{grid-template-columns:1fr}}
 .dashgrid .card{margin:0}
@@ -1972,6 +1979,25 @@ DASH_TMPL = """
   </div>
 </div>
 
+{% if filings %}
+<div class="card" id="filings">
+  <div class="card-h" style="margin-bottom:2px"><h3>Recent filings</h3><span class="sub">Machine moves — Undo puts one back and keeps automation off it.</span></div>
+  {% for f in filings %}
+  <div class="frow">
+    <div class="fmain">
+      <b><span class="fsrc">{{ f.who }}</span>{{ f.subject|clip(70) or '(no subject)' }}</b>
+      <span class="sub">→ {{ f.to_folder }}{% if f.from_folder and f.from_folder != f.to_folder %} (was {{ f.from_folder }}){% endif %} · {{ f.when_h }}</span>
+    </div>
+    {% if f.stale %}
+    <span class="sub">moved on</span>
+    {% else %}
+    <form class="inline" method="post" action="{{ url_for('undo_move', lid=f.id) }}"><button class="btn small" type="submit">Undo</button></form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="dashgrid">
   <div class="card flush">
     <div class="card-h" style="padding:14px 16px 10px;margin:0">
@@ -2068,11 +2094,16 @@ def dashboard():
     px["listener_rows"] = [{"port": port} for port, _up in sorted((px.get("ports") or {}).items())]
     llm_cfg = engine.llm_config()
     ix_st = index_status()
+    filings = store.recent_moves(limit=8)
+    for f in filings:
+        f["when_h"] = fmt_ts(f.get("ts"))
+        f["who"] = {"rule": "rule", "flow": "flow", "auto-file": "LLM", "assistant": "assistant",
+                    "manual": "you", "trash": "→ Trash"}.get(f.get("source") or "", f.get("source") or "move")
     sys_alert = bool(ws.get("last_error") or not px.get("running")
                      or ix_st.get("last_error") or not llm_cfg.get("base"))
     return render(_render_src(
         DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
-        settings=store.all_settings(), ix=ix_st, px=px,
+        settings=store.all_settings(), ix=ix_st, px=px, filings=filings,
         llm=llm_cfg, llm_used=store.llm_count_last_hour(), sys_alert=sys_alert))
 
 
@@ -2081,6 +2112,13 @@ def check_now():
     worker.trigger()
     flash("Check triggered — give it a few seconds and reload.", "ok")
     return redirect(url_for("dashboard"))
+
+
+@app.route("/undo/<int:lid>", methods=["POST"])
+def undo_move(lid):
+    ok, msg = engine.undo_filing(lid)
+    flash(msg, "ok" if ok else "err")
+    return redirect(request.referrer or url_for("dashboard"))
 
 
 @app.route("/retry-errors", methods=["POST"])
@@ -4267,7 +4305,9 @@ def message_file(mid):
             mv = {"status": "llm-moved", "action_taken": "move:" + target, "folder": target}
             if new_uid:
                 mv["uid"] = new_uid
+            store.record_move(m, target, "manual")
             store.update_message(mid, **mv)
+            store.clear_keep(m.get("msgid"))
             store.log_event("info", "filed message %d ('%s') → %s"
                             % (mid, (m.get("subject") or "")[:50], target))
             flash("Filed to '%s'." % target, "ok")

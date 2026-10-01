@@ -886,6 +886,7 @@ def _apply_flow(mc, flow, row, settings, live):
             dest = st["folder"].strip()
             if live:
                 try:
+                    store.record_move(row, dest, "flow", from_folder=cur_folder)
                     mc.ensure_folder(dest)
                     mc.ensure_selected(cur_folder)
                     new_uid = mc.move(cur_uid, dest)
@@ -1335,6 +1336,7 @@ def _process_folder(mc, folder, settings, rules, flows=None):
     else:
         uids = [u for u in mc.search("UID", "%d:*" % (last_uid + 1)) if u > last_uid]
     scanned = moved = 0
+    kept_ids = store.kept_ids()
     for uid in uids[:120]:
         try:
             meta = mc.fetch_meta(uid)
@@ -1352,7 +1354,15 @@ def _process_folder(mc, folder, settings, rules, flows=None):
         scan_flows = [f for f in (flows or []) if not _needs_verdict(f)]
         f_ctx = {"text": "%s\n%s" % (meta.get("subject") or "", meta.get("snippet") or "")}
         flow = None if rule else match_first_flows(scan_flows, _fields_for(meta), f_ctx)
-        if rule:
+        kept = ((meta.get("msgid") or row.get("msgid") or "").strip().strip("<>")
+                in kept_ids)
+        if rule and kept:
+            store.update_message(row["id"], status="kept", rule_id=rule["id"],
+                                 action_taken="kept (undo)")
+            store.log_event("info", "rule '%s' skipped — '%s' is kept (undo)"
+                            % (rule.get("name") or rule["id"],
+                               (meta.get("subject") or "")[:50]))
+        elif rule:
             try:
                 actions = json.loads(rule.get("actions") or "{}")
             except (TypeError, ValueError):
@@ -1364,6 +1374,7 @@ def _process_folder(mc, folder, settings, rules, flows=None):
             if apply:
                 try:
                     if actions.get("move_to"):
+                        store.record_move(row, actions["move_to"], "rule")
                         mc.ensure_folder(actions["move_to"])
                         new_uid = mc.move(uid, actions["move_to"])
                         taken.append("move:" + actions["move_to"])
@@ -1389,7 +1400,7 @@ def _process_folder(mc, folder, settings, rules, flows=None):
                             % (rule.get("name") or rule["id"],
                                ", ".join(taken) or ("kept (guard)" if is_guard_rule(rule) else "suggest"),
                                (meta.get("subject") or "")[:60], meta.get("from_addr")))
-        elif flow:
+        elif flow and not kept:
             why = ("topic match %.2f" % f_ctx["last_topic_score"]) if "last_topic_score" in f_ctx else ""
             _process_flow(mc, flow, row, meta, settings, why=why)
         else:
@@ -1397,6 +1408,45 @@ def _process_folder(mc, folder, settings, rules, flows=None):
     if uids:
         store.log_event("debug", "%s: scanned %d new message(s)" % (folder, scanned))
     return scanned, moved
+
+
+def undo_filing(log_id):
+    """Move a previously filed message back to its origin folder, and keep it
+    from being re-filed by rules/flows/LLM (undo guard by Message-ID)."""
+    entry = store.get_undo(log_id)
+    if not entry:
+        return False, "Unknown undo entry."
+    if entry.get("undone_ts"):
+        return False, "That filing was already undone."
+    msg = store.get_message(entry["msg_id"])
+    if not msg:
+        return False, "The message row no longer exists."
+    if (msg.get("folder") or "") != (entry.get("to_folder") or ""):
+        return False, "This message has moved since — undoing would clobber newer state."
+    if not entry.get("from_folder"):
+        return False, "I do not know where this came from."
+    mc = MailClient().connect()
+    try:
+        mc.ensure_selected(msg.get("folder") or "")
+        mc.ensure_folder(entry["from_folder"])
+        new_uid = mc.move(msg["uid"], entry["from_folder"])
+    except Exception as exc:
+        return False, "Move back failed: %r" % exc
+    finally:
+        try:
+            mc.close()
+        except Exception:
+            pass
+    fields = {"folder": entry["from_folder"], "status": entry["prev_status"] or "classified",
+              "action_taken": entry["prev_action_taken"] or ""}
+    if new_uid:
+        fields["uid"] = new_uid
+    store.update_message(msg["id"], **fields)
+    store.keep_message(msg.get("msgid"))
+    store.mark_undone(log_id, uid=new_uid or 0)
+    store.log_event("info", "undo: '%s' moved back to %s (kept - automation will not re-file it)"
+                    % ((msg.get("subject") or "")[:50], entry["from_folder"]))
+    return True, "Moved back to %s — automation will not re-file it." % entry["from_folder"]
 
 
 def _header_index(folder):
@@ -1675,6 +1725,7 @@ def classify_and_store(msg, settings, mc=None):
         conf = 0.0
     folder = (settings.get("category_folders") or {}).get(category, "")
     already_filed = str(msg.get("action_taken") or "").startswith("move")
+    kept = store.is_kept(msg.get("msgid"))
     fields = {
         "llm_category": category,
         "llm_confidence": conf,
@@ -1703,7 +1754,7 @@ def classify_and_store(msg, settings, mc=None):
                 store.log_event("info", "kept '%s' in place (guard rule '%s')"
                                 % ((msg.get("subject") or "")[:50], guard))
                 break
-    if classify_flows and not already_filed and not guard:
+    if classify_flows and not already_filed and not guard and not kept:
         # fuzzy flows fire once the verdict is in; the first matching flow wins
         m_fields = {"from": msg.get("from_addr", ""), "to": msg.get("to_addr", ""),
                     "subject": msg.get("subject", ""), "body": msg.get("snippet", "")}
@@ -1733,13 +1784,14 @@ def classify_and_store(msg, settings, mc=None):
                 store.log_event("error", "flow '%s' failed after classification: %r"
                                 % (fl.get("name"), exc))
             break
-    if filing_wanted and not already_filed and not guard and not res.get("_flow"):
+    if filing_wanted and not already_filed and not guard and not kept and not res.get("_flow"):
         own = mc is None
         try:
             if own:
                 mc = MailClient().connect()
             mc.ensure_selected(msg["folder"])
             mc.ensure_folder(folder)
+            store.record_move(msg, folder, "auto-file")
             new_uid = mc.move(msg["uid"], folder)
             fields["status"] = "llm-moved"
             fields["action_taken"] = "move:" + folder
@@ -3247,6 +3299,8 @@ class AssistantAgent:
         try:
             mc.ensure_folder(target)
             mc.ensure_selected(folder)
+            if row:
+                store.record_move(row, target, "assistant", from_folder=folder)
             new_uid = mc.move(uid, target)
         except Exception as exc:
             return {"ok": False, "summary": "move failed: %r" % exc, "result": {"error": repr(exc)}}
@@ -3863,6 +3917,8 @@ class AssistantAgent:
                     "result": {"error": "no_trash_folder"}}
         try:
             mc.ensure_selected(folder)
+            if row:
+                store.record_move(row, trash, "trash", from_folder=folder)
             new_uid = mc.move(uid, trash)
         except Exception as exc:
             return {"ok": False, "summary": "move to Trash failed: %r" % exc, "result": {"error": repr(exc)}}

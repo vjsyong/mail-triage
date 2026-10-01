@@ -283,6 +283,25 @@ def _migrate(conn):
         conn.execute("ALTER TABLE messages ADD COLUMN user_tag TEXT NOT NULL DEFAULT ''")
     if "user_tag_by" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN user_tag_by TEXT NOT NULL DEFAULT ''")
+    if "snoozed_until" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN snoozed_until INTEGER NOT NULL DEFAULT 0")
+    # undo trail for machine-applied filings + per-Message-ID keep registry
+    conn.execute("""CREATE TABLE IF NOT EXISTS undo_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL,
+        msg_id INTEGER NOT NULL,
+        from_folder TEXT NOT NULL DEFAULT '',
+        to_folder TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        prev_status TEXT NOT NULL DEFAULT '',
+        prev_action_taken TEXT NOT NULL DEFAULT '',
+        undone_ts INTEGER NOT NULL DEFAULT 0,
+        undo_uid INTEGER DEFAULT 0
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_undo_pending ON undo_log(undone_ts, id DESC)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS keep_ids (
+        msgid TEXT PRIMARY KEY, ts INTEGER NOT NULL
+    )""")
     # one-time: retire assistant_actions_apply (False meant dry-run -> the three gated
     # tools become 'ask', so nothing the assistant did before can now happen silently)
     has_perm = conn.execute("SELECT COUNT(*) FROM settings WHERE k GLOB 'perm_*'").fetchone()[0]
@@ -607,6 +626,82 @@ def insert_message(folder, uid, uidvalidity, fields):
              fields.get("body_html_at") or 0,
              fields.get("date_ts") or date_ts_from(fields.get("date", "")) or int(time.time())))
         return cur.lastrowid, conn.total_changes
+
+
+def record_move(msg, to_folder, source, from_folder=None):
+    """Record a filing for the undo trail (called before/after the IMAP move).
+    msg = pre-move message dict; from_folder overrides msg['folder'] for multi-step flows."""
+    if not msg or not msg.get("id"):
+        return
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO undo_log (ts, msg_id, from_folder, to_folder, source, prev_status, prev_action_taken)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (int(time.time()), int(msg["id"]), (from_folder or msg.get("folder") or ""),
+             to_folder or "", source or "", msg.get("status") or "", msg.get("action_taken") or ""))
+        conn.commit()
+
+
+def recent_moves(limit=8):
+    """Pending undo entries, newest first, with the message's current folder (stale detection)."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT u.id, u.ts, u.msg_id, u.from_folder, u.to_folder, u.source,"
+            "       m.subject AS subject, m.from_addr AS from_addr, m.folder AS cur_folder"
+            " FROM undo_log u LEFT JOIN messages m ON m.id = u.msg_id"
+            " WHERE u.undone_ts = 0 ORDER BY u.id DESC LIMIT ?", (limit,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["stale"] = (d.get("cur_folder") or "") != (d.get("to_folder") or "")
+            out.append(d)
+        return out
+
+
+def get_undo(log_id):
+    with db() as conn:
+        r = conn.execute("SELECT * FROM undo_log WHERE id = ?", (log_id,)).fetchone()
+        return dict(r) if r else None
+
+
+def mark_undone(log_id, uid=0):
+    with db() as conn:
+        conn.execute("UPDATE undo_log SET undone_ts=?, undo_uid=? WHERE id=?",
+                     (int(time.time()), int(uid or 0), int(log_id)))
+        conn.commit()
+
+
+def keep_message(msgid):
+    """Remember that this Message-ID must not be re-filed by rules/LLM/flows (undo guard)."""
+    msgid = (msgid or "").strip().strip("<>").strip()
+    if not msgid:
+        return
+    with db() as conn:
+        conn.execute("INSERT OR IGNORE INTO keep_ids (msgid, ts) VALUES (?,?)",
+                     (msgid, int(time.time())))
+        conn.commit()
+
+
+def clear_keep(msgid):
+    msgid = (msgid or "").strip().strip("<>").strip()
+    if not msgid:
+        return
+    with db() as conn:
+        conn.execute("DELETE FROM keep_ids WHERE msgid=?", (msgid,))
+        conn.commit()
+
+
+def kept_ids():
+    with db() as conn:
+        return set(r[0] for r in conn.execute("SELECT msgid FROM keep_ids"))
+
+
+def is_kept(msgid):
+    msgid = (msgid or "").strip().strip("<>").strip()
+    if not msgid:
+        return False
+    with db() as conn:
+        return conn.execute("SELECT 1 FROM keep_ids WHERE msgid=?", (msgid,)).fetchone() is not None
 
 
 def update_message(msg_id, **fields):
