@@ -1646,8 +1646,12 @@ def index2_state_touch(folder, uidvalidity, last_uid):
 
 
 def index2_overview(folders=None):
+    """Folder state rows for the lite index. folders=None -> every known row
+    (dashboard view); a list -> one row per folder, missing ones marked new."""
     with db() as conn:
         have = {r["folder"]: dict(r) for r in conn.execute("SELECT * FROM index2_state")}
+    if folders is None:
+        return sorted(have.values(), key=lambda r: r.get("folder") or "")
     return [have.get(f, {"folder": f, "status": "new", "messages_indexed": 0}) for f in folders]
 
 

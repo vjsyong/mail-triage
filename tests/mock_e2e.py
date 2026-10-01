@@ -1398,6 +1398,9 @@ def main():
     st_t = store.index2_state_get("INBOX") or {}
     check("state put/touch keep status semantics",
           st_t.get("status") == "working" and int(st_t.get("messages_indexed") or 0) >= 1)
+    ov_all = store.index2_overview()
+    check("index2 overview with no folder list returns every row",
+          isinstance(ov_all, list) and all(isinstance(r, dict) for r in ov_all))
     check("lite stats report the backend",
           rag.index_stats().get("backend") == "lite" and rag.index_stats()["chunks"] >= 1)
 
