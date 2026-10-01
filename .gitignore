@@ -1,7 +1,7 @@
+.venv-rag/
+.codegraph/
 __pycache__/
-*.pyc
-.venv/
-data/
-gemma/cache/
-.env
-qa/shots/
+prototype/model_cache/
+prototype/tei_cache/
+prototype/data/
+prototype/bench/*.log
