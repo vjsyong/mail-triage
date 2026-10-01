@@ -513,8 +513,16 @@ def _messages_filter_where(filt):
     return " WHERE " + " AND ".join(where)
 
 
+_MSG_LIST_COLS = ("id, folder, uid, uidvalidity, msgid, from_addr, to_addr, subject, date, "
+                  "date_ts, snippet, status, rule_id, action_taken, llm_category, llm_confidence, "
+                  "llm_summary, llm_reason, llm_needs_reply, llm_suggested_folder, classified_by, "
+                  "processed_at, user_tag, body_html_at")
+
+
 def messages(limit=50, filt="all", order="date", offset=0):
-    q = "SELECT * FROM messages" + _messages_filter_where(filt)
+    # NOTE: heavy columns (body_html/body_cids/llm_thinking) are excluded here -
+    # lists only need the light fields; use get_message(id) for the full row.
+    q = "SELECT " + _MSG_LIST_COLS + " FROM messages" + _messages_filter_where(filt)
     if order == "id":
         q += " ORDER BY id DESC"
     else:
@@ -534,7 +542,8 @@ def count_messages(filt="all"):
 def queued_messages(limit=10):
     with db() as conn:
         return [dict(r) for r in conn.execute(
-            "SELECT * FROM messages WHERE status='queued' ORDER BY id LIMIT ?", (limit,))]
+            "SELECT " + _MSG_LIST_COLS + " FROM messages WHERE status='queued' ORDER BY id LIMIT ?",
+            (limit,))]
 
 
 def last_uid(folder):

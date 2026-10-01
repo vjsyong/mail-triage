@@ -1513,10 +1513,11 @@ def main():
     html_uid = state.add("INBOX", raw_html_mail)
     engine.process_mailbox()
     hrow = [r for r in store.messages(limit=3000) if r["uid"] == html_uid][0]
+    hrowf = store.get_message(hrow["id"])
     check("scan extracted + sanitized the html body",
-          (hrow["body_html"] or "").find("<b>bold</b>") >= 0
-          and "alert(1)" not in (hrow["body_html"] or "")
-          and "img1@x" in (hrow["body_cids"] or ""))
+          (hrowf["body_html"] or "").find("<b>bold</b>") >= 0
+          and "alert(1)" not in (hrowf["body_html"] or "")
+          and "img1@x" in (hrowf["body_cids"] or ""))
     page = client.get("/messages/%d" % hrow["id"]).data
     check("html mail renders formatted (bold + table kept)",
           b"<b>bold</b>" in page and b"cell one" in page)

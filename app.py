@@ -8,6 +8,7 @@ classification of the rest, reply templates with LLM-drafted replies saved to Dr
 Run:  python app.py            (serves the UI and starts the background worker)
       python app.py --check    (read-only connectivity check, prints JSON)
 """
+import gzip
 import hashlib
 import json
 import os
@@ -27,6 +28,28 @@ import rag
 import store
 
 app = Flask(__name__)
+
+
+@app.after_request
+def _gzip_response(resp):
+    """Compress text responses (skips streams/SSE, small bodies, binary media)."""
+    try:
+        if (resp.status_code == 200 and not resp.direct_passthrough
+                and "gzip" in (request.headers.get("Accept-Encoding") or "")
+                and resp.mimetype in ("text/html", "text/css", "text/javascript",
+                                      "application/javascript", "application/json",
+                                      "text/plain", "image/svg+xml")):
+            data = resp.get_data() or b""
+            if len(data) >= 800:
+                resp.set_data(gzip.compress(data, 6))
+                resp.headers["Content-Encoding"] = "gzip"
+                resp.headers["Content-Length"] = str(len(resp.get_data()))
+                vary = resp.headers.get("Vary")
+                resp.headers["Vary"] = (vary + ", Accept-Encoding") if vary else "Accept-Encoding"
+    except Exception:
+        pass
+    return resp
+
 app.secret_key = os.environ.get("APP_SECRET", "mail-triage-local")
 
 worker = engine.Worker()
