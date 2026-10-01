@@ -435,7 +435,10 @@ def search(q, k=8, folder=None, since=None, rerank_on=None, mode="hybrid"):
     if want_rerank and len(rows) > 1:
         try:
             chunk_texts = {c["id"]: c["text"] for c in chunks.values()}
-            rr = rag.rerank(q, [(chunk_texts.get(r["chunk_id"]) or r["excerpt"])[:2000]
+            # [:1200] chars: jina-turbo's window is ~512 tokens anyway; measured on
+            # the live mailbox 97.9 R@1 @1200/800 chars vs 95.8 @2000, and ~350ms
+            # faster per query. Do not "fix" this back to full chunk texts.
+            rr = rag.rerank(q, [(chunk_texts.get(r["chunk_id"]) or r["excerpt"])[:1200]
                                 for r in rows])
             if rr:
                 by_index = {item["index"]: item.get("score", 0.0) for item in rr}

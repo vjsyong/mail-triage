@@ -52,7 +52,9 @@ def main():
         print("no %s yet" % qfile)
         return 1
     queries = json.load(open(qfile))
-    print("queries: %d | chunks in index: %d" % (len(queries), store.chunk_count()))
+    stats = rag.index_stats()
+    print("queries: %d | backend: %s | chunks in index: %d"
+          % (len(queries), stats.get("backend", "?"), stats.get("chunks", 0)))
     print("%-15s %7s %7s %8s %7s %7s" % ("mode", "R@1", "R@5", "R@10", "MRR", "ms/q"))
     for name, kw in MODES:
         hits1 = hits5 = hits10 = 0
