@@ -30,7 +30,18 @@ DEFAULT_SETTINGS = {
     },
     "drafts_folder": "",          # blank = auto-detect the \Drafts special-use folder
     "my_name": "Sean",
-    "assistant_actions_apply": True,  # assistant may move/flag mail (False = dry-run)
+    "assistant_actions_apply": True,  # RETIRED (2026-10): read only by the one-time migration; superseded by perm_*
+    # ---- agent permissions: off | ask (needs your approval) | auto ----
+    "perm_classify": "auto",       # run classification on a message (filing still follows llm_apply)
+    "perm_flag": "auto",           # read/unread, star
+    "perm_tag": "auto",            # apply tags (recorded as assistant-sourced)
+    "perm_move": "auto",           # move messages between folders
+    "perm_create_folder": "auto",  # create folders
+    "perm_classifiers": "auto",    # train / enable / delete heuristic classifiers
+    "perm_draft": "auto",          # generate a reply draft and save it to Drafts
+    "perm_delete": "off",          # DANGEROUS - move mail to Trash (recoverable until the server purges)
+    "perm_send": "off",            # DANGEROUS - send mail through the account via the proxy
+    "sends_per_hour": 5,           # cap on agent sends per hour (0 = unlimited)
     "index_enabled": True,        # build/refresh the semantic search index
     "index_folders": [],          # blank = all folders except the exclusion list below
     "rerank_enabled": True,       # cross-encoder rerank on top of hybrid retrieval
@@ -197,6 +208,14 @@ CREATE TABLE IF NOT EXISTS rule_proposals (
     rule TEXT NOT NULL DEFAULT '{}', note TEXT NOT NULL DEFAULT '',
     applied INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS agent_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_ts INTEGER, session_id INTEGER NOT NULL DEFAULT 0,
+    capability TEXT NOT NULL DEFAULT '', tool TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    preview TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL DEFAULT '{}',
+    result TEXT NOT NULL DEFAULT '', applied_ts INTEGER, updated_ts INTEGER
+);
 CREATE TABLE IF NOT EXISTS proxy_accounts (
     email TEXT PRIMARY KEY,
     provider TEXT NOT NULL DEFAULT 'custom',
@@ -262,6 +281,22 @@ def _migrate(conn):
         conn.execute("ALTER TABLE heuristics ADD COLUMN excluded TEXT NOT NULL DEFAULT '[]'")
     if "user_tag" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN user_tag TEXT NOT NULL DEFAULT ''")
+    if "user_tag_by" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN user_tag_by TEXT NOT NULL DEFAULT ''")
+    # one-time: retire assistant_actions_apply (False meant dry-run -> the three gated
+    # tools become 'ask', so nothing the assistant did before can now happen silently)
+    has_perm = conn.execute("SELECT COUNT(*) FROM settings WHERE k GLOB 'perm_*'").fetchone()[0]
+    if not has_perm:
+        row = conn.execute("SELECT v FROM settings WHERE k='assistant_actions_apply'").fetchone()
+        legacy = None
+        if row is not None:
+            try:
+                legacy = json.loads(row["v"])
+            except (TypeError, ValueError):
+                legacy = None
+        if legacy is False:
+            for k in ("perm_move", "perm_flag", "perm_create_folder"):
+                conn.execute("INSERT OR IGNORE INTO settings (k, v) VALUES (?, ?)", (k, json.dumps("ask")))
 
 
 def _backfill_date_ts(conn):
@@ -999,13 +1034,13 @@ def meta_set(key, value):
 
 # ---------------------------------------------------------------- tagging / classification
 
-def tag_messages(ids, tag):
-    ids = [int(i) for i in (ids or [])]
+def tag_messages(ids, tag, by="user"):
+    ids = [int(i) for i in (ids or []) if str(i).strip().isdigit()]
     if not ids:
         return 0
-    q = "UPDATE messages SET user_tag=? WHERE id IN (%s)" % ",".join("?" * len(ids))
+    q = "UPDATE messages SET user_tag=?, user_tag_by=? WHERE id IN (%s)" % ",".join("?" * len(ids))
     with db() as conn:
-        cur = conn.execute(q, [tag] + ids)
+        cur = conn.execute(q, [tag, by if tag else ""] + ids)
         return cur.rowcount
 
 
@@ -1013,11 +1048,65 @@ def untag_messages(ids):
     return tag_messages(ids, "")
 
 
-def tagged_examples(limit=80):
+def tagged_examples(limit=80, include_agent=False):
+    where = "coalesce(user_tag,'') != ''"
+    if not include_agent:
+        where += " AND coalesce(user_tag_by,'') != 'assistant'"
     with db() as conn:
         return [dict(r) for r in conn.execute(
-            "SELECT id, folder, from_addr, subject, date, snippet, user_tag FROM messages "
-            "WHERE coalesce(user_tag,'') != '' ORDER BY id DESC LIMIT ?", (limit,))]
+            "SELECT id, folder, from_addr, subject, date, snippet, user_tag, user_tag_by FROM messages "
+            "WHERE " + where + " ORDER BY id DESC LIMIT ?", (limit,))]
+
+
+# ---------------------------------------------------------------- agent actions
+# Pending approvals + audit trail for the fine-grained agent permissions.
+
+def add_agent_action(capability, tool, preview, payload, session_id=0):
+    now = int(time.time())
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO agent_actions (created_ts, session_id, capability, tool, status, preview, payload, "
+            "result, applied_ts, updated_ts) VALUES (?,?,?,?,'pending',?,?,'',NULL,?)",
+            (now, int(session_id or 0), capability, tool, preview,
+             json.dumps(payload or {}, ensure_ascii=False), now))
+        return cur.lastrowid
+
+
+def get_agent_action(action_id):
+    with db() as conn:
+        row = conn.execute("SELECT * FROM agent_actions WHERE id=?", (int(action_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def set_agent_action(action_id, status, result=""):
+    now = int(time.time())
+    with db() as conn:
+        if status in ("applied", "failed"):
+            conn.execute("UPDATE agent_actions SET status=?, result=?, applied_ts=?, updated_ts=? WHERE id=?",
+                         (status, result or "", now, now, int(action_id)))
+        else:
+            conn.execute("UPDATE agent_actions SET status=?, result=?, updated_ts=? WHERE id=?",
+                         (status, result or "", now, int(action_id)))
+
+
+def pending_agent_actions(limit=50):
+    with db() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM agent_actions WHERE status='pending' ORDER BY id DESC LIMIT ?", (int(limit),))]
+
+
+def count_pending_agent_actions():
+    with db() as conn:
+        return conn.execute("SELECT COUNT(*) FROM agent_actions WHERE status='pending'").fetchone()[0]
+
+
+def agent_actions_since(capability, since_ts, statuses=("applied",)):
+    marks = ",".join("?" * len(statuses))
+    with db() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM agent_actions WHERE capability=? AND status IN (%s) "
+            "AND coalesce(applied_ts, created_ts)>=?" % marks,
+            (capability,) + tuple(statuses) + (int(since_ts),)).fetchone()[0]
 
 
 def unclassified_count():
