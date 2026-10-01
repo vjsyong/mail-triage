@@ -642,6 +642,27 @@ class LLMHandler(BaseHTTPRequestHandler):
                                                "total_tokens": 10}})
             self.sse_done()
             return
+        if "fuzzy flow" in (user or "").lower():
+            self.sse_start()
+            self.delta(role="assistant")
+            if step == 0:
+                self.delta(reasoning="Fuzzy ask: a topic condition matches by meaning; the draft gets instructions. That is a flow.")
+                self.tool_delta(0, "propose_flow", {
+                    "name": "Fuzzy bills draft",
+                    "match_mode": "all",
+                    "conditions": [{"kind": "topic", "value": "invoices and payments",
+                                    "threshold": 0.5}],
+                    "steps": [{"type": "draft", "mode": "llm",
+                               "instructions": "thank them and cite the reference"}],
+                    "rationale": "fuzzy: about invoices and payments"}, "call_%d_0" % step)
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            else:
+                self.delta(content="Proposed a fuzzy flow: mail about invoices and payments gets an instructed LLM draft.")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.sse({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 5,
+                                               "total_tokens": 10}})
+            self.sse_done()
+            return
         if "semantic search" in (user or "").lower():
             self.sse_start()
             self.delta(role="assistant")
@@ -2315,6 +2336,81 @@ def main():
                                        "steps": [{"type": "move"}]})
     check("propose_flow rejects invalid steps", not bad["ok"] and "move step needs a folder" in bad["summary"])
     r.close()
+
+    section("T33 fuzzy flows: AI category + about (topic) conditions, instructed LLM drafts")
+    fp = client.get("/flows/new").data
+    check("flow builder offers fuzzy condition kinds",
+          b"AI category" in fp and b"about (topic)" in fp and b"min score" in fp and b"condKind" in fp)
+    check("flow builder offers reply instructions for LLM drafts", b"Reply instructions" in fp)
+
+    # -- topic flow: fires at scan time by MEANING (no exact words needed)
+    r = client.post("/flows/new", data={
+        "name": "Food plans", "match_mode": "all", "enabled": "1",
+        "cond_kind_0": "topic", "cond_value_0": "lunch and restaurant plans", "cond_score_0": "0.5",
+        "steps_json": json.dumps([{"type": "move", "folder": "FoodBox"},
+                                  {"type": "tag", "tag": "ai-lunch"}])},
+        follow_redirects=False)
+    fl_food = [f for f in store.list_flows() if f["name"] == "Food plans"]
+    check("topic flow saved with kind + threshold",
+          r.status_code == 302 and len(fl_food) == 1
+          and '"kind": "topic"' in fl_food[0]["conditions"]
+          and '"threshold": 0.5' in fl_food[0]["conditions"])
+
+    store.set_setting("category_folders", {"Receipt": "Receipts"})
+    r = client.post("/flows/new", data={
+        "name": "Receipt talk", "match_mode": "all", "enabled": "1",
+        "cond_kind_0": "category", "cond_value_0": "Receipt", "cond_score_0": "0.5",
+        "steps_json": json.dumps([{"type": "tag", "tag": "ai-receipt"},
+                                  {"type": "draft", "mode": "llm",
+                                   "instructions": "thank them and cite the reference"}])},
+        follow_redirects=False)
+    fl_rec = [f for f in store.list_flows() if f["name"] == "Receipt talk"]
+    check("category flow saved with min confidence",
+          r.status_code == 302 and len(fl_rec) == 1
+          and '"kind": "category"' in fl_rec[0]["conditions"]
+          and '"min_confidence": 0.5' in fl_rec[0]["conditions"])
+
+    before33 = len(state.appended)
+    add_msg(state, "chef@kitchen.com", "Team lunch on Friday",
+            "restaurant booked, see you there", "lunch33@x")
+    add_msg(state, "powerco@hkpower.com.hk", "Electricity bill for October",
+            "Your invoice is attached; payment due in 7 days.", "elec33@x")
+    engine.process_mailbox()
+    lrow = [r for r in store.messages(limit=3000) if r["msgid"] == "lunch33@x"][0]
+    erow = [r for r in store.messages(limit=3000) if r["msgid"] == "elec33@x"][0]
+    check("topic flow fired by meaning (keyword match at scan)",
+          lrow["folder"] == "FoodBox" and lrow["status"] == "flow"
+          and lrow["action_taken"] == "flow:Food plans" and lrow["user_tag"] == "ai-lunch")
+    check("category flow fired after classification",
+          erow["status"] == "flow" and erow["action_taken"] == "flow:Receipt talk"
+          and erow["user_tag"] == "ai-receipt" and erow["llm_category"] == "Receipt")
+    check("category flow suppressed the plain category filing",
+          erow["folder"] == "INBOX" and erow["action_taken"] != "move:Receipts")
+    check("topic flow left the unrelated message alone",
+          erow["folder"] != "FoodBox" and (erow["user_tag"] or "") != "ai-lunch")
+    check("instructed LLM draft was saved",
+          len(state.appended) == before33 + 1
+          and b"Re: Electricity bill for October" in state.appended[-1]["raw"])
+    check("draft instructions reached the LLM",
+          any("cite the reference" in (c.get("user") or "") for c in llm_server.calls[-8:]))
+
+    # -- assistant compiles a fuzzy flow from natural language
+    r = client.post("/assistant/stream", data={"message": "Please make a fuzzy flow for bills"})
+    body = r.data.decode()
+    check("assistant proposed a fuzzy flow", '"name": "propose_flow"' in body and "event: proposals" in body)
+    prop33 = [m for m in store.assistant_messages(limit=10)
+              if m.get("role") == "assistant" and "propose_flow" in (m.get("meta") or "")]
+    pm33 = prop33[-1]
+    sid33 = pm33["session_id"]
+    page33 = client.get("/assistant/s/%d" % sid33).data
+    check("fuzzy proposal card renders the when-text + instructions",
+          b"is about" in page33 and b"guided by" in page33
+          and b"cite the reference" in page33)
+    r = client.post("/assistant/apply", data={"msg_id": pm33["id"], "idx": 0, "session": str(sid33)})
+    af = [f for f in store.list_flows() if f["name"] == "Fuzzy bills draft"]
+    check("one-click apply stored the fuzzy flow",
+          r.status_code == 302 and len(af) == 1
+          and '"kind": "topic"' in af[0]["conditions"] and '"instructions"' in af[0]["actions"])
 
     section("T30 mobile shell: viewport, PWA manifest, tab bar, More page")
     rp = client.get("/")

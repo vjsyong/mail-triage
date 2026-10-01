@@ -13,6 +13,7 @@ import email.utils
 import html
 import imaplib
 import json
+import math
 import nh3
 import quopri
 import re
@@ -686,6 +687,29 @@ class MailClient:
 
 # ---------------------------------------------------------------- rules
 
+def _cond_field(c, fields):
+    """One deterministic {field, op, value} condition against the mail fields."""
+    field = (c.get("field") or "subject").lower()
+    op = (c.get("op") or "contains").lower()
+    val = c.get("value") or ""
+    hay_raw = fields.get(field) or ""
+    hay = hay_raw.lower()
+    if op == "contains":
+        if val and len(val) <= 3 and re.fullmatch(r"[A-Za-z0-9]+", val):
+            # short tokens match whole words: "PO" won't match "support"
+            return re.search(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(val),
+                             hay_raw, re.I) is not None
+        return bool(val) and val.lower() in hay
+    if op == "equals":
+        return hay.strip() == val.strip().lower()
+    if op == "regex":
+        try:
+            return re.search(val, hay_raw, re.I) is not None
+        except re.error:
+            return False
+    return False
+
+
 def rule_matches(rule, fields):
     try:
         conds = json.loads(rule.get("conditions") or "[]")
@@ -693,30 +717,7 @@ def rule_matches(rule, fields):
         return False
     if not conds:
         return False
-    results = []
-    for c in conds:
-        field = (c.get("field") or "subject").lower()
-        op = (c.get("op") or "contains").lower()
-        val = c.get("value") or ""
-        hay_raw = fields.get(field) or ""
-        hay = hay_raw.lower()
-        if op == "contains":
-            if val and len(val) <= 3 and re.fullmatch(r"[A-Za-z0-9]+", val):
-                # short tokens match whole words: "PO" won't match "support"
-                ok = re.search(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(val),
-                               hay_raw, re.I) is not None
-            else:
-                ok = bool(val) and val.lower() in hay
-        elif op == "equals":
-            ok = hay.strip() == val.strip().lower()
-        elif op == "regex":
-            try:
-                ok = re.search(val, hay_raw, re.I) is not None
-            except re.error:
-                ok = False
-        else:
-            ok = False
-        results.append(ok)
+    results = [_cond_field(c, fields) for c in conds]
     if len(results) == 1:
         return results[0]
     return all(results) if (rule.get("match_mode") or "all") == "all" else any(results)
@@ -739,6 +740,130 @@ def match_first(rules, fields):
 
 
 # ---------------------------------------------------------------- flows
+
+# ---- fuzzy flow conditions (AI category / about-topic) ----
+# Mature flow builders (n8n text classifier, Shortwave AI filters) route on the
+# MEANING of text, not just exact fields: a model classifies, then the flow runs.
+# We do the same in two layers:
+#   kind "category" - matches the app's classifier verdict (heuristic or LLM),
+#                     evaluated right after classification (no extra LLM call).
+#   kind "topic"    - cosine(message, description) >= threshold via the embed
+#                     endpoint, evaluated at scan time; deterministic conditions
+#                     are checked first so obvious mail skips the AI cost.
+_TOPIC_QUERY_CACHE = {}
+_TOPIC_MIN_DEFAULT = 0.55
+_TOPIC_FAIL_TS = [0.0]
+
+
+def _needs_verdict(flow):
+    """True when a flow has an AI-category condition (checked after classification)."""
+    try:
+        conds = json.loads(flow.get("conditions") or "[]")
+    except (TypeError, ValueError):
+        return False
+    return any((c.get("kind") or "field").lower() == "category" for c in conds)
+
+
+def _cosine(a, b):
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    num = sum(x * y for x, y in zip(a, b))
+    da = math.sqrt(sum(x * x for x in a))
+    db = math.sqrt(sum(x * x for x in b))
+    return (num / (da * db)) if da and db else 0.0
+
+
+def _topic_vector(text, kind):
+    """Cached embedding for a topic description (query) / message text (document)."""
+    key = (kind, text)
+    hit = _TOPIC_QUERY_CACHE.get(key)
+    if hit is not None:
+        return hit
+    import rag  # local import: rag pulls store/config; keep module load order stable
+    vec = rag.embed_one(text, kind=kind)
+    if len(_TOPIC_QUERY_CACHE) > 300:
+        _TOPIC_QUERY_CACHE.clear()
+    _TOPIC_QUERY_CACHE[key] = vec
+    return vec
+
+
+def _topic_matches(c, ctx):
+    """'is about' condition: cosine(message text, description) >= threshold."""
+    desc = (c.get("value") or "").strip()
+    if not desc or not ctx or not (ctx.get("text") or "").strip():
+        return False
+    try:
+        need = float(c.get("threshold") or _TOPIC_MIN_DEFAULT)
+    except (TypeError, ValueError):
+        need = _TOPIC_MIN_DEFAULT
+    text = ctx["text"][:2000]
+    try:
+        if ctx.get("_doc_vec") is None:
+            ctx["_doc_vec"] = _topic_vector(text, "document")
+        score = _cosine(_topic_vector(desc, "query"), ctx["_doc_vec"])
+    except Exception as exc:
+        ctx["_topic_failed"] = True
+        now = time.time()
+        if now - _TOPIC_FAIL_TS[0] > 300:
+            _TOPIC_FAIL_TS[0] = now
+            store.log_event("error", "flow topic condition: embedding failed: %r "
+                            "(check the Search index endpoint settings)" % exc)
+        return False
+    ctx["last_topic_score"] = score
+    ctx["last_topic_desc"] = desc
+    return score >= need
+
+
+def _cond_matches(c, fields, ctx):
+    """One condition of any kind. Fuzzy kinds need ctx (verdict / text)."""
+    kind = (c.get("kind") or "field").lower()
+    if kind == "category":
+        v = (ctx or {}).get("verdict")
+        if not v:
+            return False
+        want = str(c.get("value") or "").strip().lower()
+        got = str(v.get("category") or "").strip().lower()
+        if want and want != got:
+            return False
+        try:
+            need = float(c.get("min_confidence") or 0)
+        except (TypeError, ValueError):
+            need = 0.0
+        return float(v.get("confidence") or 0) >= need
+    if kind == "topic":
+        return _topic_matches(c, ctx or {})
+    return _cond_field(c, fields)
+
+
+def flow_matches(flow, fields, ctx=None):
+    """WHEN conditions for a flow, including the fuzzy kinds.
+
+    Deterministic conditions evaluate first (free); a failing deterministic
+    condition short-circuits in "all" mode before any embedding work."""
+    try:
+        conds = json.loads(flow.get("conditions") or "[]")
+    except (TypeError, ValueError):
+        return False
+    if not conds:
+        return False
+    mode = (flow.get("match_mode") or "all").lower()
+    cheap = [c for c in conds if (c.get("kind") or "field").lower() == "field"]
+    fuzzy = [c for c in conds if (c.get("kind") or "field").lower() != "field"]
+    if mode != "any":
+        if not all(_cond_field(c, fields) for c in cheap):
+            return False
+        return all(_cond_matches(c, fields, ctx) for c in fuzzy)
+    if any(_cond_field(c, fields) for c in cheap):
+        return True
+    return any(_cond_matches(c, fields, ctx) for c in fuzzy)
+
+
+def match_first_flows(flows, fields, ctx=None):
+    for flow in flows:
+        if flow_matches(flow, fields, ctx):
+            return flow
+    return None
+
 
 def _apply_flow(mc, flow, row, settings, live):
     """Execute one flow's steps in order. Returns (taken, fields). Move steps
@@ -804,7 +929,7 @@ def _apply_flow(mc, flow, row, settings, live):
                     mode = (st.get("mode") or "template").lower()
                     body = ""
                     if mode == "llm":
-                        body = generate_draft(row_now["id"], tpl_id)
+                        body = generate_draft(row_now["id"], tpl_id, st.get("instructions") or "")
                     elif mode == "fixed":
                         body = render_template_text(st.get("body") or "", row_now)
                     else:
@@ -824,7 +949,7 @@ def _apply_flow(mc, flow, row, settings, live):
     return taken, fields
 
 
-def _process_flow(mc, flow, row, meta, settings):
+def _process_flow(mc, flow, row, meta, settings, why=""):
     """Run one matching flow, once per message (flow_runs guards re-scans)."""
     live = bool(settings.get("flows_apply", True))
     key = (row.get("msgid") or "").strip() or ("id:%s" % row.get("id"))
@@ -838,9 +963,10 @@ def _process_flow(mc, flow, row, meta, settings):
     store.update_message(row["id"], **fields)
     if live:
         store.record_flow_run(flow["id"], key, row["id"])
-    store.log_event("info", "flow '%s'%s \u2192 %s | %s"
+    store.log_event("info", "flow '%s'%s \u2192 %s | %s%s"
                     % (flow.get("name"), "" if live else " (dry-run)",
-                       ", ".join(taken) or "no steps", (meta.get("subject") or "")[:60]))
+                       ", ".join(taken) or "no steps", (meta.get("subject") or "")[:60],
+                       (" [%s]" % why) if why else ""))
 
 
 # ---------------------------------------------------------------- LLM
@@ -1106,7 +1232,7 @@ class LLMClient:
             result["_thinking"] = str(thinking)[:6000]
         return result
 
-    def draft_reply(self, msg, body_text, template, settings):
+    def draft_reply(self, msg, body_text, template, settings, instructions=""):
         my_name = settings.get("my_name", "Sean")
         system = ("You write email replies as %s (%s). Be concise, warm and professional. "
                   "Output ONLY the plain-text reply body (no subject line, no headers, no quotes)."
@@ -1117,6 +1243,9 @@ class LLMClient:
             body_hint = render_template_text(template.get("body") or "", msg)
             guidance = ("Use this reply template as guidance for structure and tone:\n---\n%s\n%s\n---\n"
                         % (subject_hint, body_hint))
+        if instructions:
+            guidance += ("Follow these instructions for the reply (they win over the "
+                         "template's wording where they conflict):\n%s\n" % str(instructions)[:1000])
         user = ("%sOriginal message:\nFrom: %s\nSubject: %s\nDate: %s\n\n%s"
                 % (guidance, msg.get("from_addr", ""), msg.get("subject", ""),
                    msg.get("date", ""), (body_text or msg.get("snippet") or "")[:6000]))
@@ -1213,7 +1342,11 @@ def _process_folder(mc, folder, settings, rules, flows=None):
             continue
         scanned += 1
         rule = match_first(rules, _fields_for(meta))
-        flow = None if rule else match_first(flows or [], _fields_for(meta))
+        # category conditions need the classifier verdict; those flows wait for
+        # the classify phase. Everything else (incl. topic) evaluates at scan.
+        scan_flows = [f for f in (flows or []) if not _needs_verdict(f)]
+        f_ctx = {"text": "%s\n%s" % (meta.get("subject") or "", meta.get("snippet") or "")}
+        flow = None if rule else match_first_flows(scan_flows, _fields_for(meta), f_ctx)
         if rule:
             try:
                 actions = json.loads(rule.get("actions") or "{}")
@@ -1252,7 +1385,8 @@ def _process_folder(mc, folder, settings, rules, flows=None):
                                ", ".join(taken) or ("kept (guard)" if is_guard_rule(rule) else "suggest"),
                                (meta.get("subject") or "")[:60], meta.get("from_addr")))
         elif flow:
-            _process_flow(mc, flow, row, meta, settings)
+            why = ("topic match %.2f" % f_ctx["last_topic_score"]) if "last_topic_score" in f_ctx else ""
+            _process_flow(mc, flow, row, meta, settings, why=why)
         else:
             store.update_message(row["id"], status="queued")
     if uids:
@@ -1548,19 +1682,53 @@ def classify_and_store(msg, settings, mc=None):
         "status": "classified",
     }
     res["_moved_to"] = ""
+    res["_flow"] = ""
+    verdict = {"category": category, "confidence": conf,
+               "source": ("heuristic" if hres else "llm")}
+    classify_flows = [f for f in store.list_flows(enabled_only=True) if _needs_verdict(f)]
+    filing_wanted = bool(settings.get("llm_apply") and folder)
     guard = None
-    if settings.get("llm_apply") and folder and not already_filed:
-        # guard rules protect mail from ALL filing, including this category map
+    if (classify_flows or filing_wanted) and not already_filed:
+        # guard rules protect mail from ALL automated filing (flows + category map)
         g_fields = {"from": msg.get("from_addr", ""), "to": msg.get("to_addr", ""),
                     "subject": msg.get("subject", ""), "body": msg.get("snippet", "")}
         for r in store.list_rules(enabled_only=True):
             if is_guard_rule(r) and rule_matches(r, g_fields):
                 guard = r.get("name") or ("rule %s" % r.get("id"))
+                store.log_event("info", "kept '%s' in place (guard rule '%s')"
+                                % ((msg.get("subject") or "")[:50], guard))
                 break
-    if guard:
-        store.log_event("info", "LLM: kept '%s' in place (guard rule '%s')"
-                        % ((msg.get("subject") or "")[:50], guard))
-    if settings.get("llm_apply") and folder and not already_filed and not guard:
+    if classify_flows and not already_filed and not guard:
+        # fuzzy flows fire once the verdict is in; the first matching flow wins
+        m_fields = {"from": msg.get("from_addr", ""), "to": msg.get("to_addr", ""),
+                    "subject": msg.get("subject", ""), "body": msg.get("snippet", "")}
+        f_ctx = {"verdict": verdict,
+                 "text": "%s\n%s" % (msg.get("subject") or "", msg.get("snippet") or "")}
+        for fl in classify_flows:
+            if not flow_matches(fl, m_fields, f_ctx):
+                continue
+            try:
+                own = mc is None
+                if own:
+                    mc = MailClient().connect()
+                try:
+                    _process_flow(mc, fl, msg, {"subject": msg.get("subject")}, settings,
+                                  why="AI category %s %d%%" % (category, round(conf * 100)))
+                finally:
+                    if own and mc is not None:
+                        try:
+                            mc.close()
+                        except Exception:
+                            pass
+                live = bool(settings.get("flows_apply", True))
+                res["_flow"] = fl.get("name") or ("flow %s" % fl.get("id"))
+                fields["status"] = "flow" if live else "flow-dry"
+                fields["action_taken"] = "flow:%s" % (fl.get("name") or fl.get("id"))
+            except Exception as exc:
+                store.log_event("error", "flow '%s' failed after classification: %r"
+                                % (fl.get("name"), exc))
+            break
+    if filing_wanted and not already_filed and not guard and not res.get("_flow"):
         own = mc is None
         try:
             if own:
@@ -1605,11 +1773,14 @@ def _process_llm_queue(mc, settings, batch):
                 store.log_event("error", "LLM attempt %d failed for '%s' (will retry): %s"
                                 % (fails, (msg.get("subject") or "")[:50], exc))
             continue
+        note = "(suggestion only)"
+        if res.get("_flow"):
+            note = "flow '%s'" % res["_flow"]
+        elif res.get("_moved_to"):
+            note = "moved to %s" % res["_moved_to"]
         store.log_event("info", "LLM: '%s' → %s (%.0f%%) %s"
                         % ((msg.get("subject") or "")[:50], res.get("category"),
-                           (float(res.get("confidence") or 0)) * 100,
-                           ("moved to %s" % res["_moved_to"]) if res.get("_moved_to")
-                           else "(suggestion only)"))
+                           (float(res.get("confidence") or 0)) * 100, note))
         done += 1
     return done
 
@@ -1656,7 +1827,7 @@ def connectivity_check():
         mc.close()
 
 
-def generate_draft(msg_id, template_id=None):
+def generate_draft(msg_id, template_id=None, instructions=""):
     msg = store.get_message(msg_id)
     if not msg:
         raise RuntimeError("message %s not found" % msg_id)
@@ -1672,7 +1843,8 @@ def generate_draft(msg_id, template_id=None):
                 store.log_event("debug", "draft: body fetch failed (%r) — using snippet" % exc)
     finally:
         mc.close()
-    return LLMClient().draft_reply(msg, body_text, template, store.all_settings())
+    return LLMClient().draft_reply(msg, body_text, template, store.all_settings(),
+                                   instructions=str(instructions or ""))
 
 
 def save_draft(msg_id, body_text):
@@ -1915,7 +2087,7 @@ How to work
 - BEFORE proposing a rule, call list_rules (or mailbox_overview) and check what already exists. If a similar rule exists (same sender/domain/subject), propose an UPDATE instead of a near-duplicate: pass updates_rule_id with the rule as it should look afterwards (name/conditions/actions). If you propose something that overlaps an existing rule without updates_rule_id, the app flags it to the user, so handle it yourself first.
 - Heuristic classifiers (train_classifier / list_classifiers / manage_classifier / evaluate_classifier): deterministic trained models that run BEFORE the LLM in triage. Suggest them when the user wants less LLM dependence, when a category has regular labelled mail (tags), or when classification feels inconsistent. decision_list suits sender/keyword patterns, naive_bayes fuzzier ones; retrain via retrain_id as labels grow; evaluate before claiming quality. After a tagging session, suggest training one when a category has around 8+ tagged examples.
 - Only tell the user a rule was proposed once propose_rule has returned ok:true in this turn; never claim a proposal you did not actually make.
-- MULTI-STEP AUTOMATIONS ARE FLOWS: when a request has an ordered sequence ("move it AND then draft/tag/star it", "prepare a draft that says ..."), call propose_flow with the steps in order - NOT propose_rule. A fixed draft body is fully supported (step {type:"draft", mode:"fixed", body:"..."}). Plain single-action requests stay rules. Check list_flows and list_rules first; flows run after rules, first matching flow wins.
+- MULTI-STEP AUTOMATIONS ARE FLOWS: when a request has an ordered sequence ("move it AND then draft/tag/star it", "prepare a draft that says ..."), call propose_flow with the steps in order - NOT propose_rule. A fixed draft body is fully supported (step {type:"draft", mode:"fixed", body:"..."}), and an LLM draft takes "instructions" (what the reply should say - tone, points, what to reference; e.g. "thank them and ask for the PO number"). WHEN conditions can be FUZZY: {kind:"category", value:"<one of the app's categories>"} fires right after the classifier sorts the mail that way - use it for "if it's a <type> email" asks (see the CATEGORIES list in CURRENT STATE); {kind:"topic", value:"<short description with the boundary>"} matches by MEANING via embeddings - use it for "if it's related to / about X" asks; write the description like the boundary, e.g. "parcels and deliveries - shipping notices, courier updates, pickup codes. NOT marketing." Optional threshold 0.2-0.95 (default 0.55). Keep deterministic from/subject conditions alongside when the user names a sender; deterministic conditions are checked first and cost nothing, AI conditions run only after they pass. Plain single-action requests stay rules. Check list_flows and list_rules first; flows run after rules, first matching flow wins.
 - Rule housekeeping: call list_rules (or list_flows) for the exact ids. If the user asks to REMOVE/DELETE a rule (for example an exact duplicate), call delete_rule with that id - delete one of a duplicate pair and keep the other. If they only want it paused ("turn it off for now"), call set_rule_enabled. Only touch rules and flows the user asked about; if it is unclear which one, ask one short question first. delete_flow and set_flow_enabled do the same for flows.
 - Decide once, then act. State one short plan in your thinking, call the tools, then answer. Never repeat the same reasoning paragraph; if a task needs a capability you do not have, say so in ONE sentence and offer the closest alternative instead of re-reading your tool list.
 - Condition values of 3 characters or fewer (letters/digits) match whole words: a value "PO" will not match "support" or "report".
@@ -2006,15 +2178,18 @@ ASSISTANT_TOOLS = [
         "List the multi-step flow automations (id, enabled, WHEN conditions, THEN steps). Flows run AFTER rules; first matching flow wins. Check this before proposing a flow so you update instead of duplicating.",
         {}),
     _fn("propose_flow",
-        "Propose a multi-step FLOW for the user to approve with one click. Use when a request needs an ordered sequence - e.g. 'move it to X AND then draft a reply', 'tag it, then star it'. Steps run in order: move / draft / tag / mark_read / flag. A draft step with mode \"fixed\" saves a literal message body (placeholders {sender} {subject} {date} {my_name} allowed); mode \"template\" fills a saved template; mode \"llm\" lets the LLM write it (template optional as guidance). Nothing is ever sent - drafts land in the Drafts folder. Single-action requests should stay plain rules (propose_rule).",
+        "Propose a multi-step FLOW for the user to approve with one click. Use when a request needs an ordered sequence - e.g. 'move it to X AND then draft a reply', 'tag it, then star it'. Steps run in order: move / draft / tag / mark_read / flag. A draft step with mode \"fixed\" saves a literal message body (placeholders {sender} {subject} {date} {my_name} allowed); mode \"template\" fills a saved template; mode \"llm\" lets the LLM write it - pass \"instructions\" to say what the reply should contain (tone, points, what to reference); template is optional guidance. Nothing is ever sent - drafts land in the Drafts folder. WHEN conditions can be FUZZY: {kind:'category', value:'<category from the app's list>'} fires after classification assigns that category; {kind:'topic', value:'<short description of the kind of mail>'} matches by MEANING (no exact words needed). Single-action requests should stay plain rules (propose_rule).",
         {"name": {"type": "string", "description": "short flow name"},
          "match_mode": {"type": "string", "enum": ["all", "any"]},
-         "conditions": {"type": "array", "description": "1-4 WHEN conditions", "items": {
+         "conditions": {"type": "array", "description": "1-4 WHEN conditions. Deterministic: {field, op, value}. FUZZY: {kind:'category', value:'<category>'} fires when the classifier tags the message (checked right after classification); {kind:'topic', value:'<description with its boundary>', threshold:0.2-0.95} matches by meaning. Deterministic conditions evaluate first and skip the AI cost when they fail.", "items": {
              "type": "object",
              "properties": {
+                 "kind": {"type": "string", "enum": ["field", "category", "topic"]},
                  "field": {"type": "string", "enum": ["from", "to", "subject", "body"]},
                  "op": {"type": "string", "enum": ["contains", "equals", "regex"]},
-                 "value": {"type": "string"}}}},
+                 "value": {"type": "string"},
+                 "min_confidence": {"type": "number", "description": "category conditions: minimum classifier confidence 0-1"},
+                 "threshold": {"type": "number", "description": "topic conditions: similarity threshold 0.2-0.95 (default 0.55)"}}}},
          "steps": {"type": "array", "description": "THEN steps, in order (1-10)", "items": {
              "type": "object",
              "properties": {
@@ -2023,6 +2198,7 @@ ASSISTANT_TOOLS = [
                  "mode": {"type": "string", "enum": ["fixed", "template", "llm"], "description": "for draft steps"},
                  "body": {"type": "string", "description": "literal message for a fixed draft"},
                  "template_id": {"type": "integer", "description": "for template/llm drafts"},
+                 "instructions": {"type": "string", "description": "for llm draft steps: what the reply should say (tone, points to include, what to reference)"},
                  "tag": {"type": "string", "description": "for tag steps"}}}},
          "rationale": {"type": "string", "description": "one short sentence why"},
          "updates_flow_id": {"type": "integer",
@@ -2330,6 +2506,29 @@ ALLOWED_FIELDS = ("from", "to", "subject", "body")
 ALLOWED_OPS = ("contains", "equals", "regex")
 
 
+def _flow_cond_text(c):
+    """Human line for one WHEN condition (deterministic or fuzzy)."""
+    kind = (c.get("kind") or "field").lower()
+    if kind == "category":
+        s = 'AI category is "%s"' % c.get("value")
+        if c.get("min_confidence"):
+            s += " (>=%d%% trust)" % round(float(c["min_confidence"]) * 100)
+        return s
+    if kind == "topic":
+        try:
+            th = float(c.get("threshold") or _TOPIC_MIN_DEFAULT)
+        except (TypeError, ValueError):
+            th = _TOPIC_MIN_DEFAULT
+        return 'is about "%s" (>=%.2f)' % (c.get("value"), th)
+    return '%s %s "%s"' % (c.get("field"), c.get("op"), c.get("value"))
+
+
+def _flow_when_text(flow):
+    conds = _safe_json(flow.get("conditions"), [])
+    joiner = " AND " if (flow.get("match_mode") or "all") == "all" else " OR "
+    return joiner.join(_flow_cond_text(c) for c in conds) or "(no conditions)"
+
+
 def _flow_steps_text(steps):
     """Human line for a list of flow steps (list of dicts)."""
     parts = []
@@ -2350,7 +2549,12 @@ def _flow_steps_text(steps):
                 parts.append('draft a fixed reply ("%s%s") and save to Drafts'
                              % (body[:40], "..." if len(body) > 40 else ""))
             elif mode == "llm":
-                parts.append("draft with the LLM and save to Drafts")
+                ins = (st.get("instructions") or "").strip()
+                if ins:
+                    parts.append('draft with the LLM guided by "%s%s" and save to Drafts'
+                                 % (ins[:40], "..." if len(ins) > 40 else ""))
+                else:
+                    parts.append("draft with the LLM and save to Drafts")
             else:
                 parts.append("draft from template #%s and save to Drafts" % st.get("template_id"))
     return ", then ".join(parts) or "(no steps)"
@@ -2372,7 +2576,7 @@ def _flows_to_text(flows):
         conds = _safe_json(f.get("conditions"), [])
         steps = _safe_json(f.get("actions"), [])
         joiner = " AND " if (f.get("match_mode") or "all") == "all" else " OR "
-        cs = joiner.join('%s %s "%s"' % (c.get("field"), c.get("op"), c.get("value")) for c in conds)
+        cs = joiner.join(_flow_cond_text(c) for c in conds)
         lines.append("%d. %s%s: IF %s -> %s"
                      % (i, "" if f.get("enabled") else "[disabled] ",
                         f.get("name") or ("flow %d" % f.get("id")), cs, _flow_steps_text(steps)))
@@ -2463,6 +2667,34 @@ def _validate_flow(proposal):
         if not isinstance(c, dict):
             errors.append("each condition must be an object")
             continue
+        kind = str(c.get("kind") or "field").lower()
+        if kind == "category":
+            cat = str(c.get("value") or "").strip()
+            if not cat:
+                errors.append('AI category condition needs the category name in "value"')
+                continue
+            cond = {"kind": "category", "value": cat[:60]}
+            try:
+                conf_ = float(c.get("min_confidence") or 0)
+            except (TypeError, ValueError):
+                conf_ = 0.0
+            if conf_ > 0:
+                cond["min_confidence"] = round(max(0.0, min(1.0, conf_)), 2)
+            conditions.append(cond)
+            continue
+        if kind == "topic":
+            desc = str(c.get("value") or "").strip()
+            if not desc:
+                errors.append('about (topic) condition needs a description in "value"')
+                continue
+            try:
+                th = (float(c.get("threshold"))
+                      if c.get("threshold") not in (None, "") else _TOPIC_MIN_DEFAULT)
+            except (TypeError, ValueError):
+                th = _TOPIC_MIN_DEFAULT
+            conditions.append({"kind": "topic", "value": desc[:300],
+                               "threshold": round(max(0.2, min(0.95, th)), 2)})
+            continue
         field = str(c.get("field") or "").lower()
         op = str(c.get("op") or "contains").lower()
         value = str(c.get("value") or "").strip()
@@ -2512,7 +2744,11 @@ def _validate_flow(proposal):
                     tid = int(tid) if tid else None
                 except (TypeError, ValueError):
                     tid = None
-                steps.append({"type": "draft", "mode": "llm", "template_id": tid})
+                step_ = {"type": "draft", "mode": "llm", "template_id": tid}
+                ins = str(st.get("instructions") or "").strip()
+                if ins:
+                    step_["instructions"] = ins[:1000]
+                steps.append(step_)
             else:
                 errors.append("bad draft mode %r (use fixed/template/llm)" % dmode)
         elif kind == "tag":

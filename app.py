@@ -377,6 +377,7 @@ padding:1px 5px;word-break:break-all}
 .card-h h3{margin:0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid3{display:grid;grid-template-columns:150px 130px 1fr;gap:8px}
+.grid5{display:grid;grid-template-columns:118px 104px 92px minmax(0,1fr) 86px;gap:8px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .spread{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
 .stack>*+*{margin-top:10px}
@@ -541,6 +542,8 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 @media(max-width:767px){
   .grid2{grid-template-columns:1fr}
   .grid3{grid-template-columns:1fr 1fr}
+  .grid5{grid-template-columns:1fr 1fr}
+  .grid5 input[type=text]{grid-column:1/-1}
   .card{padding:13px 14px}
   .tbl.mcards{border:0}
   .tbl.mcards thead{display:none}
@@ -2362,7 +2365,7 @@ FLOWS_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Flows</h1>
-    <div class="page-desc">Multi-step automations — when a message matches, the steps run in order (move, tag, flag, draft from a template). Rules stay for simple single-action cases; rules run first.</div>
+    <div class="page-desc">Multi-step automations — WHEN a message matches, THEN the steps run in order. Conditions can be exact fields or AI (category / about-topic); deterministic conditions are checked first and skip the AI cost when they fail. Rules stay for simple single-action cases; rules run first.</div>
   </div>
   <div class="row"><a class="btn primary" href="{{ url_for('flow_new') }}">New flow</a></div>
 </div>
@@ -2417,7 +2420,7 @@ FLOW_EDIT_TMPL = """
     <div class="sub" style="margin-bottom:4px"><a href="{{ url_for('flows') }}">&larr; Flows</a></div>
     <div class="backlink"><a href="{{ url_for('flows') }}">← Flows</a></div>
     <h1 class="page-title">{{ 'Edit flow' if flow else 'New flow' }}</h1>
-    <div class="page-desc">WHEN a message matches, THEN run the steps, in order.</div>
+    <div class="page-desc">WHEN a message matches, THEN run the steps, in order. Deterministic conditions are checked first; AI conditions (category / about) run only if they pass.</div>
   </div>
 </div>
 <form method="post" id="flowform">
@@ -2438,28 +2441,50 @@ FLOW_EDIT_TMPL = """
     </select>
   </div>
   <div id="conds">
-    <div class="grid3 sub cond-head" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
+    <div class="grid5 sub cond-head" style="margin-bottom:2px"><div>kind</div><div>field</div><div>operator</div><div>value</div><div>min score</div></div>
     {% for i in range(5) %}
     {% set c = conditions[i] if conditions|length > i else {} %}
-    <div class="grid3{{ ' cond-extra' if i >= 2 else '' }}" style="margin-bottom:6px">
-      <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field">
+    {% set ck = c.get('kind') or 'field' %}
+    <div class="grid5{{ ' cond-extra' if i >= 2 else '' }}" style="margin-bottom:6px">
+      <select name="cond_kind_{{ i }}" aria-label="Condition {{ i+1 }} kind" onchange="condKind(this)">
+        <option value="field" {{ 'selected' if ck == 'field' else '' }}>match field</option>
+        <option value="category" {{ 'selected' if ck == 'category' else '' }}>AI category</option>
+        <option value="topic" {{ 'selected' if ck == 'topic' else '' }}>about (topic)</option>
+      </select>
+      <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field" {{ 'disabled' if ck != 'field' else '' }}>
         {% for f in ['from','to','subject','body'] %}
         <option value="{{ f }}" {{ 'selected' if c.get('field') == f else '' }}>{{ f }}</option>{% endfor %}
       </select>
-      <select name="cond_op_{{ i }}" aria-label="Condition {{ i+1 }} operator">
+      <select name="cond_op_{{ i }}" aria-label="Condition {{ i+1 }} operator" {{ 'disabled' if ck != 'field' else '' }}>
         {% for o in ['contains','equals','regex'] %}
         <option value="{{ o }}" {{ 'selected' if c.get('op') == o else '' }}>{{ o }}</option>{% endfor %}
       </select>
       <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Condition {{ i+1 }} value">
+      <input type="number" name="cond_score_{{ i }}" value="{{ c.get('min_confidence') or c.get('threshold') or '' }}" min="0" max="0.95" step="0.05" placeholder="auto" aria-label="Condition {{ i+1 }} minimum score" title="AI category: minimum confidence (0-1). about (topic): similarity threshold (default 0.55)." {{ 'disabled' if ck == 'field' else '' }}>
     </div>
     {% endfor %}
     <button type="button" class="btn small cond-more" onclick="this.parentNode.querySelectorAll('.cond-extra').forEach(function(e){e.classList.remove('cond-extra');}); this.remove();">Show 3 more conditions</button>
-    <div class="sub">Short values (&le;3 letters) match whole words only &mdash; &ldquo;PO&rdquo; won&rsquo;t fire on &ldquo;support&rdquo;.</div>
+    <div class="sub">match field is an exact text match &mdash; checked first, no AI cost. AI category fires when the classifier tags the message with that category (use the exact name from your categories list). about (topic) matches by meaning &mdash; describe the kind of mail WITH its boundary: &ldquo;parcels and deliveries - shipping notices, courier updates, pickup codes. NOT marketing.&rdquo; min score is optional: topic threshold (default 0.55) or category confidence floor (0 = any). Short values (&le;3 letters) match whole words only.</div>
   </div>
+  <script>
+  function condKind(sel){
+    var row = sel.closest('.grid5'); if(!row) return;
+    var k = sel.value;
+    var f = row.querySelector('[name^="cond_field_"]');
+    var o = row.querySelector('[name^="cond_op_"]');
+    var s = row.querySelector('[name^="cond_score_"]');
+    if(f) f.disabled = (k !== 'field');
+    if(o) o.disabled = (k !== 'field');
+    if(s) s.disabled = (k === 'field');
+  }
+  document.addEventListener('DOMContentLoaded', function(){
+    document.querySelectorAll('#conds select[name^="cond_kind_"]').forEach(condKind);
+  });
+  </script>
 </div>
 
 <div class="card">
-  <div class="card-h"><h3>THEN &mdash; do these steps, in order</h3><span class="sub">a draft step saves into your Drafts folder; nothing is ever sent</span></div>
+  <div class="card-h"><h3>THEN &mdash; do these steps, in order</h3><span class="sub">a draft step saves into your Drafts folder; nothing is ever sent. LLM drafts can follow your reply instructions</span></div>
   <div id="steps"></div>
   <span id="steps-live" class="vh" aria-live="polite"></span>
   <noscript><div class="msg err" style="margin-top:8px">The step builder needs JavaScript — enable it to add steps.</div></noscript>
@@ -2516,12 +2541,19 @@ function render(){
         ta.oninput = function(){ st.body = ta.value; sync(); };
         f.appendChild(ta);
       } else {
-      f.appendChild(el('label', null, (st.mode === 'llm') ? 'Template (guidance, optional)' : 'Template'));
+      f.appendChild(el('label', null, (st.mode === 'llm') ? 'Template (optional guidance)' : 'Template'));
       var tSel = el('select');
       var none = el('option', null, '(none)'); none.value = ''; tSel.appendChild(none);
       TEMPLATES.forEach(function(t){ var o = el('option', null, t.name); o.value = String(t.id); if(String(st.template_id || '') === String(t.id)) o.selected = true; tSel.appendChild(o); });
       tSel.onchange = function(){ st.template_id = tSel.value; sync(); };
       f.appendChild(tSel);
+      if(st.mode === 'llm'){
+        f.appendChild(el('label', null, 'Reply instructions (optional)'));
+        var ta2 = document.createElement('textarea'); ta2.rows = 2; ta2.value = st.instructions || '';
+        ta2.placeholder = 'e.g. thank them and mention delivery within 5 working days';
+        ta2.oninput = function(){ st.instructions = ta2.value; sync(); };
+        f.appendChild(ta2);
+      }
       }
     } else if(st.type === 'tag'){
       f.appendChild(el('label', null, 'Tag'));
@@ -2558,6 +2590,23 @@ render();
 """
 
 
+def _cond_friendly(c):
+    """Plain-language bit for one WHEN condition (deterministic or fuzzy)."""
+    kind = (c.get("kind") or "field").lower()
+    if kind == "category":
+        s = "AI category is ‘%s’" % c.get("value")
+        if c.get("min_confidence"):
+            s += " (≥%d%%)" % round(float(c["min_confidence"]) * 100)
+        return s
+    if kind == "topic":
+        try:
+            th = float(c.get("threshold") or 0.55)
+        except (TypeError, ValueError):
+            th = 0.55
+        return "is about ‘%s’ (≥%.2f)" % (c.get("value"), th)
+    return "%s %s ‘%s’" % (c.get("field"), c.get("op"), c.get("value"))
+
+
 def _flow_summary(flow, tpl_names):
     """One-line plain language: IF <conditions> -> <steps>."""
     try:
@@ -2565,8 +2614,7 @@ def _flow_summary(flow, tpl_names):
     except (TypeError, ValueError):
         conds = []
     joiner = " and " if (flow.get("match_mode") or "all") == "all" else " or "
-    when = joiner.join("%s %s ‘%s’" % (c.get("field"), c.get("op"), c.get("value"))
-                      for c in conds) or "—"
+    when = joiner.join(_cond_friendly(c) for c in conds) or "—"
     try:
         steps = json.loads(flow.get("actions") or "[]")
     except (TypeError, ValueError):
@@ -2586,8 +2634,10 @@ def _flow_summary(flow, tpl_names):
             dmode = (st.get("mode") or "template").lower()
             if dmode == "llm":
                 name = tpl_names.get(int(st.get("template_id") or 0), "")
-                acts.append("draft with the LLM%s and save to Drafts"
-                            % ((" using ‘%s’" % name) if name else ""))
+                ins = (st.get("instructions") or "").strip()
+                acts.append("draft with the LLM%s%s and save to Drafts"
+                            % ((" using ‘%s’" % name) if name else "",
+                               (" guided by ‘%s…’" % ins[:40]) if ins else ""))
             elif dmode == "fixed":
                 body = (st.get("body") or "").strip()
                 acts.append("draft ‘%s%s’ and save to Drafts"
@@ -2606,9 +2656,26 @@ def _flow_from_form():
         val = (request.form.get("cond_value_%d" % i) or "").strip()
         if not val:
             continue
-        conditions.append({"field": request.form.get("cond_field_%d" % i, "subject"),
-                           "op": request.form.get("cond_op_%d" % i, "contains"),
-                           "value": val})
+        kind = (request.form.get("cond_kind_%d" % i) or "field").lower()
+        raw_score = (request.form.get("cond_score_%d" % i) or "").strip()
+        try:
+            score = float(raw_score) if raw_score else None
+        except (TypeError, ValueError):
+            score = None
+        if kind == "category":
+            cond = {"kind": "category", "value": val[:60]}
+            if score and score > 0:
+                cond["min_confidence"] = max(0.0, min(1.0, round(score, 2)))
+            conditions.append(cond)
+        elif kind == "topic":
+            cond = {"kind": "topic", "value": val[:300]}
+            if score:
+                cond["threshold"] = max(0.2, min(0.95, round(score, 2)))
+            conditions.append(cond)
+        else:
+            conditions.append({"field": request.form.get("cond_field_%d" % i, "subject"),
+                               "op": request.form.get("cond_op_%d" % i, "contains"),
+                               "value": val})
     try:
         raw = json.loads(request.form.get("steps_json") or "[]")
     except (TypeError, ValueError):
@@ -2632,7 +2699,11 @@ def _flow_from_form():
                 if body:
                     steps.append({"type": "draft", "mode": "fixed", "body": body[:4000]})
             elif dmode == "llm":
-                steps.append({"type": "draft", "mode": "llm", "template_id": tid})
+                st2 = {"type": "draft", "mode": "llm", "template_id": tid}
+                ins = (st.get("instructions") or "").strip()
+                if ins:
+                    st2["instructions"] = ins[:1000]
+                steps.append(st2)
             elif tid:
                 steps.append({"type": "draft", "mode": "template", "template_id": tid})
         elif t == "tag" and (st.get("tag") or "").strip():
@@ -3919,8 +3990,8 @@ def _proposal_view(p):
             "name": p.get("name", ""),
             "match_mode": p.get("match_mode", "all"),
             "placement": "",
-            "summary": summarize_conditions({"conditions": json.dumps(p.get("conditions", [])),
-                                             "match_mode": p.get("match_mode", "all")}),
+            "summary": engine._flow_when_text({"conditions": json.dumps(p.get("conditions", [])),
+                                               "match_mode": p.get("match_mode", "all")}),
             "actions_summary": engine._flow_steps_text(p.get("steps", [])),
             "rationale": p.get("rationale", ""),
             "similar": None,
