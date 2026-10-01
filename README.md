@@ -188,7 +188,8 @@ docker exec mail-triage python app.py --check   # read-only IMAP + proxy health 
 docker exec mail-triage python app.py --index   # run the semantic indexer (resumable)
 docker exec mail-triage python app.py --reindex # wipe + rebuild the search index
 docker exec mail-triage python app.py --heal-snippets  # bulk-repair legacy raw-MIME
-                                      # snippets (progress: /data/heal.log)
+                                      # snippets: refetch + Message-ID rescue for
+                                      # moved mail (summary: /data/heal.log)
 .venv/bin/python tests/mock_e2e.py    # 269-check E2E suite (mock IMAP + mock LLM,
                                       # mock TEI embed/rerank; SSE streaming agent)
 .venv/bin/python tests/proxy_e2e.py   # 26-check live flow for the embedded proxy
