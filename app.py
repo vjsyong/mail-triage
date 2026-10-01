@@ -2222,7 +2222,7 @@ def message_part(mid, section):
                 data = fh.read()
             with open(meta_path) as fh:
                 ct = (json.load(fh) or {}).get("ct") or "application/octet-stream"
-            return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=2592000"})
+            return Response(data, mimetype=ct, headers=_SAFE_MEDIA_HEADERS)
         except Exception:
             pass
     try:
@@ -2245,7 +2245,27 @@ def message_part(mid, section):
             json.dump({"ct": ct}, fh)
     except Exception:
         pass
-    return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=2592000"})
+    return Response(data, mimetype=ct, headers=_SAFE_MEDIA_HEADERS)
+
+
+def _fetch_remote_image(url, verify=True):
+    import urllib.request
+    import ssl
+    ctx = None
+    if not verify:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request(url, headers={"User-Agent": "mail-triage-viewer/1.0"})
+    with urllib.request.urlopen(req, timeout=12, context=ctx) as resp:
+        ct = str(resp.headers.get("Content-Type") or "").split(";")[0].strip()
+        data = resp.read(8 * 1024 * 1024 + 1)
+    return data, ct
+
+
+_SAFE_MEDIA_HEADERS = {"Cache-Control": "public, max-age=2592000",
+                       "X-Content-Type-Options": "nosniff",
+                       "Content-Security-Policy": "default-src 'none'; sandbox"}
 
 
 @app.route("/messages/<int:mid>/img")
@@ -2264,22 +2284,35 @@ def message_img(mid):
                 data = fh.read()
             with open(meta_path) as fh:
                 ct = (json.load(fh) or {}).get("ct") or "application/octet-stream"
-            return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=2592000"})
+            return Response(data, mimetype=ct, headers=_SAFE_MEDIA_HEADERS)
         except Exception:
             pass
+    data, ct = None, ""
     try:
-        import urllib.request
-        req = urllib.request.Request(url, headers={"User-Agent": "mail-triage-viewer/1.0"})
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            ct = str(resp.headers.get("Content-Type") or "").split(";")[0].strip()
-            data = resp.read(8 * 1024 * 1024 + 1)
-        if len(data) > 8 * 1024 * 1024:
-            return ("too large", 502)
+        data, ct = _fetch_remote_image(url, verify=True)
     except Exception as exc:
-        store.log_event("warn", "remote image fetch failed (%s): %r" % (url[:110], exc))
-        return ("fetch failed", 502)
-    if not ct.lower().startswith("image/"):
+        # Some senders' CDNs serve incomplete chains (leaf without intermediate) -
+        # browsers mask this via AIA fetches. Retry once without verification for
+        # the image bytes (sender-controlled media anyway) and log it.
+        if "SSL" in repr(exc) or "CERTIFICATE" in repr(exc):
+            try:
+                data, ct = _fetch_remote_image(url, verify=False)
+                store.log_event("warn", "unverified image fetch (bad chain): %s" % url[:110])
+            except Exception as exc2:
+                store.log_event("warn", "remote image fetch failed (%s): %r" % (url[:110], exc2))
+                return ("fetch failed", 502)
+        else:
+            store.log_event("warn", "remote image fetch failed (%s): %r" % (url[:110], exc))
+            return ("fetch failed", 502)
+    if data is None or len(data) > 8 * 1024 * 1024:
+        return ("too large", 502)
+    sniffed = engine._sniff_image_type(data)
+    if not ct.lower().startswith("image/") and not sniffed:
         return ("not an image", 404)
+    if not ct.lower().startswith("image/"):
+        ct = sniffed
+    if sniffed and ct.lower().startswith("image/") and             sniffed.split("/")[1][:3] not in ct and ct.split("/")[1][:3] not in sniffed:
+        ct = sniffed
     try:
         os.makedirs(cache_dir, exist_ok=True)
         with open(bin_path, "wb") as fh:
@@ -2288,7 +2321,7 @@ def message_img(mid):
             json.dump({"ct": ct}, fh)
     except Exception:
         pass
-    return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=2592000"})
+    return Response(data, mimetype=ct, headers=_SAFE_MEDIA_HEADERS)
 
 
 @app.route("/messages/<int:mid>/classify", methods=["POST"])
