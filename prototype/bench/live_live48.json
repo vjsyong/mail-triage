@@ -1,0 +1,1261 @@
+{
+ "stack": "live/TEI-4B+v2m3",
+ "query_file": "tests/eval_queries.json",
+ "chunks": 5239,
+ "fts": {
+  "metrics": {
+   "R@1": 54.2,
+   "R@5": 58.3,
+   "R@10": 58.3,
+   "MRR": 0.559,
+   "not_found": 20,
+   "ms_mean": 358.2,
+   "ms_p50": 204.0,
+   "ms_p95": 1184.2
+  },
+  "misses": [
+   "the typhoon shuttle bus and staff bus arrangements",
+   "hot and spicy chicken pot promotion",
+   "press release about alumnus Jensen Huang",
+   "protecting personal data privacy notice",
+   "work from home arrangement this afternoon",
+   "electric vehicle charging procedure update",
+   "TSSSU Q&A session registration",
+   "search committee for the dean of the business school",
+   "press release MoU with French companies",
+   "heavy rainstorm signal no 8 alert"
+  ],
+  "rows": [
+   {
+    "q": "the typhoon shuttle bus and staff bus arrangements",
+    "rank": null,
+    "ms": 2834.7,
+    "note": ""
+   },
+   {
+    "q": "where can I get a free reusable glass food container",
+    "rank": 1,
+    "ms": 1184.2,
+    "note": ""
+   },
+   {
+    "q": "HPV vaccination campaign for staff",
+    "rank": 1,
+    "ms": 678.3,
+    "note": ""
+   },
+   {
+    "q": "winter flu shot and influenza awareness",
+    "rank": 1,
+    "ms": 225.1,
+    "note": ""
+   },
+   {
+    "q": "campus cinema movie vote",
+    "rank": 3,
+    "ms": 464.5,
+    "note": ""
+   },
+   {
+    "q": "hot and spicy chicken pot promotion",
+    "rank": null,
+    "ms": 206.5,
+    "note": ""
+   },
+   {
+    "q": "press release about alumnus Jensen Huang",
+    "rank": null,
+    "ms": 662.2,
+    "note": ""
+   },
+   {
+    "q": "library newsletter September 2025",
+    "rank": 1,
+    "ms": 299.1,
+    "note": ""
+   },
+   {
+    "q": "protecting personal data privacy notice",
+    "rank": null,
+    "ms": 436.2,
+    "note": ""
+   },
+   {
+    "q": "work from home arrangement this afternoon",
+    "rank": null,
+    "ms": 527.1,
+    "note": ""
+   },
+   {
+    "q": "warnings about deception scams targeting staff",
+    "rank": 1,
+    "ms": 168.1,
+    "note": ""
+   },
+   {
+    "q": "electric vehicle charging procedure update",
+    "rank": null,
+    "ms": 161.2,
+    "note": ""
+   },
+   {
+    "q": "TSSSU Q&A session registration",
+    "rank": null,
+    "ms": 638.7,
+    "note": ""
+   },
+   {
+    "q": "search committee for the dean of the business school",
+    "rank": null,
+    "ms": 393.8,
+    "note": ""
+   },
+   {
+    "q": "welcome event fire up your year",
+    "rank": 1,
+    "ms": 147.9,
+    "note": ""
+   },
+   {
+    "q": "press release MoU with French companies",
+    "rank": null,
+    "ms": 150.9,
+    "note": ""
+   },
+   {
+    "q": "campus catering services typhoon arrangements",
+    "rank": 1,
+    "ms": 166.0,
+    "note": ""
+   },
+   {
+    "q": "SENG e-In Focus monthly newsletter",
+    "rank": 1,
+    "ms": 513.8,
+    "note": ""
+   },
+   {
+    "q": "Shaw Auditorium fall newsletter",
+    "rank": 2,
+    "ms": 811.6,
+    "note": ""
+   },
+   {
+    "q": "veggie lifestyle menu promotion",
+    "rank": 1,
+    "ms": 100.6,
+    "note": ""
+   },
+   {
+    "q": "AIS new students outstanding registration documents",
+    "rank": 1,
+    "ms": 77.3,
+    "note": ""
+   },
+   {
+    "q": "AI literacy symposium invitation",
+    "rank": 1,
+    "ms": 230.3,
+    "note": ""
+   },
+   {
+    "q": "book talk by professor Philip Chen",
+    "rank": 1,
+    "ms": 1757.3,
+    "note": ""
+   },
+   {
+    "q": "the city that reinvents itself UST boundless",
+    "rank": 1,
+    "ms": 630.3,
+    "note": ""
+   },
+   {
+    "q": "suspicious cloud account login alert",
+    "rank": 1,
+    "ms": 140.9,
+    "note": ""
+   },
+   {
+    "q": "heavy rainstorm signal no 8 alert",
+    "rank": null,
+    "ms": 580.1,
+    "note": ""
+   },
+   {
+    "q": "staff ID and account association reminder",
+    "rank": 1,
+    "ms": 205.7,
+    "note": ""
+   },
+   {
+    "q": "PPOL seminar on human-machine collaboration",
+    "rank": null,
+    "ms": 351.3,
+    "note": ""
+   },
+   {
+    "q": "ice cream giveaway for staff members",
+    "rank": null,
+    "ms": 131.9,
+    "note": ""
+   },
+   {
+    "q": "the IP seminar about robust IP protection",
+    "rank": null,
+    "ms": 204.0,
+    "note": ""
+   },
+   {
+    "q": "TIE interview scheduling for the late January session",
+    "rank": 1,
+    "ms": 44.8,
+    "note": ""
+   },
+   {
+    "q": "trouble accessing the isdtie outlook account incident",
+    "rank": 1,
+    "ms": 91.2,
+    "note": ""
+   },
+   {
+    "q": "reimbursement request and expense claim notifications",
+    "rank": 1,
+    "ms": 107.6,
+    "note": ""
+   },
+   {
+    "q": "problem with the IEDA server of Tristan's group",
+    "rank": 1,
+    "ms": 241.2,
+    "note": ""
+   },
+   {
+    "q": "follow up on the overdue purchase order",
+    "rank": 1,
+    "ms": 19.3,
+    "note": ""
+   },
+   {
+    "q": "update of the TIE website",
+    "rank": 1,
+    "ms": 33.7,
+    "note": ""
+   },
+   {
+    "q": "postgraduate admissions offer list",
+    "rank": null,
+    "ms": 80.2,
+    "note": ""
+   },
+   {
+    "q": "staff wellness day event",
+    "rank": 1,
+    "ms": 131.5,
+    "note": ""
+   },
+   {
+    "q": "walking club event in January",
+    "rank": null,
+    "ms": 254.7,
+    "note": ""
+   },
+   {
+    "q": "invitation to meet the Nobel laureates",
+    "rank": null,
+    "ms": 64.5,
+    "note": ""
+   },
+   {
+    "q": "visit to the DT-hub and AMC",
+    "rank": 1,
+    "ms": 141.1,
+    "note": ""
+   },
+   {
+    "q": "workshop about making assigned readings engaging",
+    "rank": 1,
+    "ms": 195.3,
+    "note": ""
+   },
+   {
+    "q": "seminar on harnessing AI to transform manufacturing",
+    "rank": null,
+    "ms": 269.8,
+    "note": ""
+   },
+   {
+    "q": "grade submission deadline reminder",
+    "rank": 1,
+    "ms": 108.5,
+    "note": ""
+   },
+   {
+    "q": "what happens to buses when a big storm comes",
+    "rank": null,
+    "ms": 91.6,
+    "note": ""
+   },
+   {
+    "q": "locked out of my university email account",
+    "rank": 1,
+    "ms": 166.9,
+    "note": ""
+   },
+   {
+    "q": "getting money back for things I bought for work",
+    "rank": null,
+    "ms": 17.8,
+    "note": ""
+   },
+   {
+    "q": "someone wants to schedule job interviews with candidates",
+    "rank": null,
+    "ms": 54.0,
+    "note": ""
+   }
+  ]
+ },
+ "vector": {
+  "metrics": {
+   "R@1": 56.2,
+   "R@5": 60.4,
+   "R@10": 62.5,
+   "MRR": 0.58,
+   "not_found": 18,
+   "ms_mean": 331.9,
+   "ms_p50": 224.2,
+   "ms_p95": 387.4
+  },
+  "misses": [
+   "the typhoon shuttle bus and staff bus arrangements",
+   "hot and spicy chicken pot promotion",
+   "press release about alumnus Jensen Huang",
+   "protecting personal data privacy notice",
+   "work from home arrangement this afternoon",
+   "electric vehicle charging procedure update",
+   "TSSSU Q&A session registration",
+   "search committee for the dean of the business school",
+   "press release MoU with French companies",
+   "heavy rainstorm signal no 8 alert"
+  ],
+  "rows": [
+   {
+    "q": "the typhoon shuttle bus and staff bus arrangements",
+    "rank": null,
+    "ms": 4869.5,
+    "note": ""
+   },
+   {
+    "q": "where can I get a free reusable glass food container",
+    "rank": 1,
+    "ms": 344.2,
+    "note": ""
+   },
+   {
+    "q": "HPV vaccination campaign for staff",
+    "rank": 1,
+    "ms": 276.0,
+    "note": ""
+   },
+   {
+    "q": "winter flu shot and influenza awareness",
+    "rank": 1,
+    "ms": 214.5,
+    "note": ""
+   },
+   {
+    "q": "campus cinema movie vote",
+    "rank": 1,
+    "ms": 299.8,
+    "note": ""
+   },
+   {
+    "q": "hot and spicy chicken pot promotion",
+    "rank": null,
+    "ms": 237.1,
+    "note": ""
+   },
+   {
+    "q": "press release about alumnus Jensen Huang",
+    "rank": null,
+    "ms": 257.1,
+    "note": ""
+   },
+   {
+    "q": "library newsletter September 2025",
+    "rank": 8,
+    "ms": 182.5,
+    "note": ""
+   },
+   {
+    "q": "protecting personal data privacy notice",
+    "rank": null,
+    "ms": 188.5,
+    "note": ""
+   },
+   {
+    "q": "work from home arrangement this afternoon",
+    "rank": null,
+    "ms": 320.8,
+    "note": ""
+   },
+   {
+    "q": "warnings about deception scams targeting staff",
+    "rank": 1,
+    "ms": 328.7,
+    "note": ""
+   },
+   {
+    "q": "electric vehicle charging procedure update",
+    "rank": null,
+    "ms": 386.5,
+    "note": ""
+   },
+   {
+    "q": "TSSSU Q&A session registration",
+    "rank": null,
+    "ms": 201.2,
+    "note": ""
+   },
+   {
+    "q": "search committee for the dean of the business school",
+    "rank": null,
+    "ms": 186.8,
+    "note": ""
+   },
+   {
+    "q": "welcome event fire up your year",
+    "rank": 1,
+    "ms": 174.1,
+    "note": ""
+   },
+   {
+    "q": "press release MoU with French companies",
+    "rank": null,
+    "ms": 274.6,
+    "note": ""
+   },
+   {
+    "q": "campus catering services typhoon arrangements",
+    "rank": 1,
+    "ms": 173.5,
+    "note": ""
+   },
+   {
+    "q": "SENG e-In Focus monthly newsletter",
+    "rank": 1,
+    "ms": 150.0,
+    "note": ""
+   },
+   {
+    "q": "Shaw Auditorium fall newsletter",
+    "rank": 5,
+    "ms": 245.4,
+    "note": ""
+   },
+   {
+    "q": "veggie lifestyle menu promotion",
+    "rank": 1,
+    "ms": 115.0,
+    "note": ""
+   },
+   {
+    "q": "AIS new students outstanding registration documents",
+    "rank": 1,
+    "ms": 205.3,
+    "note": ""
+   },
+   {
+    "q": "AI literacy symposium invitation",
+    "rank": 1,
+    "ms": 387.4,
+    "note": ""
+   },
+   {
+    "q": "book talk by professor Philip Chen",
+    "rank": 1,
+    "ms": 235.9,
+    "note": ""
+   },
+   {
+    "q": "the city that reinvents itself UST boundless",
+    "rank": 1,
+    "ms": 192.1,
+    "note": ""
+   },
+   {
+    "q": "suspicious cloud account login alert",
+    "rank": 1,
+    "ms": 259.9,
+    "note": ""
+   },
+   {
+    "q": "heavy rainstorm signal no 8 alert",
+    "rank": null,
+    "ms": 260.9,
+    "note": ""
+   },
+   {
+    "q": "staff ID and account association reminder",
+    "rank": 1,
+    "ms": 160.4,
+    "note": ""
+   },
+   {
+    "q": "PPOL seminar on human-machine collaboration",
+    "rank": null,
+    "ms": 393.3,
+    "note": ""
+   },
+   {
+    "q": "ice cream giveaway for staff members",
+    "rank": null,
+    "ms": 175.4,
+    "note": ""
+   },
+   {
+    "q": "the IP seminar about robust IP protection",
+    "rank": null,
+    "ms": 176.5,
+    "note": ""
+   },
+   {
+    "q": "TIE interview scheduling for the late January session",
+    "rank": 1,
+    "ms": 139.2,
+    "note": ""
+   },
+   {
+    "q": "trouble accessing the isdtie outlook account incident",
+    "rank": 1,
+    "ms": 183.6,
+    "note": ""
+   },
+   {
+    "q": "reimbursement request and expense claim notifications",
+    "rank": 1,
+    "ms": 224.2,
+    "note": ""
+   },
+   {
+    "q": "problem with the IEDA server of Tristan's group",
+    "rank": 1,
+    "ms": 278.6,
+    "note": ""
+   },
+   {
+    "q": "follow up on the overdue purchase order",
+    "rank": 1,
+    "ms": 303.7,
+    "note": ""
+   },
+   {
+    "q": "update of the TIE website",
+    "rank": 1,
+    "ms": 313.0,
+    "note": ""
+   },
+   {
+    "q": "postgraduate admissions offer list",
+    "rank": null,
+    "ms": 129.1,
+    "note": ""
+   },
+   {
+    "q": "staff wellness day event",
+    "rank": 1,
+    "ms": 196.0,
+    "note": ""
+   },
+   {
+    "q": "walking club event in January",
+    "rank": null,
+    "ms": 318.9,
+    "note": ""
+   },
+   {
+    "q": "invitation to meet the Nobel laureates",
+    "rank": null,
+    "ms": 299.0,
+    "note": ""
+   },
+   {
+    "q": "visit to the DT-hub and AMC",
+    "rank": 1,
+    "ms": 213.0,
+    "note": ""
+   },
+   {
+    "q": "workshop about making assigned readings engaging",
+    "rank": 1,
+    "ms": 182.6,
+    "note": ""
+   },
+   {
+    "q": "seminar on harnessing AI to transform manufacturing",
+    "rank": null,
+    "ms": 293.2,
+    "note": ""
+   },
+   {
+    "q": "grade submission deadline reminder",
+    "rank": 1,
+    "ms": 319.4,
+    "note": ""
+   },
+   {
+    "q": "what happens to buses when a big storm comes",
+    "rank": null,
+    "ms": 128.0,
+    "note": ""
+   },
+   {
+    "q": "locked out of my university email account",
+    "rank": 1,
+    "ms": 210.4,
+    "note": ""
+   },
+   {
+    "q": "getting money back for things I bought for work",
+    "rank": 1,
+    "ms": 179.2,
+    "note": ""
+   },
+   {
+    "q": "someone wants to schedule job interviews with candidates",
+    "rank": 2,
+    "ms": 147.5,
+    "note": ""
+   }
+  ]
+ },
+ "hybrid": {
+  "metrics": {
+   "R@1": 58.3,
+   "R@5": 60.4,
+   "R@10": 62.5,
+   "MRR": 0.592,
+   "not_found": 18,
+   "ms_mean": 162.6,
+   "ms_p50": 170.0,
+   "ms_p95": 225.5
+  },
+  "misses": [
+   "the typhoon shuttle bus and staff bus arrangements",
+   "hot and spicy chicken pot promotion",
+   "press release about alumnus Jensen Huang",
+   "protecting personal data privacy notice",
+   "work from home arrangement this afternoon",
+   "electric vehicle charging procedure update",
+   "TSSSU Q&A session registration",
+   "search committee for the dean of the business school",
+   "press release MoU with French companies",
+   "heavy rainstorm signal no 8 alert"
+  ],
+  "rows": [
+   {
+    "q": "the typhoon shuttle bus and staff bus arrangements",
+    "rank": null,
+    "ms": 175.2,
+    "note": ""
+   },
+   {
+    "q": "where can I get a free reusable glass food container",
+    "rank": 1,
+    "ms": 182.9,
+    "note": ""
+   },
+   {
+    "q": "HPV vaccination campaign for staff",
+    "rank": 1,
+    "ms": 162.1,
+    "note": ""
+   },
+   {
+    "q": "winter flu shot and influenza awareness",
+    "rank": 1,
+    "ms": 163.1,
+    "note": ""
+   },
+   {
+    "q": "campus cinema movie vote",
+    "rank": 1,
+    "ms": 181.9,
+    "note": ""
+   },
+   {
+    "q": "hot and spicy chicken pot promotion",
+    "rank": null,
+    "ms": 182.1,
+    "note": ""
+   },
+   {
+    "q": "press release about alumnus Jensen Huang",
+    "rank": null,
+    "ms": 231.1,
+    "note": ""
+   },
+   {
+    "q": "library newsletter September 2025",
+    "rank": 1,
+    "ms": 147.2,
+    "note": ""
+   },
+   {
+    "q": "protecting personal data privacy notice",
+    "rank": null,
+    "ms": 122.2,
+    "note": ""
+   },
+   {
+    "q": "work from home arrangement this afternoon",
+    "rank": null,
+    "ms": 170.0,
+    "note": ""
+   },
+   {
+    "q": "warnings about deception scams targeting staff",
+    "rank": 1,
+    "ms": 183.6,
+    "note": ""
+   },
+   {
+    "q": "electric vehicle charging procedure update",
+    "rank": null,
+    "ms": 183.1,
+    "note": ""
+   },
+   {
+    "q": "TSSSU Q&A session registration",
+    "rank": null,
+    "ms": 172.1,
+    "note": ""
+   },
+   {
+    "q": "search committee for the dean of the business school",
+    "rank": null,
+    "ms": 163.3,
+    "note": ""
+   },
+   {
+    "q": "welcome event fire up your year",
+    "rank": 1,
+    "ms": 183.3,
+    "note": ""
+   },
+   {
+    "q": "press release MoU with French companies",
+    "rank": null,
+    "ms": 167.5,
+    "note": ""
+   },
+   {
+    "q": "campus catering services typhoon arrangements",
+    "rank": 1,
+    "ms": 204.6,
+    "note": ""
+   },
+   {
+    "q": "SENG e-In Focus monthly newsletter",
+    "rank": 1,
+    "ms": 225.5,
+    "note": ""
+   },
+   {
+    "q": "Shaw Auditorium fall newsletter",
+    "rank": 1,
+    "ms": 183.4,
+    "note": ""
+   },
+   {
+    "q": "veggie lifestyle menu promotion",
+    "rank": 1,
+    "ms": 126.4,
+    "note": ""
+   },
+   {
+    "q": "AIS new students outstanding registration documents",
+    "rank": 1,
+    "ms": 164.6,
+    "note": ""
+   },
+   {
+    "q": "AI literacy symposium invitation",
+    "rank": 1,
+    "ms": 172.8,
+    "note": ""
+   },
+   {
+    "q": "book talk by professor Philip Chen",
+    "rank": 1,
+    "ms": 193.8,
+    "note": ""
+   },
+   {
+    "q": "the city that reinvents itself UST boundless",
+    "rank": 1,
+    "ms": 190.5,
+    "note": ""
+   },
+   {
+    "q": "suspicious cloud account login alert",
+    "rank": 3,
+    "ms": 155.0,
+    "note": ""
+   },
+   {
+    "q": "heavy rainstorm signal no 8 alert",
+    "rank": null,
+    "ms": 169.2,
+    "note": ""
+   },
+   {
+    "q": "staff ID and account association reminder",
+    "rank": 1,
+    "ms": 174.6,
+    "note": ""
+   },
+   {
+    "q": "PPOL seminar on human-machine collaboration",
+    "rank": null,
+    "ms": 199.2,
+    "note": ""
+   },
+   {
+    "q": "ice cream giveaway for staff members",
+    "rank": null,
+    "ms": 257.7,
+    "note": ""
+   },
+   {
+    "q": "the IP seminar about robust IP protection",
+    "rank": null,
+    "ms": 150.9,
+    "note": ""
+   },
+   {
+    "q": "TIE interview scheduling for the late January session",
+    "rank": 1,
+    "ms": 146.1,
+    "note": ""
+   },
+   {
+    "q": "trouble accessing the isdtie outlook account incident",
+    "rank": 1,
+    "ms": 186.7,
+    "note": ""
+   },
+   {
+    "q": "reimbursement request and expense claim notifications",
+    "rank": 1,
+    "ms": 155.7,
+    "note": ""
+   },
+   {
+    "q": "problem with the IEDA server of Tristan's group",
+    "rank": 1,
+    "ms": 187.0,
+    "note": ""
+   },
+   {
+    "q": "follow up on the overdue purchase order",
+    "rank": 1,
+    "ms": 204.8,
+    "note": ""
+   },
+   {
+    "q": "update of the TIE website",
+    "rank": 1,
+    "ms": 143.8,
+    "note": ""
+   },
+   {
+    "q": "postgraduate admissions offer list",
+    "rank": null,
+    "ms": 86.8,
+    "note": ""
+   },
+   {
+    "q": "staff wellness day event",
+    "rank": 1,
+    "ms": 95.4,
+    "note": ""
+   },
+   {
+    "q": "walking club event in January",
+    "rank": null,
+    "ms": 87.6,
+    "note": ""
+   },
+   {
+    "q": "invitation to meet the Nobel laureates",
+    "rank": null,
+    "ms": 87.3,
+    "note": ""
+   },
+   {
+    "q": "visit to the DT-hub and AMC",
+    "rank": 1,
+    "ms": 102.4,
+    "note": ""
+   },
+   {
+    "q": "workshop about making assigned readings engaging",
+    "rank": 1,
+    "ms": 149.4,
+    "note": ""
+   },
+   {
+    "q": "seminar on harnessing AI to transform manufacturing",
+    "rank": null,
+    "ms": 191.3,
+    "note": ""
+   },
+   {
+    "q": "grade submission deadline reminder",
+    "rank": 1,
+    "ms": 212.8,
+    "note": ""
+   },
+   {
+    "q": "what happens to buses when a big storm comes",
+    "rank": null,
+    "ms": 150.3,
+    "note": ""
+   },
+   {
+    "q": "locked out of my university email account",
+    "rank": 1,
+    "ms": 95.4,
+    "note": ""
+   },
+   {
+    "q": "getting money back for things I bought for work",
+    "rank": 1,
+    "ms": 90.1,
+    "note": ""
+   },
+   {
+    "q": "someone wants to schedule job interviews with candidates",
+    "rank": 10,
+    "ms": 95.0,
+    "note": ""
+   }
+  ]
+ },
+ "hybrid+rerank": {
+  "metrics": {
+   "R@1": 56.2,
+   "R@5": 60.4,
+   "R@10": 62.5,
+   "MRR": 0.582,
+   "not_found": 18,
+   "ms_mean": 355.8,
+   "ms_p50": 356.0,
+   "ms_p95": 422.0
+  },
+  "misses": [
+   "the typhoon shuttle bus and staff bus arrangements",
+   "hot and spicy chicken pot promotion",
+   "press release about alumnus Jensen Huang",
+   "protecting personal data privacy notice",
+   "work from home arrangement this afternoon",
+   "electric vehicle charging procedure update",
+   "TSSSU Q&A session registration",
+   "search committee for the dean of the business school",
+   "press release MoU with French companies",
+   "heavy rainstorm signal no 8 alert"
+  ],
+  "rows": [
+   {
+    "q": "the typhoon shuttle bus and staff bus arrangements",
+    "rank": null,
+    "ms": 442.6,
+    "note": ""
+   },
+   {
+    "q": "where can I get a free reusable glass food container",
+    "rank": 1,
+    "ms": 371.7,
+    "note": ""
+   },
+   {
+    "q": "HPV vaccination campaign for staff",
+    "rank": 1,
+    "ms": 324.0,
+    "note": ""
+   },
+   {
+    "q": "winter flu shot and influenza awareness",
+    "rank": 1,
+    "ms": 365.6,
+    "note": ""
+   },
+   {
+    "q": "campus cinema movie vote",
+    "rank": 1,
+    "ms": 348.3,
+    "note": ""
+   },
+   {
+    "q": "hot and spicy chicken pot promotion",
+    "rank": null,
+    "ms": 504.6,
+    "note": ""
+   },
+   {
+    "q": "press release about alumnus Jensen Huang",
+    "rank": null,
+    "ms": 386.8,
+    "note": ""
+   },
+   {
+    "q": "library newsletter September 2025",
+    "rank": 1,
+    "ms": 340.3,
+    "note": ""
+   },
+   {
+    "q": "protecting personal data privacy notice",
+    "rank": null,
+    "ms": 389.1,
+    "note": ""
+   },
+   {
+    "q": "work from home arrangement this afternoon",
+    "rank": null,
+    "ms": 422.0,
+    "note": ""
+   },
+   {
+    "q": "warnings about deception scams targeting staff",
+    "rank": 1,
+    "ms": 382.3,
+    "note": ""
+   },
+   {
+    "q": "electric vehicle charging procedure update",
+    "rank": null,
+    "ms": 384.3,
+    "note": ""
+   },
+   {
+    "q": "TSSSU Q&A session registration",
+    "rank": null,
+    "ms": 331.6,
+    "note": ""
+   },
+   {
+    "q": "search committee for the dean of the business school",
+    "rank": null,
+    "ms": 291.1,
+    "note": ""
+   },
+   {
+    "q": "welcome event fire up your year",
+    "rank": 1,
+    "ms": 319.3,
+    "note": ""
+   },
+   {
+    "q": "press release MoU with French companies",
+    "rank": null,
+    "ms": 310.1,
+    "note": ""
+   },
+   {
+    "q": "campus catering services typhoon arrangements",
+    "rank": 1,
+    "ms": 366.6,
+    "note": ""
+   },
+   {
+    "q": "SENG e-In Focus monthly newsletter",
+    "rank": 1,
+    "ms": 317.6,
+    "note": ""
+   },
+   {
+    "q": "Shaw Auditorium fall newsletter",
+    "rank": 1,
+    "ms": 295.1,
+    "note": ""
+   },
+   {
+    "q": "veggie lifestyle menu promotion",
+    "rank": 1,
+    "ms": 295.5,
+    "note": ""
+   },
+   {
+    "q": "AIS new students outstanding registration documents",
+    "rank": 1,
+    "ms": 352.7,
+    "note": ""
+   },
+   {
+    "q": "AI literacy symposium invitation",
+    "rank": 1,
+    "ms": 374.6,
+    "note": ""
+   },
+   {
+    "q": "book talk by professor Philip Chen",
+    "rank": 1,
+    "ms": 330.8,
+    "note": ""
+   },
+   {
+    "q": "the city that reinvents itself UST boundless",
+    "rank": 1,
+    "ms": 354.7,
+    "note": ""
+   },
+   {
+    "q": "suspicious cloud account login alert",
+    "rank": 1,
+    "ms": 305.1,
+    "note": ""
+   },
+   {
+    "q": "heavy rainstorm signal no 8 alert",
+    "rank": null,
+    "ms": 387.0,
+    "note": ""
+   },
+   {
+    "q": "staff ID and account association reminder",
+    "rank": 1,
+    "ms": 315.9,
+    "note": ""
+   },
+   {
+    "q": "PPOL seminar on human-machine collaboration",
+    "rank": null,
+    "ms": 338.9,
+    "note": ""
+   },
+   {
+    "q": "ice cream giveaway for staff members",
+    "rank": null,
+    "ms": 361.6,
+    "note": ""
+   },
+   {
+    "q": "the IP seminar about robust IP protection",
+    "rank": null,
+    "ms": 382.2,
+    "note": ""
+   },
+   {
+    "q": "TIE interview scheduling for the late January session",
+    "rank": 1,
+    "ms": 356.0,
+    "note": ""
+   },
+   {
+    "q": "trouble accessing the isdtie outlook account incident",
+    "rank": 1,
+    "ms": 382.6,
+    "note": ""
+   },
+   {
+    "q": "reimbursement request and expense claim notifications",
+    "rank": 1,
+    "ms": 369.3,
+    "note": ""
+   },
+   {
+    "q": "problem with the IEDA server of Tristan's group",
+    "rank": 1,
+    "ms": 365.9,
+    "note": ""
+   },
+   {
+    "q": "follow up on the overdue purchase order",
+    "rank": 1,
+    "ms": 405.3,
+    "note": ""
+   },
+   {
+    "q": "update of the TIE website",
+    "rank": 3,
+    "ms": 364.3,
+    "note": ""
+   },
+   {
+    "q": "postgraduate admissions offer list",
+    "rank": null,
+    "ms": 342.1,
+    "note": ""
+   },
+   {
+    "q": "staff wellness day event",
+    "rank": 1,
+    "ms": 345.6,
+    "note": ""
+   },
+   {
+    "q": "walking club event in January",
+    "rank": null,
+    "ms": 326.7,
+    "note": ""
+   },
+   {
+    "q": "invitation to meet the Nobel laureates",
+    "rank": null,
+    "ms": 377.2,
+    "note": ""
+   },
+   {
+    "q": "visit to the DT-hub and AMC",
+    "rank": 1,
+    "ms": 367.7,
+    "note": ""
+   },
+   {
+    "q": "workshop about making assigned readings engaging",
+    "rank": 1,
+    "ms": 326.9,
+    "note": ""
+   },
+   {
+    "q": "seminar on harnessing AI to transform manufacturing",
+    "rank": null,
+    "ms": 336.1,
+    "note": ""
+   },
+   {
+    "q": "grade submission deadline reminder",
+    "rank": 1,
+    "ms": 315.1,
+    "note": ""
+   },
+   {
+    "q": "what happens to buses when a big storm comes",
+    "rank": null,
+    "ms": 415.0,
+    "note": ""
+   },
+   {
+    "q": "locked out of my university email account",
+    "rank": 2,
+    "ms": 295.7,
+    "note": ""
+   },
+   {
+    "q": "getting money back for things I bought for work",
+    "rank": 1,
+    "ms": 403.5,
+    "note": ""
+   },
+   {
+    "q": "someone wants to schedule job interviews with candidates",
+    "rank": 8,
+    "ms": 293.3,
+    "note": ""
+   }
+  ]
+ }
+}

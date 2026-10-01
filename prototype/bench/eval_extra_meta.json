@@ -1,0 +1,12 @@
+{
+ "counts": {
+  "identifier": 6,
+  "sender": 6,
+  "date": 5,
+  "subject": 6,
+  "thread": 6,
+  "mixed": 5
+ },
+ "total": 34,
+ "note": "constructed locally from the user's mailbox; do not publish"
+}

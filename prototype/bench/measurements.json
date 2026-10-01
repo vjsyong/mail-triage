@@ -1,0 +1,53 @@
+{
+ "storage_bytes": {
+  "messages_light_text_bytes": 14074331,
+  "chunks_raw_text_bytes": 7824779,
+  "chunks_clean_text_bytes": 6835578,
+  "vec_raw_06b_bytes": 23597056,
+  "vec_clean_06b_bytes": 21442560,
+  "vec_raw_4b_bytes": 58992640
+ },
+ "storage_mb": {
+  "messages_light_text_bytes": 14.1,
+  "chunks_raw_text_bytes": 7.8,
+  "chunks_clean_text_bytes": 6.8,
+  "vec_raw_06b_bytes": 23.6,
+  "vec_clean_06b_bytes": 21.4,
+  "vec_raw_4b_bytes": 59.0
+ },
+ "db_file_mb": 178.5,
+ "fastembed_load_s": 3.6,
+ "rss_after_load_mb": 1894.3,
+ "cpu_index_chunks_per_s": 0.47,
+ "cpu_index_seconds_per_email": 5.54,
+ "rss_after_embed_mb": 12979.2,
+ "cpu_query_embed_ms_median": 79.0,
+ "rerankers": {
+  "Xenova/ms-marco-MiniLM-L-6-v2": {
+   "load_s": 0.3,
+   "ms_20_passages": 160.2,
+   "ms_per_pair": 8.0
+  },
+  "Xenova/ms-marco-MiniLM-L-12-v2": {
+   "load_s": 0.4,
+   "ms_20_passages": 274.3,
+   "ms_per_pair": 13.7
+  },
+  "BAAI/bge-reranker-base": {
+   "load_s": 4.3,
+   "ms_20_passages": 777.9,
+   "ms_per_pair": 38.9
+  },
+  "jinaai/jina-reranker-v1-turbo-en": {
+   "load_s": 0.4,
+   "ms_20_passages": 199.9,
+   "ms_per_pair": 10.0
+  },
+  "v2m3-TEI-GPU": {
+   "ms_20_passages": 63.2
+  }
+ },
+ "tei_4b_ms_batch8": 31.2,
+ "tei_06b_ms_batch8": 22.3,
+ "peak_rss_mb": 716.2
+}

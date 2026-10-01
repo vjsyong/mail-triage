@@ -5,3 +5,4 @@ prototype/model_cache/
 prototype/tei_cache/
 prototype/data/
 prototype/bench/*.log
+prototype/bench/eval_extra.json

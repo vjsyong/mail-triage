@@ -1,0 +1,2404 @@
+{
+ "results": {
+  "FTS-raw": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "raw",
+    "embed": "06b",
+    "rerank": null,
+    "channels": [
+     "fts"
+    ]
+   },
+   "metrics": {
+    "R@1": 73.5,
+    "R@5": 94.1,
+    "R@10": 97.1,
+    "MRR": 0.811,
+    "not_found": 1,
+    "ms_mean": 21.8,
+    "ms_p50": 16.7,
+    "ms_p95": 42.7,
+    "total_s": 0.7
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 160.0
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 1,
+     "ms": 24.3
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 1,
+     "ms": 23.3
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 22.4
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 1,
+     "ms": 22.9
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 1,
+     "ms": 21.3
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 14.7
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 13.9
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 16.7
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 16.6
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 15.9
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 15.5
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 6,
+     "ms": 22.1
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 4,
+     "ms": 14.2
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 5,
+     "ms": 13.3
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 2,
+     "ms": 13.0
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 2,
+     "ms": 15.1
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 18.5
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 15.1
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 19.2
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 12.9
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 11.2
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 19.4
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 4,
+     "ms": 24.8
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 5,
+     "ms": 25.4
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 42.7
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 2,
+     "ms": 25.4
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 25.3
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 18.8
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 7.0
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 7.6
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 6.9
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 8.1
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 6.3
+    }
+   ]
+  },
+  "VEC-raw-06b": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "raw",
+    "embed": "06b",
+    "rerank": null,
+    "channels": [
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 61.8,
+    "R@5": 64.7,
+    "R@10": 67.6,
+    "MRR": 0.636,
+    "not_found": 11,
+    "ms_mean": 299.9,
+    "ms_p50": 176.7,
+    "ms_p95": 193.4,
+    "total_s": 10.2
+   },
+   "misses": [
+    "find the email that mentions ID 7000127615",
+    "find the email that mentions ID 7000130900",
+    "find the email that mentions DPO 100327308",
+    "find the email that mentions ID 1003035989",
+    "emails from 18678871056@163.com",
+    "emails from angelachu@ust.hk",
+    "what came in about initial last month",
+    "what came in about setting last month",
+    "what was discussed in the thread about room rates for activity hosted by isd",
+    "what did dyuak@connect.ust.hk send me about sincere"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 4407.6
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": null,
+     "ms": 184.5
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": null,
+     "ms": 182.2
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 182.4
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": null,
+     "ms": 188.8
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": null,
+     "ms": 188.6
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 188.9
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": null,
+     "ms": 188.4
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 163.9
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 163.7
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 169.4
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": null,
+     "ms": 162.5
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": null,
+     "ms": 160.1
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": null,
+     "ms": 163.1
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 9,
+     "ms": 166.4
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 160.0
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 1,
+     "ms": 161.1
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 189.7
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 166.9
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 160.1
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 161.6
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 189.6
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 167.4
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 171.9
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 171.6
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 183.5
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 166.1
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 2,
+     "ms": 193.4
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 185.1
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 178.7
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": null,
+     "ms": 176.7
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 185.0
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": null,
+     "ms": 190.5
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 176.7
+    }
+   ]
+  },
+  "A-4b-v2m3": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "raw",
+    "embed": "4b",
+    "rerank": "v2m3",
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 91.2,
+    "R@5": 97.1,
+    "R@10": 97.1,
+    "MRR": 0.941,
+    "not_found": 1,
+    "ms_mean": 172.9,
+    "ms_p50": 190.9,
+    "ms_p95": 247.9,
+    "total_s": 5.9
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 251.4
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 1,
+     "ms": 190.9
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 1,
+     "ms": 192.4
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 247.9
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 1,
+     "ms": 210.6
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 2,
+     "ms": 216.8
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 108.8
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 108.6
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 120.3
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 103.8
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 122.1
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 107.1
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 1,
+     "ms": 197.8
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 2,
+     "ms": 219.4
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 1,
+     "ms": 203.4
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 247.3
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 1,
+     "ms": 218.2
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 173.0
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 192.0
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 177.1
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 171.3
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 213.2
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 176.1
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 166.2
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 174.3
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 218.4
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 229.0
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 210.5
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 191.0
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 102.1
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 100.4
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 102.7
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 100.7
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 113.5
+    }
+   ]
+  },
+  "A-4b-nor": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "raw",
+    "embed": "4b",
+    "rerank": null,
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 85.3,
+    "R@5": 91.2,
+    "R@10": 91.2,
+    "MRR": 0.874,
+    "not_found": 3,
+    "ms_mean": 100.2,
+    "ms_p50": 100.7,
+    "ms_p95": 112.3,
+    "total_s": 3.4
+   },
+   "misses": [
+    "find the email that mentions DPO 100327308",
+    "what came in about initial last month",
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 100.8
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 1,
+     "ms": 103.1
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 1,
+     "ms": 105.5
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 104.7
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": null,
+     "ms": 101.0
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 5,
+     "ms": 98.5
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 100.7
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 96.3
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 96.5
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 100.7
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 96.2
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 96.2
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": null,
+     "ms": 102.1
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 1,
+     "ms": 97.6
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 1,
+     "ms": 102.2
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 97.3
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 1,
+     "ms": 102.4
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 99.8
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 94.7
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 103.4
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 95.2
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 92.7
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 97.6
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 106.2
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 2,
+     "ms": 112.3
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 115.0
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 101.0
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 106.5
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 106.6
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 90.8
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 90.7
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 98.3
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 93.4
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 101.2
+    }
+   ]
+  },
+  "B-06b-v2m3": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "raw",
+    "embed": "06b",
+    "rerank": "v2m3",
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 91.2,
+    "R@5": 97.1,
+    "R@10": 97.1,
+    "MRR": 0.934,
+    "not_found": 1,
+    "ms_mean": 274.9,
+    "ms_p50": 285.7,
+    "ms_p95": 363.7,
+    "total_s": 9.3
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 312.1
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 1,
+     "ms": 330.6
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 1,
+     "ms": 286.0
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 382.6
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 1,
+     "ms": 304.7
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 2,
+     "ms": 337.2
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 222.5
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 243.7
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 196.7
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 182.0
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 198.1
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 194.8
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 1,
+     "ms": 308.8
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 1,
+     "ms": 312.7
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 1,
+     "ms": 308.3
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 344.6
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 4,
+     "ms": 282.4
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 280.1
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 299.1
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 264.1
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 251.6
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 363.7
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 285.7
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 273.5
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 272.3
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 330.6
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 346.7
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 331.7
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 287.1
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 194.0
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 205.6
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 199.7
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 208.6
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 205.8
+    }
+   ]
+  },
+  "D-06b-nor": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "clean",
+    "embed": "06b",
+    "rerank": null,
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 79.4,
+    "R@5": 88.2,
+    "R@10": 94.1,
+    "MRR": 0.826,
+    "not_found": 2,
+    "ms_mean": 199.9,
+    "ms_p50": 204.6,
+    "ms_p95": 227.9,
+    "total_s": 6.8
+   },
+   "misses": [
+    "find the email that mentions DPO 100327308",
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 206.2
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 4,
+     "ms": 209.8
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 6,
+     "ms": 217.2
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 207.9
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": null,
+     "ms": 216.8
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 3,
+     "ms": 227.9
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 209.4
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 205.9
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 180.1
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 172.9
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 175.2
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 184.9
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 4,
+     "ms": 173.8
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 10,
+     "ms": 181.6
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 1,
+     "ms": 189.1
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 180.4
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 1,
+     "ms": 187.1
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 214.0
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 192.1
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 187.5
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 177.6
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 210.1
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 202.2
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 204.6
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 200.5
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 226.0
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 205.4
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 237.9
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 210.1
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 206.7
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 203.5
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 190.5
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 209.0
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 192.6
+    }
+   ]
+  },
+  "C-06b-minilm": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "clean",
+    "embed": "06b",
+    "rerank": "minilm",
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 76.5,
+    "R@5": 91.2,
+    "R@10": 97.1,
+    "MRR": 0.842,
+    "not_found": 1,
+    "ms_mean": 791.8,
+    "ms_p50": 1056.0,
+    "ms_p95": 1187.5,
+    "total_s": 26.9
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 1502.9
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 2,
+     "ms": 1151.7
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 1,
+     "ms": 1080.6
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 1056.0
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 7,
+     "ms": 1095.2
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 7,
+     "ms": 1125.2
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 206.2
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 256.5
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 222.6
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 197.0
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 259.3
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 216.0
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 3,
+     "ms": 1090.3
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 2,
+     "ms": 1084.1
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 1,
+     "ms": 1066.2
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 1044.6
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 2,
+     "ms": 1089.2
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 931.5
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 1187.5
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 1131.8
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 1123.2
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 1099.4
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 1101.4
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 352.0
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 914.1
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 1020.3
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 1158.2
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 2,
+     "ms": 878.3
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 1104.4
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 232.3
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 224.6
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 233.8
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 256.2
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 230.0
+    }
+   ]
+  },
+  "C-06b-minilm12": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "clean",
+    "embed": "06b",
+    "rerank": "minilm12",
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 76.5,
+    "R@5": 97.1,
+    "R@10": 97.1,
+    "MRR": 0.846,
+    "not_found": 1,
+    "ms_mean": 1419.0,
+    "ms_p50": 1977.4,
+    "ms_p95": 2310.9,
+    "total_s": 48.2
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 2626.0
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 2,
+     "ms": 2189.7
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 2,
+     "ms": 2237.9
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 2240.0
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 4,
+     "ms": 2310.9
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 3,
+     "ms": 2119.3
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 243.5
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 321.9
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 273.9
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 205.8
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 352.6
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 262.7
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 1,
+     "ms": 2087.9
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 2,
+     "ms": 2112.7
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 3,
+     "ms": 2063.4
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 1923.9
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 3,
+     "ms": 1977.4
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 1666.8
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 1992.7
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 2093.9
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 2071.8
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 2170.1
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 2068.4
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 504.5
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 1653.6
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 1747.8
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 1987.9
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 1471.0
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 2012.1
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 272.6
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 231.3
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 233.9
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 270.2
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 249.1
+    }
+   ]
+  },
+  "C-06b-bge-base": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "clean",
+    "embed": "06b",
+    "rerank": "bge-base",
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 82.4,
+    "R@5": 94.1,
+    "R@10": 97.1,
+    "MRR": 0.877,
+    "not_found": 1,
+    "ms_mean": 3127.1,
+    "ms_p50": 4409.6,
+    "ms_p95": 4900.4,
+    "total_s": 106.3
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 8757.8
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 1,
+     "ms": 4900.4
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 1,
+     "ms": 4722.1
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 4602.0
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 1,
+     "ms": 4520.0
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 2,
+     "ms": 4755.0
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 253.2
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 486.1
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 423.5
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 273.7
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 581.8
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 384.3
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 1,
+     "ms": 4664.9
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 3,
+     "ms": 4728.9
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 3,
+     "ms": 4492.9
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 4390.4
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 6,
+     "ms": 4510.2
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 2457.7
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 4630.6
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 4563.1
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 4513.9
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 4599.1
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 2,
+     "ms": 4409.6
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 1002.3
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 3996.9
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 4159.6
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 4534.6
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 3706.0
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 4648.2
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 377.8
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 300.4
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 289.2
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 362.1
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 324.7
+    }
+   ]
+  },
+  "C-06b-jina-turbo": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "clean",
+    "embed": "06b",
+    "rerank": "jina-turbo",
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 82.4,
+    "R@5": 94.1,
+    "R@10": 97.1,
+    "MRR": 0.876,
+    "not_found": 1,
+    "ms_mean": 1099.2,
+    "ms_p50": 1551.8,
+    "ms_p95": 1713.9,
+    "total_s": 37.4
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 2069.6
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 2,
+     "ms": 1671.9
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 2,
+     "ms": 1562.3
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 1696.9
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 1,
+     "ms": 1469.4
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 8,
+     "ms": 1566.2
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 198.3
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 259.8
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 222.5
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 178.2
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 299.3
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 234.9
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 1,
+     "ms": 1570.3
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 3,
+     "ms": 1694.0
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 3,
+     "ms": 1644.4
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 1696.6
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 1,
+     "ms": 1713.9
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 878.5
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 1655.4
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 1612.2
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 1551.8
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 1614.1
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 1605.8
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 414.5
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 1236.9
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 1357.5
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 1661.7
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 1160.1
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 1645.7
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 235.2
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 233.2
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 268.0
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 267.0
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 225.6
+    }
+   ]
+  },
+  "C-06b-v2m3": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "clean",
+    "embed": "06b",
+    "rerank": "v2m3",
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 88.2,
+    "R@5": 97.1,
+    "R@10": 97.1,
+    "MRR": 0.919,
+    "not_found": 1,
+    "ms_mean": 266.0,
+    "ms_p50": 274.2,
+    "ms_p95": 342.2,
+    "total_s": 9.0
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 317.8
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 1,
+     "ms": 322.2
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 1,
+     "ms": 292.5
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 379.1
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 1,
+     "ms": 281.1
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 2,
+     "ms": 301.6
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 209.8
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 215.5
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 194.7
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 190.3
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 200.3
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 194.7
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 1,
+     "ms": 324.1
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 2,
+     "ms": 327.3
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 1,
+     "ms": 316.9
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 330.4
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 4,
+     "ms": 277.9
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 276.3
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 274.2
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 259.6
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 252.1
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 342.2
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 273.8
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 297.6
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 241.2
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 298.8
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 266.6
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 303.6
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 272.8
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 202.2
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 216.0
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 183.4
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 196.3
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 211.0
+    }
+   ]
+  },
+  "C-4b-v2m3": {
+   "query_file": "prototype/bench/eval_extra.json",
+   "config": {
+    "cset": "clean",
+    "embed": "4b",
+    "rerank": "v2m3",
+    "channels": [
+     "fts",
+     "vec"
+    ]
+   },
+   "metrics": {
+    "R@1": 91.2,
+    "R@5": 97.1,
+    "R@10": 97.1,
+    "MRR": 0.941,
+    "not_found": 1,
+    "ms_mean": 98.1,
+    "ms_p50": 119.2,
+    "ms_p95": 142.0,
+    "total_s": 3.3
+   },
+   "misses": [
+    "what was discussed in the thread about room rates for activity hosted by isd"
+   ],
+   "rows": [
+    {
+     "q": "find the email that mentions VID 1003034997",
+     "rank": 1,
+     "ms": 132.0
+    },
+    {
+     "q": "find the email that mentions ID 7000127615",
+     "rank": 1,
+     "ms": 139.5
+    },
+    {
+     "q": "find the email that mentions ID 7000130900",
+     "rank": 1,
+     "ms": 135.8
+    },
+    {
+     "q": "find the email that mentions RFT2026060080",
+     "rank": 1,
+     "ms": 113.3
+    },
+    {
+     "q": "find the email that mentions DPO 100327308",
+     "rank": 1,
+     "ms": 137.2
+    },
+    {
+     "q": "find the email that mentions ID 1003035989",
+     "rank": 2,
+     "ms": 162.3
+    },
+    {
+     "q": "emails from 13030110024@qq.com",
+     "rank": 1,
+     "ms": 41.6
+    },
+    {
+     "q": "emails from 18678871056@163.com",
+     "rank": 1,
+     "ms": 43.8
+    },
+    {
+     "q": "emails from aareport@ust.hk",
+     "rank": 1,
+     "ms": 48.5
+    },
+    {
+     "q": "emails from aispr@ust.hk",
+     "rank": 1,
+     "ms": 36.7
+    },
+    {
+     "q": "emails from alerts@springernature.com",
+     "rank": 1,
+     "ms": 47.5
+    },
+    {
+     "q": "emails from angelachu@ust.hk",
+     "rank": 1,
+     "ms": 39.2
+    },
+    {
+     "q": "what came in about initial last month",
+     "rank": 1,
+     "ms": 131.4
+    },
+    {
+     "q": "what came in about setting last month",
+     "rank": 2,
+     "ms": 132.1
+    },
+    {
+     "q": "what came in about recorded last month",
+     "rank": 1,
+     "ms": 132.4
+    },
+    {
+     "q": "what came in about babylon last month",
+     "rank": 1,
+     "ms": 130.2
+    },
+    {
+     "q": "what came in about grading last month",
+     "rank": 1,
+     "ms": 126.0
+    },
+    {
+     "q": "email titled \u201cuniveggie & this this rice weekly menu: 28 s\u201d",
+     "rank": 1,
+     "ms": 113.3
+    },
+    {
+     "q": "email titled \u201coutstanding program registration documents (\u201d",
+     "rank": 1,
+     "ms": 142.0
+    },
+    {
+     "q": "email titled \u201clibrary hours for national day\u201d",
+     "rank": 1,
+     "ms": 121.6
+    },
+    {
+     "q": "email titled \u201crecent canvas notifications\u201d",
+     "rank": 1,
+     "ms": 101.7
+    },
+    {
+     "q": "email titled \u201csurvey digest - hmaw1905 - gba experience fi\u201d",
+     "rank": 1,
+     "ms": 119.4
+    },
+    {
+     "q": "email titled \u201cpresentation slides for tomorrow: group 2\u201d",
+     "rank": 1,
+     "ms": 103.3
+    },
+    {
+     "q": "what was discussed in the thread about hkust daily event alert",
+     "rank": 1,
+     "ms": 127.8
+    },
+    {
+     "q": "what was discussed in the thread about hkust weekly event summary",
+     "rank": 1,
+     "ms": 87.4
+    },
+    {
+     "q": "what was discussed in the thread about invitation to interview for the hkust mphil in tie programme",
+     "rank": 1,
+     "ms": 138.1
+    },
+    {
+     "q": "what was discussed in the thread about request for quotation",
+     "rank": 1,
+     "ms": 113.4
+    },
+    {
+     "q": "what was discussed in the thread about follow up overdue po d100305765 (isd)",
+     "rank": 1,
+     "ms": 125.0
+    },
+    {
+     "q": "what was discussed in the thread about room rates for activity hosted by isd",
+     "rank": null,
+     "ms": 119.2
+    },
+    {
+     "q": "what did citiprogram@ust.hk send me about requirement",
+     "rank": 1,
+     "ms": 40.0
+    },
+    {
+     "q": "what did dyuak@connect.ust.hk send me about sincere",
+     "rank": 1,
+     "ms": 47.4
+    },
+    {
+     "q": "what did equotation@ust.hk send me about requestor",
+     "rank": 1,
+     "ms": 32.9
+    },
+    {
+     "q": "what did hk_htl_noreply@trip.com send me about noreply",
+     "rank": 1,
+     "ms": 35.6
+    },
+    {
+     "q": "what did john@johnayliff.com send me about seedship",
+     "rank": 1,
+     "ms": 36.5
+    }
+   ]
+  }
+ },
+ "index": {
+  "clean": {
+   "chunks": 5235,
+   "messages": 3560
+  },
+  "raw": {
+   "chunks": 5761,
+   "messages": 3560
+  },
+  "messages_light": 3560,
+  "vec_raw_06b": 5761,
+  "vec_clean_06b": 5235,
+  "vec_raw_4b": 5761
+ }
+}
