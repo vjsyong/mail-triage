@@ -2907,6 +2907,13 @@ def main():
           bool(rtdecs) and rtdecs[0]["source_type"] == "router"
           and rtdecs[0]["predicted_value"] == chr(34) + "llm" + chr(34))
     check("predictions never mint labels", store.count_labels(source="llm_annotation") == 0)
+    rv = client.get("/messages/%d" % ar["id"])
+    check("viewer decision trace renders (card + provenance)",
+          b"Machine decisions" in rv.data and b"needs_reply_logreg@" in rv.data
+          and b"route_v1" in rv.data and b"shadow" in rv.data)
+    check("viewer decision trace explains the rows",
+          (b"needs a reply" in rv.data or b"no reply needed" in rv.data)
+          and b"would route:" in rv.data)
 
     rep = learning_mod.status_report()
     live = learning_mod.specialist_live_stats(spec_res["name"])

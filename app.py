@@ -4063,6 +4063,21 @@ MESSAGE_TMPL = """
       </div>
       {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>{% endfor %}
     </div>
+    {% if m.decisions %}
+    <div class="card" id="decisions">
+      <div class="card-h"><h3>Machine decisions</h3><span class="sub">learning loop · shadow rows never change behavior</span></div>
+      {% for d in m.decisions %}
+      <div class="arow2">
+        <span class="mono atime">{{ d.when }}</span>
+        <span class="badge {{ {'specialist':'acc','heuristic':'ok'}.get(d.source_type,'') }}">{{ d.source_type }}</span>
+        <div class="adetail">
+          <b>{{ d.task }}</b> — {{ d.value }}{% if d.confidence %} <span class="sub">{{ '%.2f' % d.confidence }}</span>{% endif %}{% if d.shadow %} <span class="badge">shadow</span>{% endif %} <span class="sub">· {{ d.source_id }}</span>
+          {% if d.evidence %}<div class="sub">evidence: {% for e in d.evidence %}{{ e.feature_name }} {{ '%+.2f' % (e.contribution or 0) }}{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 </div>
 """
@@ -4276,6 +4291,34 @@ def _email_body_html(m, show_images):
     return html, has_remote
 
 
+def _message_decisions(mid, limit=14):
+    """Learning-loop decision rows for one message: specialist (shadow), the
+    system's own verdict, and the router intent - with evidence contributions."""
+    out = []
+    if not mid:
+        return out
+    try:
+        rows = store.list_decisions(msg_id=mid, limit=limit)
+    except Exception:
+        return out
+    for d in rows:
+        try:
+            val = json.loads(d["predicted_value"])
+        except (TypeError, ValueError):
+            val = d["predicted_value"]
+        if d["task"] == "needs_reply" and isinstance(val, bool):
+            val_h = "needs a reply" if val else "no reply needed"
+        elif d["task"] == "route":
+            val_h = "would route: %s" % val
+        else:
+            val_h = str(val)
+        ev = store.decision_evidence(d["id"], limit=4) if d["source_type"] == "specialist" else []
+        out.append({"when": fmt_ts(d["ts"]), "task": d["task"], "source_type": d["source_type"],
+                    "source_id": d["source_id"], "value": val_h, "confidence": d["confidence"],
+                    "shadow": bool(d["shadow"]), "evidence": ev})
+    return out
+
+
 def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0,
                     show_images=False, plain=False, filt="all", prev_id=None, next_id=None):
     if "body" not in m:
@@ -4287,6 +4330,8 @@ def _render_message(m, classify_result=None, draft=None, draft_error=None, draft
         m["body_text_html"] = message_body_html(m["body"])
     if "date_disp" not in m:
         m["date_disp"] = _display_date(m.get("date"))
+    if "decisions" not in m:
+        m["decisions"] = _message_decisions(m.get("id"))
     m["email_html"] = ""
     has_remote = False
     if not plain and (m.get("body_html") or "").strip():
