@@ -127,3 +127,22 @@ Page-by-page sweep of the pages that had only one pass:
 - Templates editor: Template card + Body card with placeholder legend.
 - Log: level filter chips (All/Errors/Warnings/Info) with counts, debug toggle preserved;
   proxy log n-buttons get proper active states.
+
+## Fourth pass: dashboard (2026-10, same day)
+
+Research round (Domo dashboard guide; Improvado guide; ClearPoint KPI rules; NN/g
+"Dashboards: making charts easier to understand"):
+- This is an OPERATIONAL dashboard: big status indicators, minimal clutter, current
+  state first ("is anything broken?"), not analysis.
+- Five-second rule; F-pattern (most critical top-left); inverted pyramid.
+- 5-9 metrics max, each with context (share of total, severity), never isolated numbers.
+- Visual hierarchy by size/weight, not equal-weight tiles; primary element 2-3x larger.
+- Colour = status only (green/amber/red), neutral grey elsewhere; alerts/exception-first.
+- Avoid the "democratic layout" (six identical black tiles) and page duplication.
+
+Rebuild: (1) system strip - Triage / Proxy / Index / LLM each with a status dot and
+live detail, error lines with actions fold in (parked -> Retry, queue -> View);
+(2) metrics card replacing the black tiles - "need a reply" as the oversized primary
+number linking to its filter, parked errors red when >0, each metric carrying context
+(% of seen, queue length), runtime one-liner at the bottom; (3) grid: recent mail (10)
+left, search index + terminal-style activity feed (scrollable) right.

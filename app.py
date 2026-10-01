@@ -639,18 +639,33 @@ def _header_info():
 
 
 # ---------------------------------------------------------------- dashboard
-
 DASH_TMPL = """
 <style>
+.sys{display:flex;flex-wrap:wrap;gap:12px 30px;align-items:flex-start}
+.sysitem{display:flex;gap:8px;align-items:flex-start;min-width:190px}
+.sysitem .dot{margin-top:6px}
+.sysitem b{display:block;font-size:.84rem;font-weight:600}
+.sysitem .sub{font-size:.78rem;line-height:1.4}
+.sysitem .syserr{color:var(--err);word-break:break-word}
+.sysline{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+.metrics{display:flex;flex-wrap:wrap}
+.metric{padding:4px 24px;border-left:1px solid var(--line);min-width:150px;flex:1 1 auto}
+.metric:first-child{border-left:0;padding-left:0}
+.metric b{display:block;font-size:1.4rem;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.metric.primary b{font-size:1.85rem}
+.metric .lbl{display:block;font-size:.76rem;color:var(--dim);margin-top:2px}
+.metric .ctx{display:block;font-size:.72rem;color:var(--dim);opacity:.8;margin-top:1px}
+.metric.hot b{color:var(--err)} .metric.warm b{color:var(--warn)} .metric.calm b{color:var(--ok)}
+.metric a{font-weight:700}
 .dashgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
 @media(max-width:1023px){.dashgrid{grid-template-columns:1fr}}
 .dashgrid .card{margin:0}
-.dashgrid .badge{margin-left:0}
+@media(max-width:767px){.metric{min-width:calc(50% - 24px);padding:6px 16px}}
 </style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Dashboard</h1>
-    <div class="page-desc">Mailbox health, sorting activity and what arrived recently.</div>
+    <div class="page-desc">System status, workload and what arrived recently.</div>
   </div>
   <div class="row">
     <form class="inline" method="post" action="{{ url_for('check_now') }}"><button class="btn primary" type="submit" {{ 'disabled' if worker_state.running else '' }}>Check now</button></form>
@@ -659,46 +674,129 @@ DASH_TMPL = """
 </div>
 
 <div class="card">
-  <div class="row" style="gap:10px">
-    {% if worker_state.running %}<span class="badge acc">checking now</span>
-    {% elif worker_state.last_error %}<span class="badge err">last check failed</span>
-    {% elif worker_state.last_ok %}<span class="badge ok">connected</span>
-    {% else %}<span class="badge warn">starting up</span>{% endif %}
-    <span class="sub">last check {{ worker_state.last_ok_r }} · next in ~{{ worker_state.next_in }}s · every {{ worker_state.interval }}s</span>
+  <div class="sys">
+    <div class="sysitem">
+      <span class="dot {{ 'err' if worker_state.last_error else ('acc' if worker_state.running else 'ok') }}"></span>
+      <div>
+        <b>Triage</b>
+        {% if worker_state.last_error %}
+        <span class="sub syserr">{{ worker_state.last_error[:110] }} — <a href="{{ url_for('log') }}">log</a></span>
+        {% elif worker_state.running %}
+        <span class="sub">checking now…</span>
+        {% elif worker_state.last_ok %}
+        <span class="sub">connected · checked {{ worker_state.last_ok_r }} · next in ~{{ worker_state.next_in }}s</span>
+        {% else %}
+        <span class="sub">starting up…</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="sysitem">
+      <span class="dot {{ 'ok' if px.running else ('warn' if px.installed else 'err') }}"></span>
+      <div>
+        <b>Proxy</b>
+        {% if px.running %}
+        <span class="sub">running · {% for l in px.listener_rows %}<span class="mono" style="font-size:.74rem">127.0.0.1:{{ l.port }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</span>
+        {% elif not px.installed %}
+        <span class="sub syserr">emailproxy package missing</span>
+        {% else %}
+        <span class="sub">stopped{% if px.last_error %} — {{ px.last_error[:60] }}{% endif %} — <a href="{{ url_for('accounts') }}">accounts</a></span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="sysitem">
+      <span class="dot {{ 'acc' if ix.running else ('err' if ix.last_error else ('ok' if ix.chunks else 'warn')) }}"></span>
+      <div>
+        <b>Search index</b>
+        {% if ix.running %}
+        <span class="sub">{{ ix.progress or 'indexing…' }}</span>
+        {% elif ix.last_error %}
+        <span class="sub syserr">{{ ix.last_error[:90] }}</span>
+        {% elif ix.chunks %}
+        <span class="sub">ready · {{ ix.chunks }} chunks · folders {{ ix.folders_done }}/{{ ix.folders_total }}{% if ix.last_ok %} · last run {{ ix.last_ok_r }}{% endif %}</span>
+        {% else %}
+        <span class="sub">not built — run it below</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="sysitem">
+      <span class="dot {{ 'ok' if llm.base else 'err' }}"></span>
+      <div>
+        <b>LLM</b>
+        {% if llm.base %}
+        <span class="sub">{{ llm.model }} · {{ llm_used }}/{{ settings.max_llm_per_hour }} calls this hour{% if llm.fallback %} · fallback {{ llm.fallback.model }}{% endif %}</span>
+        {% else %}
+        <span class="sub syserr">not configured — <a href="{{ url_for('settings') }}">settings</a></span>
+        {% endif %}
+      </div>
+    </div>
   </div>
-  {% if worker_state.last_error %}
-  <div class="msg err" style="margin-bottom:0">Last pass failed: <span class="mono">{{ worker_state.last_error }}</span> — details in the <a href="{{ url_for('log') }}">Log</a>.</div>
-  {% elif worker_state.last_summary %}
-  <div class="sub" style="margin-top:8px">Last pass: {{ worker_state.last_summary }}</div>
+  {% if st.errors %}
+  <div class="sysline" role="alert">
+    <span class="badge err">{{ st.errors }} parked</span>
+    <span class="sub">Messages parked after repeated LLM failures — fix the endpoint, then retry.</span>
+    <form class="inline" method="post" action="{{ url_for('retry_errors') }}"><button class="btn small" type="submit">Retry parked</button></form>
+  </div>
+  {% elif st.queued and settings.llm_suggest %}
+  <div class="sysline">
+    <span class="badge warn">{{ st.queued }} waiting</span>
+    <span class="sub">Queued for LLM classification — they are picked up each check.</span>
+    <a class="btn small" href="{{ url_for('messages', f='queued') }}">View queue</a>
+  </div>
   {% endif %}
 </div>
 
-<div class="row" style="gap:8px;margin-top:14px">
-  <div class="stat"><b>{{ st.total }}</b><span>seen</span></div>
-  <div class="stat"><b>{{ st.moved }}</b><span>sorted by rules</span></div>
-  <div class="stat"><b>{{ st.classified }}</b><span>LLM classified</span></div>
-  <div class="stat"><b>{{ st.queued }}</b><span>waiting for LLM</span></div>
-  <div class="stat"><b>{{ st.needs_reply }}</b><span>need a reply</span></div>
-  <div class="stat"><b>{{ st.rules }}</b><span>rules enabled</span></div>
+<div class="card">
+  <div class="metrics">
+    <div class="metric primary">
+      <b>{% if st.needs_reply %}<a href="{{ url_for('messages', f='needs_reply') }}">{{ st.needs_reply }}</a>{% else %}{{ st.needs_reply }}{% endif %}</b>
+      <span class="lbl">need a reply</span>
+      <span class="ctx">flagged by the LLM · <a href="{{ url_for('messages', f='needs_reply') }}">view →</a></span>
+    </div>
+    <div class="metric">
+      <b{% if st.errors %} class="hot"{% endif %}>{{ st.errors }}</b>
+      <span class="lbl">parked errors</span>
+      <span class="ctx">{% if st.errors %}needs attention{% else %}all clear{% endif %}</span>
+    </div>
+    <div class="metric">
+      <b>{{ st.queued }}</b>
+      <span class="lbl">waiting for LLM</span>
+      <span class="ctx">queue length</span>
+    </div>
+    <div class="metric">
+      <b>{{ st.moved }}</b>
+      <span class="lbl">sorted by rules</span>
+      <span class="ctx">{{ '%.0f' % (st.moved * 100.0 / st.total) if st.total else 0 }}% of {{ st.total }} seen</span>
+    </div>
+    <div class="metric">
+      <b>{{ st.classified }}</b>
+      <span class="lbl">LLM classified</span>
+      <span class="ctx">{{ '%.0f' % (st.classified * 100.0 / st.total) if st.total else 0 }}% of {{ st.total }} seen</span>
+    </div>
+    <div class="metric">
+      <b><a href="{{ url_for('rules') }}">{{ st.rules }}</a></b>
+      <span class="lbl">rules enabled</span>
+      <span class="ctx">checked top to bottom</span>
+    </div>
+  </div>
+  <div class="sub" style="margin-top:12px">Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} · LLM classification {{ 'on' if settings.llm_suggest else 'off' }} · auto-filing {{ 'ON' if settings.llm_apply else 'off (suggests only)' }} — <a href="{{ url_for('settings') }}">change</a></div>
 </div>
-<div class="sub" style="margin:0 0 4px">Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} · LLM classification {{ 'on' if settings.llm_suggest else 'off' }} · auto-filing {{ 'ON' if settings.llm_apply else 'off (suggests only)' }} — <a href="{{ url_for('settings') }}">change</a></div>
 
 <div class="dashgrid">
   <div class="card flush">
     <div class="card-h" style="padding:14px 16px 10px;margin:0">
-      <h3>Recent messages</h3>
+      <h3>Recent mail</h3>
       <a class="sub" href="{{ url_for('messages') }}">All messages →</a>
     </div>
     {% if messages %}
     <div class="tablewrap"><table class="tbl mcards">
-      <thead><tr><th>when</th><th>from</th><th>subject</th><th>status</th><th>llm</th></tr></thead>
+      <thead><tr><th>when</th><th>from</th><th>subject</th><th>status</th><th>LLM</th></tr></thead>
       <tbody>
       {% for m in messages %}
       <tr>
         <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
         <td class="sub">{{ m.from_addr[:38] }}</td>
         <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:70] or '(no subject)' }}</a>
-          {% if m.action %}<div class="sub" style="font-size:.77rem">{{ m.action }}</div>{% endif %}</td>
+          {% if m.llm_summary %}<div class="sub" style="font-size:.77rem">{{ m.llm_summary[:110] }}</div>{% endif %}</td>
         <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span></td>
         <td class="sub">{{ m.llm }}</td>
       </tr>
@@ -711,7 +809,7 @@ DASH_TMPL = """
     </div>
     {% endif %}
   </div>
-  <div class="stack">
+  <div style="display:flex;flex-direction:column;gap:14px">
     <div class="card">
       <div class="card-h"><h3>Search index</h3>
         {% if ix.running %}<span class="badge acc">indexing</span>
@@ -719,32 +817,25 @@ DASH_TMPL = """
         {% elif ix.chunks %}<span class="badge ok">ready</span>
         {% else %}<span class="badge warn">not built</span>{% endif %}
       </div>
-      <div class="sub">{{ ix.messages }} messages · {{ ix.chunks }} chunks indexed · folders {{ ix.folders_done }}/{{ ix.folders_total }} complete{% if ix.last_ok %} · last run {{ ix.last_ok_r }}{% endif %}
-      {% if ix.progress %}<br>{{ ix.progress }}{% endif %}
-      {% if ix.last_error %}<br><span class="mono">{{ ix.last_error }}</span>{% endif %}</div>
+      <div class="sub">{{ ix.messages }} messages · {{ ix.chunks }} chunks · folders {{ ix.folders_done }}/{{ ix.folders_total }}{% if ix.last_ok %} · last run {{ ix.last_ok_r }}{% endif %}</div>
       <div class="row" style="margin-top:10px">
         <form class="inline" method="post" action="{{ url_for('index_run') }}"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Index now</button></form>
         <form class="inline" method="post" action="{{ url_for('index_rebuild') }}" onsubmit="return confirm('Rebuild the search index from scratch? Mail is untouched.');"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Rebuild</button></form>
       </div>
     </div>
-    {% if st.errors %}
-    <div class="card" style="border-color:var(--err)">
-      <div class="card-h"><h3>Parked messages</h3><span class="badge err">{{ st.errors }}</span></div>
-      <div class="sub">Parked after repeated LLM failures — fix the LLM endpoint, then retry.</div>
-      <form method="post" action="{{ url_for('retry_errors') }}"><button class="btn small" type="submit" style="margin-top:10px">Retry parked</button></form>
+    <div class="card flush">
+      <div class="card-h" style="padding:14px 16px 10px;margin:0"><h3>Activity</h3><a class="sub" href="{{ url_for('log') }}">Full log →</a></div>
+      <div class="logpanel" style="border:0;max-height:320px;overflow:auto">
+        {% for e in events %}<div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span class="lmsg">{{ e.message }}</span></div>
+        {% else %}<div class="sub">No events yet.</div>{% endfor %}
+      </div>
     </div>
-    {% endif %}
   </div>
-</div>
-
-<h2>Recent activity</h2>
-<div class="card logpanel">
-  {% for e in events %}<div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span class="lmsg">{{ e.message }}</span></div>
-  {% else %}<div class="sub">No events yet.</div>{% endfor %}
-  <div class="sub" style="margin-top:10px"><a href="{{ url_for('log') }}" style="color:#8ab4f8">Full log →</a></div>
 </div>
 {% if ix.running %}<script>setTimeout(function(){location.reload();}, 8000);</script>{% endif %}
 """
+
+
 
 
 
@@ -756,7 +847,7 @@ def dashboard():
     interval = int(store.get_setting("poll_interval", 90))
     ws["interval"] = interval
     ws["next_in"] = max(0, int(interval - (time.time() - ws.get("last_cycle", 0))))
-    msgs = store.messages(limit=15)
+    msgs = store.messages(limit=10)
     for m in msgs:
         m["when"] = fmt_ts(m.get("processed_at"))
         m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
@@ -766,13 +857,20 @@ def dashboard():
         if m.get("llm_needs_reply"):
             llm += " · needs reply"
         m["llm"] = llm
-    events = [e for e in store.recent_events(40) if e.get("level") != "debug"][:14]
+    events = [e for e in store.recent_events(40) if e.get("level") != "debug"][:15]
     for e in events:
         e["when"] = fmt_ts(e["ts"])
-        e["cls"] = {"error": "err", "info": "ok", "debug": ""}.get(e.get("level"), "")
+        e["cls"] = {"error": "err", "info": "ok", "warn": "warn", "debug": ""}.get(e.get("level"), "")
+    try:
+        px = proxy.manager.status()
+    except Exception as exc:
+        px = {"running": False, "installed": True, "ports": {}, "restarts": 0,
+              "last_error": repr(exc)}
+    px["listener_rows"] = [{"port": port} for port, _up in sorted((px.get("ports") or {}).items())]
     return render(render_template_string(
         DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
-        settings=store.all_settings(), ix=index_status()))
+        settings=store.all_settings(), ix=index_status(), px=px,
+        llm=engine.llm_config(), llm_used=store.llm_count_last_hour()))
 
 
 @app.route("/check", methods=["POST"])
