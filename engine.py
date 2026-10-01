@@ -1240,12 +1240,18 @@ def rescue_stale_snippets(rows, workers=6):
                     conn = None
                     continue
             try:
-                text = conn.fetch_body_text(uid, limit=6000)
+                got = conn.fetch_body_payload(uid, limit=6000)
             except Exception:
-                text = ""
-            if text and not looks_like_mime_junk(text) and looks_readable(text):
+                got = None
+            txt = (got or {}).get("text") or ""
+            if txt and not looks_like_mime_junk(txt) and looks_readable(txt):
+                fields = {"snippet": txt[:4000], "folder": folder, "uid": uid,
+                          "body_html_at": int(time.time())}
+                if got.get("html"):
+                    fields["body_html"] = got["html"][:400000]
+                    fields["body_cids"] = json.dumps(got.get("cids") or {})
                 for r in rs:
-                    store.update_message(r["id"], snippet=text[:4000], folder=folder, uid=uid)
+                    store.update_message(r["id"], **fields)
                     with flock:
                         fixed[0] += 1
         if conn is not None:
@@ -1303,6 +1309,12 @@ def extract_rendered(workers=6):
 
     groups = sorted(by_folder.items(), key=lambda kv: -len(kv[1]))
     _run_parallel(groups, chunk_fn, workers)
+
+    relook = [r for r in store.messages(limit=999999) if not (r.get("body_html_at") or 0)]
+    if relook:
+        store.log_event("info", "render-extract: %d row(s) going through the Message-ID rescue"
+                        % len(relook))
+        rescue_stale_snippets(relook, workers=workers)
     remaining = sum(1 for r in store.messages(limit=999999)
                     if not (r.get("body_html_at") or 0))
     store.log_event("info", "render-extract: %d row(s) done, %d remaining"
