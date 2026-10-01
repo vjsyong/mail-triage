@@ -331,6 +331,7 @@ a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .skip{position:absolute;left:-9999px;top:0;background:#000;color:#fff;padding:8px 12px;z-index:200}
 .vh{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.backlink{margin:0 0 4px;font-size:.84rem}
 .skip:focus{left:8px}
 /* ---- app shell ---- */
 .app{display:flex;min-height:100vh}
@@ -557,6 +558,8 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   #bulk .tbl.mcards td:nth-child(5),#bulk .tbl.mcards td:nth-child(6),#bulk .tbl.mcards td:nth-child(7){order:4;margin-top:7px}
   #bulk .tbl.mcards td:nth-child(7){margin-left:auto;text-align:right}
   #bulk .tbl.mcards td:empty{display:none}
+  .empty{padding:28px 14px}
+  .empty .btn{width:100%;display:inline-flex;justify-content:center}
   .r-head{flex-direction:column;align-items:stretch}
   .r-head .row{display:flex;gap:8px}
   .r-head .row .btn{flex:1;justify-content:center;text-align:center}
@@ -610,6 +613,10 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .spread>div:first-child{min-width:0}
   .spread h3{overflow-wrap:anywhere}
   .card .spread + .row .btn{min-height:42px}
+  .chat-head{padding-top:env(safe-area-inset-top)}
+  .sheet-h{padding-top:calc(8px + env(safe-area-inset-top))}
+  .dw-head{padding-top:max(10px, env(safe-area-inset-top))}
+  .content{padding-left:max(14px, env(safe-area-inset-left));padding-right:max(14px, env(safe-area-inset-right))}
   .toolbar{display:block;padding:10px 0 10px 12px}
   .tchips{display:flex;gap:6px;overflow-x:auto;padding-right:12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
   .tchips::-webkit-scrollbar{display:none}
@@ -770,6 +777,9 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .sheet-b .assistant-rail{display:flex;position:static;max-height:none;border:0}
   .sheet-b .assistant-rail .arow{padding:13px 12px}
   body.kb-open .bottom-nav{display:none}
+  .toasts{top:auto;bottom:calc(82px + env(safe-area-inset-bottom));left:12px;right:12px;max-width:none}
+  .toast2{max-width:none}
+  body:has(.assistant-main) .toasts{top:calc(env(safe-area-inset-top) + 8px);bottom:auto}
   .page-desc.msgfrom{display:block;font-size:.8rem;overflow-wrap:anywhere}
   .cond-head{display:none}
   .row{flex-wrap:wrap}
@@ -836,7 +846,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <span class="dot {{ 'ok' if not w.err else 'err' }}"></span>
         <span>{{ 'checks every %ss'|format(w.interval) if not w.err else 'last check failed' }}</span>
       </div>
-      <div class="sf-row"><span>{{ w.last_ok_r }}</span></div>
+      <div class="sf-row"><span><time datetime="{{ w.last_ok_iso }}" data-rel data-label="Last check ">Last check {{ w.last_ok_r }}</time></span></div>
       <div class="sf-row"><span>Times in {{ tz }}</span></div>
     </div>
   </aside>
@@ -846,7 +856,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
       <span class="tb-title">Mail Triage</span>
-      <span class="tb-status"><span class="dot {{ 'ok' if not w.err else 'err' }}"></span>{{ w.last_ok_r }}</span>
+      <span class="tb-status"><span class="dot {{ 'ok' if not w.err else 'err' }}"></span>{% if w.err %}last check failed{% else %}<time datetime="{{ w.last_ok_iso }}" data-rel data-label="Last check ">Last check {{ w.last_ok_r }}</time>{% endif %}</span>
     </header>
     <main id="main" class="content">
       {% with messages = get_flashed_messages(with_categories=true) %}
@@ -868,7 +878,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
     <span>Assistant</span></a>
   {% set morepaths = ('/more','/rules','/flows','/classifiers','/templates','/accounts','/settings','/log','/proxy') %}
-  <a href="{{ url_for('more') }}" class="{{ 'on' if p.startswith(morepaths) else '' }}">
+  <a href="{{ url_for('more') }}" class="{{ 'on' if p.startswith(morepaths) else '' }}" {{ 'aria-current="page"'|safe if p.startswith(morepaths) else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
     <span>More</span></a>
 </nav>
@@ -881,10 +891,27 @@ function toast(msg, kind){
   el.className = 'toast2' + (kind ? ' ' + kind : '');
   el.setAttribute('role', 'status');
   el.textContent = msg;
+  box.innerHTML = '';
   box.appendChild(el);
   setTimeout(function(){ el.style.opacity = '0'; el.style.transition = 'opacity .4s'; }, 4600);
   setTimeout(function(){ el.remove(); }, 5200);
 }
+(function(){
+  function relAge(iso){
+    var d=(Date.now()-new Date(iso).getTime())/1000; if(d<0) d=0;
+    if(d<90) return Math.round(d)+'s ago';
+    if(d<5400) return Math.round(d/60)+'m ago';
+    if(d<129600) return Math.round(d/3600)+'h ago';
+    return Math.round(d/86400)+'d ago';
+  }
+  function tick(){
+    document.querySelectorAll('time[data-rel]').forEach(function(t){
+      var iso=t.getAttribute('datetime'); if(!iso) return;
+      t.textContent=(t.getAttribute('data-label')||'')+relAge(iso);
+    });
+  }
+  setInterval(function(){ if(!document.hidden) tick(); }, 30000);
+})();
 function cp(text, el){
   function done(){ if(el){ var t = el.textContent; el.textContent = 'copied'; setTimeout(function(){ el.textContent = t; }, 900); } }
   if(navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(text).then(done, fallback); }
@@ -1361,6 +1388,7 @@ def render(body):
                                   info=info,
                                   pend=store.count_pending_agent_actions(),
                                   w={"err": ws.get("last_error"), "last_ok_r": rel_time(ws.get("last_ok")),
+                                     "last_ok_iso": (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ws.get("last_ok"))) if ws.get("last_ok") else ""),
                                      "interval": int(store.get_setting("poll_interval", 90) or 90)})
 
 
@@ -1390,6 +1418,8 @@ color:var(--fg);text-decoration:none}
 .more-row .grow{flex:1;min-width:0}
 .more-row b{font-size:.92rem;font-weight:600;display:block}
 .more-row .sub{font-size:.78rem}
+.more-row svg{width:16px;height:16px;flex:none;color:var(--dim);stroke-width:1.7}
+.more-list button.more-row{width:100%;font:inherit;text-align:left;cursor:pointer;background:none;border:0;color:var(--fg)}
 </style>
 <div class="page-head">
   <div>
@@ -1397,21 +1427,48 @@ color:var(--fg);text-decoration:none}
     <div class="page-desc">All sections of the app.</div>
   </div>
 </div>
+<div class="nav-label" style="margin:2px 2px 8px">Automation</div>
 <div class="more-list">
-  <a class="more-row" href="{{ url_for('rules') }}"><span class="grow"><b>Rules</b><span class="sub">First-match sorting rules and guards</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('flows') }}"><span class="grow"><b>Flows</b><span class="sub">Multi-step automations</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('classifiers') }}"><span class="grow"><b>Classifiers</b><span class="sub">Trained heuristic classifiers</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('templates') }}"><span class="grow"><b>Templates</b><span class="sub">Reply templates</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('accounts') }}"><span class="grow"><b>Accounts</b><span class="sub">Mail account and sign-in</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('log') }}"><span class="grow"><b>Log</b><span class="sub">Recent events and activity</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('settings') }}"><span class="grow"><b>Settings</b><span class="sub">App, AI, mail and agent permissions</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('rules') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"/></svg><span class="grow"><b>Rules</b><span class="sub">First-match sorting rules and guards</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('flows') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/></svg><span class="grow"><b>Flows</b><span class="sub">Multi-step automations</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('classifiers') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/></svg><span class="grow"><b>Classifiers</b><span class="sub">Trained heuristic classifiers</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('templates') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/></svg><span class="grow"><b>Templates</b><span class="sub">Reply templates</span></span><span aria-hidden="true">&#8250;</span></a>
 </div>
+<div class="nav-label" style="margin:14px 2px 8px">System</div>
+<div class="more-list">
+  <a class="more-row" href="{{ url_for('accounts') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 8h5M18.5 5.5v5"/></svg><span class="grow"><b>Accounts</b><span class="sub">Mail account and sign-in</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('log') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="m8 9 3 3-3 3M13 15h4"/></svg><span class="grow"><b>Log</b><span class="sub">Recent events and activity</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('settings') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5L9 6a7 7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.5 3h5l.5-3a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5c.06-.3.1-.66.1-1z"/></svg><span class="grow"><b>Settings</b><span class="sub">App, AI, mail and agent permissions</span></span><span aria-hidden="true">&#8250;</span></a>
+</div>
+<div class="more-list" style="margin-top:14px">
+  <button class="more-row hidden" id="install-app" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg><span class="grow"><b>Install app</b><span class="sub" id="install-note">Add Mail Triage to your home screen</span></span></button>
+</div>
+<div class="sub" style="margin:14px 2px 0;display:flex;align-items:center;gap:7px"><span class="dot {{ 'ok' if not w.err else 'err' }}"></span><time datetime="{{ w.last_ok_iso }}" data-rel data-label="Last check ">Last check {{ w.last_ok_r }}</time> · Times in {{ tz }}</div>
+<script>
+(function(){
+  var r=document.getElementById('install-app'); if(!r) return;
+  var ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  var standalone=window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;
+  if(standalone){ r.remove(); return; }
+  var note=document.getElementById('install-note');
+  window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); window.__bip=e; r.classList.remove('hidden'); });
+  window.addEventListener('appinstalled', function(){ r.classList.add('hidden'); });
+  r.addEventListener('click', function(){
+    if(window.__bip){ window.__bip.prompt(); window.__bip=null; r.classList.add('hidden'); }
+    else if(ios && note){ note.textContent='In Safari: tap Share → Add to Home Screen'; }
+  });
+  if(ios){ r.classList.remove('hidden'); }
+})();
+</script>
 """
 
 
 @app.route("/more")
 def more():
-    return render(_render_src(MORE_TMPL))
+    ws = dict(worker.state)
+    return render(_render_src(MORE_TMPL, tz=tz_label(), w={
+        "err": ws.get("last_error"), "last_ok_r": rel_time(ws.get("last_ok")),
+        "last_ok_iso": (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ws.get("last_ok"))) if ws.get("last_ok") else "")}))
 
 
 @app.route("/manifest.webmanifest")
@@ -1688,7 +1745,7 @@ DASH_TMPL = """
   var aw=document.querySelector('.actwrap'); if(aw) aw.removeAttribute('open');
 })();
 </script>
-{% if ix.running %}<script>setTimeout(function(){location.reload();}, 8000);</script>{% endif %}
+{% if ix.running %}<script>(function r(){ setTimeout(function(){ if(document.hidden){ r(); } else { location.reload(); } }, 8000); })();</script>{% endif %}
 """
 
 
@@ -1944,12 +2001,12 @@ CLASSIFIER_DATASET_TMPL = """
 {% endif %}
 <div class="page-head">
   <div>
+    <div class="backlink"><a href="{{ url_for('classifiers') }}">← Classifiers</a></div>
     <h1 class="page-title">{{ h.name }}</h1>
     <div class="page-desc">dataset review · {{ h.kind }} · {{ h.category }}</div>
   </div>
   <div class="row">
     <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn primary" type="submit">Retrain with current dataset</button></form>
-    <a class="btn" href="{{ url_for('classifiers') }}">Back</a>
   </div>
 </div>
 <div class="card">
@@ -2136,10 +2193,10 @@ RULE_EDIT_TMPL = """
 {% if error %}<div class="msg err" role="alert" id="form-err" tabindex="-1">{{ error }}</div><script>try{document.getElementById("form-err").focus();}catch(e){}</script>{% endif %}
 <div class="page-head">
   <div>
+    <div class="backlink"><a href="{{ url_for('rules') }}">← Rules</a></div>
     <h1 class="page-title">{{ 'Edit rule' if rule else 'New rule' }}</h1>
     <div class="page-desc">Rules run before classifiers and the LLM, in list order — first match wins.</div>
   </div>
-  <div class="row"><a class="btn" href="{{ url_for('rules') }}">Back</a></div>
 </div>
 <form method="post">
   <div class="card">
@@ -2357,6 +2414,7 @@ FLOW_EDIT_TMPL = """
 <div class="page-head">
   <div>
     <div class="sub" style="margin-bottom:4px"><a href="{{ url_for('flows') }}">&larr; Flows</a></div>
+    <div class="backlink"><a href="{{ url_for('flows') }}">← Flows</a></div>
     <h1 class="page-title">{{ 'Edit flow' if flow else 'New flow' }}</h1>
     <div class="page-desc">WHEN a message matches, THEN run the steps, in order.</div>
   </div>
@@ -2695,10 +2753,10 @@ TEMPLATES_TMPL = """
 TEMPLATE_EDIT_TMPL = """
 <div class="page-head">
   <div>
+    <div class="backlink"><a href="{{ url_for('templates') }}">← Templates</a></div>
     <h1 class="page-title">{{ 'Edit template' if template else 'New template' }}</h1>
     <div class="page-desc">Used as guidance when the LLM drafts a reply.</div>
   </div>
-  <div class="row"><a class="btn" href="{{ url_for('templates') }}">Back</a></div>
 </div>
 <form method="post">
   <div class="card">
@@ -2802,10 +2860,10 @@ MESSAGES_TMPL = """
     <form class="inline" method="post" action="{{ url_for('classify_stop') }}"><button class="btn small danger" type="submit">Stop</button></form>
   </div>
   {% if classify_state.total %}
-  <div class="progress" style="margin-top:10px"><i style="width:{{ (classify_state.done * 100 / classify_state.total)|round|int }}%"></i></div>
+  <div class="progress" style="margin-top:10px" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ (classify_state.done * 100 / classify_state.total)|round|int }}" aria-label="Classification progress"><i style="width:{{ (classify_state.done * 100 / classify_state.total)|round|int }}%"></i></div>
   {% endif %}
 </div>
-<script>setTimeout(function(){ location.reload(); }, 10000);</script>
+<script>(function r(){ setTimeout(function(){ if(document.hidden){ r(); } else { location.reload(); } }, 10000); })();</script>
 {% endif %}
 
 <div class="card flush">
@@ -2855,6 +2913,8 @@ MESSAGES_TMPL = """
     <div class="empty">
       <h4>No messages{% if filt != 'all' %} match this filter{% endif %} yet</h4>
       <p>{% if filt == 'all' %}Mail shows up here after the watcher's first pass.{% else %}Try another filter, or check again shortly.{% endif %}</p>
+      {% if filt == 'all' %}<form class="inline" method="post" action="{{ url_for('check_now') }}"><button class="btn primary" type="submit">Check now</button></form>
+      {% else %}<a class="btn" href="{{ url_for('messages') }}">Show all messages</a>{% endif %}
     </div>
     {% endif %}
     <div class="pager">
@@ -4984,10 +5044,10 @@ function submitPaste(email){
 ACCOUNT_NEW_TMPL = """
 <div class="page-head">
   <div>
+    <div class="backlink"><a href="{{ url_for('accounts') }}">← Accounts</a></div>
     <h1 class="page-title">Add account</h1>
     <div class="page-desc">One sign-in per provider. After adding, register the redirect URI shown on the account card, then press Authorise.</div>
   </div>
-  <div class="row"><a class="btn" href="{{ url_for('accounts') }}">Back</a></div>
 </div>
 <form method="post">
   <div class="card">
@@ -5100,10 +5160,10 @@ toggleProvider();
 ACCOUNT_EDIT_TMPL = """
 <div class="page-head">
   <div>
+    <div class="backlink"><a href="{{ url_for('accounts') }}">← Accounts</a></div>
     <h1 class="page-title">Edit {{ a.email }}</h1>
     <div class="page-desc">Saving restarts the proxy. Redirect URI: <code>{{ client_settings.redirect_uri }}</code></div>
   </div>
-  <div class="row"><a class="btn" href="{{ url_for('accounts') }}">Back</a></div>
 </div>
 <form method="post">
   <div class="card">
