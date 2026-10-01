@@ -2544,7 +2544,7 @@ def main():
     rp = client.get("/more")
     check("More page renders", rp.status_code == 200 and b"more-row" in rp.data)
     check("More lists every section",
-          all(x in rp.data for x in (b"Rules", b"Flows", b"Classifiers", b"Templates",
+          all(x in rp.data for x in (b"Rules", b"Flows", b"Learning", b"Templates",
                                      b"Accounts", b"Log", b"Settings")))
     rp = client.get("/manifest.webmanifest")
     check("manifest served with the right type",
@@ -2999,6 +2999,12 @@ def main():
     check("learning page shows both models + the next-step list",
           b"Category sorter" in r.data and b"What can be trained next" in r.data
           and b"needs_reply_logreg" in r.data)
+    check("unified page lists tag-trained fast-paths next to the learners",
+          b"Promo robot" in r.data and b"Working on your mail" in r.data
+          and (b"deciding live" in r.data or b"paused" in r.data)
+          and b"Review dataset" in r.data)
+    check("fast-path controls wired (toggle + retrain + dataset)",
+          b"/classifiers/" in r.data and b"/toggle" in r.data and b"/retrain" in r.data)
 
 
 

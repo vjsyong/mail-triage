@@ -28,6 +28,7 @@ import sys
 import time
 
 import config
+import heuristics
 import store
 
 FEATURE_SCHEMA_VERSION = 1
@@ -972,6 +973,41 @@ def reconcile(limit=5000):
 
 # ---------------------------------------------------------------- reporting
 
+def classifier_models():
+    """Tag/classified-trained fast-paths (the heuristics registry) presented in
+    the same shape as specialists, so the page can show one unified list."""
+    out = []
+    try:
+        rows = store.list_heuristics()
+    except Exception:
+        return out
+    for h in rows:
+        try:
+            stats = json.loads(h.get("stats") or "{}")
+        except (TypeError, ValueError):
+            stats = {}
+        acc = None
+        try:
+            acc = (heuristics.evaluate_heuristic(h, limit=600) or {}).get("accuracy")
+        except Exception:
+            acc = None
+        out.append({
+            "id": h["id"],
+            "name": h.get("name") or ("classifier %s" % h["id"]),
+            "job": h.get("category") or "",
+            "kind": h.get("kind") or "",
+            "status": "live" if h.get("enabled") else "paused",
+            "samples": stats.get("samples"),
+            "labels": stats.get("trained_label_count"),
+            "weak": bool(stats.get("weak_labels")),
+            "source": stats.get("source") or "",
+            "trained_at": stats.get("trained_at"),
+            "accuracy": acc,
+        })
+    out.sort(key=lambda c: (c["status"] != "live", c["id"]))
+    return out
+
+
 def proposals():
     """Data-driven 'what could be trained next' for the Learning page: what has
     labels, what it would buy, and what is blocked on missing signal. Nothing
@@ -1041,12 +1077,18 @@ def status_report():
         current = running[0]
     elif specs:
         current = specs[0]
+    classifiers = classifier_models()
     return {
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "route_mode": store.get_setting("learning_route_mode", "shadow"),
         "enabled": bool(store.get_setting("learning_enabled", True)),
         "specialists": specs,
         "current": current,
+        "classifiers": classifiers,
+        "counts": {
+            "classifiers_live": sum(1 for c in classifiers if c["status"] == "live"),
+            "learners_running": len(running),
+        },
         "proposals": proposals(),
         "routing": routing_stats(),
         "library": {

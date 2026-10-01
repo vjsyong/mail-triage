@@ -356,3 +356,15 @@ model and gained **"What can be trained next"** — the first, data-driven disco
 surface (candidates with evidence: ready / low-gain / blocked-on-signal; e.g.
 priority is blocked until user corrections exist). The LLM-driven pattern-discovery
 proposal engine (design §7) remains the next milestone on top of this.
+
+## Unified surface (same day): Classifiers + Learning are one story
+
+The heuristics registry (tag/classified-trained fast-paths) and the learning
+specialists are the same concept at different maturity: small models that decide
+before the LLM. The `/learning` page now opens with **"Working on your mail"** -
+one card per model, both families, identical status language ("deciding live" /
+"paused" / "watching quietly" / promoted) and identical controls (pause, retrain,
+review dataset for fast-paths; watch/promote/retire for learners). The sidebar
+keeps a single entry (Learning); `/classifiers` remains the deep-management page
+(create, full table, dataset review) linked from every fast-path card and back.
+The "how this works" fold explains the two families in plain words.

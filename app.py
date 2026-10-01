@@ -927,8 +927,6 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/>') }}
       {{ navitem(url_for('flows'), 'Flows', p.startswith('/flows'), '
         <path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/>') }}
-      {{ navitem(url_for('classifiers'), 'Classifiers', p.startswith('/classifiers'), '
-        <path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/>') }}
       {{ navitem(url_for('learning_page'), 'Learning', p.startswith('/learning'), '
         <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>') }}
       {{ navitem(url_for('templates'), 'Templates', p.startswith('/templates'), '
@@ -1773,7 +1771,7 @@ color:var(--fg);text-decoration:none}
   <a class="more-row" href="{{ url_for('rules') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"/></svg><span class="grow"><b>Rules</b><span class="sub">First-match sorting rules and guards</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('simulate') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/></svg><span class="grow"><b>Simulator</b><span class="sub">Draft an email, see how rules and flows would handle it</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('flows') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/></svg><span class="grow"><b>Flows</b><span class="sub">Multi-step automations</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('classifiers') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/></svg><span class="grow"><b>Classifiers</b><span class="sub">Trained heuristic classifiers</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('learning_page') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="grow"><b>Learning</b><span class="sub">Models deciding &amp; learning on your mail</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('templates') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/></svg><span class="grow"><b>Templates</b><span class="sub">Reply templates</span></span><span aria-hidden="true">&#8250;</span></a>
 </div>
 <div class="nav-label" style="margin:14px 2px 8px">System</div>
@@ -2353,7 +2351,8 @@ CLASSIFIERS_TMPL = """
     <div class="page-desc">Deterministic heuristic models that run before the LLM. Trained from your labels (manual tags) or
     existing classified mail — a confident verdict is applied without any LLM call: faster, consistent, and immune to
     instructions hidden inside email content. The assistant can train, retrain, evaluate and retire these for you
-    (“train a classifier for Receipts”, “evaluate classifier 2”).</div>
+    (“train a classifier for Receipts”, “evaluate classifier 2”).
+    Part of the <a href="{{ url_for('learning_page') }}">Learning</a> system — see how fast-paths and learners fit together.</div>
   </div>
 </div>
 <div class="card flush" id="classifiers">
@@ -6873,6 +6872,8 @@ LEARN_TMPL = """<style>
 .lfold[open]>summary::before{content:'▾'}
 .lfold .lfold-i{padding:0 0 14px}
 .ltbl td,.ltbl th{vertical-align:top}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
+.mgrid .card{margin:0}
 @media(max-width:767px){.ltbl .hide-m{display:none}.lstep{padding:9px 0}}
 </style>
 {% set s = rep.current %}
@@ -6884,7 +6885,7 @@ LEARN_TMPL = """<style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Learning</h1>
-    <div class="page-desc">The AI reads every email today. Here, small cheap models are being taught to take that work over — one task at a time. Nothing on this page changes your mail until you explicitly let it.</div>
+    <div class="page-desc">All the small models that handle your mail so the AI doesn't have to: the fast-paths your labels taught (they already decide when confident) and the newer learners taught by the AI's own answers (watching quietly until you promote them).</div>
   </div>
   {% if s %}<form method="post" action="{{ url_for('learning_train') }}"><input type="hidden" name="task" value="{{ s.task }}"><button class="btn primary" type="submit">Retrain {{ titles.get(s.task, s.task)|lower }}</button></form>{% endif %}
 </div>
@@ -6897,8 +6898,56 @@ LEARN_TMPL = """<style>
   </div>
 </div>
 {% else %}
+{% macro spec_actions(sp) %}{% if sp.status == 'validated' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching new mail</button></form>
+    <span class="sub">Changes nothing — it only records what it would decide.</span>
+    {% elif sp.status == 'shadow' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="active"><button class="btn small" type="submit">Let it take over confident calls</button></form>
+    <form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+    <span class="sub">Takes effect once live routing is on; everything is reversible.</span>
+    {% elif sp.status == 'active' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+    <span class="sub">Retiring keeps every version and all history.</span>
+    {% endif %}{% endmacro %}
+{% macro spec_stats(sp, spm, sp_live) %}{% if sp.task == 'category' %}<div class="dsrow"><span class="dsk">Sorts the newest emails like the AI</span><span class="dsv">{{ '%.0f' % (spm.accuracy * 100) if spm.accuracy else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Categories it chooses from</span><span class="dsv">{{ spm.classes|length if spm.classes else '—' }}</span></div>
+  {% else %}<div class="dsrow"><span class="dsk">Catches the AI's “needs a reply” flags</span><span class="dsv">{{ '%.0f' % (spm.recall * 100) if spm.recall else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Right when it raises a flag</span><span class="dsv">{{ '%.0f' % (spm.precision * 100) if spm.precision else '—' }}%</span></div>
+  {% endif %}<div class="dsrow"><span class="dsk">Agrees with the AI on new mail</span><span class="dsv">{% if sp_live.n %}{{ sp_live.agree }} of {{ sp_live.n }}{% else %}no checks yet{% endif %}</span></div>{% endmacro %}
 <div class="card">
-  <div class="card-h"><h3>Status</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ stat_word }}</span></div>
+  <div class="card-h"><h3>Working on your mail</h3><span class="sub">{{ rep.counts.classifiers_live }} fast-path{{ 's' if rep.counts.classifiers_live != 1 else '' }} deciding · {{ rep.counts.learners_running }} learner{{ 's' if rep.counts.learners_running != 1 else '' }} watching — nothing acts without you</span></div>
+  <div class="sub">Two families, same controls: <b>fast-paths</b> were taught by your labels and answer before the AI even sees the email; <b>learners</b> were taught by the AI's own answers and watch quietly until you promote them. <a href="{{ url_for('classifiers') }}">Manage all classifiers →</a></div>
+</div>
+<div class="mgrid">
+{% for c in rep.classifiers %}
+<div class="card">
+  <div class="card-h"><h3>{{ c.name }}</h3><span class="badge {{ 'ok' if c.status == 'live' else '' }}">{{ 'deciding live' if c.status == 'live' else 'paused' }}</span></div>
+  <div class="sub" style="margin-bottom:8px">Sorts “{{ c.job }}” mail before the AI sees it{% if c.weak %} — learned mostly from the AI's own classifications{% else %} — learned from your labels{% endif %}.</div>
+  <div class="dsrow"><span class="dsk">Self-check accuracy</span><span class="dsv">{{ '%.0f' % (c.accuracy * 100) if c.accuracy is not none else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Learned from</span><span class="dsv">{{ "{:,}".format(c.samples) if c.samples else '—' }} examples</span></div>
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">
+    <form method="post" action="{{ url_for('classifier_toggle', hid=c.id) }}"><button class="btn small" type="submit">{{ 'Pause' if c.status == 'live' else 'Resume' }}</button></form>
+    <form method="post" action="{{ url_for('classifier_retrain', hid=c.id) }}"><button class="btn small" type="submit">Retrain</button></form>
+    <a class="btn small" href="{{ url_for('classifier_dataset', hid=c.id) }}">Review dataset</a>
+  </div>
+</div>
+{% endfor %}
+<div class="card">
+  <div class="card-h"><h3>{{ titles.get(s.task, s.task) }}</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ {'validated': 'ready to watch', 'shadow': 'watching quietly', 'active': 'taking over', 'degraded': 'needs attention', 'retired': 'retired'}.get(s.status, s.status) }}</span></div>
+  <div class="sub" style="margin-bottom:8px">{% if s.task == 'category' %}One job: which category does this email belong to? It guesses the same six categories the AI uses. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% else %}One job: does this email need a reply from you? The same call the AI makes on every email today. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% endif %}</div>
+  {{ spec_stats(s, m, live) }}
+  <div class="sub" style="margin-top:8px">These compare it to the AI's answers on your newest 20% of mail — a ceiling, not the truth: the AI is not always right. Corrections from you weigh several times more than the AI's own labels when retraining.</div>
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(s) }}</div>
+</div>
+{% for sp in rep.specialists if s and sp.id != s.id and sp.task != s.task and sp.status in ('shadow', 'active', 'degraded') %}
+{% set spm = sp.metrics_parsed.val or {} %}
+<div class="card">
+  <div class="card-h"><h3>{{ titles.get(sp.task, sp.task) }}</h3><span class="badge warn">watching quietly</span></div>
+  <div class="sub" style="margin-bottom:8px">v{{ sp.version }}{% if sp.live.n %} · agrees with the AI on {{ sp.live.agree }} of {{ sp.live.n }}{% endif %}</div>
+  {{ spec_stats(sp, spm, sp.live) }}
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(sp) }}</div>
+</div>
+{% endfor %}
+</div>
+<div class="card">
+  <div class="card-h"><h3>The newest learner</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ stat_word }}</span></div>
   <div class="lead">{% if s.status == 'shadow' %}Watching quietly — it sees every classified email, records what it would decide, and changes nothing.
     {% elif s.status == 'active' %}Taking over confident calls — everything it is unsure about still goes to the AI.
     {% elif s.status == 'validated' %}Trained and scored — ready to start watching. It still changes nothing until it watches for a while and you promote it.
@@ -6922,34 +6971,6 @@ LEARN_TMPL = """<style>
       <div class="sub">{{ 'Emails it is confident about stop going to the AI. The rest still escalate.' if s.status == 'active' else 'The end goal: emails it is confident about stop going to the AI. Needs more watching time and your go-ahead.' }}</div></div></div>
   </div>
 </div>
-{% macro spec_actions(sp) %}{% if sp.status == 'validated' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching new mail</button></form>
-    <span class="sub">Changes nothing — it only records what it would decide.</span>
-    {% elif sp.status == 'shadow' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="active"><button class="btn small" type="submit">Let it take over confident calls</button></form>
-    <form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
-    <span class="sub">Takes effect once live routing is on; everything is reversible.</span>
-    {% elif sp.status == 'active' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
-    <span class="sub">Retiring keeps every version and all history.</span>
-    {% endif %}{% endmacro %}
-{% macro spec_stats(sp, spm, sp_live) %}{% if sp.task == 'category' %}<div class="dsrow"><span class="dsk">Sorts the newest emails like the AI</span><span class="dsv">{{ '%.0f' % (spm.accuracy * 100) if spm.accuracy else '—' }}%</span></div>
-  <div class="dsrow"><span class="dsk">Categories it chooses from</span><span class="dsv">{{ spm.classes|length if spm.classes else '—' }}</span></div>
-  {% else %}<div class="dsrow"><span class="dsk">Catches the AI's “needs a reply” flags</span><span class="dsv">{{ '%.0f' % (spm.recall * 100) if spm.recall else '—' }}%</span></div>
-  <div class="dsrow"><span class="dsk">Right when it raises a flag</span><span class="dsv">{{ '%.0f' % (spm.precision * 100) if spm.precision else '—' }}%</span></div>
-  {% endif %}<div class="dsrow"><span class="dsk">Agrees with the AI on new mail</span><span class="dsv">{% if sp_live.n %}{{ sp_live.agree }} of {{ sp_live.n }}{% else %}no checks yet{% endif %}</span></div>{% endmacro %}
-<div class="card">
-  <div class="card-h"><h3>{{ titles.get(s.task, s.task) }}</h3><span class="sub">{% if s.task == 'category' %}one job: which category does this email belong to?{% else %}one job: does this email need a reply from you?{% endif %}</span></div>
-  <div class="sub" style="margin-bottom:8px">{% if s.task == 'category' %}It guesses the same six categories the AI uses. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% else %}The same call the AI makes on every email today. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% endif %}</div>
-  {{ spec_stats(s, m, live) }}
-  <div class="sub" style="margin-top:8px">These compare it to the AI's answers on your newest 20% of mail — a ceiling, not the truth: the AI is not always right. Corrections from you weigh several times more than the AI's own labels when retraining.</div>
-  <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(s) }}</div>
-</div>
-{% for sp in rep.specialists if s and sp.id != s.id and sp.task != s.task and sp.status in ('shadow', 'active', 'degraded') %}
-{% set spm = sp.metrics_parsed.val or {} %}
-<div class="card">
-  <div class="card-h"><h3>{{ titles.get(sp.task, sp.task) }}</h3><span class="sub">watching quietly · v{{ sp.version }}{% if sp.live.n %} · {{ sp.live.agree }} of {{ sp.live.n }} agree{% endif %}</span></div>
-  {{ spec_stats(sp, spm, sp.live) }}
-  <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(sp) }}</div>
-</div>
-{% endfor %}
 <div class="card">
   <div class="card-h"><h3>What can be trained next</h3><span class="sub">candidates found in your data — nothing trains without you</span></div>
   {% for p in rep.proposals %}
@@ -7017,7 +7038,7 @@ LEARN_TMPL = """<style>
   <details class="lfold">
     <summary>How this works</summary>
     <div class="lfold-i">
-      <div class="sub" style="line-height:1.6">The goal is simple: <b>use the AI for novel mail, use small models for the repetitive parts.</b> The loop in plain words: the system watches what the AI decides → when a pattern repeats, a small model is trained to imitate that one decision → it is scored against history → it watches real mail without acting → if it holds up, you can let it take over → anything it is unsure about still goes to the AI. “Emails still sent to the AI” (in Raw numbers) is the number that should fall as this works.</div>
+      <div class="sub" style="line-height:1.6">The goal is simple: <b>use the AI for novel mail, use small models for the repetitive parts.</b> Two families do that here — <b>fast-paths</b> (taught by your labels; they decide before the AI when sure) and <b>learners</b> (taught by the AI's answers; they watch, then take over when you promote them). The loop in plain words: the system watches what the AI decides → when a pattern repeats, a small model is trained to imitate that one decision → it is scored against history → it watches real mail without acting → if it holds up, you can let it take over → anything it is unsure about still goes to the AI. “Emails still sent to the AI” (in Raw numbers) is the number that should fall as this works.</div>
       <ul class="simul" style="margin-top:6px">
         <li>“Watching quietly” really means quiet — shadow decisions are recorded, never acted on, and marked as such everywhere.</li>
         <li>A model's own predictions never become training data — only the AI's answers and <b>your</b> corrections teach it.</li>
