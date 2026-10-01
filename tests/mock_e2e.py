@@ -2540,7 +2540,9 @@ def main():
           b'sys-ix-actions' in d and b"Index now" in d)
     check("hero keeps the primary metric + context line",
           b'class="metric primary"' in d and b"need a reply" in d
-          and b'class="mlines"' in d and b"rules active" in d)
+          and b'class="dstat"' in d and b"Sorted by rules" in d)
+    check("automation status renders as chips with a settings link",
+          b'class="dsc"' in d and b"Auto-filing" in d and b"Settings" in d)
     check("actions live in the hero card", b'dashactions' in d and b"Open messages" in d)
     check("page-head actions tagged for mobile hiding", b'dh-actions' in d)
     check("activity collapses on phones",

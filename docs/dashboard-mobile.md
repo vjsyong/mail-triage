@@ -69,3 +69,18 @@ Emulated 393×852: collapsed system line (healthy), hero + context + actions, fo
 recent rows, activity closed; expanding System status reveals the four subsystems +
 index actions; with `data-alert=1` it stays open. Desktop 1440×900 unchanged.
 `tests/mock_e2e.py` — new T31 structure checks + full suite green.
+
+
+### Hero card refinement (2026-10-01, evening)
+The two run-on prose lines ("Rules act live ... — change" and "2479 sorted by
+rules ...") wrapped mid-phrase on phones ("— change" dangling; "12 / rules active"
+split). Replaced with:
+- `.dstat` key-value rows (mobile only; desktop keeps its metric grid):
+  label left, right-aligned tabular numbers ("2,479"), percent as dim suffix
+  ("99% of 3,559"); "Rules active" value still links to /rules.
+- `.dsc` status chips: Rules live / LLM on / Auto-filing ON / Settings ->, each an
+  atomic unit (a chip can wrap whole, never mid-phrase). Green square dot for
+  on-states, dim for off; the Settings chip is the "change" affordance now.
+  On phones the chips render as a deliberate 2x2 grid (single line of four at
+  393px left "Settings ->" orphaned on line two at 375-430px; 2x2 is deterministic
+  at any width). Desktop keeps one flex line.

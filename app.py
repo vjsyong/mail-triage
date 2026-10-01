@@ -1751,6 +1751,20 @@ DASH_TMPL = """
 .metric .ctx{display:block;font-size:.72rem;color:var(--dim);opacity:.8;margin-top:1px}
 .metric.hot b{color:var(--err)} .metric.warm b{color:var(--warn)} .metric.calm b{color:var(--ok)}
 .metric a{font-weight:700}
+/* dashboard hero: stat rows (phones) + automation status chips - one fact per
+   line, right-aligned tabular numbers, chips are atomic (never wrap mid-phrase) */
+.dstat{display:none}
+.dsrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:.88rem}
+.dsrow:last-child{border-bottom:1px solid var(--line)}
+.dsk{color:var(--dim)}
+.dsv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.dsv .dsp{font-weight:400;color:var(--dim);font-size:.78rem;margin-left:3px}
+.dsc{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.dschip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 10px;font-size:.74rem;line-height:1.2;color:var(--fg);white-space:nowrap;background:var(--card)}
+.dschip::before{content:'';width:6px;height:6px;background:var(--ok);flex:0 0 auto}
+.dschip.off{color:var(--dim)} .dschip.off::before{background:var(--line2)}
+.dschip.chg{color:var(--acc)}
+.dschip.chg::before{display:none}
 .dashgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
 @media(max-width:1023px){.dashgrid{grid-template-columns:1fr}}
 .dashgrid .card{margin:0}
@@ -1774,7 +1788,8 @@ DASH_TMPL = """
   .metrics .metric:not(.primary){display:none}
   .metric.primary{flex:1 1 100%;padding:6px 0}
   .metric.primary b{font-size:2.2rem}
-  .mlines{display:block;font-size:.78rem;color:var(--dim);margin-top:6px;line-height:1.55}
+  .dstat{display:block;margin-top:14px}
+  .dsc{display:grid;grid-template-columns:1fr 1fr;gap:6px}
   .dashactions{display:flex;gap:8px;margin-top:12px}
   .dashactions .btn{flex:1;text-align:center;justify-content:center}
   .sys-ix-actions{display:flex;gap:8px;margin-top:10px;align-items:center}
@@ -1905,8 +1920,17 @@ DASH_TMPL = """
       <span class="ctx">checked top to bottom</span>
     </div>
   </div>
-  <div class="sub" style="margin-top:12px">Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} · LLM classification {{ 'on' if settings.llm_suggest else 'off' }} · auto-filing {{ 'ON' if settings.llm_apply else 'off (suggests only)' }} — <a href="{{ url_for('settings') }}">change</a></div>
-  <div class="mlines">{{ st.moved }} sorted by rules · {{ st.classified }} classified ({{ '%.0f' % (st.classified * 100.0 / st.total) if st.total else 0 }}% of {{ st.total }}) · {{ st.rules }} rules active</div>
+  <div class="dstat">
+    <div class="dsrow"><span class="dsk">Sorted by rules</span><span class="dsv">{{ "{:,}".format(st.moved) }}</span></div>
+    <div class="dsrow"><span class="dsk">LLM classified</span><span class="dsv">{{ "{:,}".format(st.classified) }}<span class="dsp">{{ '%.0f' % (st.classified * 100.0 / st.total) if st.total else 0 }}% of {{ "{:,}".format(st.total) }}</span></span></div>
+    <div class="dsrow"><span class="dsk">Rules active</span><span class="dsv"><a href="{{ url_for('rules') }}">{{ st.rules }}</a></span></div>
+  </div>
+  <div class="dsc">
+    <span class="dschip{{ ' off' if not settings.rules_apply else '' }}" title="{{ 'Rules act live' if settings.rules_apply else 'Rules act in dry-run (suggest only)' }}">Rules {{ 'live' if settings.rules_apply else 'dry-run' }}</span>
+    <span class="dschip{{ ' off' if not settings.llm_suggest else '' }}" title="{{ 'LLM classification on' if settings.llm_suggest else 'LLM classification off' }}">LLM {{ 'on' if settings.llm_suggest else 'off' }}</span>
+    <span class="dschip{{ ' off' if not settings.llm_apply else '' }}" title="{{ 'Auto-filing ON' if settings.llm_apply else 'Auto-filing off (suggests only)' }}">Auto-filing {{ 'ON' if settings.llm_apply else 'off' }}</span>
+    <a class="dschip chg" href="{{ url_for('settings') }}">Settings →</a>
+  </div>
   <div class="dashactions">
     <a class="btn primary" href="{{ url_for('messages') }}">Open messages</a>
     <form class="inline" method="post" action="{{ url_for('check_now') }}"><button class="btn" type="submit" {{ 'disabled' if worker_state.running else '' }}>Check now</button></form>
