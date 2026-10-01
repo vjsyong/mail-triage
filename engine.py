@@ -491,16 +491,44 @@ def match_first(rules, fields):
 
 # ---------------------------------------------------------------- LLM
 
+def llm_config():
+    """Effective LLM endpoint settings: values set in the UI (SQLite) win, blank
+    fields fall back to the container env (LLM_BASE_URL etc.). Returns
+    {base, key, model, thinking, timeout, fallback: {base, key, model} | None}."""
+    def pick(name, env):
+        v = store.get_setting(name)
+        return v if v not in (None, "") else env
+
+    cfg = {
+        "base": (pick("llm_base_url", config.LLM_BASE_URL) or "").rstrip("/"),
+        "key": pick("llm_api_key", config.LLM_API_KEY) or "",
+        "model": pick("llm_model", config.LLM_MODEL) or "",
+        "thinking": store.get_setting("llm_thinking") or "auto",
+        "timeout": int(store.get_setting("llm_timeout") or config.LLM_TIMEOUT),
+        "fallback": None,
+    }
+    fb_base = pick("llm_fallback_base_url", config.LLM_FALLBACK_BASE_URL)
+    if fb_base:
+        cfg["fallback"] = {
+            "base": fb_base.rstrip("/"),
+            "key": pick("llm_fallback_api_key", config.LLM_FALLBACK_API_KEY) or "",
+            "model": pick("llm_fallback_model", config.LLM_FALLBACK_MODEL) or cfg["model"],
+        }
+    return cfg
+
+
 class LLMClient:
     def __init__(self):
-        self.base = config.LLM_BASE_URL
-        self.key = config.LLM_API_KEY
-        self.model = config.LLM_MODEL
+        c = llm_config()
+        self.base = c["base"]
+        self.key = c["key"]
+        self.model = c["model"]
+        self.thinking = c["thinking"]
+        self.timeout = c["timeout"]
         self.fallback = None
-        if config.LLM_FALLBACK_BASE_URL:
-            self.fallback = (config.LLM_FALLBACK_BASE_URL,
-                             config.LLM_FALLBACK_API_KEY,
-                             config.LLM_FALLBACK_MODEL or config.LLM_MODEL)
+        if c["fallback"]:
+            fb = c["fallback"]
+            self.fallback = (fb["base"], fb["key"], fb["model"])
 
     def _chat(self, system, user, json_mode=True, history=None, max_tokens=None,
               full=False, thinking=False):
@@ -527,9 +555,7 @@ class LLMClient:
             return out
 
     def _chat_once(self, base, key, model, system, convo, json_mode=True,
-                   max_tokens=None, full=False, thinking=False):
-        if not key:
-            raise RuntimeError("LLM_API_KEY is not configured for %s" % base)
+                   max_tokens=None, full=False, thinking=False, timeout=None):
         payload = {
             "model": model,
             "temperature": 0,
@@ -537,30 +563,37 @@ class LLMClient:
         }
         if max_tokens:
             payload["max_tokens"] = int(max_tokens)
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
+        # Providers differ on the optional fields: response_format (JSON mode) and
+        # chat_template_kwargs (the vLLM thinking extension). Send them, and strip
+        # one at a time on a 4xx so any OpenAI-compatible endpoint works.
+        optional = []
         if thinking:
             payload["chat_template_kwargs"] = {"enable_thinking": True}
+            optional.append("chat_template_kwargs")
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+            optional.append("response_format")
+        headers = {"Authorization": "Bearer " + key} if key else {}
         r = None
-        for attempt in (1, 2):
-            r = requests.post(base + "/chat/completions", json=payload,
-                              headers={"Authorization": "Bearer " + key},
-                              timeout=config.LLM_TIMEOUT)
-            if r.status_code == 400 and json_mode and attempt == 1:
-                payload.pop("response_format", None)  # provider does not support it
+        while True:
+            r = requests.post(base + "/chat/completions", json=payload, headers=headers,
+                              timeout=timeout or self.timeout)
+            if r.status_code in (400, 404, 422) and optional:
+                payload.pop(optional.pop(0), None)
                 continue
-            r.raise_for_status()
-            data = r.json()
-            choice = data["choices"][0]
-            message = choice["message"]
-            if full:
-                message = dict(message)
-                message["_finish"] = choice.get("finish_reason")
-                return message
-            return message["content"]
-        if r is not None:
-            r.raise_for_status()
-        raise RuntimeError("LLM request failed")
+            break
+        if r.status_code in (401, 403):
+            raise RuntimeError("LLM HTTP %s from %s - check the API key "
+                               "(Settings -> LLM endpoint)" % (r.status_code, base))
+        r.raise_for_status()
+        data = r.json()
+        choice = data["choices"][0]
+        message = choice["message"]
+        if full:
+            message = dict(message)
+            message["_finish"] = choice.get("finish_reason")
+            return message
+        return message["content"]
 
     # ---- streaming (used by the assistant agent) ----
 
@@ -568,13 +601,15 @@ class LLMClient:
         """Stream one chat turn against the primary endpoint, yielding event dicts:
         reasoning_delta / content_delta / tool_calls / turn_done. When the primary
         fails before producing any output, the fallback endpoint serves instead."""
+        send_thinking = bool(thinking) and self.thinking != "off"
         attempts = [(self.base, self.key, self.model, "primary '%s'" % self.model)]
         if self.fallback:
             attempts.append((*self.fallback, "fallback '%s'" % self.fallback[2]))
         for i, (base, key, model, label) in enumerate(attempts):
             produced = False
             try:
-                for ev in self._stream_once(base, key, model, system, messages, tools, thinking):
+                for ev in self._stream_once(base, key, model, system, messages, tools,
+                                            send_thinking):
                     produced = True
                     yield ev
                 return
@@ -586,8 +621,6 @@ class LLMClient:
         raise RuntimeError("no LLM endpoint available")
 
     def _stream_once(self, base, key, model, system, messages, tools, thinking):
-        if not key:
-            raise RuntimeError("LLM_API_KEY is not configured for %s" % base)
         payload = {
             "model": model,
             "temperature": 0,
@@ -600,11 +633,19 @@ class LLMClient:
             payload["tools"] = tools
         if thinking:
             # vLLM extension: lets this chat template emit the thinking channel,
-            # which the reasoning parser surfaces as delta.reasoning.
+            # which the reasoning parser surfaces as delta.reasoning. Dropped
+            # automatically below if the endpoint rejects unknown fields.
             payload["chat_template_kwargs"] = {"enable_thinking": True}
-        r = requests.post(base + "/chat/completions", json=payload,
-                          headers={"Authorization": "Bearer " + key},
-                          timeout=config.LLM_TIMEOUT, stream=True)
+        headers = {"Authorization": "Bearer " + key} if key else {}
+        r = None
+        while True:
+            r = requests.post(base + "/chat/completions", json=payload,
+                              headers=headers, timeout=self.timeout, stream=True)
+            if r.status_code in (400, 404, 422) and "chat_template_kwargs" in payload:
+                payload.pop("chat_template_kwargs", None)
+                r.close()
+                continue
+            break
         try:
             if r.status_code != 200:
                 raise RuntimeError("LLM HTTP %s from %s: %s"
@@ -682,13 +723,13 @@ class LLMClient:
         # thinking runs (empty content), so 4096 with a single 8192 retry when the
         # finish reason says "length".
         message = self._chat(system, user, json_mode=True, max_tokens=4096,
-                             full=True, thinking=True)
+                             full=True, thinking=(self.thinking != "off"))
         content = (message.get("content") or "") if isinstance(message, dict) else (message or "")
         m = re.search(r"\{.*\}", content, re.S)
         if (not m and isinstance(message, dict)
                 and message.get("_finish") == "length"):
             message = self._chat(system, user, json_mode=True, max_tokens=8192,
-                                 full=True, thinking=True)
+                                 full=True, thinking=(self.thinking != "off"))
             content = (message.get("content") or "") if isinstance(message, dict) else (message or "")
             m = re.search(r"\{.*\}", content, re.S)
         thinking = ""

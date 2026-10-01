@@ -21,13 +21,55 @@ import config
 import engine
 import store
 
-# folders matched (case-insensitive substring) are NOT indexed by default
-EXCLUDE_FOLDERS = ("junk", "deleted", "trash", "sync issues", "calendar", "contacts",
-                   "journal", "conversation history", "outbox", "rss feeds")
+def embed_config():
+    """Effective embedding endpoint: UI settings win, blank fields fall back to env."""
+    def pick(name, env):
+        v = store.get_setting(name)
+        return v if v not in (None, "") else env
 
-# query-side instruction prefix for Qwen3-Embedding (documents stay raw)
-QUERY_PREFIX = ("Instruct: Given a search query, retrieve relevant email messages "
-                "from the user's mailbox\nQuery: ")
+    return {
+        "base": (pick("embed_base_url", config.EMBED_BASE_URL) or "").rstrip("/"),
+        "model": pick("embed_model", config.EMBED_MODEL) or "",
+        "key": pick("embed_api_key", "") or "",
+        "protocol": (store.get_setting("embed_protocol") or "tei").lower(),
+        "timeout": int(store.get_setting("embed_timeout") or config.EMBED_TIMEOUT),
+        "query_prefix": store.get_setting("embed_query_prefix") or "",
+    }
+
+
+def rerank_config():
+    """Effective reranker endpoint: UI settings win, blank fields fall back to env."""
+    def pick(name, env):
+        v = store.get_setting(name)
+        return v if v not in (None, "") else env
+
+    return {
+        "base": (pick("rerank_base_url", config.RERANK_BASE_URL) or "").rstrip("/"),
+        "model": pick("rerank_model", config.RERANK_MODEL) or "",
+        "key": pick("rerank_api_key", "") or "",
+        "protocol": (store.get_setting("rerank_protocol") or "tei").lower(),
+        "timeout": int(store.get_setting("rerank_timeout") or config.RERANK_TIMEOUT),
+    }
+
+
+def excluded_substrings():
+    """Case-insensitive folder substrings not indexed by default (Settings -> RAG)."""
+    v = store.get_setting("rag_exclude_folders")
+    if v is None:
+        v = []
+    return [str(x).strip().lower() for x in v if str(x).strip()]
+
+
+def default_folders(all_folders):
+    excl = excluded_substrings()
+    keep = []
+    for f in all_folders:
+        fl = f.lower()
+        if any(x in fl for x in excl):
+            continue
+        keep.append(f)
+    return keep
+
 
 CHUNK_CHARS = 1600     # ~400 tokens target per chunk
 CHUNK_MAX = 2400       # hard cap; longer single sentences are wrapped
@@ -41,31 +83,35 @@ CANDIDATES = 50        # fused candidates considered for rerank
 RERANK_TOP = 30        # what we send to the cross-encoder
 
 
-def default_folders(all_folders):
-    keep = []
-    for f in all_folders:
-        fl = f.lower()
-        if any(x in fl for x in EXCLUDE_FOLDERS):
-            continue
-        keep.append(f)
-    return keep
-
-
-# ---------------------------------------------------------------- TEI client
+# ---------------------------------------------------------------- embed/rerank clients
 
 def embed(texts, kind="document"):
-    """Embed texts via TEI. kind='query' prepends the Qwen3 instruct prefix."""
-    if not config.EMBED_BASE_URL:
-        raise RuntimeError("EMBED_BASE_URL is not configured (see .env, embed/)")
-    payload_texts = [QUERY_PREFIX + t for t in texts] if kind == "query" else list(texts)
+    """Embed texts via the configured endpoint. kind='query' prepends the configured
+    query instruction prefix (documents stay raw). Protocols: 'tei' (POST /embed,
+    {"inputs": [...]}) or 'openai' (POST /embeddings, {"model", "input": [...]})."""
+    cfg = embed_config()
+    if not cfg["base"]:
+        raise RuntimeError("embedding endpoint not configured - set it in Settings -> RAG "
+                           "(or EMBED_BASE_URL in .env)")
+    payload_texts = list(texts)
+    if kind == "query" and cfg["query_prefix"]:
+        payload_texts = [cfg["query_prefix"] + t for t in payload_texts]
+    headers = {"Authorization": "Bearer " + cfg["key"]} if cfg["key"] else {}
     out = []
     for i in range(0, len(payload_texts), EMBED_BATCH):
-        r = requests.post(config.EMBED_BASE_URL + "/embed",
-                          json={"inputs": payload_texts[i:i + EMBED_BATCH]},
-                          timeout=config.EMBED_TIMEOUT)
-        r.raise_for_status()
-        data = r.json()
-        out.extend(data)
+        batch = payload_texts[i:i + EMBED_BATCH]
+        if cfg["protocol"] == "openai":
+            r = requests.post(cfg["base"] + "/embeddings",
+                              json={"model": cfg["model"], "input": batch},
+                              headers=headers, timeout=cfg["timeout"])
+            r.raise_for_status()
+            data = sorted(r.json().get("data") or [], key=lambda d: d.get("index", 0))
+            out.extend(d.get("embedding") or [] for d in data)
+        else:
+            r = requests.post(cfg["base"] + "/embed", json={"inputs": batch},
+                              headers=headers, timeout=cfg["timeout"])
+            r.raise_for_status()
+            out.extend(r.json())
     if len(out) != len(payload_texts):
         raise RuntimeError("embedding server returned %d vectors for %d inputs"
                            % (len(out), len(payload_texts)))
@@ -77,14 +123,30 @@ def embed_one(text, kind="query"):
 
 
 def rerank(query, texts, top_n=None):
-    """Cross-encoder rerank via TEI. Returns [{index, score}] sorted desc or None."""
-    if not config.RERANK_BASE_URL or not texts:
+    """Cross-encoder rerank via the configured endpoint. Returns [{index, score}]
+    sorted desc or None. Protocols: 'tei' ({"query","texts"} -> [{index,score}]) or
+    'cohere' ({"query","documents","top_n"} -> {"results":[{index,relevance_score}]},
+    which covers Cohere/Jina/Infinity-style rerank servers)."""
+    cfg = rerank_config()
+    if not cfg["base"] or not texts:
         return None
-    r = requests.post(config.RERANK_BASE_URL + "/rerank",
-                      json={"query": query, "texts": texts},
-                      timeout=config.RERANK_TIMEOUT)
-    r.raise_for_status()
-    data = r.json()
+    headers = {"Authorization": "Bearer " + cfg["key"]} if cfg["key"] else {}
+    if cfg["protocol"] == "cohere":
+        r = requests.post(cfg["base"] + "/rerank",
+                          json={"query": query, "documents": list(texts),
+                                "top_n": int(top_n or len(texts))},
+                          headers=headers, timeout=cfg["timeout"])
+        r.raise_for_status()
+        data = [{"index": item.get("index"),
+                 "score": item.get("relevance_score", item.get("score", 0.0))}
+                for item in (r.json().get("results") or [])]
+        data.sort(key=lambda d: d.get("score") or 0.0, reverse=True)
+    else:
+        r = requests.post(cfg["base"] + "/rerank",
+                          json={"query": query, "texts": list(texts)},
+                          headers=headers, timeout=cfg["timeout"])
+        r.raise_for_status()
+        data = r.json()
     if top_n:
         data = data[:top_n]
     return data
@@ -143,18 +205,21 @@ def _excerpt(chunk_text_value):
 
 def _ensure_dim(dim):
     known = store.meta_get("embed_dim")
+    cfg = embed_config()
     if known is None:
         store.ensure_vec_table(dim)
         store.meta_set("embed_dim", int(dim))
-        store.meta_set("embed_model", config.EMBED_MODEL)
+        store.meta_set("embed_model", cfg["model"])
         return
     if int(known) != int(dim):
         raise RuntimeError("embedding dimension changed (%s -> %s); rebuild the index "
-                           "(python app.py --reindex)" % (known, dim))
+                           "(dashboard button or python app.py --reindex)"
+                           % (known, dim))
     model = store.meta_get("embed_model")
-    if model and model != config.EMBED_MODEL:
+    if model and model != cfg["model"]:
         raise RuntimeError("embedding model changed (%s -> %s); rebuild the index "
-                           "(python app.py --reindex)" % (model, config.EMBED_MODEL))
+                           "(dashboard button or python app.py --reindex) or set the "
+                           "model back in Settings -> RAG" % (model, cfg["model"]))
 
 
 def _index_one(mc, folder, uid, uv):
@@ -307,8 +372,12 @@ class Indexer(threading.Thread):
                 self.force.clear()
                 self._run(continuous=True)
                 continue
-            # idle: incremental refresh every 10 minutes
-            self.stop_flag.wait(600)
+            # idle: incremental refresh on the configured cadence (default 10 min)
+            try:
+                idle_min = max(1, int(store.get_setting("index_refresh_minutes") or 10))
+            except (TypeError, ValueError):
+                idle_min = 10
+            self.stop_flag.wait(idle_min * 60)
             if self.force.is_set() or self.stop_flag.is_set():
                 continue
             if store.get_setting("index_enabled", True):
@@ -318,8 +387,8 @@ class Indexer(threading.Thread):
         self.state["running"] = True
         self.state["started"] = int(time.time())
         try:
-            if not config.EMBED_BASE_URL:
-                self.state["progress"] = "embed server not configured (see .env / embed/)"
+            if not embed_config()["base"]:
+                self.state["progress"] = "embedding endpoint not configured (Settings -> RAG)"
                 return
             if self.rebuild_next:
                 self.rebuild_next = False

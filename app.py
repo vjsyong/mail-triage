@@ -30,6 +30,8 @@ worker = engine.Worker()
 indexer = rag.Indexer()
 classifier = engine.ClassifyJob()
 
+_TZ_CACHE = {"at": 0.0, "off": 8.0}  # display timezone offset cache (see tz_offset_hours)
+
 MSG_REF_RE = re.compile(r"\[msg:(\d+)\]")
 _MD_FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 
@@ -149,13 +151,31 @@ def md_to_html(text):
 app.jinja_env.globals["linkify"] = linkify
 app.jinja_env.globals["md"] = md_to_html
 
-HKT = 8 * 3600
+HKT = 8 * 3600  # legacy default; the live value is the display_tz_offset setting
+
+
+def tz_offset_hours():
+    """Display timezone offset (hours from UTC) from settings, cached for 5 s."""
+    now = time.time()
+    if now - _TZ_CACHE["at"] > 5:
+        try:
+            _TZ_CACHE["off"] = float(store.get_setting("display_tz_offset", 8))
+        except (TypeError, ValueError):
+            _TZ_CACHE["off"] = 8.0
+        _TZ_CACHE["at"] = now
+    return _TZ_CACHE["off"]
+
+
+def tz_label():
+    off = float(tz_offset_hours())
+    return "UTC%s%g" % ("+" if off >= 0 else "-", abs(off))
 
 
 def fmt_ts(ts):
     if not ts:
         return "—"
-    return time.strftime("%m-%d %H:%M", time.gmtime(int(ts) + HKT))
+    return time.strftime("%m-%d %H:%M",
+                         time.gmtime(int(ts) + int(round(tz_offset_hours() * 3600))))
 
 
 def rel_time(ts):
@@ -265,6 +285,7 @@ a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 h1{font-size:1.5rem;margin:0;font-weight:700;letter-spacing:-.03em}
 h2{font-size:1.08rem;margin:26px 0 10px;font-weight:600;letter-spacing:-.02em}
 h3{font-size:1rem;margin:0 0 6px;font-weight:600;letter-spacing:-.01em}
+h4{font-size:.92rem;margin:16px 0 4px;font-weight:600;letter-spacing:-.01em}
 .topbar{background:var(--panel);color:#fff;padding:14px 0}
 .wrap2{max-width:1060px;margin:0 auto;padding:0 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
 .topbar h1{color:#fff;font-size:1.25rem}
@@ -334,7 +355,7 @@ z-index:99;opacity:1;transition:opacity .6s;box-shadow:0 6px 20px rgba(0,0,0,.28
 </style>
 </head><body>
 <div class="topbar"><div class="wrap2">
-  <div><h1>Mail Triage</h1><div class="sub">{{ cfg.IMAP_USER }} · via proxy {{ cfg.IMAP_HOST }}:{{ cfg.IMAP_PORT }} · LLM: {{ cfg.LLM_MODEL }}</div></div>
+  <div><h1>Mail Triage</h1><div class="sub">{{ info.imap }} · LLM: {{ info.llm }}</div></div>
   <nav class="sub"><a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('assistant') }}">Assistant</a><a href="{{ url_for('rules') }}">Rules</a><a href="{{ url_for('classifiers') }}">Classifiers</a><a href="{{ url_for('templates') }}">Templates</a><a href="{{ url_for('messages') }}">Messages</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('log') }}">Log</a></nav>
 </div></div>
 <div class="wrap">
@@ -342,13 +363,24 @@ z-index:99;opacity:1;transition:opacity .6s;box-shadow:0 6px 20px rgba(0,0,0,.28
   {% for cat, msg in messages %}<div class="msg {{ cat }}">{{ msg }}</div>{% endfor %}
 {% endwith %}
 {{ body|safe }}
-<div class="foot">Times shown in HKT · app data in {{ cfg.DATA_DIR }} · never deletes mail (worst case: files it into a folder)</div>
+<div class="foot">Times shown in {{ tz }} · app data in {{ cfg.DATA_DIR }} · never deletes mail (worst case: files it into a folder)</div>
 </div></body></html>
 """
 
 
 def render(body):
-    return render_template_string(BASE_TMPL, body=body, cfg=config)
+    return render_template_string(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
+                                  info=_header_info())
+
+
+def _header_info():
+    try:
+        llm = engine.llm_config()
+        llm_txt = ("%s @ %s" % (llm["model"], llm["base"])) if llm["base"] else "not configured"
+    except Exception:
+        llm_txt = "?"
+    return {"imap": "%s @ %s:%s" % (config.IMAP_USER, config.IMAP_HOST, config.IMAP_PORT),
+            "llm": llm_txt}
 
 
 # ---------------------------------------------------------------- dashboard
@@ -2079,6 +2111,8 @@ def assistant_clear():
 SETTINGS_TMPL = """
 <h2>Settings</h2>
 <form method="post" class="card">
+  <input type="hidden" name="section" value="behavior">
+  <h3>Polling &amp; rules</h3>
   <div class="grid2">
     <div><label>Check interval (seconds)</label><input type="number" name="poll_interval" value="{{ s.poll_interval }}" min="15"></div>
     <div><label>First-run lookback (hours)</label><input type="number" name="lookback_hours" value="{{ s.lookback_hours }}" min="1"></div>
@@ -2089,25 +2123,27 @@ SETTINGS_TMPL = """
   </div>
   <div class="grid2">
     <div><label>Classify concurrency <span class="sub">(parallel LLM requests, 1-16)</span></label><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16"></div>
+    <div><label>Time display offset <span class="sub">(hours from UTC; timestamps show as {{ tz }})</span></label><input type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14"></div>
   </div>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="rules_apply" value="1" style="width:auto;margin-right:8px"
+  <label class="row" style="color:var(--fg)"><input type="hidden" name="rules_apply" value="0"><input type="checkbox" name="rules_apply" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.rules_apply else '' }}> Apply rule actions for real (uncheck = dry-run, suggests only)</label>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="heuristics_enabled" value="1" style="width:auto;margin-right:8px"
+  <label class="row" style="color:var(--fg)"><input type="hidden" name="heuristics_enabled" value="0"><input type="checkbox" name="heuristics_enabled" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.heuristics_enabled else '' }}> Run trained classifiers before the LLM (deterministic, prompt-injection safe)</label>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="heuristic_autorefine" value="1" style="width:auto;margin-right:8px"
+  <label class="row" style="color:var(--fg)"><input type="hidden" name="heuristic_autorefine" value="0"><input type="checkbox" name="heuristic_autorefine" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.heuristic_autorefine else '' }}> Auto-retrain classifiers as new tags arrive</label>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="llm_suggest" value="1" style="width:auto;margin-right:8px"
+  <label class="row" style="color:var(--fg)"><input type="hidden" name="llm_suggest" value="0"><input type="checkbox" name="llm_suggest" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.llm_suggest else '' }}> Classify unmatched mail with the LLM</label>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="llm_apply" value="1" style="width:auto;margin-right:8px"
+  <label class="row" style="color:var(--fg)"><input type="hidden" name="llm_apply" value="0"><input type="checkbox" name="llm_apply" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.llm_apply else '' }}> Auto-file mail by LLM category (uses the folder map below)</label>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="assistant_actions_apply" value="1" style="width:auto;margin-right:8px"
+  <label class="row" style="color:var(--fg)"><input type="hidden" name="assistant_actions_apply" value="0"><input type="checkbox" name="assistant_actions_apply" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.assistant_actions_apply else '' }}> Assistant may act on mail (create folders, move, flag) — uncheck = dry-run</label>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="index_enabled" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.index_enabled else '' }}> Build the semantic search index (local embeddings on GPU 1)</label>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="rerank_enabled" value="1" style="width:auto;margin-right:8px"
+  <label class="row" style="color:var(--fg)"><input type="hidden" name="index_enabled" value="0"><input type="checkbox" name="index_enabled" value="1" style="width:auto;margin-right:8px"
+    {{ 'checked' if s.index_enabled else '' }}> Build the semantic search index (embeddings endpoint below)</label>
+  <label class="row" style="color:var(--fg)"><input type="hidden" name="rerank_enabled" value="0"><input type="checkbox" name="rerank_enabled" value="1" style="width:auto;margin-right:8px"
     {{ 'checked' if s.rerank_enabled else '' }}> Rerank search results with the cross-encoder (better precision, slightly slower)</label>
-  <label>Indexed folders <span class="sub">(comma separated; blank = all except Junk / Deleted / Trash / system folders)</span></label>
+  <label>Indexed folders <span class="sub">(comma separated; blank = all except the excluded list in the RAG card)</span></label>
   <input type="text" name="index_folders" value="{{ s.index_folders|join(', ') }}">
+  <h3>LLM behaviour</h3>
   <div class="grid2">
     <div><label>Max LLM calls per hour</label><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0"></div>
     <div><label>LLM classifications per check</label><input type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1"></div>
@@ -2124,87 +2160,307 @@ SETTINGS_TMPL = """
 </form>
 
 <div class="card">
-  <h3>Connection &amp; model</h3>
+  <h3>LLM endpoint <span class="sub">— any OpenAI-compatible /chat/completions server</span></h3>
+  <form method="post">
+    <input type="hidden" name="section" value="llm">
+    <div class="grid2">
+      <div><label>Base URL <span class="sub">(e.g. http://100.93.139.49:8040/v1)</span></label><input type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}"></div>
+      <div><label>Model</label><input type="text" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>API key <span class="sub">(blank keeps the stored key; enter a new one to replace)</span></label><input type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}"></div>
+      <div><label>Timeout (seconds) <span class="sub">(blank = default)</span></label><input type="number" name="llm_timeout" min="0" value="{{ s.llm_timeout or '' }}" placeholder="90"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Thinking / reasoning channel</label>
+        <select name="llm_thinking">
+          <option value="auto" {{ 'selected' if s.llm_thinking != 'off' else '' }}>auto — send the vLLM thinking extension, drop it if the endpoint rejects it</option>
+          <option value="off" {{ 'selected' if s.llm_thinking == 'off' else '' }}>off — never send it (strict OpenAI-compatible servers)</option>
+        </select>
+      </div>
+      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="llm_api_key_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored API key</label></div>
+    </div>
+    <h4>Fallback endpoint <span class="sub">(optional; used automatically when the primary fails)</span></h4>
+    <div class="grid2">
+      <div><label>Base URL</label><input type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}"></div>
+      <div><label>Model <span class="sub">(blank = same as primary)</span></label><input type="text" name="llm_fallback_model" value="{{ s.llm_fallback_model }}" placeholder="{{ (llm.fallback.model if llm.fallback else '') or '' }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>API key <span class="sub">(blank keeps the stored key)</span></label><input type="password" name="llm_fallback_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if (llm.fallback and llm.fallback.key) else 'not set' }}"></div>
+      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="llm_fallback_api_key_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored fallback key</label></div>
+    </div>
+    <p style="margin-top:14px"><button class="btn primary" type="submit">Save LLM endpoint</button></p>
+  </form>
+  <div class="row" style="margin-top:8px">
+    <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit">Test primary</button></form>
+    <form class="inline" method="post" action="{{ url_for('settings_test_llm', which='fallback') }}"><button class="btn" type="submit">Test fallback</button></form>
+    <span class="sub">tests the saved settings — save first if you just edited them</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>RAG / semantic search <span class="sub">— embeddings + reranker endpoints</span></h3>
+  <form method="post">
+    <input type="hidden" name="section" value="rag">
+    <h4>Embeddings</h4>
+    <div class="grid2">
+      <div><label>Base URL</label><input type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}"></div>
+      <div><label>Model</label><input type="text" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Protocol</label>
+        <select name="embed_protocol">
+          <option value="tei" {{ 'selected' if s.embed_protocol != 'openai' else '' }}>TEI — POST /embed {"inputs": [...]}</option>
+          <option value="openai" {{ 'selected' if s.embed_protocol == 'openai' else '' }}>OpenAI — POST /embeddings {"input": [...]} (OpenAI, Ollama, LM Studio, TEI /v1)</option>
+        </select>
+      </div>
+      <div><label>API key <span class="sub">(blank keeps the stored key; only for gated endpoints)</span></label><input type="password" name="embed_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if ecfg.key else 'not set' }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Timeout (seconds) <span class="sub">(blank = default)</span></label><input type="number" name="embed_timeout" min="0" value="{{ s.embed_timeout or '' }}" placeholder="180"></div>
+      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="embed_api_key_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored key</label></div>
+    </div>
+    <label>Query instruction prefix <span class="sub">(prepended to search queries only, never to documents; Qwen3-Embedding needs one, most other models want this blank)</span></label>
+    <textarea name="embed_query_prefix" rows="2" style="min-height:60px">{{ s.embed_query_prefix }}</textarea>
+    <h4>Reranker</h4>
+    <div class="grid2">
+      <div><label>Base URL</label><input type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}"></div>
+      <div><label>Model</label><input type="text" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Protocol</label>
+        <select name="rerank_protocol">
+          <option value="tei" {{ 'selected' if s.rerank_protocol != 'cohere' else '' }}>TEI — {"query", "texts"}</option>
+          <option value="cohere" {{ 'selected' if s.rerank_protocol == 'cohere' else '' }}>Cohere-style — {"query", "documents"} (Cohere, Jina, Infinity)</option>
+        </select>
+      </div>
+      <div><label>API key <span class="sub">(blank keeps the stored key)</span></label><input type="password" name="rerank_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if rcfg.key else 'not set' }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Timeout (seconds) <span class="sub">(blank = default)</span></label><input type="number" name="rerank_timeout" min="0" value="{{ s.rerank_timeout or '' }}" placeholder="90"></div>
+      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="rerank_api_key_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored key</label></div>
+    </div>
+    <h4>Index</h4>
+    <div class="grid2">
+      <div><label>Idle refresh interval (minutes)</label><input type="number" name="index_refresh_minutes" value="{{ s.index_refresh_minutes }}" min="1"></div>
+    </div>
+    <label>Excluded folders <span class="sub">(comma separated, case-insensitive substrings; blank = index everything)</span></label>
+    <input type="text" name="rag_exclude_folders" value="{{ s.rag_exclude_folders|join(', ') }}">
+    <p style="margin-top:14px"><button class="btn primary" type="submit">Save RAG settings</button></p>
+  </form>
+  <div class="row" style="margin-top:8px">
+    <form class="inline" method="post" action="{{ url_for('settings_test_embed') }}"><button class="btn" type="submit">Test embeddings</button></form>
+    <form class="inline" method="post" action="{{ url_for('settings_test_rerank') }}"><button class="btn" type="submit">Test reranker</button></form>
+    <span class="sub">changing the embedding model or dimension requires an index rebuild (Dashboard → Rebuild).</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Connection &amp; runtime</h3>
   <div class="sub mono">
-    IMAP: {{ cfg.IMAP_USER }} @ {{ cfg.IMAP_HOST }}:{{ cfg.IMAP_PORT }} (via email-oauth2-proxy) ·
-    LLM: {{ cfg.LLM_BASE_URL }} · model {{ cfg.LLM_MODEL }} · key {{ 'set' if cfg.LLM_API_KEY else 'MISSING' }}{% if cfg.LLM_FALLBACK_BASE_URL %} · fallback: {{ cfg.LLM_FALLBACK_MODEL }}{% endif %} ·
+    IMAP: {{ cfg.IMAP_USER }} @ {{ cfg.IMAP_HOST }}:{{ cfg.IMAP_PORT }} (via email-oauth2-proxy) ·<br>
+    LLM: {{ llm.base }} · model {{ llm.model }} · key {{ 'set' if llm.key else 'MISSING' }}{% if llm.fallback %} · fallback: {{ llm.fallback.model }}{% endif %}<br>
+    Embed: {{ ecfg.base or '— not configured —' }} · {{ ecfg.model }} · Rerank: {{ rcfg.base or '— not configured —' }} · {{ rcfg.model }}<br>
     state: {{ engine_state }} · db: {{ cfg.DB_PATH }}
   </div>
-  <p><form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit">Test LLM endpoint</button></form> <span class="sub">tests the primary endpoint (fallback engages automatically at runtime if it fails)</span></p>
-  <p class="sub" style="margin-bottom:0">Connection details and keys live in the container env file
-  (<code>~/.hermes</code>-style secrets stay out of the database); everything on this page is stored in SQLite.</p>
+  <p class="sub" style="margin-bottom:0">Endpoints and keys set on this page are stored in SQLite (keys are shown masked only);
+  blank fields fall back to the container env file, so an existing .env keeps working.</p>
 </div>
 """
 
 
-@app.route("/settings", methods=["GET", "POST"])
-def settings():
-    if request.method == "POST":
-        try:
-            store.set_setting("poll_interval", max(15, int(request.form.get("poll_interval", 90))))
-        except ValueError:
-            pass
-        try:
-            store.set_setting("classify_concurrency",
-                              max(1, min(16, int(request.form.get("classify_concurrency", 8)))))
-        except ValueError:
-            pass
-        try:
-            store.set_setting("lookback_hours", max(1, int(request.form.get("lookback_hours", 48))))
-        except ValueError:
-            pass
+def _form_int(name, default, lo=None, hi=None):
+    raw = (request.form.get(name) or "").strip()
+    try:
+        v = int(float(raw))
+    except (TypeError, ValueError):
+        return default
+    if lo is not None:
+        v = max(lo, v)
+    if hi is not None:
+        v = min(hi, v)
+    return v
+
+
+def _form_float(name, default):
+    raw = (request.form.get(name) or "").strip()
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _save_secret(name):
+    """Password-style field: blank keeps the stored value; the paired <name>_clear checkbox clears it."""
+    if name + "_clear" in request.form:
+        store.set_setting(name, "")
+        return
+    if name in request.form:
+        val = (request.form.get(name) or "").strip()
+        if val:
+            store.set_setting(name, val)
+
+
+def _save_behavior_settings():
+    f = request.form
+
+    def has(k):
+        return k in f
+
+    if has("poll_interval"):
+        store.set_setting("poll_interval", _form_int("poll_interval", 90, lo=15))
+    if has("classify_concurrency"):
+        store.set_setting("classify_concurrency", _form_int("classify_concurrency", 8, lo=1, hi=16))
+    if has("lookback_hours"):
+        store.set_setting("lookback_hours", _form_int("lookback_hours", 48, lo=1))
+    if has("display_tz_offset"):
+        store.set_setting("display_tz_offset", max(-14.0, min(14.0, _form_float("display_tz_offset", 8))))
+    if has("watch_folders"):
         store.set_setting("watch_folders",
-                          [f.strip() for f in (request.form.get("watch_folders") or "INBOX").split(",") if f.strip()])
-        store.set_setting("my_name", (request.form.get("my_name") or "Sean").strip())
-        store.set_setting("rules_apply", bool(request.form.get("rules_apply")))
-        store.set_setting("heuristics_enabled", bool(request.form.get("heuristics_enabled")))
-        store.set_setting("heuristic_autorefine", bool(request.form.get("heuristic_autorefine")))
-        store.set_setting("llm_suggest", bool(request.form.get("llm_suggest")))
-        store.set_setting("llm_apply", bool(request.form.get("llm_apply")))
-        store.set_setting("assistant_actions_apply", bool(request.form.get("assistant_actions_apply")))
-        store.set_setting("index_enabled", bool(request.form.get("index_enabled")))
-        store.set_setting("rerank_enabled", bool(request.form.get("rerank_enabled")))
+                          [x.strip() for x in (f.get("watch_folders") or "INBOX").split(",") if x.strip()])
+    if has("my_name"):
+        store.set_setting("my_name", (f.get("my_name") or "Sean").strip())
+    for k in ("rules_apply", "heuristics_enabled", "heuristic_autorefine", "llm_suggest",
+              "llm_apply", "assistant_actions_apply", "index_enabled", "rerank_enabled"):
+        if has(k):
+            store.set_setting(k, f.get(k) not in (None, "", "0"))
+    if has("index_folders"):
         store.set_setting("index_folders",
-                          [f.strip() for f in (request.form.get("index_folders") or "").split(",") if f.strip()])
-        try:
-            store.set_setting("max_llm_per_hour", max(0, int(request.form.get("max_llm_per_hour", 40))))
-        except ValueError:
-            pass
-        try:
-            store.set_setting("llm_batch_per_cycle", max(1, int(request.form.get("llm_batch_per_cycle", 5))))
-        except ValueError:
-            pass
+                          [x.strip() for x in (f.get("index_folders") or "").split(",") if x.strip()])
+    if has("max_llm_per_hour"):
+        store.set_setting("max_llm_per_hour", _form_int("max_llm_per_hour", 40, lo=0))
+    if has("llm_batch_per_cycle"):
+        store.set_setting("llm_batch_per_cycle", _form_int("llm_batch_per_cycle", 5, lo=1))
+    if has("categories"):
         store.set_setting("categories",
-                          [c.strip() for c in (request.form.get("categories") or "").split(",") if c.strip()])
+                          [c.strip() for c in (f.get("categories") or "").split(",") if c.strip()])
+    if has("category_folders"):
         mapping = {}
-        for line in (request.form.get("category_folders") or "").splitlines():
+        for line in (f.get("category_folders") or "").splitlines():
             if "=" in line:
                 k, v = line.split("=", 1)
                 if k.strip():
                     mapping[k.strip()] = v.strip()
         store.set_setting("category_folders", mapping)
-        store.set_setting("drafts_folder", (request.form.get("drafts_folder") or "").strip())
-        flash("Settings saved.", "ok")
+    if has("drafts_folder"):
+        store.set_setting("drafts_folder", (f.get("drafts_folder") or "").strip())
+
+
+def _save_llm_settings():
+    f = request.form
+    for k in ("llm_base_url", "llm_model", "llm_fallback_base_url", "llm_fallback_model"):
+        if k in f:
+            store.set_setting(k, (f.get(k) or "").strip())
+    if "llm_thinking" in f:
+        store.set_setting("llm_thinking", "off" if f.get("llm_thinking") == "off" else "auto")
+    if "llm_timeout" in f:
+        store.set_setting("llm_timeout", _form_int("llm_timeout", 0, lo=0))
+    _save_secret("llm_api_key")
+    _save_secret("llm_fallback_api_key")
+
+
+def _save_rag_settings():
+    f = request.form
+    for k in ("embed_base_url", "embed_model", "rerank_base_url", "rerank_model"):
+        if k in f:
+            store.set_setting(k, (f.get(k) or "").strip())
+    if "embed_protocol" in f and f.get("embed_protocol") in ("tei", "openai"):
+        store.set_setting("embed_protocol", f.get("embed_protocol"))
+    if "rerank_protocol" in f and f.get("rerank_protocol") in ("tei", "cohere"):
+        store.set_setting("rerank_protocol", f.get("rerank_protocol"))
+    if "embed_timeout" in f:
+        store.set_setting("embed_timeout", _form_int("embed_timeout", 0, lo=0))
+    if "rerank_timeout" in f:
+        store.set_setting("rerank_timeout", _form_int("rerank_timeout", 0, lo=0))
+    if "embed_query_prefix" in f:
+        store.set_setting("embed_query_prefix", f.get("embed_query_prefix") or "")
+    if "index_refresh_minutes" in f:
+        store.set_setting("index_refresh_minutes", _form_int("index_refresh_minutes", 10, lo=1))
+    if "rag_exclude_folders" in f:
+        store.set_setting("rag_exclude_folders",
+                          [x.strip() for x in (f.get("rag_exclude_folders") or "").split(",") if x.strip()])
+    _save_secret("embed_api_key")
+    _save_secret("rerank_api_key")
+
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings():
+    if request.method == "POST":
+        section = request.form.get("section") or "behavior"
+        if section == "llm":
+            _save_llm_settings()
+            flash("LLM endpoint settings saved.", "ok")
+        elif section == "rag":
+            _save_rag_settings()
+            flash("RAG settings saved.", "ok")
+        else:
+            _save_behavior_settings()
+            flash("Settings saved.", "ok")
+        _TZ_CACHE["at"] = 0  # re-read the display timezone on the next render
         return redirect(url_for("settings"))
-    return render(render_template_string(SETTINGS_TMPL, s=store.all_settings(),
-                                         engine_state=worker.state, cfg=config))
+    return render(render_template_string(
+        SETTINGS_TMPL, s=store.all_settings(), engine_state=worker.state, cfg=config,
+        llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config()))
 
 
 @app.route("/settings/test-llm", methods=["POST"])
 def settings_test_llm():
+    which = request.args.get("which") or "primary"
     started = time.time()
+    client = engine.LLMClient()
+    if which == "fallback":
+        if not client.fallback:
+            flash("No fallback endpoint configured (see the LLM endpoint card).", "err")
+            return redirect(url_for("settings"))
+        base, key, model = client.fallback
+    else:
+        base, key, model = client.base, client.key, client.model
+    if not base:
+        flash("No LLM endpoint configured - set one in Settings.", "err")
+        return redirect(url_for("settings"))
     try:
-        client = engine.LLMClient()
-        out = client._chat_once(client.base, client.key, client.model,
+        out = client._chat_once(base, key, model,
                                 "You are a connectivity test. Reply with the single word ok.",
                                 [{"role": "user", "content": "Reply with the single word ok."}],
                                 json_mode=False)
-        flash("LLM OK in %.1fs - model %s - replied: %s"
-              % (time.time() - started, client.model, (out or "").strip()[:60]), "ok")
+        flash("LLM %s OK in %.1fs - %s @ %s - replied: %s"
+              % (which, time.time() - started, model, base, (out or "").strip()[:60]), "ok")
     except Exception as exc:
-        flash("LLM FAILED after %.1fs: %r - is the local model running? "
-              "(cd gemma && docker compose ps)" % (time.time() - started, exc), "err")
+        flash("LLM %s FAILED after %.1fs: %r - check the endpoint on this page "
+              "(local model server: cd gemma && docker compose ps)"
+              % (which, time.time() - started, exc), "err")
     return redirect(url_for("settings"))
+
+
+@app.route("/settings/test-embed", methods=["POST"])
+def settings_test_embed():
+    started = time.time()
+    cfg = rag.embed_config()
+    try:
+        vec = rag.embed_one("connectivity test")
+        flash("Embeddings OK in %.1fs - %s @ %s - %d dimensions - protocol %s"
+              % (time.time() - started, cfg["model"], cfg["base"], len(vec), cfg["protocol"]), "ok")
+    except Exception as exc:
+        flash("Embeddings FAILED after %.1fs: %r" % (time.time() - started, exc), "err")
+    return redirect(url_for("settings"))
+
+
+@app.route("/settings/test-rerank", methods=["POST"])
+def settings_test_rerank():
+    started = time.time()
+    try:
+        rr = rag.rerank("budget review", ["the Q4 budget was reviewed and approved",
+                                          "lunch tomorrow near campus"])
+        if not rr:
+            flash("Reranker not configured (Settings -> RAG) or returned no results.", "err")
+        else:
+            top = max(rr, key=lambda d: d.get("score") or 0)
+            flash("Reranker OK in %.1fs - %d result(s), top score %.3f"
+                  % (time.time() - started, len(rr), top.get("score") or 0), "ok")
+    except Exception as exc:
+        flash("Reranker FAILED after %.1fs: %r" % (time.time() - started, exc), "err")
+    return redirect(url_for("settings"))
+
 
 
 # ---------------------------------------------------------------- log

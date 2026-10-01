@@ -397,7 +397,16 @@ class LLMHandler(BaseHTTPRequestHandler):
             if m.get("role") == "user" and isinstance(m.get("content"), str):
                 user = m["content"]
                 break
-        self.server.calls.append({"system": system, "user": user, "payload": payload})
+        self.server.calls.append({"system": system, "user": user, "payload": payload,
+                                  "auth": self.headers.get("Authorization")})
+        if getattr(self.server, "reject_ctk", False) and "chat_template_kwargs" in payload:
+            body = b'{"error": {"message": "unrecognized field chat_template_kwargs"}}'
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if payload.get("stream"):
             self.stream_reply(payload, system, user)
             return
@@ -601,15 +610,30 @@ class TEIHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length))
         self.server.calls.append({"path": self.path, "payload": payload})
-        if self.path.startswith("/embed"):
+        if self.path.startswith("/embeddings"):
+            # OpenAI-compatible embeddings shape ({"input": [...], "model": ...})
+            inputs = payload.get("input") or []
+            body = json.dumps({
+                "object": "list", "model": payload.get("model") or "mock-embed",
+                "data": [{"object": "embedding", "index": i, "embedding": semantic_vec(t)}
+                         for i, t in enumerate(inputs)],
+            }).encode()
+        elif self.path.startswith("/embed"):
             inputs = payload.get("inputs") or []
             body = json.dumps([semantic_vec(t) for t in inputs]).encode()
         elif self.path.startswith("/rerank"):
             q = payload.get("query") or ""
-            texts = payload.get("texts") or []
-            out = [{"index": i, "score": kw_score(q, t)} for i, t in enumerate(texts)]
-            out.sort(key=lambda x: -x["score"])
-            body = json.dumps(out).encode()
+            if "documents" in payload:  # Cohere/Jina-style request shape
+                texts = payload.get("documents") or []
+                results = [{"index": i, "relevance_score": kw_score(q, t)}
+                           for i, t in enumerate(texts)]
+                results.sort(key=lambda x: -x["relevance_score"])
+                body = json.dumps({"results": results}).encode()
+            else:
+                texts = payload.get("texts") or []
+                out = [{"index": i, "score": kw_score(q, t)} for i, t in enumerate(texts)]
+                out.sort(key=lambda x: -x["score"])
+                body = json.dumps(out).encode()
         else:
             self.send_response(404)
             self.end_headers()
@@ -659,6 +683,7 @@ def main():
     llm_server.inflight = 0
     llm_server.max_inflight = 0
     llm_server.calls = []
+    llm_server.reject_ctk = False
     llm_server.daemon_threads = True
     llm_port = llm_server.server_address[1]
     threading.Thread(target=llm_server.serve_forever, daemon=True).start()
@@ -1540,6 +1565,129 @@ def main():
         ok_relabel = (rowx["llm_category"] == "Personal" and rowx["classified_by"] == "user")
     check("classified-source relabel corrects the LLM label on the message", ok_relabel)
     store.delete_heuristic(hcl)
+
+    section("T26 settings decouple endpoints from env (LLM + RAG)")
+    llm_base_mock = "http://127.0.0.1:%d/v1" % llm_port
+    tei_base = "http://127.0.0.1:%d" % tei_port
+    # -- the LLM endpoint (base/model/key/timeout) is now a setting
+    r = client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
+                                       "llm_model": "settings-model-x", "llm_api_key": "settings-key-1",
+                                       "llm_timeout": "33"})
+    check("LLM settings save redirects", r.status_code == 302)
+    c = engine.LLMClient()
+    check("LLMClient reads the settings endpoint",
+          c.base == llm_base_mock and c.model == "settings-model-x" and c.timeout == 33)
+    check("stored API key is used", c.key == "settings-key-1")
+    out = c.classify({"from_addr": "x@y", "subject": "Weekly newsletter", "snippet": "deals",
+                      "to_addr": "", "date": ""}, ["Newsletter"], "Sean")
+    call = llm_server.calls[-1]
+    check("classify uses the settings model + bearer from settings",
+          out.get("category") == "Newsletter" and call["payload"].get("model") == "settings-model-x"
+          and call.get("auth") == "Bearer settings-key-1")
+    check("thinking extension sent in auto mode",
+          "chat_template_kwargs" in call["payload"])
+    # -- blank key input keeps the stored key; the clear checkbox removes it
+    client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
+                                   "llm_model": "settings-model-x", "llm_api_key": "",
+                                   "llm_timeout": "33"})
+    check("blank key field keeps the stored key", engine.LLMClient().key == "settings-key-1")
+    client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
+                                   "llm_model": "settings-model-x", "llm_api_key_clear": "1",
+                                   "llm_timeout": "33"})
+    check("clear checkbox falls back to the env key",
+          engine.LLMClient().key == config.LLM_API_KEY)
+    # -- thinking=off never sends the extension
+    client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
+                                   "llm_model": "settings-model-x", "llm_thinking": "off"})
+    engine.LLMClient().classify({"from_addr": "x@y", "subject": "Weekly newsletter",
+                                 "snippet": "deals", "to_addr": "", "date": ""}, ["Newsletter"], "Sean")
+    check("thinking=off suppresses chat_template_kwargs",
+          "chat_template_kwargs" not in llm_server.calls[-1]["payload"])
+    client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
+                                   "llm_model": "settings-model-x", "llm_thinking": "auto"})
+    # -- auto mode: an endpoint that rejects the extension still succeeds (strip + retry)
+    llm_server.reject_ctk = True
+    n0 = len(llm_server.calls)
+    out = engine.LLMClient().classify({"from_addr": "x@y", "subject": "Weekly newsletter",
+                                       "snippet": "deals", "to_addr": "", "date": ""},
+                                      ["Newsletter"], "Sean")
+    attempts = llm_server.calls[n0:]
+    llm_server.reject_ctk = False
+    check("auto mode survives an endpoint that rejects the thinking extension",
+          out.get("category") == "Newsletter" and len(attempts) == 2
+          and attempts[0]["payload"].get("chat_template_kwargs")
+          and "chat_template_kwargs" not in attempts[1]["payload"])
+    # -- fallback endpoint is a setting too
+    client.post("/settings", data={"section": "llm", "llm_fallback_base_url": llm_base_mock,
+                                   "llm_fallback_model": "settings-fb"})
+    check("fallback endpoint comes from settings",
+          engine.LLMClient().fallback == (llm_base_mock, "", "settings-fb"))
+    # -- blank fields fall back to the env
+    client.post("/settings", data={"section": "llm", "llm_base_url": "", "llm_model": "",
+                                   "llm_timeout": "0", "llm_fallback_base_url": "",
+                                   "llm_fallback_model": ""})
+    check("blank LLM settings fall back to the env endpoint",
+          engine.LLMClient().base == config.LLM_BASE_URL
+          and engine.LLMClient().model == config.LLM_MODEL)
+    # -- RAG endpoints as settings, incl. OpenAI-style embeddings + Cohere-style rerank
+    client.post("/settings", data={"section": "rag", "embed_base_url": tei_base,
+                                   "embed_model": "mock-embed-1", "embed_protocol": "openai",
+                                   "rerank_base_url": tei_base, "rerank_protocol": "cohere"})
+    n0 = len(tei_server.calls)
+    vec = rag.embed_one("invoice payment")
+    emb_calls = tei_server.calls[n0:]
+    check("openai-protocol embeddings hit /embeddings with model + input",
+          len(vec) == 8 and len(emb_calls) == 1
+          and emb_calls[0]["path"].startswith("/embeddings")
+          and emb_calls[0]["payload"].get("model") == "mock-embed-1"
+          and isinstance(emb_calls[0]["payload"].get("input"), list))
+    check("query instruction prefix still applied on queries only",
+          "Instruct:" in emb_calls[0]["payload"]["input"][0])
+    rr = rag.rerank("invoice payment", ["invoice paid", "lunch tomorrow"])
+    check("cohere-protocol rerank normalizes to index/score",
+          bool(rr) and all("index" in d and "score" in d for d in rr)
+          and rr[0]["score"] >= rr[-1]["score"])
+    r = client.post("/settings/test-embed")
+    check("Test embeddings button reaches the mock endpoint",
+          r.status_code == 302 and any(c["path"].startswith("/embeddings")
+                                       for c in tei_server.calls[-2:]))
+    r = client.post("/settings/test-rerank")
+    check("Test reranker button reaches the mock endpoint",
+          r.status_code == 302 and any(c["path"].startswith("/rerank")
+                                       for c in tei_server.calls[-2:]))
+    r = client.post("/settings/test-llm", query_string={"which": "fallback"})
+    check("Test fallback button redirects (no fallback configured)",
+          r.status_code == 302)
+    client.post("/settings", data={"section": "rag", "embed_protocol": "tei",
+                                   "rerank_protocol": "tei"})
+    check("protocols flip back to tei",
+          rag.embed_config()["protocol"] == "tei" and rag.rerank_config()["protocol"] == "tei")
+    # -- the embed-model change guard reads the settings value
+    dim = store.meta_get("embed_dim")
+    client.post("/settings", data={"section": "rag", "embed_model": "other-embed-9"})
+    guard_error = ""
+    try:
+        rag._ensure_dim(dim)
+    except Exception as exc:
+        guard_error = str(exc)
+    check("embedding model change guard fires from the settings value",
+          "other-embed-9" in guard_error and "rebuild" in guard_error)
+    client.post("/settings", data={"section": "rag", "embed_model": ""})
+    # -- excluded folders, refresh cadence, display timezone are settings now
+    client.post("/settings", data={"section": "rag", "rag_exclude_folders": "junk, custom-skip"})
+    kept = rag.default_folders(["INBOX", "Junk Email", "custom-skip folder", "Work"])
+    check("RAG excluded folders come from settings", kept == ["INBOX", "Work"])
+    client.post("/settings", data={"section": "rag",
+                                   "rag_exclude_folders": ("junk, deleted, trash, sync issues, "
+                                                           "calendar, contacts, journal, "
+                                                           "conversation history, outbox, rss feeds")})
+    client.post("/settings", data={"section": "behavior", "display_tz_offset": "0"})
+    check("display timezone offset is a setting", app_mod.fmt_ts(3600) == "01-01 01:00")
+    client.post("/settings", data={"section": "behavior", "display_tz_offset": "8"})
+    check("timezone back to +8", app_mod.fmt_ts(3600) == "01-01 09:00")
+    r = client.get("/settings")
+    check("settings page carries the new endpoint cards",
+          b"LLM endpoint" in r.data and b"RAG / semantic search" in r.data)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

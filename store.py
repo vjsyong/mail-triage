@@ -30,8 +30,38 @@ DEFAULT_SETTINGS = {
     "my_name": "Sean",
     "assistant_actions_apply": True,  # assistant may move/flag mail (False = dry-run)
     "index_enabled": True,        # build/refresh the semantic search index
-    "index_folders": [],          # blank = all folders except junk/system (see rag.EXCLUDE_FOLDERS)
+    "index_folders": [],          # blank = all folders except the exclusion list below
     "rerank_enabled": True,       # cross-encoder rerank on top of hybrid retrieval
+    "index_refresh_minutes": 10,  # idle incremental index refresh cadence
+
+    # ---- LLM endpoint (blank = fall back to the container env: LLM_BASE_URL etc.) ----
+    "llm_base_url": "",           # any OpenAI-compatible base URL, e.g. http://host:8040/v1
+    "llm_api_key": "",            # optional bearer; stored in SQLite, shown masked
+    "llm_model": "",              # model name served by that endpoint
+    "llm_timeout": 0,             # seconds; 0 = env/default
+    "llm_thinking": "auto",       # auto = send the thinking extension, drop it on 4xx; off = never send
+    "llm_fallback_base_url": "",  # optional second endpoint, used when the primary fails
+    "llm_fallback_api_key": "",
+    "llm_fallback_model": "",     # blank = same model name as the primary
+
+    # ---- RAG endpoints ----
+    "embed_base_url": "",         # e.g. http://host:8041 (TEI) or an OpenAI-style .../v1
+    "embed_model": "",            # blank = env EMBED_MODEL
+    "embed_api_key": "",          # optional bearer for the embeddings endpoint
+    "embed_protocol": "tei",      # tei = POST /embed {"inputs":..}; openai = POST /embeddings
+    "embed_timeout": 0,
+    "embed_query_prefix": ("Instruct: Given a search query, retrieve relevant email messages "
+                           "from the user's mailbox\nQuery: "),
+    "rerank_base_url": "",
+    "rerank_model": "",
+    "rerank_api_key": "",
+    "rerank_protocol": "tei",     # tei = {"query","texts"}; cohere = {"query","documents"}
+    "rerank_timeout": 0,
+    "rag_exclude_folders": ["junk", "deleted", "trash", "sync issues", "calendar", "contacts",
+                            "journal", "conversation history", "outbox", "rss feeds"],
+
+    # ---- UI ----
+    "display_tz_offset": 8,       # hours from UTC for displayed timestamps (float ok)
 }
 
 _SCHEMA = """
