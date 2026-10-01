@@ -2241,6 +2241,9 @@ def main():
     check("sidebar is resizable (grip + persisted width)",
           b'id="asb-grip"' in r.data and b"col-resize" in r.data
           and b"var(--asb-w" in r.data and b"asb_w" in r.data)
+    check("streamed proposal cards label flows correctly (kind-aware JS)",
+          b"isFlow?'Add flow':'Add rule'" in r.data
+          and b"isFlow?'Update flow #':'Update rule #'" in r.data)
     r = client.get("/assistant/s/%d" % sid29)
     check("no assistant sidebar on the assistant page itself",
           b'id="asb"' not in r.data and b'id="asb-toggle"' not in r.data
@@ -2304,6 +2307,8 @@ def main():
     body = r.data.decode()
     check("proposal turn ran propose_flow",
           '"name": "propose_flow"' in body and "event: proposals" in body)
+    check("streamed proposals carry the view shape (summary/actions_summary)",
+          '"summary"' in body and '"actions_summary"' in body and '"kind": "flow"' in body)
     prop_rows = [m for m in store.assistant_messages(limit=10)
                  if m.get("role") == "assistant" and "propose_flow" in (m.get("meta") or "")]
     check("flow proposal persisted on the message", bool(prop_rows))
@@ -2313,6 +2318,7 @@ def main():
     check("card renders as a flow proposal",
           b"Add flow" in page and b"move to Personal" in page
           and b"Thank you for your email" in page)
+    check("server-rendered apply forms carry a back target", b'name="back"' in page)
     r = client.post("/assistant/apply", data={"msg_id": pm["id"], "idx": 0, "session": str(sid32)})
     flows32 = [f for f in store.list_flows() if "Hotmail" in (f["name"] or "")]
     check("one-click apply created the flow",
@@ -2327,6 +2333,14 @@ def main():
     page32 = client.get("/assistant/s/%d" % sid32).data
     check("card greys to Added after apply",
           "\u2713 Added".encode("utf-8") in page32 and b">Add flow</button>" not in page32)
+    r = client.post("/assistant/apply", data={"msg_id": pm["id"], "idx": 0, "session": str(sid32),
+                                              "back": "/flows"})
+    check("apply honours a safe back target (stays on the page)",
+          r.headers.get("Location", "").endswith("/flows"))
+    r = client.post("/assistant/apply", data={"msg_id": pm["id"], "idx": 0, "session": str(sid32),
+                                              "back": "//evil.com"})
+    check("apply rejects scheme-relative back targets",
+          "evil.com" not in r.headers.get("Location", ""))
     check("flow builder offers fixed drafts",
           b"Fixed message" in client.get("/flows/new").data)
     before_a = len(state.appended)

@@ -1151,44 +1151,50 @@ window.assistantChat = function(opts){
       var i1=mk('input'); i1.type='hidden'; i1.name='msg_id'; i1.value=msgId; f.appendChild(i1);
       var i2=mk('input'); i2.type='hidden'; i2.name='idx'; i2.value=idx; f.appendChild(i2);
       var i3=mk('input'); i3.type='hidden'; i3.name='session'; i3.value=sid; f.appendChild(i3);
+      var ib=mk('input'); ib.type='hidden'; ib.name='back'; ib.value=location.pathname; f.appendChild(ib);
       Object.keys(extra||{}).forEach(function(k){ var i4=mk('input'); i4.type='hidden'; i4.name=k; i4.value=extra[k]; f.appendChild(i4); });
+      f.onsubmit=function(){ return guardApply(f); };
       return f;
     }
     function addProposal(p,idx,msgId){
+      var isFlow=(p.kind==='flow');
+      var updObj=p.updates||p.updates_rule||null;
+      var simObj=p.similar||p.similar_rule||null;
+      var tgt=updObj||simObj||null;
       var w=mk('div','proposal');
-      var tgt=p.updates_rule||p.similar_rule||null;
       var h=mk('div','spread');
       var left=mk('div');
       left.appendChild(mk('b','',p.name));
       left.appendChild(document.createTextNode(' ('+(p.match_mode||'all')+')'));
-      if(p.updates_rule){ var b1=mk('span','badge warn',' updates #'+p.updates_rule.id+' "'+p.updates_rule.name+'"'); b1.style.marginLeft='6px'; left.appendChild(b1); }
-      else if(p.similar_rule){ var b2=mk('span','badge warn',' overlaps #'+p.similar_rule.id); b2.style.marginLeft='6px'; left.appendChild(b2); }
+      if(updObj){ var b1=mk('span','badge warn',' updates #'+updObj.id+' "'+updObj.name+'"'); b1.style.marginLeft='6px'; left.appendChild(b1); }
+      else if(simObj){ var b2=mk('span','badge warn',' overlaps #'+simObj.id); b2.style.marginLeft='6px'; left.appendChild(b2); }
       h.appendChild(left);
       var row=mk('div','row'); row.style.whiteSpace='nowrap';
       if(tgt){
         var fu=makeForm(msgId,idx,{mode:'update',rule_id:tgt.id});
-        var bu=mk('button','btn small primary','Update rule #'+tgt.id); bu.type='submit';
+        var bu=mk('button','btn small primary',(isFlow?'Update flow #':'Update rule #')+tgt.id); bu.type='submit';
         fu.appendChild(bu); row.appendChild(fu);
       }
       var fa=makeForm(msgId,idx,{});
-      var ba=mk('button','btn small'+(tgt?'':' primary'),'Add rule'); ba.type='submit';
+      var ba=mk('button','btn small'+(tgt?'':' primary'),isFlow?'Add flow':'Add rule'); ba.type='submit';
       fa.appendChild(ba); row.appendChild(fa);
       var fd=makeForm(msgId,idx,{disabled:'1'});
       var bd=mk('button','btn small','Add (disabled)'); bd.type='submit';
       fd.appendChild(bd); row.appendChild(fd);
       h.appendChild(row);
       w.appendChild(h);
-      if(p.updates_rule){
-        w.appendChild(mk('div','note','Updates rule #'+p.updates_rule.id+' "'+p.updates_rule.name+'" \u2014 currently '+actsText(p.updates_rule.actions)+'.'));
-      } else if(p.similar_rule){
-        w.appendChild(mk('div','note','\u26a0 Similar rule exists: #'+p.similar_rule.id+' "'+p.similar_rule.name+'" \u2014 '+actsText(p.similar_rule.actions)+'. Updating it avoids a duplicate.'));
+      if(updObj){
+        w.appendChild(mk('div','note','Updates '+(isFlow?'flow':'rule')+' #'+updObj.id+' "'+updObj.name+'" — currently '+(p.updates_actions||'')+'.'));
+      } else if(simObj){
+        w.appendChild(mk('div','note','⚠ Similar rule exists: #'+simObj.id+' "'+simObj.name+'" — '+actsText(simObj.actions)+'. Updating it avoids a duplicate.'));
       }
-      var conds=(p.conditions||[]).map(function(c){ return c.field+' '+c.op+' "'+c.value+'"'; }).join((p.match_mode==='any')?' OR ':' AND ');
+      var conds = p.summary ? p.summary : (p.conditions||[]).map(function(c){ return c.field+' '+c.op+' "'+c.value+'"'; }).join((p.match_mode==='any')?' OR ':' AND ');
       w.appendChild(mk('div','mono',conds));
-      w.appendChild(mk('div','sub',actsText(p.actions)));
+      w.appendChild(mk('div','sub', p.actions_summary ? p.actions_summary : actsText(p.actions)));
       if(p.rationale) w.appendChild(mk('div','sub',p.rationale));
       box.appendChild(w);
     }
+    
     function addPendingAction(a){
       var w=mk('div','proposal');
       var h=mk('div','spread');
@@ -4127,6 +4133,7 @@ CONVO_TMPL = r"""
                 <input type="hidden" name="mode" value="update">
                 <input type="hidden" name="rule_id" value="{{ tgt.id }}">
                 <input type="hidden" name="session" value="{{ sid }}">
+                <input type="hidden" name="back" value="{{ (back or '')|e }}">
                 <button class="btn small primary" type="submit">{{ 'Update flow #%d' % tgt.id if p.kind == 'flow' else 'Update rule #%d' % tgt.id }}</button>
               </form>
               {% endif %}
@@ -4134,6 +4141,7 @@ CONVO_TMPL = r"""
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                 <input type="hidden" name="session" value="{{ sid }}">
+                <input type="hidden" name="back" value="{{ (back or '')|e }}">
                 <button class="btn small{{ '' if tgt else ' primary' }}" type="submit">{{ 'Add flow' if p.kind == 'flow' else 'Add rule' }}</button>
               </form>
               <form class="inline" method="post" action="{{ url_for('assistant_apply') }}" onsubmit="return guardApply(this)">
@@ -4141,6 +4149,7 @@ CONVO_TMPL = r"""
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                 <input type="hidden" name="disabled" value="1">
                 <input type="hidden" name="session" value="{{ sid }}">
+                <input type="hidden" name="back" value="{{ (back or '')|e }}">
                 <button class="btn small" type="submit">Add (disabled)</button>
               </form>
               {% endif %}
@@ -4428,10 +4437,10 @@ def _assistant_prep(convo):
     return convo
 
 
-def _assistant_fragment(sid, ctx_path=""):
+def _assistant_fragment(sid, ctx_path="", back=""):
     convo = _assistant_prep(store.session_messages(sid))
     return convo, _render_src(CONVO_TMPL, convo=convo, sid=sid,
-                              suggest=_suggestions_for_path(ctx_path))
+                              suggest=_suggestions_for_path(ctx_path), back=back)
 
 
 @app.route("/assistant/s/<int:sid>")
@@ -4442,7 +4451,8 @@ def assistant_session(sid):
     sessions = store.list_sessions()
     for s in sessions:
         s["when"] = fmt_ts(s["last_ts"] or s["created"])
-    convo, convo_html = _assistant_fragment(sid, "/assistant")
+    convo, convo_html = _assistant_fragment(sid, "/assistant",
+                                            url_for("assistant_session", sid=sid))
     pending = store.pending_agent_actions()
     for pa in pending:
         pa["when_h"] = fmt_ts(pa.get("created_ts"))
@@ -4460,7 +4470,8 @@ def assistant_panel():
         sid = 0
     if not sid or not store.get_session(sid):
         return ("no such chat", 404)
-    _, convo_html = _assistant_fragment(sid, request.args.get("path") or "")
+    pth = request.args.get("path") or ""
+    _, convo_html = _assistant_fragment(sid, pth, pth)
     return Response(convo_html, mimetype="text/html")
 
 
@@ -4517,6 +4528,8 @@ def assistant_stream():
         try:
             for ev in agent.stream(text):
                 etype = ev.pop("type")
+                if etype == "proposals":
+                    ev["proposals"] = [_proposal_view(pp) for pp in ev.get("proposals") or []]
                 yield _sse(etype, ev)
         except Exception as exc:  # agent.stream handles its own errors; belt & braces
             try:
@@ -4547,6 +4560,14 @@ def assistant_send():
     return redirect(url_for("assistant_session", sid=sid))
 
 
+def _safe_back(v, fallback):
+    """Local-only redirect target (no open redirects, no scheme-relative URLs)."""
+    v = (v or "").strip()
+    if v.startswith("/") and not v.startswith("//") and "\\" not in v and "\r" not in v and "\n" not in v:
+        return v
+    return fallback
+
+
 def _mark_proposal_applied(mid, proposals, idx, mode):
     proposals[idx]["applied"] = {"ts": time.time(), "mode": mode}
     store.set_assistant_proposals(mid, json.dumps(proposals))
@@ -4563,8 +4584,9 @@ def assistant_apply():
         sid = int(request.form.get("session") or 0)
     except (TypeError, ValueError):
         sid = 0
-    back = (url_for("assistant_session", sid=sid)
-            if sid and store.get_session(sid) else url_for("assistant"))
+    back_default = (url_for("assistant_session", sid=sid)
+                    if sid and store.get_session(sid) else url_for("assistant"))
+    back = _safe_back(request.form.get("back"), back_default)
     disabled = bool(request.form.get("disabled"))
     row = store.get_assistant_message(mid)
     proposals = []
