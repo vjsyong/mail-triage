@@ -612,8 +612,10 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .btn{min-height:44px}
   .btn.small,.iconbtn{min-height:44px;min-width:44px}
   .menu-item{min-height:44px}
-  input,select,textarea{font-size:16px}
-  input,select{min-height:44px}
+  .setrow input:not([type=checkbox]):not([type=radio]),
+  input[type=text],input[type=number],input[type=password],input[type=search],
+  input[type=email],input[type=url],input[type=tel],select,textarea{font-size:16px}
+  input:not([type=checkbox]):not([type=radio]),select{min-height:44px}
   .nav-item{min-height:48px}
   .copy{padding:8px 10px}
 }
@@ -635,13 +637,21 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .bottom-nav a svg{width:21px;height:21px;stroke-width:1.7;opacity:.8}
   .bottom-nav a.on{color:#000;font-weight:600}
   .bottom-nav a.on svg{opacity:1}
+  .topbar #menuBtn{display:none}
   .content{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
-  .fab{bottom:calc(78px + env(safe-area-inset-bottom));right:12px}
+  .fab{display:none}
   .savebar{bottom:calc(72px + env(safe-area-inset-bottom))}
   .drawer{width:100vw;max-width:none;height:100dvh}
-  .assistant-flex{height:auto;min-height:420px}
+  .page-desc{display:none}
+  .foot{display:none}
+  .assistant-rail{max-height:96px}
+  .assistant-flex{height:calc(100vh - 470px);height:calc(100dvh - 470px);min-height:280px}
+  .composer .hint{display:none}
+  .composer .comp-row .sub{display:none}
   .jumpwrap{min-height:420px}
-  input,select,textarea{font-size:16px}
+  .setrow input:not([type=checkbox]):not([type=radio]),
+  input[type=text],input[type=number],input[type=password],input[type=search],
+  input[type=email],input[type=url],input[type=tel],select,textarea{font-size:16px}
 }
 </style>
 </head><body>
@@ -2245,8 +2255,8 @@ def _flow_summary(flow, tpl_names):
     except (TypeError, ValueError):
         conds = []
     joiner = " and " if (flow.get("match_mode") or "all") == "all" else " or "
-    when = joiner.join("%s %s \u2018%s\u2019" % (c.get("field"), c.get("op"), c.get("value"))
-                      for c in conds) or "\u2014"
+    when = joiner.join("%s %s ‘%s’" % (c.get("field"), c.get("op"), c.get("value"))
+                      for c in conds) or "—"
     try:
         steps = json.loads(flow.get("actions") or "[]")
     except (TypeError, ValueError):
@@ -2261,15 +2271,15 @@ def _flow_summary(flow, tpl_names):
         elif t == "flag":
             acts.append("star")
         elif t == "tag":
-            acts.append("tag \u2018%s\u2019" % st.get("tag"))
+            acts.append("tag ‘%s’" % st.get("tag"))
         elif t == "draft":
             name = tpl_names.get(int(st.get("template_id") or 0), "")
             if (st.get("mode") or "template") == "llm":
                 acts.append("draft with the LLM%s and save to Drafts"
-                            % ((" using \u2018%s\u2019" % name) if name else ""))
+                            % ((" using ‘%s’" % name) if name else ""))
             else:
-                acts.append("draft from \u2018%s\u2019 and save to Drafts" % name if name else "draft (no template)")
-    return "IF %s \u2192 %s" % (when, ", then ".join(acts) or "\u2014")
+                acts.append("draft from ‘%s’ and save to Drafts" % name if name else "draft (no template)")
+    return "IF %s → %s" % (when, ", then ".join(acts) or "—")
 
 
 def _flow_from_form():
@@ -3001,7 +3011,7 @@ def message_body_html(text):
         return esc
     main = "\n".join(lines[:idx]).strip()
     quoted = "\n".join(lines[idx:]).strip()
-    return (main + '<details class="quote"><summary>\u00b7\u00b7\u00b7 show quoted text (%d lines)</summary><div class="qbody">%s</div></details>'
+    return (main + '<details class="quote"><summary>··· show quoted text (%d lines)</summary><div class="qbody">%s</div></details>'
             % (len(lines) - idx, quoted))
 
 
@@ -3475,7 +3485,7 @@ ASSISTANT_TMPL = r"""
 <div class="page-head">
   <div>
     <h1 class="page-title">Assistant</h1>
-    <div class="page-desc">Streams its thinking and every tool step live \u00b7 chats are saved \u2014 resume any of them from the list, or open the drawer anywhere</div>
+    <div class="page-desc">Streams its thinking and every tool step live · chats are saved — resume any of them from the list, or open the drawer anywhere</div>
   </div>
   <div class="row">
     <a class="btn primary" href="{{ url_for('assistant') }}">New chat</a>
@@ -3487,14 +3497,14 @@ ASSISTANT_TMPL = r"""
     <div class="arow{{ ' cur' if s.id == sid else '' }}">
       <a class="t" href="{{ url_for('assistant_session', sid=s.id) }}" title="{{ s.title or 'Untitled chat' }}">{{ s.title or 'Untitled chat' }}</a>
       <span class="when">{{ s.when }}</span>
-      <form class="inline" method="post" action="{{ url_for('assistant_session_delete', sid=s.id) }}" onsubmit="return confirm('Delete this chat?');"><button class="btn small" type="submit" aria-label="Delete chat">\u2715</button></form>
+      <form class="inline" method="post" action="{{ url_for('assistant_session_delete', sid=s.id) }}" onsubmit="return confirm('Delete this chat?');"><button class="btn small" type="submit" aria-label="Delete chat">✕</button></form>
     </div>
     {% endfor %}
   </aside>
   <div class="assistant-main">
     <div class="assistant-flex">
       <div class="jumpwrap">
-        <button type="button" class="btn small hidden" id="jump">\u2193 Jump to latest</button>
+        <button type="button" class="btn small hidden" id="jump">↓ Jump to latest</button>
         <div class="chat" id="convo">{{ convo_html|safe }}</div>
       </div>
       {% if pending %}
@@ -3514,9 +3524,9 @@ ASSISTANT_TMPL = r"""
       {% endif %}
       <form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
         <input type="hidden" name="session" value="{{ sid }}">
-        <textarea name="message" id="msg" rows="1" placeholder="Message the assistant\u2026"></textarea>
+        <textarea name="message" id="msg" rows="1" placeholder="Message the assistant…"></textarea>
         <div class="comp-row">
-          <span class="sub" style="font-size:.78rem">Enter sends \u00b7 Shift+Enter new line</span>
+          <span class="sub" style="font-size:.78rem">Enter sends · Shift+Enter new line</span>
           <span class="row" style="margin-left:auto">
             <button class="btn danger" type="button" id="astop" style="display:none">Stop</button>
             <button class="btn primary" type="submit" id="asend">Send</button>
@@ -4564,7 +4574,7 @@ ACCOUNTS_TMPL = """
     <div class="auth-msg sub">…</div>
     <div class="auth-url hidden" style="margin-top:8px">
       <div class="note">Open this link in a browser and sign in as <b>{{ a.email }}</b>.
-      {% if a.mode == 'tailnet' %}You should then see a \u201csuccessfully authenticated\u201d page
+      {% if a.mode == 'tailnet' %}You should then see a “successfully authenticated” page
       from the proxy — if the browser cannot reach it, copy the URL it ended on and paste it below.
       {% else %}The browser will end on an address starting with <code>{{ a.redirect_uri }}</code>
       that fails to load — that is expected. Copy the <b>whole address</b> from the address bar and
