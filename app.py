@@ -4079,10 +4079,14 @@ MESSAGE_TMPL = """
       <div class="card-h"><h3>Machine decisions</h3><span class="sub">learning loop · shadow rows never change behavior</span></div>
       {% for d in m.decisions %}
       <div class="arow2">
-        <span class="mono atime">{{ d.when }}</span>
-        <span class="badge {{ {'specialist':'acc','heuristic':'ok'}.get(d.source_type,'') }}">{{ d.source_type }}</span>
+        <div class="ahead">
+          <span class="mono atime">{{ d.when }}</span>
+          <span class="badge {{ {'specialist':'acc','heuristic':'ok'}.get(d.source_type,'') }}">{{ d.source_type }}</span>
+          {% if d.shadow %}<span class="badge">shadow</span>{% endif %}
+          <span class="sub">{{ d.task }}{% if d.confidence %} · confidence {{ '%.2f' % d.confidence }}{% endif %}</span>
+        </div>
         <div class="adetail">
-          <b>{{ d.task }}</b> — {{ d.value }}{% if d.confidence %} <span class="sub">{{ '%.2f' % d.confidence }}</span>{% endif %}{% if d.shadow %} <span class="badge">shadow</span>{% endif %} <span class="sub">· {{ d.source_id }}</span>
+          <b>{{ d.value }}</b> <span class="sub">· {{ d.source_id }}</span>
           {% if d.evidence %}<div class="sub">evidence: {% for e in d.evidence %}{{ e.feature_name }} {{ '%+.2f' % (e.contribution or 0) }}{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
         </div>
       </div>
