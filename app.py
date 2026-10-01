@@ -722,6 +722,15 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .think summary::before{content:'\25B8 ';font-size:.7rem}
 .think[open] summary::before{content:'\25BE '}
 .think pre{white-space:pre-wrap;font-family:var(--mono);font-size:.78rem;color:#444;margin:6px 0 2px;padding:8px 10px;background:#fff;border:1px solid var(--line);max-height:260px;overflow:auto}
+/* audit rows + reasoning traces (viewer + simulator) - keep in the base sheet: a page
+   <style> block is only served on its own page (the audit <pre> overflowed this way) */
+.arow2{display:grid;grid-template-columns:auto auto 1fr;gap:2px 8px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);font-size:.84rem}
+.arow2:first-of-type{border-top:0;padding-top:2px}
+.arow2 .atime{font-size:.72rem;color:var(--dim)}
+.arow2 .adetail{min-width:0;overflow-wrap:anywhere}
+.audit-pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.78rem;color:var(--dim);margin:6px 0 0;max-height:280px;overflow:auto}
+.simul{margin:4px 0 0;padding-left:18px;font-size:.88rem}
+.simul li{margin:3px 0}
 .tools{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
 .tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-chip.ok{color:var(--ok);border-color:var(--ok)}
@@ -1862,13 +1871,6 @@ DASH_TMPL = """
 .frow .fmain b{display:block;font-size:.86rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .frow .fmain .sub{display:block;font-size:.76rem;margin-top:1px}
 .frow .fsrc{display:inline-block;font-size:.68rem;font-weight:500;color:var(--dim);border:1px solid var(--line);padding:1px 6px;margin-right:6px;vertical-align:1px}
-.arow2{display:grid;grid-template-columns:auto auto 1fr;gap:2px 8px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);font-size:.84rem}
-.arow2:first-of-type{border-top:0;padding-top:2px}
-.arow2 .atime{font-size:.72rem;color:var(--dim)}
-.arow2 .adetail{min-width:0;overflow-wrap:anywhere}
-.audit-pre{white-space:pre-wrap;font-size:.78rem;color:var(--dim);margin:6px 0 0;max-height:280px;overflow:auto}
-.simul{margin:4px 0 0;padding-left:18px;font-size:.88rem}
-.simul li{margin:3px 0}
 .dashgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
 @media(max-width:1023px){.dashgrid{grid-template-columns:1fr}}
 .dashgrid .card{margin:0}
@@ -6463,63 +6465,170 @@ def log():
 
 
 SIMULATE_TMPL = """
+<style>
+/* simulator (dry-run report): draft left, report right from 1024px up */
+.simgrid{display:grid;grid-template-columns:minmax(340px,5fr) minmax(0,7fr);gap:14px;align-items:start}
+.simgrid .card{margin:0}
+@media(max-width:1023px){.simgrid{grid-template-columns:1fr}}
+.simcheck{display:flex;gap:10px;align-items:flex-start;margin-top:14px;cursor:pointer}
+.simcheck input{width:15px;height:15px;margin:2px 0 0;flex:none}
+.simcheck>span{min-width:0}
+.simcheck .t{display:block;font-size:.86rem;font-weight:500;color:var(--fg);line-height:1.4}
+.simcheck .d{display:block;font-size:.78rem;color:var(--dim);margin-top:2px;line-height:1.45}
+.simrun{margin-top:14px}
+.simrun .btn{width:100%}
+.simhero{display:grid;grid-template-columns:auto 1fr;gap:0 12px;padding:2px 0 14px;border-bottom:1px solid var(--line)}
+.simhero .dot{margin-top:8px}
+.simhero-t{font-size:1.01rem;font-weight:600;letter-spacing:-.01em;line-height:1.5}
+.simchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.simchips:empty{display:none}
+.simrow{display:grid;grid-template-columns:auto 1fr;gap:0 12px;padding:12px 0;position:relative}
+.simrow+.simrow{border-top:1px solid var(--line)}
+.simrow .dot{margin-top:6px}
+.simrow:not(:last-child)::before{content:'';position:absolute;left:3px;top:26px;bottom:-1px;width:1px;background:var(--line)}
+.simrow-t{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.simrow-t b{font-size:.9rem;font-weight:600;letter-spacing:-.01em}
+.simrow-d{font-size:.85rem;color:var(--dim);margin-top:3px;line-height:1.5}
+.simrow.cur .simrow-d{color:var(--fg)}
+.simnest{margin-top:10px;padding-left:13px;border-left:2px solid var(--line)}
+.simacts{display:flex;flex-wrap:wrap;gap:6px}
+.simact{font-size:.8rem;border:1px solid var(--line);padding:2px 9px;background:#fff;color:#3f3f46}
+.simverdict{font-size:.92rem;line-height:1.5}
+.simnotes{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.simnotes .note{margin:0}
+@media(max-width:767px){
+  .simhero-t{font-size:.95rem}
+  .simrow{padding:11px 0}
+}
+</style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Simulator</h1>
-    <div class="page-desc">Draft an email and see exactly how the pipeline would treat it — guard/rule match, flows, classifier. Nothing is changed.</div>
+    <div class="page-desc">Draft an email and see how the pipeline would treat it — rules, flows, classifier. Nothing is changed.</div>
   </div>
 </div>
-<form method="post">
-  <div class="card">
-    <div class="card-h"><h3>The draft</h3></div>
-    <div class="grid2">
-      <div><label for="s-from">From</label><input id="s-from" type="text" name="from_addr" value="{{ form.from_addr }}" placeholder="sender@example.com" autocomplete="off"></div>
-      <div><label for="s-to">To (optional)</label><input id="s-to" type="text" name="to_addr" value="{{ form.to_addr }}" autocomplete="off"></div>
+<div class="simgrid">
+  <form method="post">
+    <div class="card">
+      <div class="card-h"><h3>The draft</h3><span class="sub">Nothing here touches your mailbox.</span></div>
+      <label for="s-from">From</label>
+      <input id="s-from" type="text" name="from_addr" value="{{ form.from_addr }}" placeholder="sender@example.com" autocomplete="off">
+      <label for="s-to">To <span class="sub">· optional</span></label>
+      <input id="s-to" type="text" name="to_addr" value="{{ form.to_addr }}" autocomplete="off">
+      <label for="s-subj">Subject</label>
+      <input id="s-subj" type="text" name="subject" value="{{ form.subject }}">
+      <label for="s-body">Body</label>
+      <textarea id="s-body" name="body" rows="7">{{ form.body }}</textarea>
+      <label class="simcheck" for="s-llm">
+        <input id="s-llm" type="checkbox" name="use_llm" value="1" {{ 'checked' if form.use_llm else '' }}>
+        <span><span class="t">Ask the classifier</span>
+        <span class="d">Runs the model too — needed to test AI category / topic flows and see its reasoning.</span></span>
+      </label>
+      <div class="simrun">
+        <button class="btn primary" type="submit">Run simulation</button>
+      </div>
     </div>
-    <div style="margin-top:10px"><label for="s-subj">Subject</label><input id="s-subj" type="text" name="subject" value="{{ form.subject }}"></div>
-    <div style="margin-top:10px"><label for="s-body">Body</label><textarea id="s-body" name="body" rows="7">{{ form.body }}</textarea></div>
-    <div class="row" style="margin-top:10px;align-items:center">
-      <label class="inline" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="use_llm" value="1" {{ 'checked' if form.use_llm else '' }}> Ask the classifier (uses the model — needed for AI category / topic flows)</label>
-      <span class="sp" style="flex:1"></span>
-      <button class="btn primary" type="submit">Run simulation</button>
+  </form>
+  {% if result %}
+  {% set v = result.verdict %}{% set llm = result.use_llm %}
+  <section class="card" id="sim-report">
+    <div class="card-h"><h3>What would happen</h3><span class="sub">Nothing was changed — this is a dry run.</span></div>
+    <div class="simhero">
+      <span class="dot {% if result.guard %}warn{% elif result.rule or result.flow %}ok{% elif v %}acc{% endif %}"></span>
+      <div>
+        <div class="simhero-t">{% if result.guard %}Blocked by guard “{{ result.guard }}” — this mail would stay put.
+          {% elif result.rule %}Rule “{{ result.rule.name }}” matches — {{ result.rule_actions|join(', ') }}.
+          {% elif result.flow %}Flow “{{ result.flow.name }}” matches — {{ result.flow_taken|length }} step{{ 's' if result.flow_taken|length != 1 else '' }} would run.
+          {% elif v and v.category %}No rule or flow matches — the classifier suggests “{{ v.category }}”.
+          {% elif v %}No rule or flow matches — the classifier found no category.
+          {% else %}No rule or flow matches.{% endif %}</div>
+        <div class="simchips">
+          {% if v and v.needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
+          {% if result.rule and not result.rules_apply %}<span class="badge">rules in dry-run — suggest only</span>{% endif %}
+          {% if result.flow and not result.flows_apply %}<span class="badge">flows in dry-run — record only</span>{% endif %}
+          {% if v and not result.guard and not result.rule and not result.flow and result.suggested_folder %}
+            {% if result.llm_apply %}<span class="badge ok">auto-file → “{{ result.suggested_folder }}”</span>
+            {% else %}<span class="badge">suggested folder “{{ result.suggested_folder }}” — auto-filing off</span>{% endif %}
+          {% endif %}
+        </div>
+      </div>
     </div>
-  </div>
-</form>
-{% if result %}
-<div class="card">
-  <div class="card-h"><h3>What would happen</h3><span class="sub">Nothing was changed — this is a dry run.</span></div>
-  <ul class="simul">{% for w in result.would %}<li>{{ w }}</li>{% endfor %}</ul>
-  {% for n in result.notes %}<div class="sub" style="margin-top:6px">Note: {{ n }}</div>{% endfor %}
-</div>
-{% if result.guard or result.rule %}
-<div class="card">
-  <div class="card-h"><h3>{{ 'Guard rule' if result.guard else 'Rule match' }}</h3></div>
-  {% if result.guard %}
-  <div class="sub">“{{ result.guard }}” is a guard — all automated filing is blocked for this mail.</div>
+    <div class="simrows">
+      <div class="simrow{% if result.guard or result.rule %} cur{% endif %}">
+        <span class="dot {% if result.guard %}warn{% elif result.rule %}ok{% endif %}"></span>
+        <div>
+          <div class="simrow-t"><b>Rules</b>
+            {% if result.guard %}<span class="badge warn">blocked</span>
+            {% elif result.rule %}<span class="badge ok">matched</span>
+            {% else %}<span class="badge">no match</span>{% endif %}
+          </div>
+          <div class="simrow-d">{% if result.guard %}Guard “{{ result.guard }}” is a keep guard — it stops all automated filing for this mail.
+            {% elif result.rule %}“{{ result.rule.name }}” — first match in list order.
+            {% else %}No enabled rule matched.{% endif %}</div>
+          {% if result.rule %}
+          <div class="simnest">
+            <div class="simacts">{% for a in result.rule_actions %}<span class="simact">→ {{ a }}</span>{% endfor %}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="simrow{% if result.flow %} cur{% endif %}">
+        <span class="dot {% if result.guard %}warn{% elif result.flow %}ok{% endif %}"></span>
+        <div>
+          <div class="simrow-t"><b>Flows</b>
+            {% if result.guard or result.rule %}<span class="badge">skipped</span>
+            {% elif result.flow %}<span class="badge ok">matched</span>
+            {% else %}<span class="badge">no match</span>{% endif %}
+          </div>
+          <div class="simrow-d">
+            {% if result.guard %}Not evaluated — the guard stops the pipeline here.
+            {% elif result.rule %}Not evaluated — a rule matched first (flows run after rules).
+            {% elif result.flow %}“{{ result.flow.name }}” matched.
+            {% else %}No rule or deterministic flow matches.{% if not llm %} Tick “Ask the classifier” to also test AI category / topic flows.{% endif %}{% endif %}
+          </div>
+          {% if result.flow %}
+          <div class="simnest">
+            <ol class="simul">{% for s in result.flow_taken %}<li>{{ s }}</li>{% endfor %}</ol>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="simrow{% if v and not result.guard and not result.rule and not result.flow %} cur{% endif %}">
+        <span class="dot {% if v %}acc{% endif %}"></span>
+        <div>
+          <div class="simrow-t"><b>Classifier</b>
+            {% if v %}<span class="badge acc">ran</span>{% else %}<span class="badge">skipped</span>{% endif %}
+          </div>
+          <div class="simrow-d">
+            {% if v %}“{{ v.category or '(no category)' }}”{% if v.confidence %} — {{ '%.0f' % (v.confidence * 100) }}%{% endif %} · {{ v.by }}
+            {% else %}Skipped — “Ask the classifier” is off.{% endif %}
+          </div>
+          {% if v %}
+          <div class="simnest">
+            <div class="simverdict"><b>Classifier:</b> “{{ v.category or '(no category)' }}”{% if v.confidence %} — {{ '%.0f' % (v.confidence * 100) }}%{% endif %} <span class="sub">· {{ v.by }}</span></div>
+            {% if v.reason %}<div class="simrow-d">why: {{ v.reason }}</div>{% endif %}
+            {% if v.summary %}<div class="simrow-d">{{ v.summary }}</div>{% endif %}
+            {% if v.thinking %}<details class="think" style="margin-top:9px"><summary>Model reasoning <span class="sub">(raw chain of thought)</span></summary><pre class="mono audit-pre">{{ v.thinking }}</pre></details>{% endif %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% if result.notes %}
+    <div class="simnotes">{% for n in result.notes %}<div class="note">Note: {{ n }}</div>{% endfor %}</div>
+    {% endif %}
+  </section>
+  <script>setTimeout(function(){try{var c=document.getElementById('sim-report');if(c){c.scrollIntoView({block:'start'});window.scrollBy(0,-70);}}catch(e){}},60);</script>
   {% else %}
-  <div><b>{{ result.rule.name }}</b> <span class="sub">(first match in list order)</span></div>
-  <div class="sub" style="margin-top:4px">{{ result.rule_actions|join(' · ') }}</div>
+  <div class="card">
+    <div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/></svg>
+      <h4>Test a draft against the whole pipeline</h4>
+      <p>Write a plausible email and run it. The report shows the decision path — <b>rules</b> first, then <b>flows</b>, then the <b>classifier</b> — which stage would act, and why. Nothing is sent, moved or changed.</p>
+    </div>
+  </div>
   {% endif %}
 </div>
-{% endif %}
-{% if result.flow %}
-<div class="card">
-  <div class="card-h"><h3>Flow</h3><span class="sub">{{ result.flow.name }}</span></div>
-  <ol class="simul">{% for s in result.flow_taken %}<li>{{ s }}</li>{% endfor %}</ol>
-</div>
-{% endif %}
-{% if result.verdict %}
-<div class="card">
-  <div class="card-h"><h3>Classifier</h3><span class="sub">{{ result.verdict.by }}</span></div>
-  <div><b>{{ result.verdict.category or '(no category)' }}</b>{% if result.verdict.confidence %} <span class="sub">{{ '%.0f' % (result.verdict.confidence * 100) }}%</span>{% endif %}{% if result.verdict.needs_reply %} <span class="badge warn">needs reply</span>{% endif %}</div>
-  {% if result.verdict.reason %}<div class="sub" style="margin-top:4px">why: {{ result.verdict.reason }}</div>{% endif %}
-  {% if result.verdict.summary %}<div class="sub" style="margin-top:4px">{{ result.verdict.summary }}</div>{% endif %}
-  {% if result.suggested_folder %}<div class="sub" style="margin-top:4px">suggested folder: {{ result.suggested_folder }}</div>{% endif %}
-  {% if result.verdict.thinking %}<details style="margin-top:6px"><summary class="sub" style="cursor:pointer">full reasoning</summary><pre class="mono audit-pre">{{ result.verdict.thinking }}</pre></details>{% endif %}
-</div>
-{% endif %}
-{% if result %}<script>setTimeout(function(){try{var c=document.querySelector('.simul');if(c){c.scrollIntoView({block:'start'});window.scrollBy(0,-70);}}catch(e){}},60);</script>{% endif %}
-{% endif %}
 """
 
 

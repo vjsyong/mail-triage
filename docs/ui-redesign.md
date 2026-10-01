@@ -220,3 +220,48 @@ empty chat reused so they never pile up), resume/delete from the rail. A shared 
 engine (one JS implementation + one Jinja conversation fragment) powers both the page
 and a global right-side drawer (FAB button, collapsible, remembers the open state and
 the active chat per browser). Streamed turns announce their session first.
+
+## Eighth pass: simulator rebuilt as a dry-run report (2026-10, same day)
+
+Request: the simulator works but reads ugly/opaque, and the classifier reasoning trace
+overflows its box after a run.
+
+**Root cause of the overflow.** Commit 6dd2452 added the shared rule set (.arow2 /
+.audit-pre / .simul) inside DASH_TMPL's page <style> block - dashboard-only CSS. The
+viewer's audit timeline and the simulator both USE those classes but never received the
+stylesheet, so the reasoning <pre> fell back to browser defaults (white-space: pre, no
+max-height, no overflow); one run produced ~3,900px-wide content and a document-level
+horizontal scrollbar. The viewer's audit rows were silently unstyled for the same
+reason. Fix: the three rule groups moved into BASE_TMPL (with .audit-pre upgraded to
+wrap long tokens: overflow-wrap:anywhere) - shared classes must never live in a page
+template; regression checks assert the CSS is present on a rendered /simulate page.
+
+**Research round** (cited): AI UX Playground *Chain of Thought* trust pattern - design
+the disclosure lifecycle (collapsed named control by default, answer stands alone,
+numbered/discrete steps, never a wall of thinking text); Zapier *Test Zap steps* - the
+dry run is a first-class per-step artifact with an explicit status per stage and a
+"Data out" result; in-repo ux-benchmarks: dry-run affordances bar (S11: preview
+matches before commit; Zapier Test tab) and log-viewer bar (S12: monospace for machine
+data, severity paired with text; auto-follow must be interruptible).
+
+**Rebuild decisions.**
+- Layout: single column at phones; two columns from 1024px (draft left, report right) -
+  "what would happen to this draft" is answered next to the input. Empty state on the
+  right teaches the pipeline before the first run (.empty: funnel icon, rules -> flows
+  -> classifier).
+- The report reads as a PIPELINE, not four fragmented cards: outcome hero (one
+  sentence + qualifier chips: needs reply / dry-run modes / suggested folder), then
+  three stage rows - Rules, Flows, Classifier - each with a status dot plus text badge
+  (matched / blocked / skipped / no match / ran) and a one-line why; the deciding stage
+  is full-contrast, others dim. No status is colour-only.
+- Details nest under their stage: rule actions as arrow tags, flow steps as an ordered
+  list, classifier verdict (Classifier: category - score - by, why:, summary) with the
+  model reasoning as a collapsed .think disclosure - "Model reasoning (raw chain of
+  thought)", wrapped, max-height + scroll (never open by default; long traces stay
+  contained).
+- Dry-run notes (rules/flows in dry-run mode, classifier-off hints) render as info
+  strips at the bottom; the old duplicated bullet list (classifier line repeated in
+  "would" + a separate Classifier card) is gone - the engine's would[] narrative is no
+  longer rendered. Page carries its own scoped <style> (.sim-* classes).
+- Form: labelled fields (From/To stacked), explicit "Ask the classifier" checkbox with
+  a one-line helper, one full-width primary "Run simulation" action.

@@ -2743,8 +2743,13 @@ def main():
     r = client.post("/simulate", follow_redirects=True, data={"from_addr": "llm.sim@x.com", "subject": "Invoice question",
                                        "body": "please resend the invoice", "use_llm": "1"})
     check("simulator includes the classifier verdict", b"Classifier:" in r.data)
+    check("simulator report ships its styles + pipeline stages",
+          b".audit-pre{" in r.data and b"overflow-wrap:anywhere" in r.data
+          and b".simrow{" in r.data and b"<b>Rules</b>" in r.data
+          and b"<b>Flows</b>" in r.data and b"<b>Classifier</b>" in r.data)
     r = client.get("/simulate")
     check("simulator page reachable via nav", r.status_code == 200 and b"Run simulation" in r.data)
+    check("simulator teaches the pipeline before any run", b"Test a draft" in r.data)
     store.update_rule(sim_rid, enabled=0)
 
     section("T42 assistant page context (this email / this flow)")
