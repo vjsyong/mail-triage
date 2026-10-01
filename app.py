@@ -2638,10 +2638,11 @@ function condEmpty(){
   var e = document.getElementById('cond-empty'); if(e) e.style.display = any ? 'none' : '';
 }
 function condAdd(kind){
-  var rows = document.querySelectorAll('.cond-row');
-  var target = null;
-  rows.forEach(function(r){ if(!target && r.classList.contains('extra')) target = r; });
-  if(!target) rows.forEach(function(r){ if(!target && !r.querySelector('.k-val').value.trim()) target = r; });
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.cond-row'));
+  var target = rows.filter(function(r){
+    return !r.classList.contains('extra') && !r.querySelector('.k-val').value.trim();
+  })[0];
+  if(!target) target = rows.filter(function(r){ return r.classList.contains('extra'); })[0];
   if(!target) return;
   target.classList.remove('extra');
   var sel = target.querySelector('.k-sel'); sel.value = kind; condKind(sel);
@@ -2723,7 +2724,7 @@ function edge(i){
 }
 function render(){
   stepsEl.innerHTML = '';
-  if(!steps.length) stepsEl.appendChild(edge(0));
+  stepsEl.appendChild(edge(0));
   steps.forEach(function(st, i){
     var card = el('div','stepcard fl-node' + (st._open ? ' open' : ''));
     var head = el('div','fl-step-head');
