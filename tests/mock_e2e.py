@@ -2533,6 +2533,14 @@ def main():
     check("index card tagged for mobile hiding", b'card ixcard' in d)
     check("mobile collapse script present", b"removeAttribute('open')" in d)
 
+    # --- two-step chat delete (armed red trash reveal, no confirm popup)
+    r = client.get("/assistant", follow_redirects=True)
+    d = r.data
+    check("chat delete button carries the two-step class", b"chat-del" in d)
+    check("chat delete has no JS confirm popup", b"Delete this chat?" not in d)
+    check("armed chat-delete reveal shipped (style + JS)",
+          b".chat-del.armed" in d and b"Press again to delete this chat" in d)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

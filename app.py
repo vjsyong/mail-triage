@@ -719,6 +719,9 @@ html:not(.asb-open) .asb-main{display:none}
 .dhist-item .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem}
 .dhist-item .when{font-size:.7rem;color:var(--dim);white-space:nowrap}
 .dhist-item.cur{background:var(--hover)}
+.chat-del{transition:background .12s ease,color .12s ease,border-color .12s ease}
+.chat-del svg{display:block}
+.chat-del.armed{background:var(--err);border-color:var(--err);color:#fff}
 .dw-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#fff}
 .dw-body .chat{border:0;background:#fff;padding:14px 12px}
 .dw-comp{margin:0;border-left:0;border-right:0;border-bottom:0}
@@ -930,6 +933,21 @@ function toast(msg, kind){
     });
   }
   setInterval(function(){ if(!document.hidden) tick(); }, 30000);
+})();
+/* two-step chat delete: first tap arms (red trash), second tap deletes */
+(function(){
+  var TRASH='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 7V5h4v2m-6 0 1 13h6l1-13M10 11v6M14 11v6"/></svg>';
+  function disarm(b){ if(!b.classList.contains('armed')) return; b.classList.remove('armed'); b.textContent='\u2715'; b.setAttribute('aria-label', b.getAttribute('data-al') || 'Delete chat'); if(b._armT){ clearTimeout(b._armT); b._armT=null; } }
+  function disarmAll(except){ document.querySelectorAll('.chat-del.armed').forEach(function(b){ if(b!==except) disarm(b); }); }
+  function arm(b){ disarmAll(b); if(b.classList.contains('armed')) return; if(!b.getAttribute('data-al')) b.setAttribute('data-al', b.getAttribute('aria-label') || 'Delete chat'); b.classList.add('armed'); b.innerHTML=TRASH; b.setAttribute('aria-label','Press again to delete this chat'); b._armT=setTimeout(function(){ disarm(b); }, 4000); }
+  document.addEventListener('click', function(e){
+    var b = e.target && e.target.closest ? e.target.closest('.chat-del') : null;
+    if(!b){ disarmAll(null); return; }
+    if(b.classList.contains('armed')) return;
+    e.preventDefault(); e.stopPropagation();
+    arm(b);
+  }, true);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') disarmAll(null); });
 })();
 function cp(text, el){
   function done(){ if(el){ var t = el.textContent; el.textContent = 'copied'; setTimeout(function(){ el.textContent = t; }, 900); } }
@@ -1373,9 +1391,10 @@ window.guardApply = function(f){
         var row = document.createElement('div'); row.className = 'dhist-item' + (String(s.id) === String(curSid) ? ' cur' : '');
         var t1 = document.createElement('span'); t1.className = 't'; t1.textContent = s.title || 'Untitled chat'; row.appendChild(t1);
         var w = document.createElement('span'); w.className = 'when'; w.textContent = s.when || ''; row.appendChild(w);
-        var del = document.createElement('button'); del.type = 'button'; del.className = 'btn small'; del.textContent = '✕';
+        var del = document.createElement('button'); del.type = 'button'; del.className = 'btn small chat-del'; del.textContent = '✕';
+        del.setAttribute('aria-label', 'Delete chat: ' + (s.title || 'Untitled chat'));
         del.addEventListener('click', function(ev){ ev.stopPropagation();
-          if(!confirm('Delete this chat?')) return;
+          if(!del.classList.contains('armed')) return;
           post('/assistant/session/' + s.id + '/delete', 'json=1').then(function(){
             if(String(curSid) === String(s.id)) curSid = null;
             loadHist();
@@ -4199,7 +4218,7 @@ ASSISTANT_TMPL = r"""
     <div class="arow{{ ' cur' if s.id == sid else '' }}">
       <a class="t" href="{{ url_for('assistant_session', sid=s.id) }}" title="{{ s.title or 'Untitled chat' }}">{{ s.title or 'Untitled chat' }}</a>
       <span class="when">{{ s.when }}</span>
-      <form class="inline" method="post" action="{{ url_for('assistant_session_delete', sid=s.id) }}" onsubmit="return confirm('Delete this chat?');"><button class="btn small" type="submit" aria-label="Delete chat">✕</button></form>
+      <form class="inline" method="post" action="{{ url_for('assistant_session_delete', sid=s.id) }}"><button class="btn small chat-del" type="submit" aria-label="Delete chat: {{ s.title or 'Untitled chat' }}">✕</button></form>
     </div>
     {% endfor %}
   </aside>
