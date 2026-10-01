@@ -437,6 +437,8 @@ white-space:nowrap;background:#fbfbfb;position:sticky;top:0;z-index:2}
 tr:hover .rowacts,tr:focus-within .rowacts{opacity:1}
 @media(hover:none){.rowacts{opacity:1}}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
+.tchips,.tactions{display:contents}
+.tactions>button:first-child{margin-left:auto}
 .bulkbar{display:none;align-items:center;gap:12px;padding:8px 12px;background:#0a0a0a;color:#fff;position:sticky;top:0;z-index:6}
 .bulkbar.on{display:flex}
 .bulkbar .n{font-weight:600}
@@ -542,6 +544,28 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .tbl.mcards td{display:block;border:0;padding:2px 0;background:none}
   .tbl.mcards td.sel{float:right;width:auto}
   .tbl.mcards .rowacts{opacity:1}
+  #bulk .tbl.mcards tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;position:relative;padding:10px 46px 10px 12px}
+  #bulk .tbl.mcards td.sel{float:none;position:absolute;top:12px;right:12px}
+  #bulk .tbl.mcards td.sel input{width:20px;height:20px}
+  #bulk .tbl.mcards td:nth-child(2){order:2;margin-left:auto;white-space:nowrap}
+  #bulk .tbl.mcards td:nth-child(3){order:1;font-weight:600;color:var(--fg);max-width:72%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #bulk .tbl.mcards td:nth-child(4){order:3;flex:1 1 100%;min-width:0}
+  #bulk .tbl.mcards td:nth-child(4) div.sub{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:3px}
+  #bulk .tbl.mcards td:nth-child(5),#bulk .tbl.mcards td:nth-child(6),#bulk .tbl.mcards td:nth-child(7){order:4;margin-top:7px}
+  #bulk .tbl.mcards td:nth-child(7){margin-left:auto;text-align:right}
+  #bulk .tbl.mcards td:empty{display:none}
+  .toolbar{display:block;padding:10px 0 10px 12px}
+  .tchips{display:flex;gap:6px;overflow-x:auto;padding-right:12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .tchips::-webkit-scrollbar{display:none}
+  .tchips .chip{flex:none;height:34px}
+  .tactions{display:flex;gap:8px;margin:10px 12px 0 0}
+  .tactions .btn{flex:1;min-height:38px}
+  .mhide{display:none}
+  .pager{padding:12px;gap:8px}
+  .pager>a.btn{flex:1;display:flex;align-items:center;justify-content:center;min-height:40px}
+  .pager>a.btn.plast{display:none}
+  .pager .pp{display:none}
+  .pager .pageno{flex:1 1 100%;text-align:center}
   .stat{min-width:calc(50% - 10px);margin-right:8px}
 }
 @media(prefers-reduced-motion:reduce){
@@ -2685,12 +2709,15 @@ MESSAGES_TMPL = """
 <div class="card flush">
   <form id="bulk" method="post">
     <div class="toolbar">
+      <span class="tchips">
       {% for key, label, n in filter_chips %}
       <a class="chip{{ ' active' if filt==key else '' }}" href="{{ url_for('messages', f=key) }}">{{ label }} <span class="n">{{ n }}</span></a>
       {% endfor %}
-      <span style="flex:1"></span>
-      <button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify all unclassified ({{ unclassified }})</button>
-      <button class="btn small" type="submit" formaction="{{ url_for('learn_rules') }}" {{ 'disabled' if not tagged_count else '' }}>Learn rules from tags ({{ tagged_count }})</button>
+      </span>
+      <span class="tactions">
+      <button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify all<span class="mhide"> unclassified</span> ({{ unclassified }})</button>
+      <button class="btn small" type="submit" formaction="{{ url_for('learn_rules') }}" {{ 'disabled' if not tagged_count else '' }}>Learn rules<span class="mhide"> from tags</span> ({{ tagged_count }})</button>
+      </span>
     </div>
     <div class="bulkbar" id="bulkbar" role="region" aria-label="Bulk actions">
       <span class="n" id="bulkcount">0 selected</span>
@@ -2731,9 +2758,9 @@ MESSAGES_TMPL = """
     <div class="pager">
       {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per) }}">← Newer</a>{% endif %}
       {% if page < pages %}<a class="btn small primary" href="{{ url_for('messages', f=filt, page=page+1, per=per) }}">Older →</a>{% endif %}
-      {% if page < pages %}<a class="btn small" href="{{ url_for('messages', f=filt, page=pages, per=per) }}">Last »</a>{% endif %}
-      <span class="sub">page {{ page }} of {{ pages }}</span>
-      <span class="sub" style="margin-left:auto">per page:
+      {% if page < pages %}<a class="btn small plast" href="{{ url_for('messages', f=filt, page=pages, per=per) }}">Last »</a>{% endif %}
+      <span class="sub pageno">page {{ page }} of {{ pages }}</span>
+      <span class="sub pp" style="margin-left:auto">per page:
         {% for n in [50, 100, 250, 500] %}<a class="chip{{ ' active' if per==n else '' }}" style="height:24px;padding:0 8px" href="{{ url_for('messages', f=filt, page=1, per=n) }}">{{ n }}</a>{% endfor %}
       </span>
     </div>

@@ -2200,6 +2200,14 @@ def main():
     check("icon route serves the png",
           rp.status_code == 200 and rp.data[:8] == b"\x89PNG\r\n\x1a\n")
 
+    section("T32 messages mobile layout hooks")
+    r = client.get("/messages")
+    check("toolbar groups chips and actions",
+          b'class="tchips"' in r.data and b'class="tactions"' in r.data
+          and b'class="mhide"' in r.data)
+    check("pager pieces tagged for mobile",
+          b'plast' in r.data and b'pageno' in r.data and b'class="sub pp"' in r.data)
+
     section("T31 dashboard rethink: system line, hero, demoted detail")
     rp = client.get("/")
     d = rp.data
