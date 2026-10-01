@@ -23,6 +23,7 @@ from flask import Flask, Response, flash, jsonify, redirect, render_template_str
 import config
 import engine
 import heuristics
+import learning
 import proxy
 import rag
 import store
@@ -732,6 +733,12 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .audit-pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.78rem;color:var(--dim);margin:6px 0 0;max-height:280px;overflow:auto}
 .simul{margin:4px 0 0;padding-left:18px;font-size:.88rem}
 .simul li{margin:3px 0}
+/* key -> value stat rows (dashboard + learning page) - shared on purpose */
+.dsrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:.88rem}
+.dsrow:last-child{border-bottom:1px solid var(--line)}
+.dsk{color:var(--dim)}
+.dsv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.dsv .dsp{font-weight:400;color:var(--dim);font-size:.78rem;margin-left:3px}
 .tools{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
 .tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-chip.ok{color:var(--ok);border-color:var(--ok)}
@@ -920,8 +927,8 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/>') }}
       {{ navitem(url_for('flows'), 'Flows', p.startswith('/flows'), '
         <path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/>') }}
-      {{ navitem(url_for('classifiers'), 'Classifiers', p.startswith('/classifiers'), '
-        <path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/>') }}
+      {{ navitem(url_for('learning_page'), 'Learning', p.startswith('/learning'), '
+        <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>') }}
       {{ navitem(url_for('templates'), 'Templates', p.startswith('/templates'), '
         <path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/>') }}
       <div class="nav-label">System</div>
@@ -1171,6 +1178,7 @@ if(!window.__mtVt){
     ['/rules/', 0, 31], ['/rules', 1, 30],
     ['/simulate', 0, 35],
     ['/classifiers/', 0, 41], ['/classifiers', 1, 40],
+    ['/learning', 0, 42],
     ['/flows/', 0, 51], ['/flows', 1, 50],
     ['/templates/', 0, 61], ['/templates', 1, 60],
     ['/accounts/', 0, 71], ['/accounts', 1, 70],
@@ -1763,7 +1771,7 @@ color:var(--fg);text-decoration:none}
   <a class="more-row" href="{{ url_for('rules') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"/></svg><span class="grow"><b>Rules</b><span class="sub">First-match sorting rules and guards</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('simulate') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/></svg><span class="grow"><b>Simulator</b><span class="sub">Draft an email, see how rules and flows would handle it</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('flows') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/></svg><span class="grow"><b>Flows</b><span class="sub">Multi-step automations</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('classifiers') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/></svg><span class="grow"><b>Classifiers</b><span class="sub">Trained heuristic classifiers</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('learning_page') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="grow"><b>Learning</b><span class="sub">Models deciding &amp; learning on your mail</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('templates') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/></svg><span class="grow"><b>Templates</b><span class="sub">Reply templates</span></span><span aria-hidden="true">&#8250;</span></a>
 </div>
 <div class="nav-label" style="margin:14px 2px 8px">System</div>
@@ -1878,11 +1886,6 @@ DASH_TMPL = """
 /* dashboard hero: stat rows (phones) + automation status chips - one fact per
    line, right-aligned tabular numbers, chips are atomic (never wrap mid-phrase) */
 .dstat{display:none}
-.dsrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:.88rem}
-.dsrow:last-child{border-bottom:1px solid var(--line)}
-.dsk{color:var(--dim)}
-.dsv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
-.dsv .dsp{font-weight:400;color:var(--dim);font-size:.78rem;margin-left:3px}
 .dsc{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
 .dschip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 10px;font-size:.74rem;line-height:1.2;color:var(--fg);white-space:nowrap;background:var(--card)}
 .dschip::before{content:'';width:6px;height:6px;background:var(--ok);flex:0 0 auto}
@@ -2227,12 +2230,14 @@ def message_snooze(mid):
         store.log_event("info", "snoozed message %d ('%s') until %s"
                         % (mid, (m.get("subject") or "")[:50], fmt_ts(until)))
         store.log_msg_event(mid, "snooze", "snoozed until %s" % fmt_ts(until))
+        learning.observe(mid, "snooze", "%.0fh" % hours, source="ui")
         flash("Snoozed until %s." % fmt_ts(until), "ok")
     else:
         store.snooze_message(mid, 0)
         store.log_event("info", "woke message %d ('%s')"
                         % (mid, (m.get("subject") or "")[:50]))
         store.log_msg_event(mid, "wake", "back in the lists")
+        learning.observe(mid, "wake", "", source="ui")
         flash("Back in your lists.", "ok")
     return redirect(request.referrer or url_for("message_detail", mid=mid))
 
@@ -2346,7 +2351,8 @@ CLASSIFIERS_TMPL = """
     <div class="page-desc">Deterministic heuristic models that run before the LLM. Trained from your labels (manual tags) or
     existing classified mail — a confident verdict is applied without any LLM call: faster, consistent, and immune to
     instructions hidden inside email content. The assistant can train, retrain, evaluate and retire these for you
-    (“train a classifier for Receipts”, “evaluate classifier 2”).</div>
+    (“train a classifier for Receipts”, “evaluate classifier 2”).
+    Part of the <a href="{{ url_for('learning_page') }}">Learning</a> system — see how fast-paths and learners fit together.</div>
   </div>
 </div>
 <div class="card flush" id="classifiers">
@@ -2564,6 +2570,9 @@ def classifier_dataset_relabel(hid):
                                      llm_confidence=1.0)
             store.log_event("info", "dataset: message %d relabelled to '%s' (classifier '%s', by ui)"
                             % (mid, cat, row.get("name") or hid))
+            learning.observe(mid, "relabel", cat, source="ui")
+            store.record_label(mid, "category", json.dumps(cat), 1.0,
+                               "explicit_user_correction", "dataset relabel")
             in_set = cat.strip().lower() == (row.get("category") or "").strip().lower()
             return redirect(url_for("classifier_dataset", hid=hid,
                                     toast="in" if in_set else "out",
@@ -4064,6 +4073,25 @@ MESSAGE_TMPL = """
       <div class="msg err" style="margin-top:10px">Draft failed: {{ draft_error }}</div>
       {% endif %}
     </div>
+    {% if m.decisions %}
+    <div class="card" id="decisions">
+      <div class="card-h"><h3>Machine decisions</h3><span class="sub">learning loop · shadow rows never change behavior</span></div>
+      {% for d in m.decisions %}
+      <div class="arow2">
+        <div class="ahead">
+          <span class="mono atime">{{ d.when }}</span>
+          <span class="badge {{ {'specialist':'acc','heuristic':'ok'}.get(d.source_type,'') }}">{{ d.source_type }}</span>
+          {% if d.shadow %}<span class="badge">shadow</span>{% endif %}
+          <span class="sub">{{ d.task }}{% if d.confidence %} · confidence {{ '%.2f' % d.confidence }}{% endif %}</span>
+        </div>
+        <div class="adetail">
+          <b>{{ d.value }}</b> <span class="sub">· {{ d.source_id }}</span>
+          {% if d.evidence %}<div class="sub">evidence: {% for e in d.evidence %}{{ e.feature_name }} {{ '%+.2f' % (e.contribution or 0) }}{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 </div>
 """
@@ -4277,6 +4305,34 @@ def _email_body_html(m, show_images):
     return html, has_remote
 
 
+def _message_decisions(mid, limit=14):
+    """Learning-loop decision rows for one message: specialist (shadow), the
+    system's own verdict, and the router intent - with evidence contributions."""
+    out = []
+    if not mid:
+        return out
+    try:
+        rows = store.list_decisions(msg_id=mid, limit=limit)
+    except Exception:
+        return out
+    for d in rows:
+        try:
+            val = json.loads(d["predicted_value"])
+        except (TypeError, ValueError):
+            val = d["predicted_value"]
+        if d["task"] == "needs_reply" and isinstance(val, bool):
+            val_h = "needs a reply" if val else "no reply needed"
+        elif d["task"] == "route":
+            val_h = "would route: %s" % val
+        else:
+            val_h = str(val)
+        ev = store.decision_evidence(d["id"], limit=4) if d["source_type"] == "specialist" else []
+        out.append({"when": fmt_ts(d["ts"]), "task": d["task"], "source_type": d["source_type"],
+                    "source_id": d["source_id"], "value": val_h, "confidence": d["confidence"],
+                    "shadow": bool(d["shadow"]), "evidence": ev})
+    return out
+
+
 def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0,
                     show_images=False, plain=False, filt="all", prev_id=None, next_id=None):
     if "body" not in m:
@@ -4288,6 +4344,8 @@ def _render_message(m, classify_result=None, draft=None, draft_error=None, draft
         m["body_text_html"] = message_body_html(m["body"])
     if "date_disp" not in m:
         m["date_disp"] = _display_date(m.get("date"))
+    if "decisions" not in m:
+        m["decisions"] = _message_decisions(m.get("id"))
     m["email_html"] = ""
     has_remote = False
     if not plain and (m.get("body_html") or "").strip():
@@ -4465,6 +4523,7 @@ def message_classify(mid):
         return redirect(url_for("messages"))
     try:
         res = engine.classify_and_store(m, store.all_settings())
+        learning.observe(mid, "reclassify", str(res.get("category") or ""), source="ui")
         store.add_llm_log(mid, True)
         m = store.get_message(mid) or m
         m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
@@ -4485,6 +4544,11 @@ def message_tag(mid):
     tag = (request.form.get("tag") or "").strip()[:40]
     store.tag_messages([mid], tag)
     store.log_msg_event(mid, "tag", ("tagged \u201c%s\u201d" % tag) if tag else "tag cleared")
+    if tag:
+        learning.observe(mid, "tag", tag, source="ui")
+        store.record_label(mid, "category", tag.lower(), 1.0, "explicit_user_label", "user_tag")
+    else:
+        learning.observe(mid, "untag", "", source="ui")
     flash(("Tag saved: " + tag) if tag else "Tag cleared.", "ok")
     return redirect(url_for("message_detail", mid=mid))
 
@@ -4513,6 +4577,7 @@ def message_file(mid):
             if new_uid:
                 mv["uid"] = new_uid
             store.record_move(m, target, "manual")
+            learning.observe(mid, "move", target, source="ui")
             store.update_message(mid, **mv)
             store.clear_keep(m.get("msgid"))
             store.log_event("info", "filed message %d ('%s') → %s"
@@ -6788,6 +6853,342 @@ def simulate():
                   for r in store.list_rules()])
     return render(_render_src(SIMULATE_TMPL, form=form, result=result,
                               prefill_note=prefill_note, targets=targets))
+
+
+EVAL_TMPL = """<style>
+.evmsgsub{font-size:.85rem;color:var(--dim);margin-top:2px}
+.evbody{white-space:pre-wrap;font-size:.88rem;line-height:1.55;margin-top:10px;max-height:340px;overflow:auto}
+.evbtns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+@media(max-width:767px){.evbody{max-height:150px}}
+</style>
+<div class="page-head">
+  <div>
+    <h1>Label the test set</h1>
+    <div class="page-desc">Answer from your own judgment. Nothing shows what any model thinks here - that is the point. Your answers become the test set everything gets scored against.</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-h"><h3>Progress</h3><span class="sub">{{ done }} of {{ total }} messages labeled{% if skipped %} - {{ skipped }} marked not sure{% endif %}</span></div>
+  <span class="eprog" style="min-width:220px"><i style="width:{{ (100 * done / total)|round|int if total else 0 }}%"></i></span>
+</div>
+{% if msg %}
+<div class="card">
+  <div class="card-h"><h3>{{ msg.subject or '(no subject)' }}</h3><span class="sub">{{ fmt_ts(msg.date_ts) }}</span></div>
+  <div class="evmsgsub">From: {{ msg.from_addr }}{% if msg.to_addr %} - To: {{ msg.to_addr }}{% endif %}</div>
+  <div class="evbody">{{ msg.snippet or '(no preview)' }}</div>
+  <div class="sub" style="margin-top:8px"><a href="/messages/{{ msg.id }}" target="_blank">Open the full message</a></div>
+</div>
+{% if 'needs_reply' in need %}
+<div class="card">
+  <div class="card-h"><h3>Does it need a reply from you?</h3></div>
+  <div class="evbtns">
+    <form method="post" action="{{ url_for('learning_eval_label') }}"><input type="hidden" name="msg" value="{{ msg.id }}"><input type="hidden" name="task" value="needs_reply"><input type="hidden" name="label" value="1"><button class="btn small" type="submit">Yes - needs a reply</button></form>
+    <form method="post" action="{{ url_for('learning_eval_label') }}"><input type="hidden" name="msg" value="{{ msg.id }}"><input type="hidden" name="task" value="needs_reply"><input type="hidden" name="label" value="0"><button class="btn small" type="submit">No reply needed</button></form>
+  </div>
+</div>
+{% endif %}
+{% if 'category' in need %}
+<div class="card">
+  <div class="card-h"><h3>Which category?</h3></div>
+  <div class="evbtns">
+    <form method="post" action="{{ url_for('learning_eval_label') }}"><input type="hidden" name="msg" value="{{ msg.id }}"><input type="hidden" name="task" value="category"><select class="evsel" name="label">{% for c in cats %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select><button class="btn small" type="submit">Save</button></form>
+    <form method="post" action="{{ url_for('learning_eval_label') }}"><input type="hidden" name="msg" value="{{ msg.id }}"><input type="hidden" name="task" value="category"><input type="hidden" name="label" value="__skip__"><button class="btn small" type="submit">Not sure</button></form>
+  </div>
+</div>
+{% endif %}
+{% else %}
+<div class="card"><div class="card-h"><h3>All done</h3></div><div class="sub">Every sampled message has your answers. The scores are on the <a href="{{ url_for('learning_page') }}">Learning page</a>.</div></div>
+{% endif %}
+<div class="sub" style="margin-top:10px"><a href="{{ url_for('learning_page') }}">Back to Learning</a></div>
+"""
+
+
+LEARN_TMPL = """<style>
+.lsteps{margin-top:6px}
+.lstep{display:grid;grid-template-columns:auto 1fr;gap:0 12px;padding:10px 0;position:relative}
+.lstep:not(:last-child)::before{content:'';position:absolute;left:3px;top:25px;bottom:-1px;width:1px;background:var(--line)}
+.lstep .dot{margin-top:5px}
+.lstep.now .dot{background:var(--acc)}
+.lstep b{font-size:.9rem;letter-spacing:-.01em}
+.lstep .sub{font-size:.82rem;margin-top:2px;line-height:1.5}
+.lstep.todo b,.lstep.todo .sub{color:var(--dim)}
+.lead{font-size:.98rem;font-weight:600;letter-spacing:-.01em;line-height:1.5;margin-bottom:2px}
+.lfold{border-top:1px solid var(--line)}
+.lfold>summary{cursor:pointer;padding:13px 2px;font-weight:600;font-size:.9rem;list-style:none;display:flex;align-items:center;gap:8px}
+.lfold>summary::-webkit-details-marker{display:none}
+.lfold>summary::before{content:'▸';font-size:.7rem;color:var(--dim)}
+.lfold[open]>summary::before{content:'▾'}
+.lfold .lfold-i{padding:0 0 14px}
+.ltbl td,.ltbl th{vertical-align:top}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
+.mgrid .card{margin:0}
+.eprog{display:inline-block;min-width:110px;height:6px;border-radius:3px;background:var(--line);vertical-align:middle;margin-right:8px;overflow:hidden}
+.eprog i{display:block;height:100%;border-radius:3px;background:var(--acc)}
+.evsel{padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg,#fff);color:inherit;font:inherit;font-size:.85rem}
+@media(max-width:767px){.ltbl .hide-m{display:none}.lstep{padding:9px 0}}
+</style>
+{% set s = rep.current %}
+{% set titles = {'needs_reply': 'Reply detector', 'category': 'Category sorter'} %}
+{% set m = (s.metrics_parsed.val or {}) if s else {} %}
+{% set ds = (s.stats_parsed.dataset or {}) if s else {} %}
+{% set live = s.live if s else {} %}
+{% set stat_word = {'validated': 'Trained · not watching yet', 'shadow': 'Watching quietly', 'active': 'Taking over confident calls', 'degraded': 'Needs attention', 'retired': 'Retired', 'rejected': 'Rejected', 'proposed': 'Prepared'}.get(s.status, s.status) if s else '' %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Learning</h1>
+    <div class="page-desc">All the small models that handle your mail so the AI doesn't have to: the fast-paths your labels taught (they already decide when confident) and the newer learners taught by the AI's own answers (watching quietly until you promote them).</div>
+  </div>
+  {% if s %}<form method="post" action="{{ url_for('learning_train') }}"><input type="hidden" name="task" value="{{ s.task }}"><button class="btn primary" type="submit">Retrain {{ titles.get(s.task, s.task)|lower }}</button></form>{% endif %}
+</div>
+{% if not s %}
+<div class="card">
+  <div class="empty">
+    <h4>Nothing is being learned yet</h4>
+    <p>Training takes about five seconds. The model studies every classification the AI has already made on your mail, learns to imitate its “needs a reply” call, and then waits. You decide what it may do, step by step.</p>
+    <form method="post" action="{{ url_for('learning_train') }}" style="margin-top:12px"><button class="btn primary" type="submit">Train the first model</button></form>
+  </div>
+</div>
+{% else %}
+{% macro spec_actions(sp) %}{% if sp.status == 'validated' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching new mail</button></form>
+    <span class="sub">Changes nothing — it only records what it would decide.</span>
+    {% elif sp.status == 'shadow' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="active"><button class="btn small" type="submit">Let it take over confident calls</button></form>
+    <form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+    <span class="sub">Takes effect once live routing is on; everything is reversible.</span>
+    {% elif sp.status == 'active' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+    <span class="sub">Retiring keeps every version and all history.</span>
+    {% endif %}{% endmacro %}
+{% macro spec_stats(sp, spm, sp_live) %}{% if sp.task == 'category' %}<div class="dsrow"><span class="dsk">Sorts the newest emails like the AI</span><span class="dsv">{{ '%.0f' % (spm.accuracy * 100) if spm.accuracy else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Categories it chooses from</span><span class="dsv">{{ spm.classes|length if spm.classes else '—' }}</span></div>
+  {% else %}<div class="dsrow"><span class="dsk">Catches the AI's “needs a reply” flags</span><span class="dsv">{{ '%.0f' % (spm.recall * 100) if spm.recall else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Right when it raises a flag</span><span class="dsv">{{ '%.0f' % (spm.precision * 100) if spm.precision else '—' }}%</span></div>
+  {% endif %}<div class="dsrow"><span class="dsk">Agrees with the AI on new mail</span><span class="dsv">{% if sp_live.n %}{{ sp_live.agree }} of {{ sp_live.n }}{% else %}no checks yet{% endif %}</span></div>{% endmacro %}
+<div class="card">
+  <div class="card-h"><h3>Working on your mail</h3><span class="sub">{{ rep.counts.classifiers_live }} fast-path{{ 's' if rep.counts.classifiers_live != 1 else '' }} deciding · {{ rep.counts.learners_running }} learner{{ 's' if rep.counts.learners_running != 1 else '' }} watching — nothing acts without you</span></div>
+  <div class="sub">Two families, same controls: <b>fast-paths</b> were taught by your labels and answer before the AI even sees the email; <b>learners</b> were taught by the AI's own answers and watch quietly until you promote them. <a href="{{ url_for('classifiers') }}">Manage all classifiers →</a></div>
+</div>
+<div class="mgrid">
+{% for c in rep.classifiers %}
+<div class="card">
+  <div class="card-h"><h3>{{ c.name }}</h3><span class="badge {{ 'ok' if c.status == 'live' else '' }}">{{ 'deciding live' if c.status == 'live' else 'paused' }}</span></div>
+  <div class="sub" style="margin-bottom:8px">Sorts “{{ c.job }}” mail before the AI sees it{% if c.weak %} — learned mostly from the AI's own classifications{% else %} — learned from your labels{% endif %}.</div>
+  <div class="dsrow"><span class="dsk">Self-check accuracy</span><span class="dsv">{{ '%.0f' % (c.accuracy * 100) if c.accuracy is not none else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Learned from</span><span class="dsv">{{ "{:,}".format(c.samples) if c.samples else '—' }} examples</span></div>
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">
+    <form method="post" action="{{ url_for('classifier_toggle', hid=c.id) }}"><button class="btn small" type="submit">{{ 'Pause' if c.status == 'live' else 'Resume' }}</button></form>
+    <form method="post" action="{{ url_for('classifier_retrain', hid=c.id) }}"><button class="btn small" type="submit">Retrain</button></form>
+    <a class="btn small" href="{{ url_for('classifier_dataset', hid=c.id) }}">Review dataset</a>
+  </div>
+</div>
+{% endfor %}
+<div class="card">
+  <div class="card-h"><h3>{{ titles.get(s.task, s.task) }}</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ {'validated': 'ready to watch', 'shadow': 'watching quietly', 'active': 'taking over', 'degraded': 'needs attention', 'retired': 'retired'}.get(s.status, s.status) }}</span></div>
+  <div class="sub" style="margin-bottom:8px">{% if s.task == 'category' %}One job: which category does this email belong to? It guesses the same six categories the AI uses. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% else %}One job: does this email need a reply from you? The same call the AI makes on every email today. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% endif %}</div>
+  {{ spec_stats(s, m, live) }}
+  <div class="sub" style="margin-top:8px">These compare it to the AI's answers on your newest 20% of mail — a ceiling, not the truth: the AI is not always right. Corrections from you weigh several times more than the AI's own labels when retraining.</div>
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(s) }}</div>
+</div>
+{% for sp in rep.specialists if s and sp.id != s.id and sp.task != s.task and sp.status in ('shadow', 'active', 'degraded') %}
+{% set spm = sp.metrics_parsed.val or {} %}
+<div class="card">
+  <div class="card-h"><h3>{{ titles.get(sp.task, sp.task) }}</h3><span class="badge warn">watching quietly</span></div>
+  <div class="sub" style="margin-bottom:8px">v{{ sp.version }}{% if sp.live.n %} · agrees with the AI on {{ sp.live.agree }} of {{ sp.live.n }}{% endif %}</div>
+  {{ spec_stats(sp, spm, sp.live) }}
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(sp) }}</div>
+</div>
+{% endfor %}
+</div>
+<div class="card">
+  <div class="card-h"><h3>Test sets</h3><span class="sub">hand-labeled by you - frozen - kept out of training</span></div>
+  {% if rep.eval.any %}
+    <div style="margin-bottom:10px"><span class="eprog"><i style="width:{{ (100 * rep.eval.progress.done / rep.eval.progress.total)|round|int }}%"></i></span><span class="sub">{{ rep.eval.progress.done }} of {{ rep.eval.progress.total }} messages labeled</span></div>
+    {% for t, g in rep.eval.tasks.items() %}
+      {% if g.n %}
+      <div class="dsrow" style="margin-top:6px"><span class="dsk">{{ g.title }}</span><span class="dsv">{{ g.labeled }} of {{ g.n }}{% if g.skipped %} - {{ g.skipped }} not sure{% endif %}</span></div>
+      {% if g.model_text %}<div class="sub" style="margin:2px 0 6px">{{ g.model_text }}</div>{% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if rep.eval.progress.done < rep.eval.progress.total %}
+    <div class="row" style="margin-top:12px"><a class="btn small" href="{{ url_for('learning_eval') }}">Label now ({{ rep.eval.progress.total - rep.eval.progress.done }} left)</a></div>
+    {% endif %}
+    {% if rep.eval.stale_models %}
+    <div class="sub" style="margin-top:10px">Models were trained before this set existed. <b>Retrain</b> them so your test messages never leak into training.</div>
+    {% endif %}
+  {% else %}
+    <div class="sub" style="margin-bottom:10px">Scores against AI labels measure imitation - the AI taught the models. This samples ~50 real emails for <b>you</b> to answer by hand (about 10 minutes, once). From then on every model is scored against your answers: the only truth-based score here. The set is frozen, and the messages are kept out of all training.</div>
+    <form method="post" action="{{ url_for('learning_eval_sample') }}"><button class="btn small" type="submit">Build the test set</button></form>
+  {% endif %}
+</div>
+<div class="card">
+  <div class="card-h"><h3>The newest learner</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ stat_word }}</span></div>
+  <div class="lead">{% if s.status == 'shadow' %}Watching quietly — it sees every classified email, records what it would decide, and changes nothing.
+    {% elif s.status == 'active' %}Taking over confident calls — everything it is unsure about still goes to the AI.
+    {% elif s.status == 'validated' %}Trained and scored — ready to start watching. It still changes nothing until it watches for a while and you promote it.
+    {% elif s.status == 'degraded' %}Quality dropped below its bar — it is back to watching until retrained.
+    {% elif s.status == 'retired' %}Retired — kept for the record. Retrain to bring it back.
+    {% else %}Prepared but not running.{% endif %}</div>
+  <div class="sub" style="margin:2px 0 4px">{{ titles.get(s.task, s.task) }} · version {{ s.version }}{% if live.last_at %} · last check {{ fmt_ts(live.last_at) }}{% elif s.created %} · trained {{ fmt_ts(s.created) }}{% endif %}</div>
+  <div class="lsteps">
+    <div class="lstep done"><span class="dot ok"></span><div><b>1 · Learned from your past mail</b>
+      <div class="sub">{{ "{:,}".format(ds.n or 0) }} classifications to study — every label was written by the AI itself, not by you.</div></div></div>
+    <div class="lstep done"><span class="dot ok"></span><div><b>2 · Scored against history</b>
+      <div class="sub">{% if s.task == 'category' %}Checked on the newest {{ m.n or 0 }} emails: it sorts {{ '%.0f' % (m.accuracy * 100) if m.accuracy else '—' }}% the same way the AI does.{% else %}Checked on the newest {{ m.n or 0 }} emails: it catches {{ '%.0f' % (m.recall * 100) if m.recall else '—' }}% of the AI's “needs a reply” flags, and is right {{ '%.0f' % (m.precision * 100) if m.precision else '—' }}% of the times it raises one.{% endif %}</div></div></div>
+    {% if s.status in ('shadow', 'active') %}
+    <div class="lstep now"><span class="dot acc"></span><div><b>3 · Watching new mail</b> <span class="badge acc">now</span>
+      <div class="sub">{% if live.n %}Checked {{ live.n }} so far, agrees with the AI on {{ live.agree }} of them ({{ '%.0f' % (live.agreement * 100) }}%). Every check is recorded below.{% else %}Running — the first check appears with the next classified email.{% endif %}</div></div></div>
+    {% else %}
+    <div class="lstep todo"><span class="dot"></span><div><b>3 · Watch new mail</b>
+      <div class="sub">Not started — press “Start watching new mail” below.</div></div></div>
+    {% endif %}
+    <div class="lstep {{ 'now' if s.status == 'active' else 'todo' }}"><span class="dot {{ 'acc' if s.status == 'active' else '' }}"></span><div><b>4 · Take over confident calls</b>{% if s.status == 'active' %} <span class="badge ok">on</span>{% endif %}
+      <div class="sub">{{ 'Emails it is confident about stop going to the AI. The rest still escalate.' if s.status == 'active' else 'The end goal: emails it is confident about stop going to the AI. Needs more watching time and your go-ahead.' }}</div></div></div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-h"><h3>What can be trained next</h3><span class="sub">candidates found in your data — nothing trains without you</span></div>
+  {% for p in rep.proposals %}
+  <div class="dsrow">
+    <span class="dsk"><b>{{ p.title }}</b><div class="sub">{{ p.evidence }} · {{ p.why }}</div></span>
+    <span class="dsv">
+      {% if p.status == 'ready' and p.trainable %}<form class="inline" method="post" action="{{ url_for('learning_train') }}"><input type="hidden" name="task" value="{{ p.task }}"><button class="btn small primary" type="submit">Train</button></form>
+      {% elif p.status == 'ready' %}<span class="badge">low gain</span>
+      {% elif p.status == 'watching' %}<span class="badge warn">watching</span>
+      {% else %}<span class="badge">blocked</span>{% endif %}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+<div class="card">
+  <details class="lfold">
+    <summary>Where it disagrees with the AI{% if rep.disagreements %} · {{ rep.disagreements|length }} recent{% endif %}</summary>
+    <div class="lfold-i">
+      <div class="sub" style="margin-bottom:8px">Shadow checks — the AI's decision still ran; these are the moments the model would have said something different. Open one to judge for yourself.</div>
+      {% if rep.disagreements %}
+      <div class="tablewrap"><table class="tbl ltbl">
+        <tr><th>Email</th><th>This model said</th><th>The AI said</th><th class="hide-m">When</th></tr>
+        {% for d in rep.disagreements %}
+        <tr>
+          <td><a href="{{ url_for('message_detail', mid=d.msg_id) }}">{{ d.subject or ('#' ~ d.msg_id) }}</a><div class="sub">{{ titles.get(d.task, d.task) }} · {{ d.from_addr }}</div></td>
+          <td><span class="badge warn">{{ 'needs reply' if d.specialist else 'no reply' }}</span> <span class="sub">{{ '%.2f' % d.specialist_conf }}</span></td>
+          <td><span class="badge">{{ 'needs reply' if d.system else 'no reply' }}</span> <span class="sub">{{ d.system_source }}</span></td>
+          <td class="sub hide-m">{{ fmt_ts(d.ts) }}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+      {% else %}<div class="sub">Nothing yet — disagreements appear once it has watched some new mail.</div>{% endif %}
+    </div>
+  </details>
+  <details class="lfold">
+    <summary>Raw numbers</summary>
+    <div class="lfold-i">
+      <div class="dsrow"><span class="dsk">Emails still sent to the AI</span><span class="dsv">{{ '%.0f' % (rep.routing.escalation_rate * 100) if rep.routing.escalation_rate is not none else '—' }}%<span class="dsp"> of last {{ rep.routing.n }}</span></span></div>
+      <div class="dsrow"><span class="dsk">Could have skipped the AI</span><span class="dsv">{{ '%.0f' % (rep.routing.would_skip_rate * 100) if rep.routing.would_skip_rate is not none else '—' }}%</span></div>
+      <div class="dsrow"><span class="dsk">Sent for a second look</span><span class="dsv">{{ rep.routing.counts['verify'] }}</span></div>
+      <div class="dsrow"><span class="dsk">Decisions recorded</span><span class="dsv">{{ "{:,}".format(rep.library.decisions) }}</span></div>
+      <div class="dsrow"><span class="dsk">Your actions recorded (tags, moves, undos)</span><span class="dsv">{{ "{:,}".format(rep.library.observations) }}</span></div>
+      <div class="dsrow"><span class="dsk">Confirmed labels (from your corrections)</span><span class="dsv">{{ "{:,}".format(rep.library.labels) }}</span></div>
+      <div class="sub" style="margin-top:8px">“Emails still sent to the AI” is the number that should fall as models take over. Labels written by you are worth several AI labels each{% if rep.library.labels_by_source %} — so far: {% for src, n in rep.library.labels_by_source.items() %}{{ src }} {{ n }}{{ ' · ' if not loop.last }}{% endfor %}{% endif %}.</div>
+    </div>
+  </details>
+  <details class="lfold">
+    <summary>All models &amp; versions · {{ rep.specialists|length }}</summary>
+    <div class="lfold-i">
+      <div class="tablewrap"><table class="tbl ltbl">
+        <tr><th>Model</th><th>Status</th><th>Catches / right</th><th class="hide-m">Agrees on new mail</th><th></th></tr>
+        {% for sp in rep.specialists %}
+        {% set spm = sp.metrics_parsed.val or {} %}
+        <tr>
+          <td><b>{{ sp.name }}</b> <span class="sub">v{{ sp.version }} · {{ sp.kind }} · #{{ sp.id }}</span><div class="sub">{{ sp.task }}{% set n = (sp.stats_parsed.dataset or {}).get('n') %}{% if n %} · {{ n }} samples{% endif %}</div></td>
+          <td><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(sp.status, '') }}">{{ sp.status }}</span></td>
+          <td class="sub">{{ '%.0f' % (spm.recall * 100) if spm.recall else '—' }}% / {{ '%.0f' % (spm.precision * 100) if spm.precision else '—' }}%</td>
+          <td class="sub hide-m">{% if sp.live.n %}{{ sp.live.agree }} of {{ sp.live.n }}{% else %}—{% endif %}</td>
+          <td class="r">{% if sp.status == 'validated' and (not s or sp.id != s.id) %}<form class="inline" method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+    </div>
+  </details>
+  <details class="lfold">
+    <summary>How this works</summary>
+    <div class="lfold-i">
+      <div class="sub" style="line-height:1.6">The goal is simple: <b>use the AI for novel mail, use small models for the repetitive parts.</b> Two families do that here — <b>fast-paths</b> (taught by your labels; they decide before the AI when sure) and <b>learners</b> (taught by the AI's answers; they watch, then take over when you promote them). The loop in plain words: the system watches what the AI decides → when a pattern repeats, a small model is trained to imitate that one decision → it is scored against history → it watches real mail without acting → if it holds up, you can let it take over → anything it is unsure about still goes to the AI. “Emails still sent to the AI” (in Raw numbers) is the number that should fall as this works.</div>
+      <ul class="simul" style="margin-top:6px">
+        <li>“Watching quietly” really means quiet — shadow decisions are recorded, never acted on, and marked as such everywhere.</li>
+        <li>A model's own predictions never become training data — only the AI's answers and <b>your</b> corrections teach it.</li>
+        <li>Every version is kept forever; promoting and retiring are reversible; deleting is not a thing here.</li>
+        <li>Small print: “the AI said” is not ground truth either — until you correct enough emails, all scores measure imitation, not truth.</li>
+      </ul>
+    </div>
+  </details>
+</div>
+{% endif %}
+"""
+
+
+@app.route("/learning")
+def learning_page():
+    rep = learning.status_report()
+    return render(_render_src(LEARN_TMPL, rep=rep, fmt_ts=fmt_ts))
+
+
+@app.route("/learning/train", methods=["POST"])
+def learning_train():
+    task = (request.form.get("task") or "needs_reply").strip()
+    try:
+        res = learning.train_specialist(task, created_by="ui")
+        v = res["val"]
+        score = v.get("f1") if v.get("f1") is not None else v.get("accuracy")
+        flash("Trained %s v%d - validation score %s on %d held-out sample(s) of %d. "
+              "Deploy to shadow when ready." % (res["name"], res["version"], score,
+                                                v.get("n") or 0, res["dataset"]["n"]), "ok")
+    except Exception as exc:
+        flash("Training failed: %s" % exc, "err")
+    return redirect(url_for("learning_page"))
+
+
+@app.route("/learning/specialists/<int:sid>/transition", methods=["POST"])
+def learning_transition(sid):
+    to = (request.form.get("to") or "").strip()
+    try:
+        learning.transition(sid, to, reason="by ui", by="ui")
+        flash("Specialist #%d is now %s." % (sid, to.upper()), "ok")
+    except Exception as exc:
+        flash("Transition failed: %s" % exc, "err")
+    return redirect(url_for("learning_page"))
+
+
+@app.route("/learning/eval")
+def learning_eval():
+    ctx = learning.next_eval_context()
+    prog = learning.eval_progress()
+    cats = list(store.get_setting("categories") or []) or learning.known_categories()
+    msg = ctx["msg"] if ctx else None
+    need = ctx["need"] if ctx else []
+    return render(_render_src(EVAL_TMPL, msg=msg, need=need, cats=cats,
+                              done=prog["done"], total=prog["total"],
+                              skipped=prog["skipped"], fmt_ts=fmt_ts))
+
+
+@app.route("/learning/eval/sample", methods=["POST"])
+def learning_eval_sample():
+    try:
+        res = learning.sample_eval_set()
+        flash("Test set built: %d messages picked (%d questions). Label them from the Learning page."
+              % (res["messages"], res["items"]), "ok")
+    except Exception as exc:
+        flash("Could not build the test set: %s" % exc, "err")
+    return redirect(url_for("learning_page"))
+
+
+@app.route("/learning/eval/label", methods=["POST"])
+def learning_eval_label():
+    msg_id = int(request.form.get("msg") or 0)
+    task = (request.form.get("task") or "").strip()
+    label = (request.form.get("label") or "").strip()
+    try:
+        learning.label_eval(msg_id, task, label)
+    except Exception as exc:
+        flash("Could not save that answer: %s" % exc, "err")
+    return redirect(url_for("learning_eval"))
 
 
 @app.route("/fonts/<name>")

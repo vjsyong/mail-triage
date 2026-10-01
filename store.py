@@ -21,6 +21,10 @@ DEFAULT_SETTINGS = {
     "classify_concurrency": 8,    # parallel LLM requests for batch classification
     "heuristics_enabled": True,   # run trained heuristic classifiers before the LLM
     "heuristic_autorefine": True,  # retrain tag-sourced heuristics when labels grow
+    # ---- learning loop (docs/mail-intelligence/design.md) ----
+    "learning_enabled": True,        # record decisions/observations; run shadow specialists
+    "learning_route_mode": "shadow", # shadow = log what routing WOULD do; enforce = confident specialists may skip the LLM call
+    "learning_sample_pct": 1.0,      # % of high-confidence accepts still routed to the LLM for audit (0 = none)
     "categories": ["Action", "Notification", "Newsletter", "Receipt", "Personal", "Promo"],
     "category_folders": {
         "Notification": "Notifications",
@@ -334,6 +338,85 @@ def _migrate(conn):
         detail TEXT NOT NULL DEFAULT ''
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_msgev_msg ON msg_events(msg_id, id)")
+    # ---- learning loop: specialists registry, decision store, observations, labels
+    # See docs/mail-intelligence/design.md. Decisions are per (message, task) records
+    # with provenance; shadow=1 rows never influenced behavior. Labels are versioned
+    # training material with a source strength (explicit > inferred > weak LLM).
+    conn.execute("""CREATE TABLE IF NOT EXISTS specialists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL DEFAULT '',
+        task TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL DEFAULT '',
+        version INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'proposed',
+        feature_schema_version INTEGER NOT NULL DEFAULT 1,
+        model TEXT NOT NULL DEFAULT '{}',
+        stats TEXT NOT NULL DEFAULT '{}',
+        metrics TEXT NOT NULL DEFAULT '{}',
+        min_confidence REAL NOT NULL DEFAULT 0.9,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT NOT NULL DEFAULT '',
+        created INTEGER NOT NULL DEFAULT 0,
+        updated INTEGER NOT NULL DEFAULT 0,
+        superseded_by INTEGER NOT NULL DEFAULT 0
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spec_task ON specialists(task, id)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS decisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL DEFAULT 0,
+        msg_id INTEGER NOT NULL DEFAULT 0,
+        task TEXT NOT NULL DEFAULT '',
+        predicted_value TEXT NOT NULL DEFAULT '',
+        confidence REAL NOT NULL DEFAULT 0,
+        source_type TEXT NOT NULL DEFAULT '',
+        source_id TEXT NOT NULL DEFAULT '',
+        model_version TEXT NOT NULL DEFAULT '',
+        feature_version INTEGER NOT NULL DEFAULT 0,
+        shadow INTEGER NOT NULL DEFAULT 0,
+        routed TEXT NOT NULL DEFAULT ''
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dec_task ON decisions(task, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dec_msg ON decisions(msg_id, task)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS decision_evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        decision_id INTEGER NOT NULL DEFAULT 0,
+        feature_name TEXT NOT NULL DEFAULT '',
+        feature_value TEXT NOT NULL DEFAULT '',
+        contribution REAL
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_devev_dec ON decision_evidence(decision_id)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL DEFAULT 0,
+        msg_id INTEGER NOT NULL DEFAULT 0,
+        event_type TEXT NOT NULL DEFAULT '',
+        event_value TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT ''
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_obs_msg ON observations(msg_id, id)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS labels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL DEFAULT 0,
+        msg_id INTEGER NOT NULL DEFAULT 0,
+        task TEXT NOT NULL DEFAULT '',
+        label TEXT NOT NULL DEFAULT '',
+        confidence REAL NOT NULL DEFAULT 1.0,
+        source TEXT NOT NULL DEFAULT '',
+        source_detail TEXT NOT NULL DEFAULT '',
+        UNIQUE(msg_id, task, label, source)
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_lab_msg ON labels(msg_id, task)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS eval_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        set_name TEXT NOT NULL DEFAULT 'golden',
+        msg_id INTEGER NOT NULL DEFAULT 0,
+        task TEXT NOT NULL DEFAULT '',
+        label TEXT NOT NULL DEFAULT '',
+        created INTEGER NOT NULL DEFAULT 0,
+        labeled_at INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(set_name, msg_id, task)
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_msg ON eval_items(set_name, msg_id)")
     # one-time: retire assistant_actions_apply (False meant dry-run -> the three gated
     # tools become 'ask', so nothing the assistant did before can now happen silently)
     has_perm = conn.execute("SELECT COUNT(*) FROM settings WHERE k GLOB 'perm_*'").fetchone()[0]
@@ -592,6 +675,223 @@ def update_heuristic(hid, **fields):
 def delete_heuristic(hid):
     with db() as conn:
         conn.execute("DELETE FROM heuristics WHERE id=?", (hid,))
+
+
+# ---------------------------------------------------------------- learning loop
+# Decisions, observations, labels and the specialist registry used by learning.py
+# (design: docs/mail-intelligence/design.md). These are additive: nothing in the
+# existing pipeline reads them except the shadow hook + the /learning page.
+
+def list_specialists(task=None, enabled_only=False, statuses=None):
+    q = "SELECT * FROM specialists"
+    where, args = [], []
+    if task:
+        where.append("task=?")
+        args.append(task)
+    if enabled_only:
+        where.append("enabled=1")
+    if statuses:
+        where.append("status IN (%s)" % ",".join("?" * len(statuses)))
+        args.extend(statuses)
+    if where:
+        q += " WHERE " + " AND ".join(where)
+    q += " ORDER BY task, id DESC"
+    with db() as conn:
+        return [dict(r) for r in conn.execute(q, args)]
+
+
+def get_specialist(sid):
+    with db() as conn:
+        row = conn.execute("SELECT * FROM specialists WHERE id=?", (int(sid),)).fetchone()
+    return dict(row) if row else None
+
+
+def add_specialist(name, task, kind, version=1, status="proposed", feature_schema_version=1,
+                   model="{}", stats="{}", metrics="{}", min_confidence=0.9,
+                   enabled=False, created_by=""):
+    now = int(time.time())
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO specialists (name, task, kind, version, status, feature_schema_version, "
+            "model, stats, metrics, min_confidence, enabled, created_by, created, updated) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (name, task, kind, int(version), status, int(feature_schema_version), model, stats,
+             metrics, float(min_confidence), 1 if enabled else 0, created_by, now, now))
+        return cur.lastrowid
+
+
+def update_specialist(sid, **fields):
+    if not fields:
+        return
+    fields["updated"] = int(time.time())
+    sets = ", ".join("%s=?" % k for k in fields)
+    with db() as conn:
+        conn.execute("UPDATE specialists SET %s WHERE id=?" % sets, (*fields.values(), int(sid)))
+
+
+def next_specialist_version(name):
+    with db() as conn:
+        row = conn.execute("SELECT MAX(version) FROM specialists WHERE name=?", (name,)).fetchone()
+    return int(row[0] or 0) + 1
+
+
+def record_decision(msg_id, task, predicted_value, confidence, source_type, source_id="",
+                    model_version="", feature_version=0, shadow=0, routed="", ts=None):
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO decisions (ts, msg_id, task, predicted_value, confidence, source_type, "
+            "source_id, model_version, feature_version, shadow, routed) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (int(ts or time.time()), int(msg_id or 0), task, str(predicted_value),
+             float(confidence or 0), source_type, source_id, str(model_version),
+             int(feature_version or 0), 1 if shadow else 0, routed))
+        return cur.lastrowid
+
+
+def record_decision_evidence(decision_id, items):
+    """items: iterable of (feature_name, feature_value, contribution-or-None)."""
+    with db() as conn:
+        conn.executemany(
+            "INSERT INTO decision_evidence (decision_id, feature_name, feature_value, contribution) "
+            "VALUES (?,?,?,?)",
+            [(int(decision_id), str(n)[:80], str(v)[:120],
+              None if c is None else float(c)) for n, v, c in items])
+
+
+def list_decisions(task=None, msg_id=None, source_type=None, source_id=None, shadow=None,
+                   since=None, limit=200, newest_first=True):
+    q = "SELECT * FROM decisions"
+    where, args = [], []
+    if task:
+        where.append("task=?")
+        args.append(task)
+    if msg_id:
+        where.append("msg_id=?")
+        args.append(int(msg_id))
+    if source_type:
+        where.append("source_type=?")
+        args.append(source_type)
+    if source_id:
+        where.append("source_id=?")
+        args.append(source_id)
+    if shadow is not None:
+        where.append("shadow=?")
+        args.append(1 if shadow else 0)
+    if since:
+        where.append("ts>=?")
+        args.append(int(since))
+    if where:
+        q += " WHERE " + " AND ".join(where)
+    q += " ORDER BY id %s LIMIT ?" % ("DESC" if newest_first else "ASC")
+    args.append(int(limit))
+    with db() as conn:
+        return [dict(r) for r in conn.execute(q, args)]
+
+
+def count_decisions(task=None, source_type=None, since=None):
+    q = "SELECT COUNT(*) FROM decisions"
+    where, args = [], []
+    if task:
+        where.append("task=?")
+        args.append(task)
+    if source_type:
+        where.append("source_type=?")
+        args.append(source_type)
+    if since:
+        where.append("ts>=?")
+        args.append(int(since))
+    if where:
+        q += " WHERE " + " AND ".join(where)
+    with db() as conn:
+        return conn.execute(q, args).fetchone()[0]
+
+
+def decision_evidence(decision_id, limit=50):
+    with db() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM decision_evidence WHERE decision_id=? ORDER BY ABS(COALESCE(contribution,0)) DESC LIMIT ?",
+            (int(decision_id), int(limit)))]
+
+
+def record_observation(msg_id, event_type, event_value="", source="", ts=None):
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO observations (ts, msg_id, event_type, event_value, source) VALUES (?,?,?,?,?)",
+            (int(ts or time.time()), int(msg_id or 0), event_type, str(event_value)[:300], source))
+        return cur.lastrowid
+
+
+def list_observations(msg_id=None, event_type=None, limit=100):
+    q = "SELECT * FROM observations"
+    where, args = [], []
+    if msg_id:
+        where.append("msg_id=?")
+        args.append(int(msg_id))
+    if event_type:
+        where.append("event_type=?")
+        args.append(event_type)
+    if where:
+        q += " WHERE " + " AND ".join(where)
+    q += " ORDER BY id DESC LIMIT ?"
+    args.append(int(limit))
+    with db() as conn:
+        return [dict(r) for r in conn.execute(q, args)]
+
+
+def count_observations(event_type=None):
+    q = "SELECT COUNT(*) FROM observations"
+    args = []
+    if event_type:
+        q += " WHERE event_type=?"
+        args.append(event_type)
+    with db() as conn:
+        return conn.execute(q, args).fetchone()[0]
+
+
+def record_label(msg_id, task, label, confidence=1.0, source="", source_detail=""):
+    """Idempotent per (msg, task, label, source) - richer sources add rows, they
+    never silently overwrite; strength ordering lives in learning.LABEL_SOURCES."""
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO labels (ts, msg_id, task, label, confidence, source, source_detail) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (int(time.time()), int(msg_id or 0), task, str(label), float(confidence or 1.0),
+             source, str(source_detail)[:200]))
+        return cur.lastrowid if cur.rowcount else None
+
+
+def list_labels(msg_id=None, task=None, source=None, limit=500):
+    q = "SELECT * FROM labels"
+    where, args = [], []
+    if msg_id:
+        where.append("msg_id=?")
+        args.append(int(msg_id))
+    if task:
+        where.append("task=?")
+        args.append(task)
+    if source:
+        where.append("source=?")
+        args.append(source)
+    if where:
+        q += " WHERE " + " AND ".join(where)
+    q += " ORDER BY id DESC LIMIT ?"
+    args.append(int(limit))
+    with db() as conn:
+        return [dict(r) for r in conn.execute(q, args)]
+
+
+def count_labels(task=None, source=None):
+    q = "SELECT COUNT(*) FROM labels"
+    where, args = [], []
+    if task:
+        where.append("task=?")
+        args.append(task)
+    if source:
+        where.append("source=?")
+        args.append(source)
+    if where:
+        q += " WHERE " + " AND ".join(where)
+    with db() as conn:
+        return conn.execute(q, args).fetchone()[0]
 
 
 def move_rule(rule_id, direction):
@@ -1502,3 +1802,70 @@ def get_rule_proposal(pid):
 def mark_rule_proposal_applied(pid):
     with db() as conn:
         conn.execute("UPDATE rule_proposals SET applied=1 WHERE id=?", (pid,))
+
+
+# ---------------------------------------------------------------- eval sets (test sets)
+
+def add_eval_item(msg_id, task, set_name="golden"):
+    """Idempotent: one row per (set, message, task). Returns 1 when added."""
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO eval_items (set_name, msg_id, task, created) VALUES (?,?,?,?)",
+            (set_name, int(msg_id), task, int(time.time())))
+        return cur.rowcount
+
+
+def eval_items(set_name="golden", task=None):
+    sql = "SELECT * FROM eval_items WHERE set_name=?"
+    args = [set_name]
+    if task:
+        sql += " AND task=?"
+        args.append(task)
+    with db() as conn:
+        return [dict(r) for r in conn.execute(sql, args)]
+
+
+def eval_counts(set_name="golden"):
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT task, COUNT(*) total, SUM(CASE WHEN labeled_at>0 THEN 1 ELSE 0 END) labeled "
+            "FROM eval_items WHERE set_name=? GROUP BY task", (set_name,)).fetchall()
+    return {r["task"]: {"total": r["total"], "labeled": r["labeled"] or 0} for r in rows}
+
+
+def eval_msg_ids(set_name="golden"):
+    with db() as conn:
+        return {r[0] for r in conn.execute(
+            "SELECT DISTINCT msg_id FROM eval_items WHERE set_name=?", (set_name,))}
+
+
+def set_eval_label(msg_id, task, label, set_name="golden"):
+    with db() as conn:
+        cur = conn.execute(
+            "UPDATE eval_items SET label=?, labeled_at=? "
+            "WHERE set_name=? AND msg_id=? AND task=?",
+            (str(label), int(time.time()), set_name, int(msg_id), task))
+        return cur.rowcount
+
+
+def next_eval_msg(set_name="golden"):
+    """First message that still has an unlabeled item (stable order)."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT msg_id FROM eval_items WHERE set_name=? AND labeled_at=0 "
+            "GROUP BY msg_id ORDER BY MIN(id) LIMIT 1", (set_name,)).fetchone()
+    return row[0] if row else None
+
+
+def eval_items_for_msg(msg_id, set_name="golden"):
+    with db() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM eval_items WHERE set_name=? AND msg_id=?",
+            (set_name, int(msg_id)))]
+
+
+def eval_created(set_name="golden"):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT MIN(created) c FROM eval_items WHERE set_name=?", (set_name,)).fetchone()
+    return row["c"] if row and row["c"] else None

@@ -24,6 +24,7 @@ import requests
 
 import config
 import heuristics
+import learning
 import proxy
 import store
 
@@ -1456,6 +1457,7 @@ def undo_filing(log_id):
                     % ((msg.get("subject") or "")[:50], entry["from_folder"]))
     store.log_msg_event(msg["id"], "undo", "moved back to \u201c%s\u201d - automation will not re-file it"
                         % entry["from_folder"])
+    learning.observe(msg["id"], "undo", entry["to_folder"], source="ui")
     return True, "Moved back to %s — automation will not re-file it." % entry["from_folder"]
 
 
@@ -2022,6 +2024,7 @@ def classify_and_store(msg, settings, mc=None):
                 except Exception:
                     pass
     store.update_message(msg["id"], **fields)
+    learning.observe_classification(msg, fields, res, hres, settings)
     return res
 
 

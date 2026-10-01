@@ -5,6 +5,7 @@ data/
 gemma/cache/
 .env
 qa/shots/
+.codegraph/
 data
 /data
 ragmodels/
