@@ -1,273 +1,153 @@
 # Mail Triage
 
-Smart email management for the `seanyong@ust.hk` mailbox, running as an all-in-one
-container on gpu-vm1. The container embeds the **email-oauth2-proxy** (OAuth sign-in
-for the mail providers, managed on the Accounts page) and the triage stack: simple
-rules sort most mail, everything else gets classified by an LLM, and it can draft
-replies from your templates straight into your Drafts folder.
+Self-hosted triage for a single mailbox. Deterministic rules sort most mail, a local
+LLM classifies the rest, and a learning loop compiles the LLM's repeated reasoning
+into small auditable models that answer before the LLM is ever called.
 
-Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
+![The dashboard: system status, triage metrics, recent filings, recent mail](docs/img/dashboard.png)
+
+One container on one host: Flask UI + worker + embedded OAuth mail proxy. Mail stays
+on the machine; the LLM defaults to a local model, and a cloud fallback is optional.
+
+## Features
+
+- **Rules first.** Match from / to / subject / body (contains, equals, regex; ALL or
+  ANY), then move, mark read, flag. First match wins; a rule with no actions is a
+  guard that pins matching mail in place so nothing else can move it. Folders are
+  created if missing; tokens of 3 characters or fewer match whole words only.
+- **LLM classification.** Whatever no rule matched is classified into your
+  categories with a confidence, a one-line summary, and a short reason. Auto-filing
+  starts off; per-hour call cap.
+- **Fast-path classifiers.** Deterministic models (decision lists, naive Bayes)
+  trained from your tags or the LLM's own verdicts. A confident hit skips the LLM,
+  runs identically every time, and can't be steered by instructions hidden inside
+  email content. Every classifier has a dataset page for reviewing and correcting
+  the exact samples it learns from.
+- **Learning loop.** Small specialists train on mailbox history in seconds (reply
+  detector, category sorter), watch in shadow mode first (recording what they would
+  do, changing nothing), get scored against a hand-labeled test set, and only take
+  over when you promote them. Models are plain JSON; every decision keeps its
+  evidence. See `docs/mail-intelligence/design.md`.
+- **Flows.** Multi-step automations: WHEN a message matches (exact fields, AI
+  category, or topic by meaning) then run steps in order - move, tag, flag, mark
+  read, draft from a template or with the LLM into Drafts.
+- **Assistant.** A streaming tool-calling chat over your whole mailbox (live IMAP,
+  any folder): search, read, move, flag, create folders, propose rules. Thinking and
+  every tool step are visible; actions can run dry-run; every action is logged.
+- **Semantic search.** Hybrid local index: fielded FTS5 + sqlite-vec dense
+  retrieval, RRF fusion, small CPU cross-encoder reranker. No GPU needed.
+- **Message viewer and triage queue.** Sanitized HTML rendering, one-click
+  file-and-next, undo trail, snooze that resurfaces, tagging, bulk "classify
+  selected" / "classify all unclassified".
+- **Templates and drafting.** Reply templates with placeholders; draft with the LLM
+  and save straight into Drafts to send from your normal client.
+- **Accounts.** Mailbox sign-in via OAuth handled in the UI through the embedded
+  email-oauth2-proxy; token status live, restart/remove managed there.
+
+Full detail on every feature: [docs/features.md](docs/features.md).
+
+## Quick start
+
+Docker + Compose. A GPU is optional - any OpenAI-compatible LLM endpoint works, and
+search embeddings run on CPU by default.
+
+```bash
+git clone <this repo> && cd mail-triage
+cat > .env <<'EOF'
+LLM_BASE_URL=http://127.0.0.1:8040/v1     # any OpenAI-compatible endpoint
+LLM_MODEL=gemma-4-26b-a4b
+UI_PORT=8097
+DATA_DIR=/data
+EOF
+docker compose up -d --build
+# then open http://localhost:8097
+```
+
+First run:
+
+1. **Accounts** - add your mailbox and complete the OAuth flow (the page shows the
+   exact redirect URI to register, drives the login, reports token status).
+2. **Settings** - set the LLM endpoint (blank fields fall back to `.env`) and press
+   "Test LLM endpoint".
+3. Optional: run the bundled local model server - `cd gemma && docker compose up -d`
+   (one GPU, vLLM, port 8040).
+4. Tags and corrections you make now feed the learning loop; train your first
+   specialist from **Learning**.
+
+## How it works
 
 ```
-  +-------------------------------------------- mail-triage container ---------------+
-  |   email-oauth2-proxy (child process)          Flask UI :8097 + worker loop      |
-  |   OAuth 2.0 / TLS  ==========> Microsoft      accounts: Accounts page (SQLite)  |
-  |   127.0.0.1:1993 plain IMAP <---- reads <---- MailClient                        |
-  +-------------------------------|--------------------------|----------------------+
++-------------------------------------------- mail-triage container --------------+
+|   email-oauth2-proxy (child process)          Flask UI :8097 + worker loop      |
+|   OAuth 2.0 / TLS  ==========> provider      accounts: Accounts page (SQLite)   |
+|   127.0.0.1:1993 plain IMAP <---- reads <---- MailClient                        |
++-------------------------------|--------------------------|----------------------+
                                   |                          |
                     +-------------v------------+   +---------v------------------+
-                    |  gemma-4-26b-a4b         |   |  RAG: lite (CPU)           |
-                    |  local LLM, GPU 0 :8040  |   |  legacy TEI :8041/:8042    |
-                    |  fallback: DeepSeek API  |   |  semantic search index     |
+                    |  local LLM (vLLM)        |   |  semantic search index     |
+                    |  GPU 0 :8040, optional   |   |  FTS5 + sqlite-vec (CPU)   |
+                    |  fallback: any endpoint  |   |  or legacy TEI :8041/:8042 |
                     +--------------------------+   +----------------------------+
 ```
 
-## What it does
-
-- **Polls your inbox** every 90 s (configurable) through the embedded proxy and records
-- The message viewer renders real HTML email (sanitized) - formatted text, tables, inline images; remote images are blocked by default (per-message *Load images*, or always-on in Settings).
-- **Flows** are multi-step automations: WHEN a message matches -> THEN run steps in order (move, tag, flag, mark read, draft from a template, with the LLM following your instructions, or a fixed message - saved to Drafts). WHEN conditions can be exact fields or AI: an **AI category** condition fires when the classifier tags the message that way (checked right after classification), and an **about (topic)** condition matches by meaning via embeddings - no exact words needed; both take an optional min score. Rules stay for single-action cases; rules run first. Dry-run toggle in Settings.
-- The **assistant** keeps a chat history: every click on Assistant starts a fresh chat, old chats are listed on the left and can be resumed or deleted, and a docked right sidebar (collapsible to a slim rail) is available on every page except the assistant itself, with page-aware starter suggestions.
-  every new message in a local SQLite database.
-- **Accounts** (Accounts page): add mail accounts and sign them in via OAuth — the page
-  shows the exact redirect URI to register at the provider, drives the Authorise flow
-  (open the login link, paste the final URL back for loopback flows), reports token
-  status live, and can reset tokens or remove accounts. The email-oauth2-proxy runs as
-  a child process inside this container and exposes a plain local IMAP listener.
-- **Endpoints** (Settings page): the LLM endpoint (any OpenAI-compatible server: base
-  URL, model, API key, timeout, thinking mode, optional fallback endpoint) and the RAG
-  endpoints (backend: lite | legacy; embeddings + reranker: protocol local/tei/openai,
-  base URL, model, optional key, query
-  prefix) are set in the UI and stored in SQLite. Blank fields fall back to the
-  container env (`.env`), so environment-based deployments keep working.
-- **Quick filter rules** (Rules page): match on from / to / subject / body snippet
-  (contains, equals, regex; ALL or ANY), then move to a folder, mark read, and/or
-  flag. First matching rule wins, top to bottom. Folders are created if missing.
-  A rule with no actions is a **guard**: matching mail stays put and nothing else
-  (later rules, LLM filing) can move it — that's how "never move X out of the inbox"
-  is expressed. Guards belong at the top (⤒ button; assistant proposals land there
-  automatically when the rule asks for it). Values of 3 characters or fewer match
-  whole words only ("PO" won't fire on "support"), so short tokens are safe.
-- **Message list** (Messages page): newest mail first, the whole mailbox paginated
-  (100 per page by default, `per` up to 500; pager shows totals, Newer/Older/Last),
-  with the one-line LLM summary rendered under each subject so you can see what a
-  message is at a glance.
-- **Rule assistant** (Assistant page): a streaming, tool-calling chat. It shows its
-  thinking and every tool step live; it can search your whole mailbox history (live
-  IMAP through the proxy — not just what the app has indexed), read messages, create
-  folders, move and flag mail, and it proposes structured rules that you add with one
-  click. Actions can be switched to dry-run in Settings.
-- **LLM escalation** (Settings page): anything no rule matched gets classified into
-  your categories (Action, Notification, Newsletter, Receipt, Personal, Promo by
-  default). Each classification carries a confidence, a one-sentence summary of what
-  the email is, and a short reason for the category ("why: ..."), shown on the message
-  page. Auto-filing by category starts off; the LLM suggests until you enable it.
-- **Trained classifiers** (Classifiers page): deterministic heuristic models that run BEFORE
-  the LLM. Two kinds ship: `decision_list` (learned ordered conditions with precision/support,
-  fully interpretable) and `naive_bayes` (token statistics). They train from your labels
-  (manual tags) or from the LLM's own auto-tags on classified mail; a confident verdict is
-  applied with no LLM call — consistent run to run, and immune to instructions hidden inside
-  email content (prompt injection). Every classifier has a **dataset page**: review the exact
-  samples it learns from (with the label and confidence) and either remove anything that
-  doesn't belong or **reclassify it with the dropdown** — the sample moves between the in-set
-  and out-of-set immediately (with a toast), and for LLM-labeled data the correction also
-  updates the message's own record. Removals stick across retraining and auto-refine, and
-  can be re-included. The assistant trains, retrains and evaluates them on request. Toggle in Settings.
-- **Semantic search (RAG)**: a local hybrid index over all indexed folders - fielded
-  FTS5 (BM25) + sqlite-vec dense retrieval over quote-stripped chunks, fused with RRF
-  and reranked with a small CPU cross-encoder (Qwen3-Embedding-0.6B + jina-turbo via
-  FastEmbed, no GPU needed; the original 4B GPU stack stays available as a rollback
-  backend). The assistant uses it for content questions ("what did the landlord
-  want?"); the dashboard has an index card with Run/Rebuild. All
-  local; nothing leaves the host.
-- **Classify on demand** (Messages page): tick rows and "Classify selected", or run
-  "Classify all unclassified" as a background job (newest first, progress + Stop;
-  files mail per your llm_apply setting). The batch job classifies several messages
-  in parallel against the local model (Settings -> "Classify concurrency", default 8,
-  cap 16; measured ~41 msg/min at 16 on the 3090) and each message keeps the model's
-  reasoning, collapsible on its page. Message pages also have a single "Classify with
-  LLM" button and "File to <suggested folder>".
-- **Tag by hand, learn rules**: tick rows on Messages and give them a tag (Receipt,
-  Action, ...). "Learn rules from tags" asks the local LLM to infer filter rules from
-  your labels and shows them for one-click approval. The assistant can also read your
-  tags (list_tagged) and turn them into rule proposals in chat.
-- **Reply templates + LLM drafting** (Messages page): pick a message, choose a
-  template (or none), hit "Draft with LLM". Review, copy, or "Save to Drafts" --
-  the draft lands in your Drafts folder to send from your normal client.
-
-## The local model (Gemma 4 26B-A4B)
-
-The default LLM is a **local Gemma 4 26B-A4B** (AWQ-4bit) served by vLLM on **GPU 0**
-for this app, independent of the club-3090 model-pool (that stays stopped; nothing
-was borrowed from it at runtime — the stack in `gemma/` is a self-contained copy).
-
-```
-gemma/                         # the model server (own compose project, one GPU)
-  docker-compose.yml            #   container: mail-triage-gemma, port 8040
-  patches/vllm-pr40391-v0.22.0/ #   vendored int8-KV overlay for vLLM v0.22.0
-  chat_template.jinja           #   Gemma canonical chat template
-  cache/                        #   warm torch/triton compile caches
-```
-
-- Start / stop / logs (from `~/mail-triage/gemma`):
-  `docker compose up -d` · `docker compose stop` · `docker compose logs -f`
-- It auto-starts on boot (`restart: unless-stopped`). Boot takes ~3-5 min (16 GB of
-  weights load into the 3090); the healthcheck allows it 5 min to come up.
-- **Fallback:** if the local endpoint is unreachable, the app automatically falls back
-  to DeepSeek (`deepseek-chat`) and notes it on the Log page. Switch back happens by
-  itself once the local server is up again. To make the app 100% local with no cloud
-  fallback, delete the `LLM_FALLBACK_*` lines from `.env` and restart.
-- To point at something else entirely: edit `LLM_BASE_URL` / `LLM_MODEL` in `.env`
-  and `docker restart mail-triage` (any OpenAI-compatible endpoint works).
-
-## The assistant (streaming + tools)
-
-The Assistant page uses the same LLM endpoint through an agent harness: the reply
-streams token by token (SSE on `/assistant/stream`), rendered as markdown (bold,
-lists, code, links; `[msg:ID]` refs become links), the model's thinking renders in
-a live "thinking" block, and every tool call shows as a card with its result. The
-transcript (thinking + tool steps) is stored per message, so it survives reloads.
-
-Tools: `mailbox_overview` · `search_messages` (local index) · `search_mail` (live
-IMAP search — full history, any folder) · `read_message` · `move_message` ·
-`flag_message` · `create_folder` · `list_folders` · `propose_rule`.
-
-Safety: assistant moves/flags/folders act live by default (it can never delete or
-send); untick "Assistant may act on mail" in Settings for a dry-run. Rules are only
-proposed in chat — they go live when you click "Add rule". Each turn is capped
-(8 tool rounds, 4 calls per round) and everything is logged on the Log page.
-
-## Semantic search (RAG)
-
-Two backends live behind the same `rag.search` interface; pick one with the "RAG
-backend" setting (default **lite**). Both store into the same `triage.db`.
-
-**lite (default)** - CPU-first, no extra services, no GPU: fielded FTS5
-(subject/sender/body BM25) + sqlite-vec dense KNN over *clean* chunks (quoted history
-stripped before chunking) + RRF fusion + a small CPU cross-encoder, all inside the app:
-
-```
-embed    Qwen/Qwen3-Embedding-0.6B          1024-dim, FastEmbed/ONNX on CPU
-rerank   jinaai/jina-reranker-v1-turbo-en   FastEmbed/ONNX on CPU
-models   ./ragmodels   (mounts to /ragmodels, FASTEMBED_CACHE_PATH)
-```
-
-Queries extract sender/date hints and exact tokens (INV-39281) and push them down as
-SQL pre-filters + quoted FTS terms, so metadata and lexical signals stay first-class.
-Indexing: full body -> strip quoted replies -> sentence-packed chunks (~400 tokens,
-each carrying a From/Date/Subject header) -> chunks2 + FTS + vec tables. Rebuild from
-the dashboard (wipes only the active backend). Measured on this mailbox
-(48 semantic + 34 exact-query sets; full report `docs/rag-lite-report.md`):
-
-```
-                                   R@1     R@5     (48 semantic queries)
-legacy 4B + v2-m3 (GPU)            93.8    97.9
-lite 0.6B + jina-turbo (CPU)       95.8    97.9
-lite 0.6B, no rerank               89.6    95.8
-                                   R@1     R@5     (34 exact/metadata queries)
-legacy 4B + v2-m3 (GPU)            91.2    97.1
-lite 0.6B + v2-m3 (GPU rerank)     88.2    97.1
-lite 0.6B + jina-turbo (CPU)       82.4    94.1
-```
-
-CPU query cost: ~79 ms embed, ~0.3-0.5 s end-to-end, ~1.9 GB RSS. Incremental
-indexing ~4 s/message; for the first full backfill point the embed protocol at a
-scratch GPU TEI running the same 0.6B model (fast, identical vectors), then flip back
-to local. Swap the reranker to bge-reranker-v2-m3 (below) from Settings for maximum
-exact-query quality while the GPU exists.
-
-**legacy (rollback)** - the original GPU stack: two HuggingFace TEI servers on the
-second 3090 (`embed/`, CDI `nvidia.com/gpu=1`):
-
-```
-mail-triage-embed   :8041  Qwen/Qwen3-Embedding-4B    (dense embeddings)
-mail-triage-rerank  :8042  BAAI/bge-reranker-v2-m3    (cross-encoder rerank)
-```
-
-Set "RAG backend" to `legacy` in Settings to use it. Each backend keeps its own
-tables + folder state while the other is active, so switching (both ways) is a
-settings flip with no reindex.
-
-- Build/refresh: dashboard "Index now" (resumable, folder by folder), or
-  `docker exec mail-triage python app.py --index`; `--reindex` wipes and rebuilds the
-  active backend. A run/trigger request wakes the indexer immediately.
-- Scope, rerank toggle, backend + protocols + local thread cap: Settings -> RAG.
-- Quality harness: `tests/retrieval_eval.py` + `tests/eval_queries.json`
-  (recall@1/5/10 and MRR for fts / vector / hybrid / hybrid+rerank).
+Cycle: poll inbox -> rules -> fast-path classifiers -> LLM for the rest -> file or
+suggest. Each stage records what it decided and why (per-message audit trail).
 
 ## Safety model
 
-- It **never deletes mail**. Worst case it files something into a folder.
-- Rules act live by default; uncheck "Apply rule actions for real" in Settings to
-  go dry-run. New rules from the assistant can be added disabled first if you want.
-- LLM auto-filing starts **off**; there is a per-hour cap (40) on LLM calls.
-- The UI is reachable only on your tailnet (Tailscale Serve, no Funnel).
+- **Never deletes mail.** Worst case it files something into a folder; Undo puts it
+  back and keeps automation off that message.
+- Rules act live by default (dry-run toggle in Settings); LLM auto-filing starts off.
+- The assistant can move/flag/create folders - never delete or send - and can be
+  switched to dry-run.
+- The learning loop changes nothing until you promote it: shadow first, human
+  promotion, plain-JSON models, hand-labeled test sets, full decision provenance.
+- LLM calls are capped per hour; every automation and agent action is logged on the
+  Log page.
 
-## Management
+## Operations
 
-All commands from `/home/xrim/mail-triage`:
+All commands from the repo root:
 
 ```bash
-docker compose ps                     # app container status
-docker logs -f mail-triage            # app live logs
-docker compose up -d --build          # rebuild + start the app after code changes
-docker restart mail-triage            # simple app restart (embedded proxy comes back up)
-docker exec mail-triage python app.py --check   # read-only IMAP + proxy health check
-docker exec mail-triage python app.py --index   # run the semantic indexer (resumable)
-docker exec mail-triage python app.py --reindex # wipe + rebuild the search index
-docker exec mail-triage python app.py --heal-snippets  # bulk-repair legacy raw-MIME
-                                      # snippets: refetch + Message-ID rescue for
-                                      # moved mail (summary: /data/heal.log)
-docker exec mail-triage python app.py --extract-html   # pre-extract sanitized HTML bodies
-                                      # for old mail (viewer renders without a
-                                      # per-message fetch; rescue for stale rows)
-.venv/bin/python tests/mock_e2e.py    # 306-check E2E suite (mock IMAP + mock LLM,
-                                      # mock TEI embed/rerank; SSE streaming agent)
-.venv/bin/python tests/proxy_e2e.py   # 26-check live flow for the embedded proxy
-                                      # (real emailproxy vs mock OAuth + IMAP servers)
-
-cd gemma                              # the model server
-docker compose ps && docker compose logs -f
-docker compose stop                   # free GPU 0
-docker compose up -d                  # bring it back
+docker compose ps                     # status
+docker logs -f mail-triage            # live logs
+docker compose up -d --build          # rebuild after code changes (image bakes the app)
+docker restart mail-triage            # simple restart
+docker exec mail-triage python app.py --check          # read-only health JSON
+docker exec mail-triage python app.py --index          # run the search indexer (resumable)
+docker exec mail-triage python app.py --reindex        # wipe + rebuild the index
+docker exec mail-triage python app.py --heal-snippets  # repair legacy raw-MIME snippets
+docker exec mail-triage python learning.py report      # learning loop state
+.venv/bin/python tests/mock_e2e.py                     # E2E suite (mock IMAP + LLM; 500+ checks)
+.venv/bin/python tests/proxy_e2e.py                    # embedded-proxy E2E (mock OAuth + IMAP)
 ```
 
-- **Settings** (endpoints, interval, toggles, categories, folder map, drafts folder,
-  mail connection) live in the UI under Settings and are stored in SQLite.
-- **Accounts & OAuth** (providers, client IDs, local passwords, tokens) are managed on
-  the Accounts page; tokens live in `data/emailproxy/credentials.cache` (encrypted).
-- **Data**: `data/triage.db` (messages, rules, templates, assistant chat, events,
-  accounts) · `data/emailproxy/` (generated config, token cache, proxy log).
-- **Secrets/connection**: `.env` still works as a fallback for keys and connection
-  defaults; anything set in the UI wins.
+Data lives in `data/`: `triage.db` (messages, rules, templates, chat, learning
+tables) and `data/emailproxy/` (generated config, encrypted token cache, proxy log).
 
-## If something breaks
+## Docs
 
-1. Worker errors show in the **Log** page and as a red banner on the Dashboard.
-   Parked messages (3 failed classifications) can be retried with the
-   "Retry parked" button.
-2. "Connect/login failed" errors usually mean the OAuth token died. Fix it on the
-   **Accounts page** (https://gpu-vm1.bigscale-snapper.ts.net:8097/accounts):
-   Authorise -> log in -> paste the final URL back. The token watchdog will also
-   ping you on Telegram. If the embedded proxy itself is down, hit "Restart proxy".
-3. LLM failures: check the model server (`cd gemma && docker compose ps`); use the
-   "Test LLM endpoint" button on the Settings page. If the GPU wedges after a
-   driver-level fault (Xid "GPU requires reset"), recover it per card with:
-   `sudo bash -c 'echo 0000:0X:00.0 > /sys/bus/pci/drivers/nvidia/unbind; echo 1 > /sys/bus/pci/devices/0000:0X:00.0/reset; echo 0000:0X:00.0 > /sys/bus/pci/drivers/nvidia/bind'`
-   (`nvidia-smi -r` is not supported on GeForce cards; the sysfs FLR reset above works).
-4. `docker exec mail-triage python app.py --check` prints a read-only status JSON.
+- [docs/](docs/README.md) - index of everything, sorted by purpose (start here /
+  design records / research / history)
+- [docs/features.md](docs/features.md) - the full feature tour
+- [docs/mail-intelligence/design.md](docs/mail-intelligence/design.md) - learning
+  loop design and safety invariants
+- [docs/mail-intelligence/improvement-roadmap.md](docs/mail-intelligence/improvement-roadmap.md) -
+  test sets, retraining triggers, where it goes next
 
 ## Layout
 
 ```
-app.py            Flask UI + routes + worker start        Dockerfile
-engine.py         IMAP client, rules, LLM, assistant      docker-compose.yml
-store.py          SQLite schema + queries                 .env (fallback secrets, 600)
-config.py         env fallbacks for deployments           tests/mock_e2e.py
-proxy.py          embedded email-oauth2-proxy manager     tests/proxy_e2e.py
-rag.py            semantic search (embeddings/rerank)     README.md (this file)
-heuristics.py     deterministic classifiers               gemma/ (own compose, GPU 0)
-                                                          embed/ (own compose, GPU 1)
+app.py            Flask UI + routes + worker start      Dockerfile
+engine.py         IMAP client, rules, LLM, assistant    docker-compose.yml
+store.py          SQLite schema + queries               .env (secrets fallback, 600)
+config.py         env fallbacks for deployments         tests/
+proxy.py          embedded email-oauth2-proxy manager   docs/
+rag.py, rag_lite.py   semantic search (legacy GPU, CPU) gemma/ (local model server, GPU 0)
+learning.py       learning loop (specialists, decisions, test sets)
+heuristics.py     fast-path classifiers                 static/, fonts/, icons/
 ```
 
-Times in the UI follow the display timezone setting (default UTC+8).
+Private personal project; no license granted. Times in the UI follow the display
+timezone setting (default UTC+8).
