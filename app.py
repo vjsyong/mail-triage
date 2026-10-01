@@ -313,6 +313,9 @@ BASE_TMPL = r"""<!doctype html>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Mail Triage">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/icon-180.png">
+<link rel="icon" href="/static/icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
 <meta name="turbo-cache-control" content="no-cache">
 <meta name="view-transition" content="same-origin">
 <script src="/static/turbo.js?v=8.0.12" defer></script>
@@ -1748,6 +1751,13 @@ def static_icon(name):
     from flask import send_from_directory
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
     return send_from_directory(base, name, max_age=2592000)
+
+
+@app.route("/favicon.ico")
+def favicon():
+    from flask import send_from_directory
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+    return send_from_directory(base, "favicon.ico", max_age=604800)
 
 
 @app.route("/static/turbo.js")

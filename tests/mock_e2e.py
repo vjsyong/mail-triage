@@ -2559,6 +2559,9 @@ def main():
           b".chat-del.armed" in d and b"Press again to delete this chat" in d)
     check("turbo drive wired (SPA navigation)", b"/static/turbo.js" in d and b"turbo-cache-control" in d)
     check("view transitions opted in (direction-aware)", b'name="view-transition" content="same-origin"' in d and b"mtvt-in" in d and b"mtvt-fwd-in" in d and b"data-vt-dir" in d and b"vtDir" in d)
+    check("favicon wired (ico + png links)", b'rel="icon"' in d and b"favicon.ico" in d)
+    rf = client.get("/favicon.ico")
+    check("favicon.ico served (ICO magic)", rf.status_code == 200 and rf.data[:4] == b"\x00\x00\x01\x00")
     check("keyboard-follow: composer rides above the on-screen keyboard",
           b"--kb-h" in d and b"__mtKbFit" in d and b"kb-open:has(.assistant-main)" in d)
     rt = client.get("/static/turbo.js")
