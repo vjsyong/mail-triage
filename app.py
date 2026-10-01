@@ -2992,12 +2992,18 @@ def flow_toggle(flow_id):
     flow = store.get_flow(flow_id)
     if flow:
         store.update_flow(flow_id, enabled=0 if flow["enabled"] else 1)
+        store.log_event("info", "flow #%d '%s' %s (by ui)"
+                        % (flow_id, flow.get("name"),
+                           "disabled" if flow["enabled"] else "enabled"))
     return redirect(url_for("flows"))
 
 
 @app.route("/flows/<int:flow_id>/delete", methods=["POST"])
 def flow_delete(flow_id):
+    flow = store.get_flow(flow_id)
     store.delete_flow(flow_id)
+    store.log_event("info", "flow #%d '%s' deleted (by ui)"
+                    % (flow_id, (flow or {}).get("name") or "?"))
     return redirect(url_for("flows"))
 
 
