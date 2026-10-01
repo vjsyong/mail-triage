@@ -3967,34 +3967,41 @@ MESSAGE_TMPL = """
       {% else %}<div class="empty" style="padding:26px 0 10px"><h4>Body unavailable</h4><p>Reload to retry the fetch, or open this message in your mail client.</p></div>{% endif %}
     </div>
 
-    <div class="card">
-      <div class="card-h"><h3>Reply</h3><span class="sub">Drafts land in your Drafts folder — nothing is sent automatically.</span></div>
-      <div class="row">
-        <form class="inline" method="post" action="{{ url_for('message_draft', mid=m.id) }}">
-          <select name="template_id" style="width:auto;min-width:220px" aria-label="Reply template">
-            <option value="">(no template — freeform)</option>
-            {% for t in templates %}<option value="{{ t.id }}" {{ 'selected' if draft_template_id==t.id else '' }}>{{ t.name }}</option>{% endfor %}
-          </select>
-          <button class="btn primary" type="submit">Draft with LLM</button>
-        </form>
-        <span class="sub">{% if not llm_configured %}LLM key not configured — see Settings.{% endif %}</span>
-      </div>
-      {% if draft %}
-      <form method="post" action="{{ url_for('message_save', mid=m.id) }}" style="margin-top:10px">
-        <textarea name="body" rows="12" aria-label="Draft body">{{ draft }}</textarea>
-        <p class="row" style="margin-top:8px">
-          <button class="btn primary" type="submit">Save to Drafts</button>
-          <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.querySelector('textarea[name=body]').value);this.textContent='copied'">Copy</button>
-          <span class="sub">Review and send from your mail client.</span>
-        </p>
-      </form>
-      {% elif draft_error %}
-      <div class="msg err" style="margin-top:10px">Draft failed: {{ draft_error }}</div>
-      {% endif %}
-    </div>
   </div>
 
   <div class="stickycol">
+    <div class="card">
+      <div class="card-h"><h3>Details</h3></div>
+      <div class="kv">
+        <div class="k">From</div><div class="msgfrom">{{ m.from_addr or '—' }}</div>
+        <div class="k">To</div><div class="msgfrom">{{ m.to_addr or '—' }}</div>
+        <div class="k">Date</div><div>{{ m.date or '—' }}</div>
+        <div class="k">Folder</div><div>{{ m.folder }} <span class="sub">uid {{ m.uid }}</span></div>
+        <div class="k">Message-ID</div><div class="mono" style="font-size:.77rem">{{ m.msgid or '—' }}</div>
+      </div>
+    </div>
+    <div class="card" id="audit">
+      <div class="card-h"><h3>Audit trail</h3><span class="sub">How this email was triaged, oldest first{% if m.audit %} · {{ m.audit|length }} event{{ 's' if m.audit|length != 1 else '' }}{% endif %}</span></div>
+      {% for ev in m.audit %}
+      <div class="arow2">
+        <div class="ahead">
+          <span class="mono atime">{{ ev.when }}</span>
+          <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','wake':'ok','tag':'warn','draft':'acc'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
+          {% if ev.meta %}
+          {% if ev.meta.needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
+          <span class="sub">{% if ev.meta.confidence is not none %}{{ '%.0f' % (ev.meta.confidence * 100) }}% · {% endif %}{{ ev.meta.by }}</span>
+          {% endif %}
+        </div>
+        <div class="adetail">
+          {% if ev.meta %}
+          <b>{{ ev.meta.category or '(no category)' }}</b>
+          {% if ev.meta.reason %}<div class="sub">why: {{ ev.meta.reason }}</div>{% endif %}
+          {% if ev.meta.thinking %}<details><summary class="sub" style="cursor:pointer">full reasoning</summary><pre class="mono audit-pre">{{ ev.meta.thinking }}</pre></details>{% endif %}
+          {% else %}{{ ev.detail }}{% endif %}
+        </div>
+      </div>
+      {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>{% endfor %}
+    </div>
     <div class="card">
       <div class="card-h"><h3>Actions</h3></div>
       <div class="row">
@@ -4033,36 +4040,29 @@ MESSAGE_TMPL = """
       </div>
     </div>
     <div class="card">
-      <div class="card-h"><h3>Details</h3></div>
-      <div class="kv">
-        <div class="k">From</div><div class="msgfrom">{{ m.from_addr or '—' }}</div>
-        <div class="k">To</div><div class="msgfrom">{{ m.to_addr or '—' }}</div>
-        <div class="k">Date</div><div>{{ m.date or '—' }}</div>
-        <div class="k">Folder</div><div>{{ m.folder }} <span class="sub">uid {{ m.uid }}</span></div>
-        <div class="k">Message-ID</div><div class="mono" style="font-size:.77rem">{{ m.msgid or '—' }}</div>
+      <div class="card-h"><h3>Replies</h3><span class="sub">Drafts land in your Drafts folder — nothing is sent automatically.</span></div>
+      <div class="row">
+        <form class="inline" method="post" action="{{ url_for('message_draft', mid=m.id) }}">
+          <select name="template_id" style="width:auto;min-width:160px" aria-label="Reply template">
+            <option value="">(no template — freeform)</option>
+            {% for t in templates %}<option value="{{ t.id }}" {{ 'selected' if draft_template_id==t.id else '' }}>{{ t.name }}</option>{% endfor %}
+          </select>
+          <button class="btn primary" type="submit">Draft with LLM</button>
+        </form>
+        <span class="sub">{% if not llm_configured %}LLM key not configured — see Settings.{% endif %}</span>
       </div>
-    </div>
-    <div class="card" id="audit">
-      <div class="card-h"><h3>Audit trail</h3><span class="sub">How this email was triaged, oldest first{% if m.audit %} · {{ m.audit|length }} event{{ 's' if m.audit|length != 1 else '' }}{% endif %}</span></div>
-      {% for ev in m.audit %}
-      <div class="arow2">
-        <div class="ahead">
-          <span class="mono atime">{{ ev.when }}</span>
-          <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','wake':'ok','tag':'warn','draft':'acc'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
-          {% if ev.meta %}
-          {% if ev.meta.needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
-          <span class="sub">{% if ev.meta.confidence is not none %}{{ '%.0f' % (ev.meta.confidence * 100) }}% · {% endif %}{{ ev.meta.by }}</span>
-          {% endif %}
-        </div>
-        <div class="adetail">
-          {% if ev.meta %}
-          <b>{{ ev.meta.category or '(no category)' }}</b>
-          {% if ev.meta.reason %}<div class="sub">why: {{ ev.meta.reason }}</div>{% endif %}
-          {% if ev.meta.thinking %}<details><summary class="sub" style="cursor:pointer">full reasoning</summary><pre class="mono audit-pre">{{ ev.meta.thinking }}</pre></details>{% endif %}
-          {% else %}{{ ev.detail }}{% endif %}
-        </div>
-      </div>
-      {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>{% endfor %}
+      {% if draft %}
+      <form method="post" action="{{ url_for('message_save', mid=m.id) }}" style="margin-top:10px">
+        <textarea name="body" rows="12" aria-label="Draft body">{{ draft }}</textarea>
+        <p class="row" style="margin-top:8px">
+          <button class="btn primary" type="submit">Save to Drafts</button>
+          <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.querySelector('textarea[name=body]').value);this.textContent='copied'">Copy</button>
+          <span class="sub">Review and send from your mail client.</span>
+        </p>
+      </form>
+      {% elif draft_error %}
+      <div class="msg err" style="margin-top:10px">Draft failed: {{ draft_error }}</div>
+      {% endif %}
     </div>
   </div>
 </div>
