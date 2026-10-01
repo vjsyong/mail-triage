@@ -27,7 +27,7 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
 - **Polls your inbox** every 90 s (configurable) through the embedded proxy and records
 - The message viewer renders real HTML email (sanitized) - formatted text, tables, inline images; remote images are blocked by default (per-message *Load images*, or always-on in Settings).
 - **Flows** are multi-step automations: WHEN a message matches -> THEN run steps in order (move, tag, flag, mark read, draft from a template, with the LLM following your instructions, or a fixed message - saved to Drafts). WHEN conditions can be exact fields or AI: an **AI category** condition fires when the classifier tags the message that way (checked right after classification), and an **about (topic)** condition matches by meaning via embeddings - no exact words needed; both take an optional min score. Rules stay for single-action cases; rules run first. Dry-run toggle in Settings.
-- The **assistant** keeps a chat history: every click on Assistant starts a fresh chat, old chats are listed on the left and can be resumed or deleted, and a collapsible drawer (bottom-right button) is available on every page.
+- The **assistant** keeps a chat history: every click on Assistant starts a fresh chat, old chats are listed on the left and can be resumed or deleted, and a docked right sidebar (collapsible to a slim rail) is available on every page except the assistant itself, with page-aware starter suggestions.
   every new message in a local SQLite database.
 - **Accounts** (Accounts page): add mail accounts and sign them in via OAuth — the page
   shows the exact redirect URI to register at the provider, drives the Authorise flow
