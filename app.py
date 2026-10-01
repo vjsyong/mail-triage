@@ -587,6 +587,27 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   #templates .tbl.mcards td:nth-child(3){order:3;flex:1 1 100%;margin-top:6px}
   #templates .tbl.mcards .rowacts{justify-content:flex-start !important;gap:8px;min-height:44px}
   #rules .tbl.mcards .rowacts .btn,#classifiers .tbl.mcards .rowacts .btn,#templates .tbl.mcards .rowacts .btn{min-height:40px}
+  .row.chiprow{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px;max-width:100%}
+  .row.chiprow::-webkit-scrollbar{display:none}
+  .row.chiprow>*{flex:none}
+  .dsx .tbl.mcards tr{display:flex;flex-wrap:wrap;gap:2px 8px}
+  .dsx .tbl.mcards td{display:block;padding:1px 0}
+  .dsx .tbl.mcards td:nth-child(1){order:1;flex:1 1 100%;min-width:0}
+  .dsx .tbl.mcards td:nth-child(1) a{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .dsx .tbl.mcards td:nth-child(1) div.sub{display:none}
+  .dsx .tbl.mcards td:nth-child(2){order:2;flex:1 1 100%;font-size:.75rem}
+  .dsx .tbl.mcards td:nth-child(3){order:3;flex:1 1 100%;margin-top:4px}
+  .dsx .tbl.mcards td:nth-child(3) select{width:100% !important}
+  .dsx .tbl.mcards td:nth-child(3) form.inline::before{content:'Label: ';font-size:.78rem;color:var(--dim)}
+  .dsx .tbl.mcards td:nth-child(4){order:4;flex:1 1 100%;margin-top:6px;text-align:left}
+  .dsx .tbl.mcards td:nth-child(4) .btn{min-height:38px}
+  .auth-paste .row{flex-wrap:wrap !important}
+  .auth-paste .row input{flex:1 1 100%}
+  .auth-paste .row .btn{flex:1 1 100%}
+  .menu-pop{max-width:calc(100vw - 24px)}
+  .spread>div:first-child{min-width:0}
+  .spread h3{overflow-wrap:anywhere}
+  .card .spread + .row .btn{min-height:42px}
   .toolbar{display:block;padding:10px 0 10px 12px}
   .tchips{display:flex;gap:6px;overflow-x:auto;padding-right:12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
   .tchips::-webkit-scrollbar{display:none}
@@ -762,6 +783,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   input[type=text],input[type=number],input[type=password],input[type=search],
   input[type=email],input[type=url],input[type=tel],select,textarea{font-size:16px}
 }
+@media(max-width:640px){pre.log{font-size:.78rem}}
 </style>
 </head><body>
 <a class="skip" href="#main">Skip to content</a>
@@ -1938,7 +1960,7 @@ CLASSIFIER_DATASET_TMPL = """
     dataset and the message's record.{% endif %}</div>
 </div>
 
-<div class="card flush">
+<div class="card flush dsx">
   <div class="card-h" style="padding:14px 16px 10px;margin:0"><h3>In the set <span class="sub">({{ ds.category }} positives)</span></h3></div>
   {% if ds.positives %}
   <div class="tablewrap"><table class="tbl mcards">
@@ -1949,7 +1971,7 @@ CLASSIFIER_DATASET_TMPL = """
       <td><a href="{{ url_for('message_detail', mid=s.msg_id) }}">{{ s.subject or '(no subject)' }}</a>{% if s.summary %}<div class="sub" style="font-size:.75rem">{{ s.summary }}</div>{% endif %}</td>
       <td class="sub">{{ s.from }}</td>
       <td>
-        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem" aria-label="Reclassify sample">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem" aria-label="Reclassify sample — {{ (s.subject or 'no subject')[:40] }}">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
         <div class="sub" style="font-size:.72rem;margin-top:2px">{% if ds.source == 'tags' %}tag{% else %}LLM label{% endif %}{% if s.confidence is not none %} · {{ '%.0f' % (s.confidence*100) }}%{% endif %}{% if s.excluded %} · removed{% endif %}</div>
       </td>
       <td class="r">{% if s.excluded %}
@@ -1964,7 +1986,7 @@ CLASSIFIER_DATASET_TMPL = """
   {% else %}<div class="empty"><h4>No positive samples yet</h4><p>Tag mail or let the LLM classify some first.</p></div>{% endif %}
 </div>
 
-<div class="card flush">
+<div class="card flush dsx">
   <div class="card-h" style="padding:14px 16px 10px;margin:0"><h3>Out of set <span class="sub">(negatives — samples of other categories)</span></h3></div>
   {% if ds.negatives %}
   <div class="tablewrap"><table class="tbl mcards">
@@ -1975,7 +1997,7 @@ CLASSIFIER_DATASET_TMPL = """
       <td><a href="{{ url_for('message_detail', mid=s.msg_id) }}">{{ s.subject or '(no subject)' }}</a></td>
       <td class="sub">{{ s.from }}</td>
       <td>
-        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem" aria-label="Reclassify sample">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem" aria-label="Reclassify sample — {{ (s.subject or 'no subject')[:40] }}">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
         <div class="sub" style="font-size:.72rem;margin-top:2px">{% if ds.source == 'tags' %}tag{% else %}LLM label{% endif %}{% if s.confidence is not none %} · {{ '%.0f' % (s.confidence*100) }}%{% endif %}{% if s.excluded %} · removed{% endif %}</div>
       </td>
       <td class="r">{% if s.excluded %}
@@ -5095,7 +5117,7 @@ PROXY_LOG_TMPL = """
     <h1 class="page-title">Proxy log</h1>
     <div class="page-desc">The embedded email-oauth2-proxy — log file <span class="mono">{{ log_file }}</span></div>
   </div>
-  <div class="row">
+  <div class="row chiprow">
     <a class="chip{{ ' active' if n == 200 else '' }}" href="{{ url_for('proxy_log') }}?n=200">200</a>
     <a class="chip{{ ' active' if n == 500 else '' }}" href="{{ url_for('proxy_log') }}?n=500">500</a>
     <a class="chip{{ ' active' if n == 2000 else '' }}" href="{{ url_for('proxy_log') }}?n=2000">2000</a>
@@ -5237,7 +5259,7 @@ LOG_TMPL = """
     <h1 class="page-title">Activity log</h1>
     <div class="page-desc">Everything Mail Triage did, newest first{% if not show_debug %} (debug lines hidden){% endif %}.</div>
   </div>
-  <div class="row">
+  <div class="row chiprow">
     <a class="chip{{ ' active' if lvl == 'all' else '' }}" href="{{ url_for('log', debug=('1' if show_debug else none)) }}">All</a>
     <a class="chip{{ ' active' if lvl == 'error' else '' }}" href="{{ url_for('log', lvl='error', debug=('1' if show_debug else none)) }}">Errors{% if errors %} <span class="n">{{ errors }}</span>{% endif %}</a>
     <a class="chip{{ ' active' if lvl == 'warn' else '' }}" href="{{ url_for('log', lvl='warn', debug=('1' if show_debug else none)) }}">Warnings{% if warns %} <span class="n">{{ warns }}</span>{% endif %}</a>
