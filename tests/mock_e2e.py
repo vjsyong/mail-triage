@@ -1523,7 +1523,7 @@ def main():
     check("scripts, handlers stripped from the render",
           b"alert(1)" not in page and b"onclick" not in page)
     check("cid image rewritten to the inline part route",
-          ('/messages/%d/part/2"' % hrow["id"]).encode() in page and b"cid:img1" not in page)
+          ('/messages/%d/part/2?v=2"' % hrow["id"]).encode() in page and b"cid:img1" not in page)
     check("remote image blocked by default with a load button",
           b"Load images" in page and b"/img?u=" not in page
           and b"tracker.example.com" not in page)

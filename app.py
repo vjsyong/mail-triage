@@ -2116,7 +2116,7 @@ def _email_body_html(m, show_images):
 
     def cid_url(cid):
         sec = (cids.get(cid) or {}).get("section")
-        return "/messages/%d/part/%s" % (mid, sec) if sec else ""
+        return "/messages/%d/part/%s?v=2" % (mid, sec) if sec else ""
 
     def repl_cid_attr(mo):
         url = cid_url(mo.group(3))
