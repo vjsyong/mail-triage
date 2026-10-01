@@ -1,34 +1,41 @@
 # Mail Triage
 
-Smart email management for the `seanyong@ust.hk` mailbox, running as a container on
-gpu-vm1 and reading mail through the **email-oauth2-proxy** (which handles the OAuth
-side). Most mail is sorted by simple rules; everything else gets classified by an LLM,
-and it can draft replies from your templates straight into your Drafts folder.
+Smart email management for the `seanyong@ust.hk` mailbox, running as an all-in-one
+container on gpu-vm1. The container embeds the **email-oauth2-proxy** (OAuth sign-in
+for the mail providers, managed on the Accounts page) and the triage stack: simple
+rules sort most mail, everything else gets classified by an LLM, and it can draft
+replies from your templates straight into your Drafts folder.
 
 Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
 
 ```
-                    +-------------------+        plain IMAP       +----------------+
-  inbox mail  --->  |  email-oauth2-    |  <------------------   |  mail-triage   |
-  (O365 / HKUST)    |  proxy (:1993)    |                        |  container     |
-                    |  holds the OAuth  |    OAuth 2.0 / TLS     |  :8097 UI      |
-                    |  tokens           |  ===================>  |  worker loop   |
-                    +-------------------+       to Microsoft     +--------+-------+
-                                                                          |
-                              +-------------------------------------------+---------+
-                              |                                                     |
-                    +---------v----------+                              +-----------v---------+
-                    |  gemma-4-26b-a4b   |   fallback (only if the      |  DeepSeek API      |
-                    |  local, GPU 0      |   local endpoint is down)    |  (deepseek-chat)   |
-                    |  ~/mail-triage/    | ---------------------------> |                    |
-                    |  gemma  (:8040)    |                              |                    |
-                    +--------------------+                              +--------------------+
+  +-------------------------------------------- mail-triage container ---------------+
+  |   email-oauth2-proxy (child process)          Flask UI :8097 + worker loop      |
+  |   OAuth 2.0 / TLS  ==========> Microsoft      accounts: Accounts page (SQLite)  |
+  |   127.0.0.1:1993 plain IMAP <---- reads <---- MailClient                        |
+  +-------------------------------|--------------------------|----------------------+
+                                  |                          |
+                    +-------------v------------+   +---------v------------------+
+                    |  gemma-4-26b-a4b         |   |  embed / rerank (TEI)      |
+                    |  local LLM, GPU 0 :8040  |   |  GPU 1 :8041 / :8042       |
+                    |  fallback: DeepSeek API  |   |  semantic search index     |
+                    +--------------------------+   +----------------------------+
 ```
 
 ## What it does
 
-- **Polls your inbox** every 90 s (configurable) through the proxy and records every
-  new message in a local SQLite database.
+- **Polls your inbox** every 90 s (configurable) through the embedded proxy and records
+  every new message in a local SQLite database.
+- **Accounts** (Accounts page): add mail accounts and sign them in via OAuth — the page
+  shows the exact redirect URI to register at the provider, drives the Authorise flow
+  (open the login link, paste the final URL back for loopback flows), reports token
+  status live, and can reset tokens or remove accounts. The email-oauth2-proxy runs as
+  a child process inside this container and exposes a plain local IMAP listener.
+- **Endpoints** (Settings page): the LLM endpoint (any OpenAI-compatible server: base
+  URL, model, API key, timeout, thinking mode, optional fallback endpoint) and the RAG
+  endpoints (embeddings + reranker: base URL, model, protocol, optional key, query
+  prefix) are set in the UI and stored in SQLite. Blank fields fall back to the
+  container env (`.env`), so environment-based deployments keep working.
 - **Quick filter rules** (Rules page): match on from / to / subject / body snippet
   (contains, equals, regex; ALL or ANY), then move to a folder, mark read, and/or
   flag. First matching rule wins, top to bottom. Folders are created if missing.
@@ -176,12 +183,14 @@ All commands from `/home/xrim/mail-triage`:
 docker compose ps                     # app container status
 docker logs -f mail-triage            # app live logs
 docker compose up -d --build          # rebuild + start the app after code changes
-docker restart mail-triage            # simple app restart
-docker exec mail-triage python app.py --check   # read-only IMAP health check
+docker restart mail-triage            # simple app restart (embedded proxy comes back up)
+docker exec mail-triage python app.py --check   # read-only IMAP + proxy health check
 docker exec mail-triage python app.py --index   # run the semantic indexer (resumable)
 docker exec mail-triage python app.py --reindex # wipe + rebuild the search index
-.venv/bin/python tests/mock_e2e.py    # 146-check E2E suite (mock IMAP + mock LLM,
+.venv/bin/python tests/mock_e2e.py    # 262-check E2E suite (mock IMAP + mock LLM,
                                       # mock TEI embed/rerank; SSE streaming agent)
+.venv/bin/python tests/proxy_e2e.py   # 26-check live flow for the embedded proxy
+                                      # (real emailproxy vs mock OAuth + IMAP servers)
 
 cd gemma                              # the model server
 docker compose ps && docker compose logs -f
@@ -189,19 +198,24 @@ docker compose stop                   # free GPU 0
 docker compose up -d                  # bring it back
 ```
 
-- **Settings** (interval, toggles, categories, folder map, drafts folder) live in the
-  UI under Settings and are stored in SQLite.
-- **Secrets/connection** live in `.env` (chmod 600).
-- **Data**: `data/triage.db` (messages, rules, templates, assistant chat, events).
+- **Settings** (endpoints, interval, toggles, categories, folder map, drafts folder,
+  mail connection) live in the UI under Settings and are stored in SQLite.
+- **Accounts & OAuth** (providers, client IDs, local passwords, tokens) are managed on
+  the Accounts page; tokens live in `data/emailproxy/credentials.cache` (encrypted).
+- **Data**: `data/triage.db` (messages, rules, templates, assistant chat, events,
+  accounts) · `data/emailproxy/` (generated config, token cache, proxy log).
+- **Secrets/connection**: `.env` still works as a fallback for keys and connection
+  defaults; anything set in the UI wins.
 
 ## If something breaks
 
 1. Worker errors show in the **Log** page and as a red banner on the Dashboard.
    Parked messages (3 failed classifications) can be retried with the
    "Retry parked" button.
-2. "Connect/login failed" errors usually mean the OAuth token died. Fix it in the
-   proxy UI: https://gpu-vm1.bigscale-snapper.ts.net:8095/ (Authorise -> login ->
-   paste the URL back). The token watchdog will also ping you on Telegram.
+2. "Connect/login failed" errors usually mean the OAuth token died. Fix it on the
+   **Accounts page** (https://gpu-vm1.bigscale-snapper.ts.net:8097/accounts):
+   Authorise -> log in -> paste the final URL back. The token watchdog will also
+   ping you on Telegram. If the embedded proxy itself is down, hit "Restart proxy".
 3. LLM failures: check the model server (`cd gemma && docker compose ps`); use the
    "Test LLM endpoint" button on the Settings page. If the GPU wedges after a
    driver-level fault (Xid "GPU requires reset"), recover it per card with:
@@ -214,9 +228,12 @@ docker compose up -d                  # bring it back
 ```
 app.py            Flask UI + routes + worker start        Dockerfile
 engine.py         IMAP client, rules, LLM, assistant      docker-compose.yml
-store.py          SQLite schema + queries                 .env (secrets, 600)
-config.py         env config                              tests/mock_e2e.py
-gemma/            local Gemma model server (own compose)  README.md (this file)
+store.py          SQLite schema + queries                 .env (fallback secrets, 600)
+config.py         env fallbacks for deployments           tests/mock_e2e.py
+proxy.py          embedded email-oauth2-proxy manager     tests/proxy_e2e.py
+rag.py            semantic search (embeddings/rerank)     README.md (this file)
+heuristics.py     deterministic classifiers               gemma/ (own compose, GPU 0)
+                                                          embed/ (own compose, GPU 1)
 ```
 
-Times in the UI are HKT.
+Times in the UI follow the display timezone setting (default UTC+8).
