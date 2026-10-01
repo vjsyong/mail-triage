@@ -628,6 +628,13 @@ def insert_message(folder, uid, uidvalidity, fields):
         return cur.lastrowid, conn.total_changes
 
 
+def snooze_message(mid, until_ts):
+    with db() as conn:
+        conn.execute("UPDATE messages SET snoozed_until=? WHERE id=?",
+                     (int(until_ts or 0), int(mid)))
+        conn.commit()
+
+
 def record_move(msg, to_folder, source, from_folder=None):
     """Record a filing for the undo trail (called before/after the IMAP move).
     msg = pre-move message dict; from_folder overrides msg['folder'] for multi-step flows."""
@@ -748,7 +755,12 @@ REAL_MSG = "NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coale
 
 
 def _messages_filter_where(filt):
+    now = int(time.time())
     where = [REAL_MSG]
+    if filt == "snoozed":
+        where.append("snoozed_until > %d" % now)
+    else:
+        where.append("coalesce(snoozed_until, 0) <= %d" % now)
     if filt == "queued":
         where.append("status='queued'")
     elif filt == "unmatched":

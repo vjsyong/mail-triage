@@ -240,7 +240,8 @@ def stats():
             "queued": one("SELECT COUNT(*) FROM messages" + G + " AND status='queued'"),
             "classified": one("SELECT COUNT(*) FROM messages" + G + " AND status IN ('classified','llm-moved')"),
             "moved": one("SELECT COUNT(*) FROM messages" + G + " AND action_taken LIKE 'move%'"),
-            "needs_reply": one("SELECT COUNT(*) FROM messages" + G + " AND llm_needs_reply=1"),
+            "needs_reply": one("SELECT COUNT(*) FROM messages" + G + " AND llm_needs_reply=1"
+                               " AND coalesce(snoozed_until,0) <= %d" % int(time.time())),
             "errors": one("SELECT COUNT(*) FROM messages" + G + " AND status='error'"),
             "rules": one("SELECT COUNT(*) FROM rules WHERE enabled=1"),
         }
@@ -2117,6 +2118,30 @@ def check_now():
     return redirect(url_for("dashboard"))
 
 
+@app.route("/messages/<int:mid>/snooze", methods=["POST"])
+def message_snooze(mid):
+    m = store.get_message(mid)
+    if not m:
+        flash("No such message.", "err")
+        return redirect(url_for("messages"))
+    try:
+        hours = float(request.form.get("hours") or 0)
+    except ValueError:
+        hours = 0
+    if hours > 0:
+        until = int(time.time() + hours * 3600)
+        store.snooze_message(mid, until)
+        store.log_event("info", "snoozed message %d ('%s') until %s"
+                        % (mid, (m.get("subject") or "")[:50], fmt_ts(until)))
+        flash("Snoozed until %s." % fmt_ts(until), "ok")
+    else:
+        store.snooze_message(mid, 0)
+        store.log_event("info", "woke message %d ('%s')"
+                        % (mid, (m.get("subject") or "")[:50]))
+        flash("Back in your lists.", "ok")
+    return redirect(request.referrer or url_for("message_detail", mid=mid))
+
+
 @app.route("/undo/<int:lid>", methods=["POST"])
 def undo_move(lid):
     ok, msg = engine.undo_filing(lid)
@@ -3531,7 +3556,7 @@ MESSAGES_TMPL = """
         <td><a href="{{ url_for('message_detail', mid=m.id, f=filt) }}" title="{{ m.subject }}">{{ m.subject|clip(84) or '(no subject)' }}</a>
           {% if m.llm_summary %}<div class="sub" style="font-size:.78rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(150) }}</div>{% endif %}</td>
         <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
-        <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
+        <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.snoozed_active %} <span class="badge warn" title="until {{ m.snoozed_h }}">snoozed</span>{% endif %}{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
         <td class="sub">{{ m.llm }}</td>
       </tr>
       {% endfor %}
@@ -3620,6 +3645,9 @@ def messages():
         if llm and m.get("llm_confidence") is not None:
             llm += " (%.0f%%)" % (m["llm_confidence"] * 100)
         m["llm"] = llm
+        su = m.get("snoozed_until") or 0
+        m["snoozed_active"] = bool(su and su > time.time())
+        m["snoozed_h"] = fmt_ts(su) if su else ""
     settings = store.all_settings()
     tag_options = sorted(set(
         list(settings.get("categories") or [])
@@ -3629,7 +3657,8 @@ def messages():
     tag_options = [t for t in tag_options if t]
     filter_chips = [(key, label, store.count_messages(key)) for key, label in (
         ("all", "All"), ("queued", "Awaiting LLM"), ("needs_reply", "Needs reply"),
-        ("moved", "Sorted"), ("tagged", "Tagged"), ("errors", "Errors"))]
+        ("moved", "Sorted"), ("tagged", "Tagged"), ("snoozed", "Snoozed"),
+        ("errors", "Errors"))]
     return render(_render_src(
         MESSAGES_TMPL, msgs=msgs, filt=filt, page=page, pages=pages, per=per, total=total,
         proposals=_proposal_views(),
@@ -3790,6 +3819,7 @@ MESSAGE_TMPL = """
   <div class="row">
     <span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>
     {% if m.llm_needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
+    {% if m.snoozed_active %}<span class="badge warn">snoozed until {{ m.snoozed_h }}</span>{% endif %}
   </div>
 </div>
 
@@ -3879,6 +3909,19 @@ MESSAGE_TMPL = """
           <button class="btn small" type="submit">Save</button>
         </div>
       </form>
+      <div style="margin-top:12px">
+        <label>Snooze — hide it from the lists</label>
+        <div class="row">
+          {% if m.snoozed_active %}
+          <span class="sub" style="margin-right:auto">Snoozed until {{ m.snoozed_h }}</span>
+          <form class="inline" method="post" action="{{ url_for('message_snooze', mid=m.id) }}"><input type="hidden" name="hours" value="0"><button class="btn small" type="submit">Wake now</button></form>
+          {% else %}
+          <form class="inline" method="post" action="{{ url_for('message_snooze', mid=m.id) }}"><input type="hidden" name="hours" value="24"><button class="btn small" type="submit">1 day</button></form>
+          <form class="inline" method="post" action="{{ url_for('message_snooze', mid=m.id) }}"><input type="hidden" name="hours" value="72"><button class="btn small" type="submit">3 days</button></form>
+          <form class="inline" method="post" action="{{ url_for('message_snooze', mid=m.id) }}"><input type="hidden" name="hours" value="168"><button class="btn small" type="submit">1 week</button></form>
+          {% endif %}
+        </div>
+      </div>
     </div>
     <div class="card">
       <div class="card-h"><h3>Details</h3></div>
@@ -4136,6 +4179,9 @@ def message_detail(mid):
         flash("No such message.", "err")
         return redirect(url_for("messages"))
     m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
+    su = m.get("snoozed_until") or 0
+    m["snoozed_active"] = bool(su and su > time.time())
+    m["snoozed_h"] = fmt_ts(su) if su else ""
     show_images = request.args.get("imgs") == "1" or bool(store.get_setting("render_images"))
     plain = request.args.get("view") == "plain"
     filt = request.args.get("f") or "all"

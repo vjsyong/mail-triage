@@ -2642,6 +2642,34 @@ def main():
     qb2 = store.get_message(idB)
     check("the filed message really moved", qb2["folder"] == "Archive")
 
+    section("T38 snooze: hide, resurface, counts, chips")
+    add_msg(state, "snoozee@x.com", "Snooze me", "z", "sz@x")
+    engine.process_mailbox()
+    srow = [r for r in store.messages(limit=3000) if r["subject"] == "Snooze me"][0]
+    sid_ = srow["id"]
+    store.update_message(sid_, llm_needs_reply=1)
+    base_nr = store.count_messages("needs_reply")
+    r = client.post("/messages/%d/snooze" % sid_, data={"hours": "24"})
+    srow2 = store.get_message(sid_)
+    check("snooze sets the wake time", r.status_code == 302 and srow2["snoozed_until"] > time.time())
+    check("snoozed message leaves the default list",
+          sid_ not in [x["id"] for x in store.messages(limit=3000)])
+    check("snoozed message appears in the snoozed filter",
+          sid_ in [x["id"] for x in store.messages(limit=3000, filt="snoozed")])
+    check("needs-reply count excludes snoozed",
+          store.count_messages("needs_reply") == base_nr - 1)
+    check("dashboard stat matches the list count",
+          app_mod.stats()["needs_reply"] == store.count_messages("needs_reply"))
+    r = client.get("/messages")
+    check("snoozed chip rendered", b"Snoozed" in r.data)
+    r = client.get("/messages/%d" % sid_)
+    check("viewer shows the snoozed badge + wake control",
+          b"snoozed until" in r.data and b"Wake now" in r.data)
+    r = client.post("/messages/%d/snooze" % sid_, data={"hours": "0"})
+    srow3 = store.get_message(sid_)
+    check("wake clears the snooze", srow3["snoozed_until"] == 0
+          and sid_ in [x["id"] for x in store.messages(limit=3000)])
+
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
