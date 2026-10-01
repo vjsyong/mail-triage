@@ -476,7 +476,7 @@ margin:0 8px 8px 0;min-width:104px}
 animation:sk 1.3s ease infinite}
 @keyframes sk{0%{background-position:100% 0}100%{background-position:0 0}}
 pre.log{background:var(--codebg);border:1px solid var(--codebg);color:var(--codefg);padding:12px;font-size:.78rem;
-line-height:1.5;overflow:auto;max-height:70vh;white-space:pre-wrap}
+line-height:1.5;overflow:auto;max-height:70vh;white-space:pre-wrap;overflow-wrap:anywhere}
 .logpanel{background:var(--codebg);border:1px solid var(--codebg);padding:12px 14px}
 .logpanel .logrow{font-size:.8rem;color:#d4d4d4;padding:2px 0;line-height:1.6;display:flex;gap:8px;align-items:baseline}
 .logpanel .mono{background:none;border:0;padding:0;color:#8f8f8f;font-size:.76rem;flex:none}
@@ -484,7 +484,7 @@ line-height:1.5;overflow:auto;max-height:70vh;white-space:pre-wrap}
 .logpanel .badge.ok{color:#4ade80;border-color:#4ade80}
 .logpanel .badge.err{color:#f87171;border-color:#f87171}
 .logpanel .badge.warn{color:#fbbf24;border-color:#fbbf24}
-.logpanel .lmsg{min-width:0}
+.logpanel .lmsg{min-width:0;overflow-wrap:anywhere}
 .foot{margin-top:34px;color:var(--dim);font-size:.78rem;border-top:1px solid var(--line);padding-top:12px}
 /* ---- toasts (JS) ---- */
 .toasts{position:fixed;right:16px;top:16px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:min(420px,92vw)}
