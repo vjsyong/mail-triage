@@ -91,3 +91,22 @@ back = the exact mirror; top bar and bottom tab bar pinned in both. Desktop
 re-verified as fade+rise with zero horizontal displacement. Also classed the
 message viewer's "← Messages" link as `.backlink` (it was the last unclassed
 parent link, so it now slides from the left too).
+
+## Direction fix (same day, v3) - page-order model
+Symptom: "always right to left" - every tab-to-tab tap animated the same way, because
+Turbo reports ALL link clicks as action=advance, so the action-based rule never
+reversed on sibling navigation.
+
+Rule now: pages sit in a fixed order in the base script (`VTPOS`: tab-bar order
+dashboard(0) < messages(10) < viewer(11) < assistant(20) < rules(30/31) <
+classifiers(40/41) < flows(50/51) < templates(60/61) < accounts(70/71) <
+settings(80) < more(90) < log(91) < proxy(92)). Moving to a LATER page slides in
+from the right; moving to an EARLIER page slides in from the left - regardless of
+how the navigation was triggered. Backlink clicks stay forced to 'back'; unknown
+page pairs fall back to Turbo's action (restore = back).
+
+Verified live on mobile (attr + slowed-down frames): assistant->messages now
+slides in from the LEFT (the reported bug), messages->assistant unchanged
+(from the right); messages<->viewer, messages<->dashboard and history-back all
+correct. When adding a page, add its prefix to VTPOS or it falls back to
+always-forward for its pairings.

@@ -1126,11 +1126,41 @@ function mdRender(src){
 }
 window.mdRender = mdRender;
 
-/* view-transition direction: forward = slide in from the right;
-   backlinks and history-back = slide in from the left (mobile) */
+/* view-transition direction: pages sit in a fixed order (tab-bar order, then
+   depth within each section - edit VTPOS when adding pages). Moving to a LATER
+   page slides in from the right, moving to an EARLIER page slides in from the
+   left. Backlink clicks always count as back; unknown pairs fall back to
+   Turbo's visit action. */
 if(!window.__mtVt){
   window.__mtVt = 1;
   var vtRoot = document.documentElement;
+  var VTPOS = [
+    ['/', 1, 0],            /* dashboard */
+    ['/messages/', 0, 11],  /* message viewer */
+    ['/messages', 1, 10],   /* message list (filters/pages share this) */
+    ['/assistant', 0, 20],
+    ['/rules/', 0, 31], ['/rules', 1, 30],
+    ['/classifiers/', 0, 41], ['/classifiers', 1, 40],
+    ['/flows/', 0, 51], ['/flows', 1, 50],
+    ['/templates/', 0, 61], ['/templates', 1, 60],
+    ['/accounts/', 0, 71], ['/accounts', 1, 70],
+    ['/settings', 0, 80],
+    ['/more', 0, 90],
+    ['/log', 0, 91],
+    ['/proxy', 0, 92]
+  ];
+  function vtPos(path){
+    for (var i = 0; i < VTPOS.length; i++){
+      var p = VTPOS[i][0];
+      if (VTPOS[i][1] ? path === p : path.indexOf(p) === 0) return VTPOS[i][2];
+    }
+    return null;
+  }
+  function vtDir(toPath){
+    var from = vtPos(location.pathname), to = vtPos(toPath);
+    if (from !== null && to !== null && from !== to) return to > from ? 'forward' : 'back';
+    return null;
+  }
   vtRoot.setAttribute('data-vt-dir', 'forward');
   document.addEventListener('click', function(e){
     var b = e.target && e.target.closest ? e.target.closest('.backlink') : null;
@@ -1138,7 +1168,10 @@ if(!window.__mtVt){
   }, true);
   document.addEventListener('turbo:visit', function(e){
     var a = e.detail && e.detail.action;
-    var dir = (window.__mtBack || a === 'restore') ? 'back' : 'forward';
+    var toPath = '';
+    try { toPath = new URL((e.detail && e.detail.url) || '', location.href).pathname; } catch(err){}
+    var dir = window.__mtBack ? 'back' : vtDir(toPath);
+    if(!dir) dir = (a === 'restore') ? 'back' : 'forward';
     window.__mtBack = false;
     vtRoot.setAttribute('data-vt-dir', dir);
   });
