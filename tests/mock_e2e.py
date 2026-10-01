@@ -2540,6 +2540,11 @@ def main():
     check("chat delete has no JS confirm popup", b"Delete this chat?" not in d)
     check("armed chat-delete reveal shipped (style + JS)",
           b".chat-del.armed" in d and b"Press again to delete this chat" in d)
+    check("turbo drive wired (SPA navigation)", b"/static/turbo.js" in d and b"turbo-cache-control" in d)
+    rt = client.get("/static/turbo.js")
+    check("turbo.js served", rt.status_code == 200 and b"Turbo" in rt.data[:400])
+    check("singleton guards present (no duplicate listeners across swaps)",
+          b"__mtChatDel" in d and b"__mtTicker" in d)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

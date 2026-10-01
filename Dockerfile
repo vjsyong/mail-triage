@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY config.py store.py engine.py app.py rag.py heuristics.py proxy.py ./
 COPY fonts/ /app/fonts/
 COPY icons/ /app/icons/
+COPY static/ /app/static/
 
 ENV DATA_DIR=/data \
     UI_HOST=0.0.0.0 \

@@ -312,6 +312,8 @@ BASE_TMPL = r"""<!doctype html>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Mail Triage">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/icon-180.png">
+<meta name="turbo-cache-control" content="no-cache">
+<script src="/static/turbo.js?v=8.0.12" defer></script>
 <meta name="theme-color" content="#fafafa">
 <meta name="color-scheme" content="light">
 <title>Mail Triage</title>
@@ -491,6 +493,7 @@ line-height:1.5;overflow:auto;max-height:70vh;white-space:pre-wrap;overflow-wrap
 .toast2{background:#0a0a0a;color:#fff;padding:11px 14px;font-size:.86rem;box-shadow:0 8px 24px rgba(0,0,0,.25);
 border-left:3px solid #a3a3a3;animation:tin .18s ease}
 .toast2.ok{border-left-color:var(--ok)} .toast2.err{border-left-color:var(--err)}
+.turbo-progress-bar{height:2px !important;background:#000 !important}
 .toast2.warn{border-left-color:var(--warn)}
 @keyframes tin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 .toast{position:fixed;right:18px;bottom:18px;background:#000;color:#fff;padding:11px 16px;font-size:.85rem;
@@ -918,6 +921,7 @@ function toast(msg, kind){
   setTimeout(function(){ el.style.opacity = '0'; el.style.transition = 'opacity .4s'; }, 4600);
   setTimeout(function(){ el.remove(); }, 5200);
 }
+if(!window.__mtTicker){ window.__mtTicker = 1;
 (function(){
   function relAge(iso){
     var d=(Date.now()-new Date(iso).getTime())/1000; if(d<0) d=0;
@@ -934,7 +938,9 @@ function toast(msg, kind){
   }
   setInterval(function(){ if(!document.hidden) tick(); }, 30000);
 })();
+}
 /* two-step chat delete: first tap arms (red trash), second tap deletes */
+if(!window.__mtChatDel){ window.__mtChatDel = 1;
 (function(){
   var TRASH='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 7V5h4v2m-6 0 1 13h6l1-13M10 11v6M14 11v6"/></svg>';
   function disarm(b){ if(!b.classList.contains('armed')) return; b.classList.remove('armed'); b.textContent='\u2715'; b.setAttribute('aria-label', b.getAttribute('data-al') || 'Delete chat'); if(b._armT){ clearTimeout(b._armT); b._armT=null; } }
@@ -949,6 +955,7 @@ function toast(msg, kind){
   }, true);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') disarmAll(null); });
 })();
+}
 function cp(text, el){
   function done(){ if(el){ var t = el.textContent; el.textContent = 'copied'; setTimeout(function(){ el.textContent = t; }, 900); } }
   if(navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(text).then(done, fallback); }
@@ -969,18 +976,25 @@ function cp(text, el){
   }
   if(btn) btn.addEventListener('click', function(){ setOpen(!side.classList.contains('open')); });
   if(scrim) scrim.addEventListener('click', function(){ setOpen(false); });
-  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') setOpen(false); });
   document.querySelectorAll('.nav-item').forEach(function(a){ a.addEventListener('click', function(){ setOpen(false); }); });
-  document.addEventListener('click', function(e){
-    document.querySelectorAll('details.menu[open]').forEach(function(d){
-      if(!d.contains(e.target)) d.removeAttribute('open');
+  if(!window.__mtSide1){
+    window.__mtSide1 = 1;
+    document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){
+      var s=document.getElementById('side'); if(s) s.classList.remove('open');
+      var sc=document.getElementById('scrim'); if(sc) sc.classList.add('hidden');
+      var b=document.getElementById('menuBtn'); if(b) b.setAttribute('aria-expanded','false');
+    } });
+    document.addEventListener('click', function(e){
+      document.querySelectorAll('details.menu[open]').forEach(function(d){
+        if(!d.contains(e.target)) d.removeAttribute('open');
+      });
     });
-  });
+  }
 })();
 </script>
 
 {% if show_asb %}
-<aside id="asb" class="asb" aria-label="Assistant sidebar">
+<aside id="asb" class="asb" data-turbo-permanent aria-label="Assistant sidebar">
   <div class="asb-grip" id="asb-grip" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the assistant sidebar" title="Drag to resize — double-click to reset"></div>
   <div class="asb-rail" id="asb-rail" title="Expand the assistant">
     <button type="button" id="asb-toggle" aria-label="Expand the assistant">&#10022;</button>
@@ -1074,6 +1088,7 @@ function mdRender(src){
 }
 window.mdRender = mdRender;
 
+if(!window.__mtCopy){ window.__mtCopy = 1;
 document.addEventListener('click', function(e){
   var c=e.target.closest('.copy');
   if(!c) return;
@@ -1081,6 +1096,7 @@ document.addEventListener('click', function(e){
   if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ c.textContent='copied'; setTimeout(function(){ c.textContent='copy'; },1500); }); }
   else { c.textContent='n/a'; }
 });
+}
 
 window.assistantChat = function(opts){
   var root=opts.root, form=opts.form, ta=opts.ta, btn=opts.sendBtn, stopBtn=opts.stopBtn,
@@ -1138,7 +1154,7 @@ window.assistantChat = function(opts){
     function setStatus(label){ if(!finished) status.textContent=label+' \u00b7 '+secs()+'s'; }
     setStatus('thinking\u2026');
     scrollBottom(true);
-    timer=setInterval(function(){ if(!finished && status.dataset.label) status.textContent=status.dataset.label+' \u00b7 '+secs()+'s'; }, 500);
+    timer=setInterval(function(){ if(!document.body.contains(status)){ clearInterval(timer); return; } if(!finished && status.dataset.label) status.textContent=status.dataset.label+' \u00b7 '+secs()+'s'; }, 500);
     function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
     function label(x){ if(!finished){ status.dataset.label=x; status.textContent=x+' \u00b7 '+secs()+'s'; } }
     var cards=[];
@@ -1328,7 +1344,8 @@ window.guardApply = function(f){
 };
 (function(){
   var asb = document.getElementById('asb');
-  if(!asb) return;
+  if(!asb || asb.__wired) return;
+  asb.__wired = 1;
   var chat = document.getElementById('dchat'), histList = document.getElementById('dhistlist');
   var inited = false, curSid = null;
   function expanded(){ return document.documentElement.classList.contains('asb-open'); }
@@ -1379,9 +1396,11 @@ window.guardApply = function(f){
     if(ev.key === 'ArrowLeft'){ applyW(curW + 24); saveW(); ev.preventDefault(); }
     else if(ev.key === 'ArrowRight'){ applyW(curW - 24); saveW(); ev.preventDefault(); }
   });
-  window.addEventListener('resize', function(){
-    if(expanded() && clampW(curW) !== curW){ applyW(curW); saveW(); }
-  });
+  if(!window.__mtAsbRz){
+    window.__mtAsbRz = 1;
+    window.addEventListener('resize', function(){ if(window.__asbRz) window.__asbRz(); });
+  }
+  window.__asbRz = function(){ if(expanded() && clampW(curW) !== curW){ applyW(curW); saveW(); } };
   function post(url, data){ return fetch(url, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:data||''}); }
   function newSid(){ return post('/assistant/new.json').then(function(r){ return r.json(); }).then(function(d){ return d.sid; }); }
   function loadHist(){
@@ -1463,9 +1482,12 @@ window.guardApply = function(f){
       el.style.transform = open ? ('translateY(-' + Math.round(kb) + 'px)') : '';
     });
   }
-  vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit);
-  document.addEventListener('focusin', function(){ setTimeout(fit, 250); });
-  document.addEventListener('focusout', function(){ setTimeout(fit, 80); });
+  if(!window.__mtKb){
+    window.__mtKb = 1;
+    vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit);
+    document.addEventListener('focusin', function(){ setTimeout(fit, 250); });
+    document.addEventListener('focusout', function(){ setTimeout(fit, 80); });
+  }
   fit();
 })();
 </script>
@@ -1558,8 +1580,11 @@ color:var(--fg);text-decoration:none}
   var standalone=window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;
   if(standalone){ r.remove(); return; }
   var note=document.getElementById('install-note');
-  window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); window.__bip=e; r.classList.remove('hidden'); });
-  window.addEventListener('appinstalled', function(){ r.classList.add('hidden'); });
+  if(!window.__mtBip){
+    window.__mtBip = 1;
+    window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); window.__bip=e; var rr=document.getElementById('install-app'); if(rr) rr.classList.remove('hidden'); });
+    window.addEventListener('appinstalled', function(){ var rr=document.getElementById('install-app'); if(rr) rr.classList.add('hidden'); });
+  }
   r.addEventListener('click', function(){
     if(window.__bip){ window.__bip.prompt(); window.__bip=null; r.classList.add('hidden'); }
     else if(ios && note){ note.textContent='In Safari: tap Share → Add to Home Screen'; }
@@ -1610,6 +1635,13 @@ def static_icon(name):
     from flask import send_from_directory
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
     return send_from_directory(base, name, max_age=2592000)
+
+
+@app.route("/static/turbo.js")
+def static_turbo():
+    from flask import send_from_directory
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    return send_from_directory(base, "turbo.js", max_age=604800)
 
 
 # ---------------------------------------------------------------- dashboard
@@ -1852,7 +1884,7 @@ DASH_TMPL = """
   var aw=document.querySelector('.actwrap'); if(aw) aw.removeAttribute('open');
 })();
 </script>
-{% if ix.running %}<script>(function r(){ setTimeout(function(){ if(document.hidden){ r(); } else { location.reload(); } }, 8000); })();</script>{% endif %}
+{% if ix.running %}<script>(function(){ var me=location.pathname; (function r(){ setTimeout(function(){ if(location.pathname!==me) return; if(document.hidden){ r(); } else { location.reload(); } }, 8000); })(); })();</script>{% endif %}
 """
 
 
@@ -2860,12 +2892,14 @@ function render(){
   sync();
 }
 function addStep(type){ insertStep(steps.length, type); }
+if(!window.__mtFlOut){ window.__mtFlOut = 1;
 document.addEventListener('click', function(ev){
   document.querySelectorAll('.fl-insert-menu.on').forEach(function(mm){
     if(!mm.contains(ev.target)){ mm.classList.remove('on'); }
   });
   document.querySelectorAll('.fl-ins.on').forEach(function(bb){ bb.classList.remove('on'); });
 });
+}
 var e0 = document.getElementById('fl-edge-0');
 if(e0){
   var b0 = el('button','fl-ins','+'); b0.type = 'button'; b0.setAttribute('aria-label','Add a filter');
@@ -3268,7 +3302,7 @@ MESSAGES_TMPL = """
   <div class="progress" style="margin-top:10px" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ (classify_state.done * 100 / classify_state.total)|round|int }}" aria-label="Classification progress"><i style="width:{{ (classify_state.done * 100 / classify_state.total)|round|int }}%"></i></div>
   {% endif %}
 </div>
-<script>(function r(){ setTimeout(function(){ if(document.hidden){ r(); } else { location.reload(); } }, 10000); })();</script>
+<script>(function(){ var me=location.pathname; (function r(){ setTimeout(function(){ if(location.pathname!==me) return; if(document.hidden){ r(); } else { location.reload(); } }, 10000); })(); })();</script>
 {% endif %}
 
 <div class="card flush">
@@ -5578,6 +5612,7 @@ function pollAuth(email, btn){
   panel.classList.remove('hidden');
   btn.textContent = 'Authorising…';
   const timer = setInterval(function(){
+    if(!document.body.contains(panel)){ clearInterval(timer); return; }
     fetch('/api/proxy/auth/' + encodeURIComponent(email) + '/status')
       .then(r => r.json())
       .then(j => {
