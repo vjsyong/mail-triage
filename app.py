@@ -1856,16 +1856,18 @@ def static_turbo():
 # ---------------------------------------------------------------- dashboard
 DASH_TMPL = """
 <style>
-.sys{display:flex;flex-wrap:wrap;gap:12px 30px;align-items:flex-start}
-.sysitem{display:flex;gap:8px;align-items:flex-start;min-width:190px}
+.sys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 30px;align-items:flex-start}
+@media(max-width:1239px){.sys{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sysitem{display:flex;gap:8px;align-items:flex-start;min-width:0}
 .sysitem .dot{margin-top:6px}
 .sysitem b{display:block;font-size:.84rem;font-weight:600}
 .sysitem .sub{font-size:.78rem;line-height:1.4}
 .sysitem .syserr{color:var(--err);word-break:break-word}
 .sysline{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
-.metrics{display:flex;flex-wrap:wrap}
-.metric{padding:4px 24px;border-left:1px solid var(--line);min-width:150px;flex:1 1 auto}
-.metric:first-child{border-left:0;padding-left:0}
+/* hero metric strip: CSS grid so numbers sit in aligned columns at every width
+   (flex-wrap stretched each row to its own widths and orphaned the last item) */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px 26px;align-items:start}
+.metric{padding:0;min-width:0}
 .metric b{display:block;font-size:1.4rem;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .metric.primary b{font-size:1.85rem}
 .metric .lbl{display:block;font-size:.76rem;color:var(--dim);margin-top:2px}
@@ -1912,8 +1914,10 @@ DASH_TMPL = """
   .sys-chev{margin-left:auto}
   .sys-chev::after{content:'▸'}
   .syswrap[open] .sys-chev::after{content:'▾'}
+  .metrics{grid-template-columns:1fr}
   .metrics .metric:not(.primary){display:none}
-  .metric.primary{flex:1 1 100%;padding:6px 0}
+  .metric.primary{padding:6px 0}
+  .sys{grid-template-columns:1fr}
   .metric.primary b{font-size:2.2rem}
   .dstat{display:block;margin-top:14px}
   .dsc{display:grid;grid-template-columns:1fr 1fr;gap:6px}
