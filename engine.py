@@ -814,6 +814,13 @@ class Worker(threading.Thread):
     def run(self):
         store.init_db()
         self.stop_flag.wait(2)  # let the UI come up first
+        try:
+            # embedded proxy may still be booting; wait for its listener so the first
+            # cycle does not race it after a container restart
+            if (store.get_setting("proxy_mode") or "embedded").lower() == "embedded":
+                proxy.wait_ready(20)
+        except Exception:
+            pass
         while not self.stop_flag.is_set():
             settings = store.all_settings()
             interval = max(15, int(settings.get("poll_interval", 90) or 90))

@@ -534,6 +534,25 @@ class Manager:
 manager = Manager()
 
 
+def wait_ready(timeout=20.0):
+    """True once any configured listener accepts connections. Used at boot so the
+    worker's first cycle does not race the proxy coming up."""
+    ports = manager.ports()
+    if not ports:
+        return True
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for port in ports:
+            try:
+                s = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+                s.close()
+                return True
+            except OSError:
+                continue
+        time.sleep(0.3)
+    return False
+
+
 def ensure_running():
     """Called by the supervisor loop: keep the proxy up when it should be up."""
     if (store.get_setting("proxy_mode") or "embedded").lower() != "embedded":
@@ -887,10 +906,21 @@ def import_legacy_state(state_path):
             st = json.load(fh)
     except (OSError, ValueError) as exc:
         return {"imported": 0, "error": "could not read %s: %r" % (state_path, exc)}
-    cfg_path = (st.get("settings") or {}).get("config_file") or \
-        os.path.join(os.path.dirname(state_path), "emailproxy.config")
-    conf = _load_ini(cfg_path)
+    legacy_dir = os.path.dirname(os.path.abspath(state_path))
+    candidates = [os.path.join(legacy_dir, "legacy_emailproxy.config")]
+    recorded = (st.get("settings") or {}).get("config_file")
+    if recorded:
+        # the recorded path points at the ORIGINAL deployment, so it is only a fallback
+        candidates.append(recorded)
+    conf = None
+    for cand in candidates:
+        if cand and os.path.exists(cand):
+            conf = _load_ini(cand)
+            break
+    if conf is None:
+        conf = configparser.ConfigParser(interpolation=None, strict=False)
     imported = 0
+    warnings = []
     for email, a in (st.get("accounts") or {}).items():
         if get_account(email):
             continue
@@ -903,7 +933,8 @@ def import_legacy_state(state_path):
             "password": a.get("password", ""),
             "client_id": conf.get(email, "client_id", fallback="") if sec_ok else "",
             "client_secret": conf.get(email, "client_secret", fallback="") if sec_ok else "",
-            "scopes": conf.get(email, "oauth2_scope", fallback="") if sec_ok else "",
+            "scopes": (conf.get(email, "oauth2_scope", fallback="") if sec_ok else "")
+                      or preset.get("scopes", ""),
             "auth_url": (conf.get(email, "permission_url", fallback="") if sec_ok else "")
                         or preset.get("auth_url", ""),
             "token_url": (conf.get(email, "token_url", fallback="") if sec_ok else "")
@@ -914,6 +945,12 @@ def import_legacy_state(state_path):
             "imap_local_port": a.get("imap_local_port") or preset.get("imap", {}).get("local_port") or 0,
             "smtp_local_port": a.get("smtp_local_port") or preset.get("smtp", {}).get("local_port") or 0,
         }
+        if not rec.get("client_id"):
+            warnings.append("%s: no client_id found (add it on the Accounts page, or copy the "
+                            "legacy emailproxy.config next to the state file as "
+                            "legacy_emailproxy.config and re-import)" % email)
+        if not rec.get("scopes"):
+            warnings.append("%s: no oauth2_scope found" % email)
         if provider == "custom":
             for section in conf.sections():
                 if section.startswith("IMAP-") and int(section.rsplit("-", 1)[1]) == rec["imap_local_port"]:
@@ -932,7 +969,8 @@ def import_legacy_state(state_path):
             rec["smtp_starttls"] = 1 if preset["smtp"].get("starttls") else 0
         upsert_account(rec)
         imported += 1
-    return {"imported": imported, "accounts": [a["email"] for a in list_accounts()]}
+    return {"imported": imported, "accounts": [a["email"] for a in list_accounts()],
+            "warnings": warnings}
 
 
 def client_settings(account):
