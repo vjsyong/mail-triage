@@ -146,3 +146,33 @@ live detail, error lines with actions fold in (parked -> Retry, queue -> View);
 number linking to its filter, parked errors red when >0, each metric carrying context
 (% of seen, queue length), runtime one-liner at the bottom; (3) grid: recent mail (10)
 left, search index + terminal-style activity feed (scrollable) right.
+
+## Fifth pass: message viewer (the "ugly mess" fix)
+
+Research round (Superhuman UX teardowns, NN/g reading/scanning research):
+- Header first, F-pattern: sender + date + folder immediately under the subject;
+  users scan the top before reading.
+- Avoid tiny text / exotic fonts (a cited Superhuman complaint) - body at ~15px,
+  generous line height, and never clip or box the mail content.
+- Reading measure ~50-75 characters per line for prose.
+- Quoted raw falls off: collapse it behind a "show quoted text" disclosure (the
+  standard reply-trimming pattern) instead of showing a wall of ">".
+
+Root cause of the raw-MIME mess: for multipart mail with base64 parts, an old code
+path stored the raw body (boundary + part headers + base64) as the snippet. The
+viewer's repair path could not refetch because by then the message had ALSO been
+moved on the server (external or auto-file) while the DB row kept a stale
+folder/uid. Salvage then failed because the stored text's line breaks had been
+collapsed, which the old base64 decoder could not handle.
+
+Fixes shipped:
+1. engine: run-based base64 decode (canonical lines, buffered across short tail
+   lines; space-collapsed runs; runs after part headers) + MIME scaffold stripping
+   in salvage paths; junk detector also flags raw headers (Received:, DKIM...).
+2. app: viewer re-fetch falls back to a Message-ID search across folders when the
+   stored folder/uid is stale, caches the repaired body back and relocates the row.
+3. engine/app: every move the app performs (rules, LLM auto-file, manual file,
+   assistant) now records the destination folder + new UID (from the IMAP COPYUID
+   response) on the row - no more stale folders for app-filed mail.
+4. Viewer layout: 72ch measure, .94rem/1.65 typography, linkified URLs, quoted
+   tails collapsed, pretty date in the header, explicit "body unavailable" state.
