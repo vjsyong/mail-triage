@@ -637,11 +637,24 @@ function cp(text, el){
 """
 
 
+_TPL_CACHE = {}
+
+
+def _render_src(src, **ctx):
+    """render_template_string with a compiled-template cache. The templates are
+    module-level constants; recompiling them per request cost ~40ms/page."""
+    tpl = _TPL_CACHE.get(src)
+    if tpl is None:
+        tpl = app.jinja_env.from_string(src)
+        _TPL_CACHE[src] = tpl
+    return tpl.render(**ctx)
+
+
 def render(body):
     ws = dict(worker.state)
     info = dict(_header_info())
     info["imap_user"] = (engine.imap_config().get("user") or "").strip()
-    return render_template_string(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
+    return _render_src(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
                                   info=info,
                                   w={"err": ws.get("last_error"), "last_ok_r": rel_time(ws.get("last_ok")),
                                      "interval": int(store.get_setting("poll_interval", 90) or 90)})
@@ -892,7 +905,7 @@ def dashboard():
         px = {"running": False, "installed": True, "ports": {}, "restarts": 0,
               "last_error": repr(exc)}
     px["listener_rows"] = [{"port": port} for port, _up in sorted((px.get("ports") or {}).items())]
-    return render(render_template_string(
+    return render(_render_src(
         DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
         settings=store.all_settings(), ix=index_status(), px=px,
         llm=engine.llm_config(), llm_used=store.llm_count_last_hour()))
@@ -1044,7 +1057,7 @@ def classifiers():
         v = heuristics.view(h)
         v["when"] = fmt_ts(h.get("updated"))
         hx.append(v)
-    return render(render_template_string(CLASSIFIERS_TMPL, hx=hx))
+    return render(_render_src(CLASSIFIERS_TMPL, hx=hx))
 
 
 @app.route("/classifiers/<int:hid>/toggle", methods=["POST"])
@@ -1184,7 +1197,7 @@ def classifier_dataset(hid):
     options = list(store.get_setting("categories") or [])
     if row.get("category") and row["category"] not in options:
         options.insert(0, row["category"])
-    return render(render_template_string(CLASSIFIER_DATASET_TMPL, h=heuristics.view(row),
+    return render(_render_src(CLASSIFIER_DATASET_TMPL, h=heuristics.view(row),
                                          ds=ds, options=options))
 
 
@@ -1274,7 +1287,7 @@ def rules():
                     matched_ids.add(m["id"])
             tr.append({"name": r["name"], "count": cnt})
         tu = len(rows) - len(matched_ids)
-    return render(render_template_string(
+    return render(_render_src(
         RULES_TMPL, rules=rules_list, settings=store.all_settings(),
         test_results=tr, test_unmatched=tu, test_limit=200))
 
@@ -1395,7 +1408,7 @@ def rule_new():
         store.log_event("info", "rule '%s' added" % name)
         flash("Rule added.", "ok")
         return redirect(url_for("rules"))
-    return render(render_template_string(RULE_EDIT_TMPL, **_rule_form_context()))
+    return render(_render_src(RULE_EDIT_TMPL, **_rule_form_context()))
 
 
 @app.route("/rules/<int:rule_id>/edit", methods=["GET", "POST"])
@@ -1414,7 +1427,7 @@ def rule_edit(rule_id):
                           enabled=1 if enabled else 0)
         flash("Rule saved.", "ok")
         return redirect(url_for("rules"))
-    return render(render_template_string(RULE_EDIT_TMPL, **_rule_form_context(rule)))
+    return render(_render_src(RULE_EDIT_TMPL, **_rule_form_context(rule)))
 
 
 @app.route("/rules/<int:rule_id>/toggle", methods=["POST"])
@@ -1511,7 +1524,7 @@ TEMPLATE_EDIT_TMPL = """
 
 @app.route("/templates")
 def templates():
-    return render(render_template_string(TEMPLATES_TMPL, templates=store.list_templates()))
+    return render(_render_src(TEMPLATES_TMPL, templates=store.list_templates()))
 
 
 @app.route("/templates/new", methods=["GET", "POST"])
@@ -1522,7 +1535,7 @@ def template_new():
                            request.form.get("body") or "")
         flash("Template added.", "ok")
         return redirect(url_for("templates"))
-    return render(render_template_string(TEMPLATE_EDIT_TMPL, template=None))
+    return render(_render_src(TEMPLATE_EDIT_TMPL, template=None))
 
 
 @app.route("/templates/<int:tid>/edit", methods=["GET", "POST"])
@@ -1537,7 +1550,7 @@ def template_edit(tid):
                               request.form.get("body") or "")
         flash("Template saved.", "ok")
         return redirect(url_for("templates"))
-    return render(render_template_string(TEMPLATE_EDIT_TMPL, template=t))
+    return render(_render_src(TEMPLATE_EDIT_TMPL, template=t))
 
 
 @app.route("/templates/<int:tid>/delete", methods=["POST"])
@@ -1727,7 +1740,7 @@ def messages():
     filter_chips = [(key, label, store.count_messages(key)) for key, label in (
         ("all", "All"), ("queued", "Awaiting LLM"), ("needs_reply", "Needs reply"),
         ("moved", "Sorted"), ("tagged", "Tagged"), ("errors", "Errors"))]
-    return render(render_template_string(
+    return render(_render_src(
         MESSAGES_TMPL, msgs=msgs, filt=filt, page=page, pages=pages, per=per, total=total,
         proposals=_proposal_views(),
         classify_state=dict(classifier.state),
@@ -2202,7 +2215,7 @@ def _render_message(m, classify_result=None, draft=None, draft_error=None, draft
     m["email_has_remote"] = has_remote
     m["show_images"] = show_images
     m["plain_view"] = plain
-    return render(render_template_string(
+    return render(_render_src(
         MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
         draft_error=draft_error, draft_template_id=draft_template_id,
         classify_result=classify_result, llm_configured=bool(config.LLM_API_KEY)))
@@ -2926,7 +2939,7 @@ def assistant():
                 m["tool_steps"] = meta.get("tools") or []
             except (TypeError, ValueError):
                 pass
-    return render(render_template_string(
+    return render(_render_src(
         ASSISTANT_TMPL, convo=convo, cfg=config, llm=engine.llm_config(),
         actions_live=bool(store.get_setting("assistant_actions_apply", True))))
 
@@ -3519,7 +3532,7 @@ def settings():
             flash(("%s saved." % scope) if scope else "Settings saved.", "ok")
         _TZ_CACHE["at"] = 0  # re-read the display timezone on the next render
         return redirect(url_for("settings"))
-    return render(render_template_string(
+    return render(_render_src(
         SETTINGS_TMPL, s=store.all_settings(), engine_state=worker.state, cfg=config,
         llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config(),
         icfg=engine.imap_config()))
@@ -4021,7 +4034,7 @@ PROXY_LOG_TMPL = """
 @app.route("/accounts")
 def accounts():
     ext_mode = (store.get_setting("proxy_mode") or "embedded") == "external"
-    return render(render_template_string(ACCOUNTS_TMPL, accounts=_accounts_view(),
+    return render(_render_src(ACCOUNTS_TMPL, accounts=_accounts_view(),
                                          p=_proxy_status_view(), ext_mode=ext_mode))
 
 
@@ -4045,7 +4058,7 @@ def account_new():
             flash("Account %s added, but the embedded proxy did not start: %s"
                   % (rec["email"], merr), "warn")
         return redirect(url_for("accounts"))
-    return render(render_template_string(
+    return render(_render_src(
         ACCOUNT_NEW_TMPL, presets=proxy.PRESETS,
         default_password=proxy.default_password(),
         reuse_client_id=proxy.PRESETS["outlook"]["reuse_client_id"]))
@@ -4077,7 +4090,7 @@ def account_edit(email):
         else:
             flash("Saved, but the embedded proxy did not restart: %s" % merr, "warn")
         return redirect(url_for("accounts"))
-    return render(render_template_string(ACCOUNT_EDIT_TMPL, a=acct, presets=proxy.PRESETS,
+    return render(_render_src(ACCOUNT_EDIT_TMPL, a=acct, presets=proxy.PRESETS,
                                          client_settings=proxy.client_settings(acct)))
 
 
@@ -4108,7 +4121,7 @@ def proxy_restart():
 @app.route("/proxy/log")
 def proxy_log():
     n = request.args.get("n", type=int) or 300
-    return render(render_template_string(PROXY_LOG_TMPL, content=proxy.tail_log(n), n=n,
+    return render(_render_src(PROXY_LOG_TMPL, content=proxy.tail_log(n), n=n,
                                          log_file=proxy.log_path()))
 
 
@@ -4180,7 +4193,7 @@ def log():
     for e in events:
         e["when"] = fmt_ts(e["ts"])
         e["cls"] = {"error": "err", "info": "ok", "warn": "warn", "debug": ""}.get(e.get("level"), "")
-    return render(render_template_string(LOG_TMPL, events=events, show_debug=show_debug,
+    return render(_render_src(LOG_TMPL, events=events, show_debug=show_debug,
                                          errors=errors, warns=warns, lvl=lvl))
 
 

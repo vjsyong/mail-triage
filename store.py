@@ -218,6 +218,10 @@ def _migrate(conn):
         conn.execute("ALTER TABLE messages ADD COLUMN body_cids TEXT NOT NULL DEFAULT ''")
     if "body_html_at" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN body_html_at INTEGER DEFAULT 0")
+    if "sort_ts" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN sort_ts INTEGER DEFAULT 0")
+        conn.execute("UPDATE messages SET sort_ts = COALESCE(NULLIF(date_ts,0), processed_at, 0)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_sort ON messages(sort_ts DESC, id DESC)")
     hcols = [r[1] for r in conn.execute("PRAGMA table_info(heuristics)")]
     if hcols and "excluded" not in hcols:
         conn.execute("ALTER TABLE heuristics ADD COLUMN excluded TEXT NOT NULL DEFAULT '[]'")
@@ -448,13 +452,15 @@ def insert_message(folder, uid, uidvalidity, fields):
         cur = conn.execute(
             "INSERT OR IGNORE INTO messages (folder, uid, uidvalidity, msgid, from_addr, to_addr, "
             "subject, date, date_ts, snippet, status, processed_at, body_html, body_cids, "
-            "body_html_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "body_html_at, sort_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (folder, uid, uidvalidity, fields.get("msgid", ""), fields.get("from_addr", ""),
              fields.get("to_addr", ""), fields.get("subject", ""), fields.get("date", ""),
              fields.get("date_ts") or date_ts_from(fields.get("date", "")),
-             fields.get("snippet", ""), fields.get("status", "new"), int(time.time()),
+             fields.get("snippet", ""), fields.get("status", "new"),
+             fields.get("processed_at") or int(time.time()),
              fields.get("body_html", ""), fields.get("body_cids", ""),
-             fields.get("body_html_at") or 0))
+             fields.get("body_html_at") or 0,
+             fields.get("date_ts") or date_ts_from(fields.get("date", "")) or int(time.time())))
         return cur.lastrowid, conn.total_changes
 
 
@@ -526,8 +532,7 @@ def messages(limit=50, filt="all", order="date", offset=0):
     if order == "id":
         q += " ORDER BY id DESC"
     else:
-        q += (" ORDER BY (CASE WHEN coalesce(date_ts,0)>0 THEN date_ts ELSE processed_at END) "
-              "DESC, id DESC")
+        q += " ORDER BY sort_ts DESC, id DESC"
     q += " LIMIT ? OFFSET ?"
     with db() as conn:
         return [dict(r) for r in conn.execute(q, (limit, offset))]
