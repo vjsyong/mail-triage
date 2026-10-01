@@ -43,3 +43,31 @@ Marker `window.__mark` survived tab clicks / sidebar clicks / form POST
 session was then deleted via the two-tap trash (also under Turbo); viewer, log,
 classifiers, flows, settings all swap with zero console errors; drawer marker
 `__t=777` survived desktop navigations (permanence + single-binding check).
+
+## Transitions (added same day)
+"Nice smooth transition animations" — the View Transitions API, which Turbo wraps
+renders in automatically when the head carries
+`<meta name="view-transition" content="same-origin">` (verified in the vendored
+turbo.js: `prefersViewTransitions` reads exactly that meta, and
+`renderChange()` calls `document.startViewTransition`).
+
+Design: **chrome stays put, content breathes.**
+- `.side`, `.topbar`, `.bottom-nav`, `#asb` get `view-transition-name` groups:
+  they morph in place (identical pixels = invisible crossfade; the sidebar's
+  active state crossfades smoothly instead of sliding with the page).
+- The content (root group) fades: old out at 140ms, new in at 240ms with a
+  subtle 8px rise (`cubic-bezier(.2,.7,.3,1)`).
+- `prefers-reduced-motion: reduce` kills all transition pseudo animations
+  (instant swap), and the feature CSS is itself wrapped in `no-preference`.
+- Redirect navigations (e.g. the Assistant tab, which 302s to its session URL)
+  run two chained transitions, but both render the same final body so the
+  second is invisible — verified frame-by-frame, no blank flash.
+
+Verified live: `startViewTransition` hook fired once per navigation (twice on
+redirect navs), zero console warnings (no duplicate-name aborts), slowed-down
+frames show a clean crossfade with sidebar/topbar crisp and already updated.
+
+Side-fix found by the slowed-down frames: the desktop Messages DATE column was
+only 55px wide and wrapped "10-01 18:30" into three fragments; `white-space:nowrap`
+on the date cell (and the classifiers "updated" column) — column now 101px,
+single line.

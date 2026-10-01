@@ -313,6 +313,7 @@ BASE_TMPL = r"""<!doctype html>
 <meta name="apple-mobile-web-app-title" content="Mail Triage">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/icon-180.png">
 <meta name="turbo-cache-control" content="no-cache">
+<meta name="view-transition" content="same-origin">
 <script src="/static/turbo.js?v=8.0.12" defer></script>
 <meta name="theme-color" content="#fafafa">
 <meta name="color-scheme" content="light">
@@ -335,6 +336,8 @@ a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 .vh{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .backlink{margin:0 0 4px;font-size:.84rem}
 #rules th:nth-child(1),#rules td:nth-child(1){white-space:nowrap}
+#bulk .tbl th:nth-child(2),#bulk .tbl td:nth-child(2){white-space:nowrap}
+#classifiers .tbl th:nth-child(7),#classifiers .tbl td:nth-child(7){white-space:nowrap}
 .skip:focus{left:8px}
 /* ---- app shell ---- */
 .app{display:flex;min-height:100vh}
@@ -494,6 +497,20 @@ line-height:1.5;overflow:auto;max-height:70vh;white-space:pre-wrap;overflow-wrap
 border-left:3px solid #a3a3a3;animation:tin .18s ease}
 .toast2.ok{border-left-color:var(--ok)} .toast2.err{border-left-color:var(--err)}
 .turbo-progress-bar{height:2px !important;background:#000 !important}
+/* view transitions: chrome stays put, content breathes */
+@media (prefers-reduced-motion: no-preference){
+  .side{view-transition-name:mt-side}
+  .topbar{view-transition-name:mt-topbar}
+  .bottom-nav{view-transition-name:mt-nav}
+  #asb{view-transition-name:mt-asb}
+  ::view-transition-old(root){animation:mtvt-out .14s ease both}
+  ::view-transition-new(root){animation:mtvt-in .24s cubic-bezier(.2,.7,.3,1) both}
+  @keyframes mtvt-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes mtvt-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(-4px)}}
+}
+@media (prefers-reduced-motion: reduce){
+  ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none !important}
+}
 .toast2.warn{border-left-color:var(--warn)}
 @keyframes tin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 .toast{position:fixed;right:18px;bottom:18px;background:#000;color:#fff;padding:11px 16px;font-size:.85rem;
