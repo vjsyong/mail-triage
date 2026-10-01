@@ -618,94 +618,112 @@ def _header_info():
 # ---------------------------------------------------------------- dashboard
 
 DASH_TMPL = """
-{% set ws = worker_state %}
+<style>
+.dashgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
+@media(max-width:1023px){.dashgrid{grid-template-columns:1fr}}
+.dashgrid .card{margin:0}
+.dashgrid .badge{margin-left:0}
+</style>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Dashboard</h1>
+    <div class="page-desc">Mailbox health, sorting activity and what arrived recently.</div>
+  </div>
+  <div class="row">
+    <form class="inline" method="post" action="{{ url_for('check_now') }}"><button class="btn primary" type="submit" {{ 'disabled' if worker_state.running else '' }}>Check now</button></form>
+    <a class="btn" href="{{ url_for('messages') }}">Open messages</a>
+  </div>
+</div>
+
 <div class="card">
-  <div class="spread">
-    <div>
-      <h3>Status</h3>
-      <div class="sub">
-        {% if ws.running %}<span class="badge acc">checking now…</span>
-        {% elif ws.last_error %}<span class="badge err">last check failed</span>
-          <span class="mono">{{ ws.last_error }}</span>
-        {% elif ws.last_ok %}<span class="badge ok">connected</span>
-        {% else %}<span class="badge warn">starting up…</span>{% endif %}
-        &nbsp;last check: {{ ws.last_ok_r }} · next in ~{{ ws.next_in }}s · every {{ ws.interval }}s
-        {% if ws.last_summary %}<br>last pass: {{ ws.last_summary }}{% endif %}
+  <div class="row" style="gap:10px">
+    {% if worker_state.running %}<span class="badge acc">checking now</span>
+    {% elif worker_state.last_error %}<span class="badge err">last check failed</span>
+    {% elif worker_state.last_ok %}<span class="badge ok">connected</span>
+    {% else %}<span class="badge warn">starting up</span>{% endif %}
+    <span class="sub">last check {{ worker_state.last_ok_r }} · next in ~{{ worker_state.next_in }}s · every {{ worker_state.interval }}s</span>
+  </div>
+  {% if worker_state.last_error %}
+  <div class="msg err" style="margin-bottom:0">Last pass failed: <span class="mono">{{ worker_state.last_error }}</span> — details in the <a href="{{ url_for('log') }}">Log</a>.</div>
+  {% elif worker_state.last_summary %}
+  <div class="sub" style="margin-top:8px">Last pass: {{ worker_state.last_summary }}</div>
+  {% endif %}
+</div>
+
+<div class="row" style="gap:8px;margin-top:14px">
+  <div class="stat"><b>{{ st.total }}</b><span>seen</span></div>
+  <div class="stat"><b>{{ st.moved }}</b><span>sorted by rules</span></div>
+  <div class="stat"><b>{{ st.classified }}</b><span>LLM classified</span></div>
+  <div class="stat"><b>{{ st.queued }}</b><span>waiting for LLM</span></div>
+  <div class="stat"><b>{{ st.needs_reply }}</b><span>need a reply</span></div>
+  <div class="stat"><b>{{ st.rules }}</b><span>rules enabled</span></div>
+</div>
+<div class="sub" style="margin:0 0 4px">Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} · LLM classification {{ 'on' if settings.llm_suggest else 'off' }} · auto-filing {{ 'ON' if settings.llm_apply else 'off (suggests only)' }} — <a href="{{ url_for('settings') }}">change</a></div>
+
+<div class="dashgrid">
+  <div class="card flush">
+    <div class="card-h" style="padding:14px 16px 10px;margin:0">
+      <h3>Recent messages</h3>
+      <a class="sub" href="{{ url_for('messages') }}">All messages →</a>
+    </div>
+    {% if messages %}
+    <div class="tablewrap"><table class="tbl mcards">
+      <thead><tr><th>when</th><th>from</th><th>subject</th><th>status</th><th>llm</th></tr></thead>
+      <tbody>
+      {% for m in messages %}
+      <tr>
+        <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
+        <td class="sub">{{ m.from_addr[:38] }}</td>
+        <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:70] or '(no subject)' }}</a>
+          {% if m.action %}<div class="sub" style="font-size:.77rem">{{ m.action }}</div>{% endif %}</td>
+        <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span></td>
+        <td class="sub">{{ m.llm }}</td>
+      </tr>
+      {% endfor %}
+      </tbody></table></div>
+    {% else %}
+    <div class="empty">
+      <h4>No mail processed yet</h4>
+      <p>When the watcher runs its first pass, new mail shows up here.</p>
+    </div>
+    {% endif %}
+  </div>
+  <div class="stack">
+    <div class="card">
+      <div class="card-h"><h3>Search index</h3>
+        {% if ix.running %}<span class="badge acc">indexing</span>
+        {% elif ix.last_error %}<span class="badge err">error</span>
+        {% elif ix.chunks %}<span class="badge ok">ready</span>
+        {% else %}<span class="badge warn">not built</span>{% endif %}
+      </div>
+      <div class="sub">{{ ix.messages }} messages · {{ ix.chunks }} chunks indexed · folders {{ ix.folders_done }}/{{ ix.folders_total }} complete{% if ix.last_ok %} · last run {{ ix.last_ok_r }}{% endif %}
+      {% if ix.progress %}<br>{{ ix.progress }}{% endif %}
+      {% if ix.last_error %}<br><span class="mono">{{ ix.last_error }}</span>{% endif %}</div>
+      <div class="row" style="margin-top:10px">
+        <form class="inline" method="post" action="{{ url_for('index_run') }}"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Index now</button></form>
+        <form class="inline" method="post" action="{{ url_for('index_rebuild') }}" onsubmit="return confirm('Rebuild the search index from scratch? Mail is untouched.');"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Rebuild</button></form>
       </div>
     </div>
-    <form class="inline" method="post" action="{{ url_for('check_now') }}">{% if false %}{% endif %}
-      <button class="btn primary" type="submit" {{ 'disabled' if ws.running else '' }}>Check now</button></form>
-  </div>
-  {% if ws.last_error %}<div class="msg err">The last pass failed: {{ ws.last_error }} — see the Log page.</div>{% endif %}
-</div>
-
-<div class="card">
-  <div class="row">
-    <div class="stat"><b>{{ st.total }}</b><span>seen</span></div>
-    <div class="stat"><b>{{ st.moved }}</b><span>sorted by rules</span></div>
-    <div class="stat"><b>{{ st.classified }}</b><span>LLM classified</span></div>
-    <div class="stat"><b>{{ st.queued }}</b><span>waiting for LLM</span></div>
-    <div class="stat"><b>{{ st.needs_reply }}</b><span>need a reply</span></div>
-    <div class="stat"><b>{{ st.rules }}</b><span>rules enabled</span></div>
-  </div>
-  <div class="sub">
-    Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} ·
-    LLM classification {{ 'on' if settings.llm_suggest else 'off' }} ·
-    LLM auto-filing {{ 'ON' if settings.llm_apply else 'off (suggests only)' }} ·
-    <a href="{{ url_for('settings') }}">change</a>
-  </div>
-</div>
-
-<h2>Search index <span class="sub">— semantic search over the whole archive</span></h2>
-<div class="card">
-  <div class="spread">
-    <div class="sub">
-      {% if ix.running %}<span class="badge acc">indexing…</span> {{ ix.progress }}
-      {% elif ix.last_error %}<span class="badge err">indexer error</span> <span class="mono">{{ ix.last_error }}</span>
-      {% elif ix.chunks %}<span class="badge ok">ready</span>
-      {% else %}<span class="badge warn">not built yet</span>{% endif %}
-      <br>{{ ix.messages }} messages · {{ ix.chunks }} chunks indexed · folders {{ ix.folders_done }}/{{ ix.folders_total }} complete{% if ix.last_ok %} · last run {{ ix.last_ok_r }}{% endif %}
+    {% if st.errors %}
+    <div class="card" style="border-color:var(--err)">
+      <div class="card-h"><h3>Parked messages</h3><span class="badge err">{{ st.errors }}</span></div>
+      <div class="sub">Parked after repeated LLM failures — fix the LLM endpoint, then retry.</div>
+      <form method="post" action="{{ url_for('retry_errors') }}"><button class="btn small" type="submit" style="margin-top:10px">Retry parked</button></form>
     </div>
-    <div class="row" style="white-space:nowrap">
-      <form class="inline" method="post" action="{{ url_for('index_run') }}"><button class="btn" type="submit" {{ 'disabled' if ix.running else '' }}>Index now</button></form>
-      <form class="inline" method="post" action="{{ url_for('index_rebuild') }}" onsubmit="return confirm('Rebuild the search index from scratch? Mail is untouched.');"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Rebuild</button></form>
-    </div>
+    {% endif %}
   </div>
-</div>
-{% if ix.running %}<script>setTimeout(function(){location.reload();}, 8000);</script>{% endif %}
-{% if st.errors %}
-<div class="card">
-  <div class="spread">
-    <div class="sub">{{ st.errors }} message(s) parked after repeated LLM failures - fix the LLM endpoint, then retry.</div>
-    <form class="inline" method="post" action="{{ url_for('retry_errors') }}"><button class="btn" type="submit">Retry parked</button></form>
-  </div>
-</div>
-{% endif %}
-
-<h2>Recent messages</h2>
-<div class="card">
-  {% if messages %}
-  <table class="tbl"><tr><th>when</th><th>from</th><th>subject</th><th>status</th><th>LLM</th></tr>
-  {% for m in messages %}
-  <tr>
-    <td class="sub">{{ m.when }}</td>
-    <td class="sub">{{ m.from_addr[:40] }}</td>
-    <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:80] or '(no subject)' }}</a></td>
-    <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
-    <td class="sub">{{ m.llm }}</td>
-  </tr>
-  {% endfor %}</table>
-  {% else %}<div class="sub">Nothing processed yet — the first pass will pick up your recent inbox ({% if true %}{{ settings.lookback_hours }}h lookback{% endif %}).</div>{% endif %}
-  <p><a class="btn" href="{{ url_for('messages') }}">All messages →</a></p>
 </div>
 
 <h2>Recent activity</h2>
 <div class="card logpanel">
-  {% for e in events %}
-  <div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> {{ e.message }}</div>
+  {% for e in events %}<div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span class="lmsg">{{ e.message }}</span></div>
   {% else %}<div class="sub">No events yet.</div>{% endfor %}
+  <div class="sub" style="margin-top:10px"><a href="{{ url_for('log') }}" style="color:#8ab4f8">Full log →</a></div>
 </div>
+{% if ix.running %}<script>setTimeout(function(){location.reload();}, 8000);</script>{% endif %}
 """
+
+
 
 
 @app.route("/")
@@ -766,88 +784,109 @@ def index_rebuild():
 # ---------------------------------------------------------------- rules
 
 RULES_TMPL = """
-<h2>Filter rules <span class="sub">— evaluated top to bottom, first match wins; most mail should be sorted by these</span></h2>
-<div class="card">
-  <div class="spread">
-    <div class="sub">Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} — see Settings.</div>
-    <div class="row">
-      <form class="inline" method="post" action="{{ url_for('rules_test') }}">
-        <button class="btn" type="submit">Test against last {{ test_limit }} messages</button></form>
-      <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
-    </div>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Rules</h1>
+    <div class="page-desc">Evaluated top to bottom — first match wins. Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }}. A rule with no actions is a guard: matching mail stays put.</div>
+  </div>
+  <div class="row">
+    <form class="inline" method="post" action="{{ url_for('rules_test') }}">
+      <button class="btn" type="submit">Test against last {{ test_limit }} messages</button></form>
+    <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
   </div>
 </div>
 {% if test_results %}
 <div class="card">
-  <h3>Dry-run test <span class="sub">(nothing was changed)</span></h3>
-  <table class="tbl"><tr><th>rule</th><th>matches</th></tr>
-  {% for t in test_results %}<tr><td>{{ t.name }}</td><td>{{ t.count }}</td></tr>{% endfor %}
-  <tr><td class="sub">unmatched (would go to LLM)</td><td>{{ test_unmatched }}</td></tr>
-  </table>
+  <div class="card-h"><h3>Dry-run test <span class="sub">(nothing was changed)</span></h3></div>
+  <div class="tablewrap"><table class="tbl" style="max-width:560px">
+    <thead><tr><th>rule</th><th class="r">matches</th></tr></thead>
+    <tbody>
+    {% for t in test_results %}<tr><td>{{ t.name }}</td><td class="r mono">{{ t.count }}</td></tr>{% endfor %}
+    <tr><td class="sub">unmatched (would go to LLM)</td><td class="r mono">{{ test_unmatched }}</td></tr>
+    </tbody></table></div>
 </div>
 {% endif %}
-<div class="card">
+<div class="card flush">
   {% if rules %}
-  <table class="tbl"><tr><th>#</th><th>name</th><th>matches</th><th>actions</th><th></th></tr>
-  {% for r in rules %}
-  <tr>
-    <td class="sub">{{ loop.index }}</td>
-    <td>
-      {% if r.enabled %}{{ r.name }}{% else %}<span class="sub">{{ r.name }} (disabled)</span>{% endif %}
-    </td>
-    <td class="mono">{{ r.summary }}</td>
-    <td class="sub">{{ r.actions }}</td>
-    <td class="row" style="white-space:nowrap">
-      <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="top"><button class="btn small" type="submit" title="move to top">⤒</button></form>
-      <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit">↑</button></form>
-      <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit">↓</button></form>
-      <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}"><button class="btn small" type="submit">{{ 'disable' if r.enabled else 'enable' }}</button></form>
-      <a class="btn small" href="{{ url_for('rule_edit', rule_id=r.id) }}">edit</a>
-      <form class="inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
-            onsubmit="return confirm('Delete rule {{ r.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
-    </td>
-  </tr>
-  {% endfor %}</table>
-  {% else %}<div class="sub">No rules yet. Create one, e.g. “from contains newsletter@ → move to Newsletters”.</div>{% endif %}
+  <div class="tablewrap"><table class="tbl mcards">
+    <thead><tr><th style="width:34px">#</th><th>rule</th><th>matches</th><th>actions</th><th class="r"></th></tr></thead>
+    <tbody>
+    {% for r in rules %}
+    <tr{% if not r.enabled %} style="opacity:.55"{% endif %}>
+      <td class="sub mono">{{ loop.index }}</td>
+      <td><b>{{ r.name }}</b>{% if not r.enabled %} <span class="badge">disabled</span>{% endif %}</td>
+      <td class="mono" style="font-size:.79rem">{{ r.summary }}</td>
+      <td class="sub">{{ r.actions }}</td>
+      <td class="r"><span class="rowacts" style="justify-content:flex-end">
+        <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="top"><button class="btn small" type="submit" title="move to top" aria-label="Move rule to top">⤒</button></form>
+        <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" title="move up" aria-label="Move rule up">↑</button></form>
+        <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" title="move down" aria-label="Move rule down">↓</button></form>
+        <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}"><button class="btn small" type="submit">{{ 'disable' if r.enabled else 'enable' }}</button></form>
+        <a class="btn small" href="{{ url_for('rule_edit', rule_id=r.id) }}">edit</a>
+        <form class="inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
+              onsubmit="return confirm('Delete rule {{ r.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
+      </span></td>
+    </tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% else %}
+  <div class="empty">
+    <h4>No rules yet</h4>
+    <p>Create one like “from contains newsletter@ → move to Newsletters”, or tell the assistant what to sort and it will propose one.</p>
+    <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
+  </div>
+  {% endif %}
 </div>
 """
 
 
+
+
 CLASSIFIERS_TMPL = """
-<h2>Classifiers <span class="sub">— deterministic heuristic models that run before the LLM</span></h2>
-<div class="card">
-  <div class="sub" style="margin-bottom:8px">Trained from your labels (manual tags) or existing classified mail. A confident verdict is
-  applied without any LLM call: faster, consistent, and immune to instructions hidden inside email content. The assistant can
-  train, retrain, evaluate and retire these for you ("train a classifier for Receipts", "evaluate classifier 2").</div>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Classifiers</h1>
+    <div class="page-desc">Deterministic heuristic models that run before the LLM. Trained from your labels (manual tags) or
+    existing classified mail — a confident verdict is applied without any LLM call: faster, consistent, and immune to
+    instructions hidden inside email content. The assistant can train, retrain, evaluate and retire these for you
+    (“train a classifier for Receipts”, “evaluate classifier 2”).</div>
+  </div>
+</div>
+<div class="card flush">
   {% if hx %}
-  <table class="tbl">
-    <tr><th>name</th><th>kind</th><th>category</th><th>samples</th><th>labels</th><th>matches on</th><th>updated</th><th></th></tr>
+  <div class="tablewrap"><table class="tbl mcards">
+    <thead><tr><th>name</th><th>kind</th><th>category</th><th>samples</th><th>labels</th><th>matches on</th><th>updated</th><th class="r"></th></tr></thead>
+    <tbody>
     {% for h in hx %}
     <tr>
       <td><b>{{ h.name }}</b>{% if not h.enabled %} <span class="badge">disabled</span>{% endif %}<div class="sub" style="font-size:.75rem">min conf {{ '%.2f' % (h.min_confidence or 0.8) }} · by {{ h.created_by }}</div></td>
-      <td class="mono">{{ h.kind }}</td>
+      <td class="mono" style="font-size:.79rem">{{ h.kind }}</td>
       <td>{{ h.category }}</td>
       <td class="sub">{{ h.samples }}{% if h.excluded %} <span class="badge">-{{ h.excluded }} removed</span>{% endif %}</td>
       <td class="sub">{{ h.label_source }}{% if h.weak_labels %} <span class="badge warn">weak</span>{% endif %}</td>
       <td class="sub" style="max-width:340px">{{ h.description[:170] }}</td>
       <td class="sub">{{ h.when }}</td>
-      <td class="row" style="white-space:nowrap">
+      <td class="r"><span class="rowacts" style="justify-content:flex-end">
         <a class="btn small" href="{{ url_for('classifier_dataset', hid=h.id) }}">dataset</a>
         <form class="inline" method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}"><button class="btn small" type="submit">{{ 'disable' if h.enabled else 'enable' }}</button></form>
         <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn small" type="submit">retrain</button></form>
         <form class="inline" method="post" action="{{ url_for('classifier_delete', hid=h.id) }}" onsubmit="return confirm('Delete this classifier?');"><button class="btn small danger" type="submit">delete</button></form>
-      </td>
+      </span></td>
     </tr>
     {% endfor %}
-  </table>
+    </tbody></table></div>
   {% else %}
-  <div class="sub">No classifiers yet. Tag some mail on the Messages page — or run "Classify all" so the LLM
-  auto-tags older mail — then ask the assistant to train a classifier (it can use your tags or the LLM's
-  auto-tags). Every classifier gets a dataset page where you can review samples and remove anything that
-  doesn't belong.</div>
+  <div class="empty">
+    <h4>No classifiers yet</h4>
+    <p>Tag some mail on the Messages page — or run “Classify all” so the LLM auto-tags older mail — then ask the
+    assistant to train a classifier from those labels. Every classifier gets a dataset page for reviewing samples.</p>
+    <a class="btn" href="{{ url_for('messages') }}">Go to messages</a>
+  </div>
   {% endif %}
 </div>
 """
+
+
 
 
 @app.route("/classifiers")
@@ -902,21 +941,26 @@ def classifier_delete(hid):
 
 
 CLASSIFIER_DATASET_TMPL = """
-<h2>{{ h.name }} <span class="sub">— dataset review</span></h2>
 {% if request.args.get('toast') %}
 <div class="toast">✓ <b>{{ request.args.get('subj') }}</b> moved to {{ 'the in-set' if request.args.get('toast') == 'in' else 'the out-of-set' }} → {{ request.args.get('cat') }}</div>
 <script>setTimeout(function(){ var t=document.querySelector('.toast'); if(t){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 700); } }, 3800);</script>
 {% endif %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ h.name }}</h1>
+    <div class="page-desc">dataset review · {{ h.kind }} · {{ h.category }}</div>
+  </div>
+  <div class="row">
+    <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn primary" type="submit">Retrain with current dataset</button></form>
+    <a class="btn" href="{{ url_for('classifiers') }}">Back</a>
+  </div>
+</div>
 <div class="card">
   <div class="row" style="margin-bottom:8px">
     <span class="badge">{{ h.kind }}</span>
     <span class="badge acc">{{ h.category }}</span>
     <span class="badge {{ 'warn' if ds.weak else 'ok' }}">labels: {{ 'LLM auto-tags' if ds.weak else 'your tags' }}</span>
     {% if not h.enabled %}<span class="badge">disabled</span>{% endif %}
-    <span class="row" style="margin-left:auto">
-      <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn small primary" type="submit">Retrain with current dataset</button></form>
-      <a class="btn small" href="{{ url_for('classifiers') }}">Back</a>
-    </span>
   </div>
   <div class="sub">{{ ds.pos_total }} positive sample(s){% if ds.pos_excluded %} ({{ ds.pos_excluded }} removed){% endif %} ·
     {{ ds.neg_total }} negative sample(s){% if ds.neg_excluded %} ({{ ds.neg_excluded }} removed){% endif %}.
@@ -926,56 +970,60 @@ CLASSIFIER_DATASET_TMPL = """
     dataset and the message's record.{% endif %}</div>
 </div>
 
-<div class="card">
-  <h3>In the set: {{ ds.category }} <span class="sub">(positives)</span></h3>
+<div class="card flush">
+  <div class="card-h" style="padding:14px 16px 10px;margin:0"><h3>In the set <span class="sub">({{ ds.category }} positives)</span></h3></div>
   {% if ds.positives %}
-  <table class="tbl">
-    <tr><th>subject</th><th>from</th><th>labeled</th><th></th></tr>
+  <div class="tablewrap"><table class="tbl mcards">
+    <thead><tr><th>subject</th><th>from</th><th>labeled</th><th class="r"></th></tr></thead>
+    <tbody>
     {% for s in ds.positives %}
     <tr{% if s.excluded %} style="opacity:.45"{% endif %}>
       <td><a href="{{ url_for('message_detail', mid=s.msg_id) }}">{{ s.subject or '(no subject)' }}</a>{% if s.summary %}<div class="sub" style="font-size:.75rem">{{ s.summary }}</div>{% endif %}</td>
       <td class="sub">{{ s.from }}</td>
       <td>
-        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem" aria-label="Reclassify sample">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
         <div class="sub" style="font-size:.72rem;margin-top:2px">{% if ds.source == 'tags' %}tag{% else %}LLM label{% endif %}{% if s.confidence is not none %} · {{ '%.0f' % (s.confidence*100) }}%{% endif %}{% if s.excluded %} · removed{% endif %}</div>
       </td>
-      <td>{% if s.excluded %}
+      <td class="r">{% if s.excluded %}
         <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">re-include</button></form>
       {% else %}
         <form class="inline" method="post" action="{{ url_for('classifier_dataset_remove', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small danger" type="submit">remove</button></form>
       {% endif %}</td>
     </tr>
     {% endfor %}
-  </table>
-  {% if ds.pos_total > ds.positives|length %}<div class="sub" style="margin-top:6px">showing the first {{ ds.positives|length }} of {{ ds.pos_total }}</div>{% endif %}
-  {% else %}<div class="sub">No positive samples yet - tag mail or let the LLM classify some first.</div>{% endif %}
+    </tbody></table></div>
+  {% if ds.pos_total > ds.positives|length %}<div class="sub" style="padding:10px 16px">showing the first {{ ds.positives|length }} of {{ ds.pos_total }}</div>{% endif %}
+  {% else %}<div class="empty"><h4>No positive samples yet</h4><p>Tag mail or let the LLM classify some first.</p></div>{% endif %}
 </div>
 
-<div class="card">
-  <h3>Out of set <span class="sub">(negatives — samples of other categories)</span></h3>
+<div class="card flush">
+  <div class="card-h" style="padding:14px 16px 10px;margin:0"><h3>Out of set <span class="sub">(negatives — samples of other categories)</span></h3></div>
   {% if ds.negatives %}
-  <table class="tbl">
-    <tr><th>subject</th><th>from</th><th>labeled</th><th></th></tr>
+  <div class="tablewrap"><table class="tbl mcards">
+    <thead><tr><th>subject</th><th>from</th><th>labeled</th><th class="r"></th></tr></thead>
+    <tbody>
     {% for s in ds.negatives %}
     <tr{% if s.excluded %} style="opacity:.45"{% endif %}>
       <td><a href="{{ url_for('message_detail', mid=s.msg_id) }}">{{ s.subject or '(no subject)' }}</a></td>
       <td class="sub">{{ s.from }}</td>
       <td>
-        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_relabel', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><select name="category" onchange="this.form.submit()" style="width:auto;padding:3px 6px;font-size:.82rem" aria-label="Reclassify sample">{% if ds.source == 'tags' %}{% if s.tag and s.tag not in options %}<option value="{{ s.tag }}" selected>{{ s.tag }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.tag == c else '' }}>{{ c }}</option>{% endfor %}{% else %}{% if s.llm_category and s.llm_category not in options %}<option value="{{ s.llm_category }}" selected>{{ s.llm_category }}</option>{% endif %}{% for c in options %}<option value="{{ c }}"{{ ' selected' if s.llm_category == c else '' }}>{{ c }}</option>{% endfor %}{% endif %}</select></form>
         <div class="sub" style="font-size:.72rem;margin-top:2px">{% if ds.source == 'tags' %}tag{% else %}LLM label{% endif %}{% if s.confidence is not none %} · {{ '%.0f' % (s.confidence*100) }}%{% endif %}{% if s.excluded %} · removed{% endif %}</div>
       </td>
-      <td>{% if s.excluded %}
+      <td class="r">{% if s.excluded %}
         <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">re-include</button></form>
       {% else %}
         <form class="inline" method="post" action="{{ url_for('classifier_dataset_remove', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small danger" type="submit">remove</button></form>
       {% endif %}</td>
     </tr>
     {% endfor %}
-  </table>
-  {% if ds.neg_total > ds.negatives|length %}<div class="sub" style="margin-top:6px">showing the first {{ ds.negatives|length }} of {{ ds.neg_total }}</div>{% endif %}
-  {% else %}<div class="sub">No negative samples yet.</div>{% endif %}
+    </tbody></table></div>
+  {% if ds.neg_total > ds.negatives|length %}<div class="sub" style="padding:10px 16px">showing the first {{ ds.negatives|length }} of {{ ds.neg_total }}</div>{% endif %}
+  {% else %}<div class="empty"><h4>No negative samples yet</h4><p>Samples from other categories sharpen precision — tag some more mail.</p></div>{% endif %}
 </div>
 """
+
+
 
 
 @app.route("/classifiers/<int:hid>/dataset")
@@ -1089,50 +1137,60 @@ def rules_test():
 
 
 RULE_EDIT_TMPL = """
-<h2>{{ 'Edit rule' if rule else 'New rule' }}</h2>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ 'Edit rule' if rule else 'New rule' }}</h1>
+    <div class="page-desc">Conditions match against from / to / subject / body. Empty condition rows are ignored.</div>
+  </div>
+  <div class="row"><a class="btn" href="{{ url_for('rules') }}">Back</a></div>
+</div>
 <form method="post" class="card">
   <div class="grid2">
-    <div><label>Name</label><input type="text" name="name" value="{{ rule.name if rule else '' }}" placeholder="e.g. Boss → Work"></div>
-    <div><label>Match mode</label>
-      <select name="match_mode">
+    <div><label for="r-name">Name</label><input id="r-name" type="text" name="name" value="{{ rule.name if rule else '' }}" placeholder="e.g. Boss → Work"></div>
+    <div><label for="r-mode">Match mode</label>
+      <select id="r-mode" name="match_mode">
         <option value="all" {{ 'selected' if (rule.match_mode if rule else 'all')=='all' else '' }}>ALL conditions must match</option>
         <option value="any" {{ 'selected' if rule and rule.match_mode=='any' else '' }}>ANY condition matches</option>
       </select></div>
   </div>
-  <label>Conditions <span class="sub">(empty rows are ignored)</span></label>
+  <label>Conditions</label>
   <div id="conds">
+    <div class="grid3 sub" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
     {% for i in range(5) %}
     {% set c = conditions[i] if conditions|length > i else {} %}
     <div class="grid3" style="margin-bottom:6px">
-      <select name="cond_field_{{ i }}">
+      <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field">
         {% for f in ['from','to','subject','body'] %}
         <option value="{{ f }}" {{ 'selected' if c.get('field')==f else '' }}>{{ f }}</option>{% endfor %}
       </select>
-      <select name="cond_op_{{ i }}">
+      <select name="cond_op_{{ i }}" aria-label="Condition {{ i+1 }} operator">
         {% for o in ['contains','equals','regex'] %}
         <option value="{{ o }}" {{ 'selected' if c.get('op')==o else '' }}>{{ o }}</option>{% endfor %}
       </select>
-      <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}">
+      <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" aria-label="Condition {{ i+1 }} value">
     </div>
     {% endfor %}
   </div>
-  <label>Actions <span class="sub">— leave all blank to keep matching mail in place (a guard rule: no later rule or LLM filing can move it)</span></label>
+  <h4>Actions</h4>
+  <div class="sub" style="margin-bottom:6px">Leave all blank to keep matching mail in place (a guard rule: no later rule or LLM filing can move it).</div>
   <div class="grid2">
-    <div><label>Move to folder <span class="sub">(blank = don't move; created if missing)</span></label>
-      <input type="text" name="move_to" value="{{ actions.get('move_to','') }}" placeholder="e.g. Work"></div>
+    <div><label for="r-move">Move to folder <span class="sub">(blank = don't move; created if missing)</span></label>
+      <input id="r-move" type="text" name="move_to" value="{{ actions.get('move_to','') }}" placeholder="e.g. Work"></div>
     <div>
-      <label class="row" style="color:var(--fg)"><input type="checkbox" name="mark_read" value="1" style="width:auto;margin-right:8px"
-        {{ 'checked' if actions.get('mark_read') else '' }}> Mark as read</label>
-      <label class="row" style="color:var(--fg)"><input type="checkbox" name="flag" value="1" style="width:auto;margin-right:8px"
-        {{ 'checked' if actions.get('flag') else '' }}> Flag / star</label>
-      <label class="row" style="color:var(--fg)"><input type="checkbox" name="enabled" value="1" style="width:auto;margin-right:8px"
-        {{ 'checked' if (rule.enabled if rule else True) else '' }}> Enabled</label>
+      <label class="check"><input type="checkbox" name="mark_read" value="1"
+        {{ 'checked' if actions.get('mark_read') else '' }}> <span>Mark as read</span></label>
+      <label class="check"><input type="checkbox" name="flag" value="1"
+        {{ 'checked' if actions.get('flag') else '' }}> <span>Flag / star</span></label>
+      <label class="check"><input type="checkbox" name="enabled" value="1"
+        {{ 'checked' if (rule.enabled if rule else True) else '' }}> <span>Enabled</span></label>
     </div>
   </div>
   <p style="margin-top:14px"><button class="btn primary" type="submit">Save rule</button>
   <a class="btn" href="{{ url_for('rules') }}">Back</a></p>
 </form>
 """
+
+
 
 
 def _rule_from_form():
@@ -1231,40 +1289,62 @@ def rule_move(rule_id):
 # ---------------------------------------------------------------- templates
 
 TEMPLATES_TMPL = """
-<h2>Reply templates <span class="sub">— placeholders: {sender} {subject} {date} {my_name}</span></h2>
-<div class="card">
-  <div class="spread"><div class="sub">Used as guidance when the LLM drafts a reply, or fill them in yourself.</div>
-  <a class="btn primary" href="{{ url_for('template_new') }}">New template</a></div>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Reply templates</h1>
+    <div class="page-desc">Used as guidance when the LLM drafts a reply — placeholders: {sender} {subject} {date} {my_name}</div>
+  </div>
+  <div class="row"><a class="btn primary" href="{{ url_for('template_new') }}">New template</a></div>
 </div>
-<div class="card">
+<div class="card flush">
   {% if templates %}
-  <table class="tbl"><tr><th>name</th><th>body preview</th><th></th></tr>
-  {% for t in templates %}
-  <tr><td>{{ t.name }}</td><td class="sub">{{ t.body[:120] }}</td>
-  <td class="row" style="white-space:nowrap">
-    <a class="btn small" href="{{ url_for('template_edit', tid=t.id) }}">edit</a>
-    <form class="inline" method="post" action="{{ url_for('template_delete', tid=t.id) }}"
-          onsubmit="return confirm('Delete template {{ t.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
-  </td></tr>
-  {% endfor %}</table>
-  {% else %}<div class="sub">No templates yet.</div>{% endif %}
+  <div class="tablewrap"><table class="tbl mcards">
+    <thead><tr><th>name</th><th>preview</th><th class="r"></th></tr></thead>
+    <tbody>
+    {% for t in templates %}
+    <tr>
+      <td><a href="{{ url_for('template_edit', tid=t.id) }}">{{ t.name }}</a></td>
+      <td class="sub">{{ t.body[:120] }}</td>
+      <td class="r"><span class="rowacts" style="justify-content:flex-end">
+        <a class="btn small" href="{{ url_for('template_edit', tid=t.id) }}">edit</a>
+        <form class="inline" method="post" action="{{ url_for('template_delete', tid=t.id) }}"
+              onsubmit="return confirm('Delete template {{ t.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
+      </span></td>
+    </tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% else %}
+  <div class="empty">
+    <h4>No templates yet</h4>
+    <p>Start from one of your recurring replies, e.g. a short acknowledgment — the assistant can reuse it when drafting.</p>
+    <a class="btn primary" href="{{ url_for('template_new') }}">New template</a>
+  </div>
+  {% endif %}
 </div>
 """
 
+
+
 TEMPLATE_EDIT_TMPL = """
-<h2>{{ 'Edit template' if template else 'New template' }}</h2>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ 'Edit template' if template else 'New template' }}</h1>
+    <div class="page-desc">Keep templates short — the LLM adapts them to the actual email.</div>
+  </div>
+  <div class="row"><a class="btn" href="{{ url_for('templates') }}">Back</a></div>
+</div>
 <form method="post" class="card">
   <div class="grid2">
-    <div><label>Name</label><input type="text" name="name" value="{{ template.name if template else '' }}" placeholder="e.g. Meeting ack"></div>
-    <div><label>Subject (optional; {subject} works)</label><input type="text" name="subject" value="{{ template.subject if template else '' }}" placeholder="Re: {subject}"></div>
+    <div><label for="t-name">Name</label><input id="t-name" type="text" name="name" value="{{ template.name if template else '' }}" placeholder="e.g. Meeting ack"></div>
+    <div><label for="t-subj">Subject <span class="sub">(optional; {subject} works)</span></label><input id="t-subj" type="text" name="subject" value="{{ template.subject if template else '' }}" placeholder="Re: {subject}"></div>
   </div>
-  <label>Body</label>
-  <textarea name="body" rows="10">{{ template.body if template else '' }}</textarea>
-  <p><button class="btn primary" type="submit">Save template</button>
-  <a class="btn" href="{{ url_for('templates') }}">Back</a></p>
-  <div class="sub">Tip: keep templates short — the LLM adapts them to the actual email.</div>
+  <label for="t-body">Body</label>
+  <textarea id="t-body" name="body" rows="10">{{ template.body if template else '' }}</textarea>
+  <p style="margin-top:14px"><button class="btn primary" type="submit">Save template</button></p>
 </form>
 """
+
+
 
 
 @app.route("/templates")
@@ -1307,13 +1387,19 @@ def template_delete(tid):
 # ---------------------------------------------------------------- messages
 
 MESSAGES_TMPL = """
-<h2>Messages <span class="sub">— newest mail first · tick rows to tag or classify in bulk</span></h2>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Messages</h1>
+    <div class="page-desc">Newest first — select rows to tag, classify or file in bulk.</div>
+  </div>
+  <div class="row"><span class="sub">{{ total }} message{{ 's' if total != 1 else '' }} · page {{ page }} of {{ pages }}</span></div>
+</div>
 
 {% if proposals %}
 <div class="card">
-  <h3>Rules proposed from your tags <span class="sub">— review, then add with one click</span></h3>
+  <div class="card-h"><h3>Rules proposed from your tags <span class="sub">— review, then add with one click</span></h3></div>
   {% for p in proposals %}
-  <div style="background:#fff;border:1px solid var(--line);padding:10px 12px;margin:8px 0">
+  <div style="border:1px solid var(--line);padding:12px;margin:8px 0">
     <div class="spread">
       <div><b>{{ p.rule_obj.name }}</b> <span class="sub">({{ p.rule_obj.match_mode }})</span>{% if p.rule_obj.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}{% if p.similar %} <span class="badge warn">overlaps #{{ p.similar.id }}</span>{% endif %}</div>
       <div class="row" style="white-space:nowrap">
@@ -1323,8 +1409,8 @@ MESSAGES_TMPL = """
         <form class="inline" method="post" action="{{ url_for('proposal_dismiss', pid=p.id) }}"><button class="btn small danger" type="submit">Dismiss</button></form>
       </div>
     </div>
-    {% if p.similar %}<div class="note" style="border-color:var(--warn);color:var(--warn)">⚠ Similar rule exists: #{{ p.similar.id }} "{{ p.similar.name }}"{% if not p.similar.enabled %} (disabled){% endif %} — {{ p.similar_actions }}. Updating it avoids a duplicate.</div>{% endif %}
-    <div class="mono" style="font-size:.85rem">{{ p.cond_text }}</div>
+    {% if p.similar %}<div class="note" style="border-color:var(--warn);color:var(--warn);margin-top:8px">⚠ Similar rule exists: #{{ p.similar.id }} "{{ p.similar.name }}"{% if not p.similar.enabled %} (disabled){% endif %} — {{ p.similar_actions }}. Updating it avoids a duplicate.</div>{% endif %}
+    <div class="mono" style="font-size:.83rem;margin-top:6px">{{ p.cond_text }}</div>
     <div class="sub">{{ p.act_text }}{% if p.rule_obj.rationale %} — {{ p.rule_obj.rationale }}{% endif %}</div>
   </div>
   {% endfor %}
@@ -1333,66 +1419,100 @@ MESSAGES_TMPL = """
 
 {% if classify_state.running %}
 <div class="card">
-  <div class="row">
-    <span class="badge acc">classifying…</span>
-    <span class="sub">{{ classify_state.done }}/{{ classify_state.total }}{% if classify_state.failed %} · {{ classify_state.failed }} failed{% endif %}{% if classify_state.concurrency %} · {{ classify_state.concurrency }} at a time{% endif %}{% if classify_state.current %} · now: {{ classify_state.current }}{% endif %}</span>
+  <div class="spread">
+    <div class="row" style="gap:10px">
+      <span class="badge acc">classifying…</span>
+      <span class="sub">{{ classify_state.done }}/{{ classify_state.total }}{% if classify_state.failed %} · {{ classify_state.failed }} failed{% endif %}{% if classify_state.concurrency %} · {{ classify_state.concurrency }} at a time{% endif %}{% if classify_state.current %} · now: {{ classify_state.current }}{% endif %}</span>
+    </div>
     <form class="inline" method="post" action="{{ url_for('classify_stop') }}"><button class="btn small danger" type="submit">Stop</button></form>
   </div>
+  {% if classify_state.total %}
+  <div class="progress" style="margin-top:10px"><i style="width:{{ (classify_state.done * 100 / classify_state.total)|round|int }}%"></i></div>
+  {% endif %}
 </div>
 <script>setTimeout(function(){ location.reload(); }, 10000);</script>
 {% endif %}
 
-<div class="card">
+<div class="card flush">
   <form id="bulk" method="post">
-    <div class="row">
-      <input type="text" name="tag" list="taglist" placeholder="tag selected as…" style="max-width:210px">
-      <datalist id="taglist">{% for c in tag_options %}<option value="{{ c }}">{% endfor %}</datalist>
-      <button class="btn" type="submit" formaction="{{ url_for('messages_tag') }}">Tag</button>
-      <button class="btn" type="submit" formaction="{{ url_for('messages_untag') }}">Untag</button>
-      <button class="btn" type="submit" formaction="{{ url_for('messages_classify') }}">Classify selected</button>
+    <div class="toolbar">
+      {% for key, label, n in filter_chips %}
+      <a class="chip{{ ' active' if filt==key else '' }}" href="{{ url_for('messages', f=key) }}">{{ label }} <span class="n">{{ n }}</span></a>
+      {% endfor %}
+      <span style="flex:1"></span>
       <button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify all unclassified ({{ unclassified }})</button>
       <button class="btn small" type="submit" formaction="{{ url_for('learn_rules') }}" {{ 'disabled' if not tagged_count else '' }}>Learn rules from tags ({{ tagged_count }})</button>
     </div>
-    <div class="row" style="margin-top:8px">
-      {% for key, label in [('all','All'),('queued','Awaiting LLM'),('needs_reply','Needs reply'),('moved','Sorted'),('tagged','Tagged'),('errors','Errors')] %}
-        <a class="btn small {{ 'primary' if filt==key else '' }}" href="{{ url_for('messages', f=key) }}">{{ label }}</a>
-      {% endfor %}
+    <div class="bulkbar" id="bulkbar" role="region" aria-label="Bulk actions">
+      <span class="n" id="bulkcount">0 selected</span>
+      <button class="btn small" type="button" id="bulkclear">Clear</button>
+      <input type="text" name="tag" list="taglist" placeholder="tag selected as…" aria-label="Tag"
+             style="height:28px;width:190px;background:#141414;color:#fff;border-color:#3f3f46">
+      <datalist id="taglist">{% for c in tag_options %}<option value="{{ c }}">{% endfor %}</datalist>
+      <button class="btn small" type="submit" formaction="{{ url_for('messages_tag') }}">Tag</button>
+      <button class="btn small" type="submit" formaction="{{ url_for('messages_untag') }}">Untag</button>
+      <button class="btn small primary" type="submit" formaction="{{ url_for('messages_classify') }}">Classify selected</button>
     </div>
-    <div class="row" style="margin-top:8px">
-      <span class="sub">{{ total }} message{{ 's' if total != 1 else '' }} · page {{ page }} of {{ pages }}</span>
-      {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per) }}">← Newer</a>{% endif %}
-      {% if page < pages %}<a class="btn small primary" href="{{ url_for('messages', f=filt, page=page+1, per=per) }}">Older →</a>{% endif %}
-      {% if page < pages %}<a class="btn small" href="{{ url_for('messages', f=filt, page=pages, per=per) }}">Last »</a>{% endif %}
-      <span class="sub">per page:
-        {% for n in [50, 100, 250, 500] %}<a class="{{ 'primary ' if per==n else '' }}btn small" style="padding:.1rem .45rem" href="{{ url_for('messages', f=filt, page=1, per=n) }}">{{ n }}</a>{% endfor %}
-      </span>
-    </div>
-    <table class="tbl" style="margin-top:8px">
-      <tr>
-        <th><input type="checkbox" style="width:auto" onclick="for (var b of document.querySelectorAll('#bulk input[name=ids]')) b.checked = this.checked;"></th>
+    {% if msgs %}
+    <div class="tablewrap"><table class="tbl mcards">
+      <thead><tr>
+        <th class="sel"><input type="checkbox" id="selall" aria-label="Select all on this page"></th>
         <th>date</th><th>from</th><th>subject</th><th>tag</th><th>status</th><th>LLM</th>
-      </tr>
+      </tr></thead>
+      <tbody>
       {% for m in msgs %}
       <tr>
-        <td><input type="checkbox" name="ids" value="{{ m.id }}" style="width:auto"></td>
-        <td class="sub">{{ m.when }}</td>
+        <td class="sel"><input type="checkbox" name="ids" value="{{ m.id }}" aria-label="Select message"></td>
+        <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
         <td class="sub">{{ m.from_addr[:34] }}</td>
-        <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:84] or '(no subject)' }}</a>{% if m.llm_summary %}<div class="sub" style="font-size:.78rem">{{ m.llm_summary[:150] }}</div>{% endif %}</td>
+        <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:84] or '(no subject)' }}</a>
+          {% if m.llm_summary %}<div class="sub" style="font-size:.78rem">{{ m.llm_summary[:150] }}</div>{% endif %}</td>
         <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
         <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
         <td class="sub">{{ m.llm }}</td>
       </tr>
       {% endfor %}
-    </table>
-    <div class="row" style="margin-top:8px">
-      {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per) }}">← Newer</a>{% endif %}
-      {% if page < pages %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page+1, per=per) }}">Older →</a>{% endif %}
-      <span class="sub">page {{ page }}/{{ pages }}</span>
+      </tbody></table></div>
+    {% else %}
+    <div class="empty">
+      <h4>No messages{% if filt != 'all' %} match this filter{% endif %} yet</h4>
+      <p>{% if filt == 'all' %}Mail shows up here after the watcher's first pass.{% else %}Try another filter, or check again shortly.{% endif %}</p>
     </div>
-    {% if not msgs %}<div class="sub">No messages{% if filt != 'all' %} in this filter{% endif %} yet.</div>{% endif %}
+    {% endif %}
+    <div class="pager">
+      {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per) }}">← Newer</a>{% endif %}
+      {% if page < pages %}<a class="btn small primary" href="{{ url_for('messages', f=filt, page=page+1, per=per) }}">Older →</a>{% endif %}
+      {% if page < pages %}<a class="btn small" href="{{ url_for('messages', f=filt, page=pages, per=per) }}">Last »</a>{% endif %}
+      <span class="sub">page {{ page }} of {{ pages }}</span>
+      <span class="sub" style="margin-left:auto">per page:
+        {% for n in [50, 100, 250, 500] %}<a class="chip{{ ' active' if per==n else '' }}" style="height:24px;padding:0 8px" href="{{ url_for('messages', f=filt, page=1, per=n) }}">{{ n }}</a>{% endfor %}
+      </span>
+    </div>
   </form>
 </div>
+<script>
+(function(){
+  var form = document.getElementById('bulk');
+  if(!form) return;
+  var bar = document.getElementById('bulkbar');
+  var count = document.getElementById('bulkcount');
+  var all = document.getElementById('selall');
+  function boxes(){ return Array.prototype.slice.call(form.querySelectorAll('input[name=ids]')); }
+  function update(){
+    var n = boxes().filter(function(b){ return b.checked; }).length;
+    if(bar) bar.classList.toggle('on', n > 0);
+    if(count) count.textContent = n + ' selected';
+    if(all) all.checked = n > 0 && n === boxes().length;
+  }
+  if(all) all.addEventListener('change', function(){ boxes().forEach(function(b){ b.checked = all.checked; }); update(); });
+  form.addEventListener('change', function(e){ if(e.target && e.target.name === 'ids') update(); });
+  var clear = document.getElementById('bulkclear');
+  if(clear) clear.addEventListener('click', function(){ boxes().forEach(function(b){ b.checked = false; }); update(); });
+})();
+</script>
 """
+
+
 
 
 def _proposal_views():
@@ -1442,13 +1562,16 @@ def messages():
         + [json.loads(r.get("actions") or "{}").get("move_to", "")
            for r in store.list_rules() if r.get("enabled")]))
     tag_options = [t for t in tag_options if t]
+    filter_chips = [(key, label, store.count_messages(key)) for key, label in (
+        ("all", "All"), ("queued", "Awaiting LLM"), ("needs_reply", "Needs reply"),
+        ("moved", "Sorted"), ("tagged", "Tagged"), ("errors", "Errors"))]
     return render(render_template_string(
         MESSAGES_TMPL, msgs=msgs, filt=filt, page=page, pages=pages, per=per, total=total,
         proposals=_proposal_views(),
         classify_state=dict(classifier.state),
         unclassified=store.unclassified_count(),
         tagged_count=len(store.tagged_examples(1000)),
-        tag_options=tag_options))
+        tag_options=tag_options, filter_chips=filter_chips))
 
 
 @app.route("/messages/tag", methods=["POST"])
@@ -1573,63 +1696,100 @@ def proposal_dismiss(pid):
 
 
 MESSAGE_TMPL = """
-<h2>{{ m.subject[:100] or '(no subject)' }}</h2>
-<div class="card">
-  <div class="kv sub">From <b>{{ m.from_addr }}</b> · {{ m.date }} · folder {{ m.folder }} · uid {{ m.uid }}</div>
-  <div class="row" style="margin:8px 0">
+<style>
+.msgrid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;align-items:start}
+@media(max-width:1023px){.msgrid{grid-template-columns:1fr}}
+.msgrid .card{margin-top:0}
+.msgbody{white-space:pre-wrap;margin:12px 0 2px;font-size:.92rem;line-height:1.55}
+</style>
+<div class="page-head">
+  <div style="min-width:0">
+    <div class="sub" style="margin-bottom:4px"><a href="{{ url_for('messages') }}">← Messages</a></div>
+    <h1 class="page-title" style="font-size:1.12rem">{{ m.subject[:100] or '(no subject)' }}</h1>
+    <div class="page-desc">{{ m.from_addr }} · {{ m.date }} · {{ m.folder }}</div>
+  </div>
+  <div class="row">
     <span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>
-    {% if m.user_tag %}<span class="badge warn">tag: {{ m.user_tag }}</span>{% endif %}
-    {% if m.action_taken %}<span class="badge">{{ m.action_taken }}</span>{% endif %}
-    {% if m.llm_category %}<span class="badge acc">LLM: {{ m.llm_category }}
-      {% if m.llm_confidence is not none %}({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
-    {% if m.classified_by and m.classified_by.startswith('heuristic') %}<span class="badge acc">⚙ {{ m.classified_by }}</span>{% endif %}
     {% if m.llm_needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
   </div>
-  {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_reason %} · why: {{ m.llm_reason }}{% endif %}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
-  {% if m.llm_thinking %}<details class="sub" style="margin:4px 0"><summary style="cursor:pointer">classifier thinking</summary><pre class="mono" style="white-space:pre-wrap;font-size:.8rem;color:var(--dim);margin:6px 0">{{ m.llm_thinking }}</pre></details>{% endif %}
-  <div class="row" style="margin:10px 0 2px">
-    <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
-      <button class="btn small primary" type="submit">{{ 'Re-classify with LLM' if m.llm_category else 'Classify with LLM' }}</button></form>
-    {% if m.llm_suggested_folder %}
-    <form class="inline" method="post" action="{{ url_for('message_file', mid=m.id) }}">
-      <button class="btn small" type="submit">File to {{ m.llm_suggested_folder }}</button></form>
-    {% endif %}
-    <form class="inline row" method="post" action="{{ url_for('message_tag', mid=m.id) }}">
-      <input type="text" name="tag" value="{{ m.user_tag }}" placeholder="tag…" style="max-width:170px;width:auto">
-      <button class="btn small" type="submit">Save tag</button>
-    </form>
-  </div>
-  {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
-    ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.reason %} · why: {{ classify_result.reason }}{% endif %}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
-  <div style="white-space:pre-wrap;margin:10px 0;font-size:.92rem;line-height:1.5">{{ m.body[:4000] }}</div>
 </div>
 
-<h2>Reply</h2>
-<div class="card">
-  <div class="row">
-    <form class="inline" method="post" action="{{ url_for('message_draft', mid=m.id) }}">
-      <select name="template_id" style="width:auto;min-width:220px">
-        <option value="">(no template — freeform)</option>
-        {% for t in templates %}<option value="{{ t.id }}" {{ 'selected' if draft_template_id==t.id else '' }}>{{ t.name }}</option>{% endfor %}
-      </select>
-      <button class="btn primary" type="submit">Draft with LLM</button>
-    </form>
-    <span class="sub">{% if not llm_configured %}LLM key not configured — see Settings.{% endif %}</span>
+<div class="msgrid">
+  <div class="stack">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        {% if m.user_tag %}<span class="badge warn">tag: {{ m.user_tag }}</span>{% endif %}
+        {% if m.action_taken %}<span class="badge">{{ m.action_taken }}</span>{% endif %}
+        {% if m.llm_category %}<span class="badge acc">LLM: {{ m.llm_category }}{% if m.llm_confidence is not none %} ({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
+        {% if m.classified_by and m.classified_by.startswith('heuristic') %}<span class="badge acc">⚙ {{ m.classified_by }}</span>{% endif %}
+      </div>
+      {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_reason %} · why: {{ m.llm_reason }}{% endif %}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
+      {% if m.llm_thinking %}<details class="sub" style="margin:8px 0 0"><summary style="cursor:pointer">classifier thinking</summary><pre class="mono" style="white-space:pre-wrap;font-size:.8rem;color:var(--dim);margin:6px 0">{{ m.llm_thinking }}</pre></details>{% endif %}
+      {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
+        ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.reason %} · why: {{ classify_result.reason }}{% endif %}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
+      <div class="msgbody">{{ m.body[:4000] }}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>Reply</h3><span class="sub">Saved to your Drafts folder — nothing is sent automatically.</span></div>
+      <div class="row">
+        <form class="inline" method="post" action="{{ url_for('message_draft', mid=m.id) }}">
+          <select name="template_id" style="width:auto;min-width:220px">
+            <option value="">(no template — freeform)</option>
+            {% for t in templates %}<option value="{{ t.id }}" {{ 'selected' if draft_template_id==t.id else '' }}>{{ t.name }}</option>{% endfor %}
+          </select>
+          <button class="btn primary" type="submit">Draft with LLM</button>
+        </form>
+        <span class="sub">{% if not llm_configured %}LLM key not configured — see Settings.{% endif %}</span>
+      </div>
+      {% if draft %}
+      <form method="post" action="{{ url_for('message_save', mid=m.id) }}" style="margin-top:10px">
+        <textarea name="body" rows="12">{{ draft }}</textarea>
+        <p class="row" style="margin-top:8px">
+          <button class="btn primary" type="submit">Save to Drafts</button>
+          <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.querySelector('textarea[name=body]').value);this.textContent='copied'">Copy</button>
+        </p>
+      </form>
+      {% elif draft_error %}
+      <div class="msg err" style="margin-top:10px">Draft failed: {{ draft_error }}</div>
+      {% endif %}
+    </div>
   </div>
-  {% if draft %}
-  <form method="post" action="{{ url_for('message_save', mid=m.id) }}" style="margin-top:10px">
-    <textarea name="body" rows="12">{{ draft }}</textarea>
-    <p class="row" style="margin-top:8px">
-      <button class="btn primary" type="submit">Save to Drafts</button>
-      <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.querySelector('textarea[name=body]').value);this.textContent='copied'">Copy</button>
-      <span class="sub">Saving puts it in your Drafts folder — nothing is sent automatically; review & send from your mail client.</span>
-    </p>
-  </form>
-  {% elif draft_error %}
-  <div class="msg err" style="margin-top:10px">Draft failed: {{ draft_error }}</div>
-  {% endif %}
+
+  <div class="stack">
+    <div class="card">
+      <div class="card-h"><h3>Actions</h3></div>
+      <div class="row">
+        <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
+          <button class="btn small primary" type="submit">{{ 'Re-classify with LLM' if m.llm_category else 'Classify with LLM' }}</button></form>
+        {% if m.llm_suggested_folder %}
+        <form class="inline" method="post" action="{{ url_for('message_file', mid=m.id) }}">
+          <button class="btn small" type="submit">File to {{ m.llm_suggested_folder }}</button></form>
+        {% endif %}
+      </div>
+      <form method="post" action="{{ url_for('message_tag', mid=m.id) }}" style="margin-top:10px">
+        <label>Tag this message</label>
+        <div class="row" style="flex-wrap:nowrap">
+          <input type="text" name="tag" value="{{ m.user_tag }}" placeholder="e.g. Receipt">
+          <button class="btn small" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Details</h3></div>
+      <div class="kv">
+        <div class="k">From</div><div>{{ m.from_addr or '—' }}</div>
+        <div class="k">To</div><div>{{ m.to_addr or '—' }}</div>
+        <div class="k">Date</div><div>{{ m.date or '—' }}</div>
+        <div class="k">Folder</div><div>{{ m.folder }} <span class="sub">uid {{ m.uid }}</span></div>
+        <div class="k">Message-ID</div><div class="mono" style="font-size:.77rem">{{ m.msgid or '—' }}</div>
+      </div>
+    </div>
+  </div>
 </div>
 """
+
+
 
 
 def _message_body_for_view(m):
@@ -2341,191 +2501,207 @@ def assistant_clear():
 # ---------------------------------------------------------------- settings
 
 SETTINGS_TMPL = """
-<h2>Settings</h2>
-<form method="post" class="card">
+<style>
+.savebar{position:sticky;bottom:10px;background:rgba(250,250,250,.94);backdrop-filter:blur(4px);
+border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;gap:10px;margin-top:14px;z-index:4}
+.secnav{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 4px}
+</style>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Settings</h1>
+    <div class="page-desc">Everything here is stored in SQLite — endpoints, keys, behaviour and display.</div>
+  </div>
+  <div class="row secnav">
+    <a class="chip" href="#behavior">Behaviour</a>
+    <a class="chip" href="#llm">LLM endpoint</a>
+    <a class="chip" href="#rag">RAG</a>
+    <a class="chip" href="#connection">Mail connection</a>
+    <a class="chip" href="#runtime">Runtime</a>
+  </div>
+</div>
+
+<form method="post" class="card" id="behavior">
   <input type="hidden" name="section" value="behavior">
-  <h3>Polling &amp; rules</h3>
+  <div class="card-h"><h3>Behaviour</h3><span class="sub">polling, rules and LLM triage</span></div>
   <div class="grid2">
-    <div><label>Check interval (seconds)</label><input type="number" name="poll_interval" value="{{ s.poll_interval }}" min="15"></div>
-    <div><label>First-run lookback (hours)</label><input type="number" name="lookback_hours" value="{{ s.lookback_hours }}" min="1"></div>
+    <div><label for="p-int">Check interval (seconds)</label><input id="p-int" type="number" name="poll_interval" value="{{ s.poll_interval }}" min="15"></div>
+    <div><label for="p-look">First-run lookback (hours)</label><input id="p-look" type="number" name="lookback_hours" value="{{ s.lookback_hours }}" min="1"></div>
   </div>
   <div class="grid2">
-    <div><label>Watched folders (comma separated)</label><input type="text" name="watch_folders" value="{{ s.watch_folders|join(', ') }}"></div>
-    <div><label>Your name (for drafts)</label><input type="text" name="my_name" value="{{ s.my_name }}"></div>
+    <div><label for="p-watch">Watched folders (comma separated)</label><input id="p-watch" type="text" name="watch_folders" value="{{ s.watch_folders|join(', ') }}"></div>
+    <div><label for="p-name">Your name (for drafts)</label><input id="p-name" type="text" name="my_name" value="{{ s.my_name }}"></div>
   </div>
   <div class="grid2">
-    <div><label>Classify concurrency <span class="sub">(parallel LLM requests, 1-16)</span></label><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16"></div>
-    <div><label>Time display offset <span class="sub">(hours from UTC; timestamps show as {{ tz }})</span></label><input type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14"></div>
+    <div><label for="p-conc">Classify concurrency <span class="sub">(parallel LLM requests, 1-16)</span></label><input id="p-conc" type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16"></div>
+    <div><label for="p-tz">Time display offset <span class="sub">(hours from UTC; timestamps show as {{ tz }})</span></label><input id="p-tz" type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14"></div>
   </div>
-  <label class="row" style="color:var(--fg)"><input type="hidden" name="rules_apply" value="0"><input type="checkbox" name="rules_apply" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.rules_apply else '' }}> Apply rule actions for real (uncheck = dry-run, suggests only)</label>
-  <label class="row" style="color:var(--fg)"><input type="hidden" name="heuristics_enabled" value="0"><input type="checkbox" name="heuristics_enabled" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.heuristics_enabled else '' }}> Run trained classifiers before the LLM (deterministic, prompt-injection safe)</label>
-  <label class="row" style="color:var(--fg)"><input type="hidden" name="heuristic_autorefine" value="0"><input type="checkbox" name="heuristic_autorefine" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.heuristic_autorefine else '' }}> Auto-retrain classifiers as new tags arrive</label>
-  <label class="row" style="color:var(--fg)"><input type="hidden" name="llm_suggest" value="0"><input type="checkbox" name="llm_suggest" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.llm_suggest else '' }}> Classify unmatched mail with the LLM</label>
-  <label class="row" style="color:var(--fg)"><input type="hidden" name="llm_apply" value="0"><input type="checkbox" name="llm_apply" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.llm_apply else '' }}> Auto-file mail by LLM category (uses the folder map below)</label>
-  <label class="row" style="color:var(--fg)"><input type="hidden" name="assistant_actions_apply" value="0"><input type="checkbox" name="assistant_actions_apply" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.assistant_actions_apply else '' }}> Assistant may act on mail (create folders, move, flag) — uncheck = dry-run</label>
-  <label class="row" style="color:var(--fg)"><input type="hidden" name="index_enabled" value="0"><input type="checkbox" name="index_enabled" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.index_enabled else '' }}> Build the semantic search index (embeddings endpoint below)</label>
-  <label class="row" style="color:var(--fg)"><input type="hidden" name="rerank_enabled" value="0"><input type="checkbox" name="rerank_enabled" value="1" style="width:auto;margin-right:8px"
-    {{ 'checked' if s.rerank_enabled else '' }}> Rerank search results with the cross-encoder (better precision, slightly slower)</label>
-  <label>Indexed folders <span class="sub">(comma separated; blank = all except the excluded list in the RAG card)</span></label>
-  <input type="text" name="index_folders" value="{{ s.index_folders|join(', ') }}">
-  <h3>LLM behaviour</h3>
+  <div style="margin-top:8px">
+    <label class="check"><input type="checkbox" name="rules_apply" value="1"><input type="hidden" name="rules_apply" value="0" {{ 'checked' if s.rules_apply else '' }}> <span>Apply rule actions for real — uncheck for dry-run (suggests only)</span></label>
+    <label class="check"><input type="checkbox" name="heuristics_enabled" value="1"><input type="hidden" name="heuristics_enabled" value="0" {{ 'checked' if s.heuristics_enabled else '' }}> <span>Run trained classifiers before the LLM (deterministic, prompt-injection safe)</span></label>
+    <label class="check"><input type="checkbox" name="heuristic_autorefine" value="1"><input type="hidden" name="heuristic_autorefine" value="0" {{ 'checked' if s.heuristic_autorefine else '' }}> <span>Auto-retrain classifiers as new tags arrive</span></label>
+    <label class="check"><input type="checkbox" name="llm_suggest" value="1"><input type="hidden" name="llm_suggest" value="0" {{ 'checked' if s.llm_suggest else '' }}> <span>Classify unmatched mail with the LLM</span></label>
+    <label class="check"><input type="checkbox" name="llm_apply" value="1"><input type="hidden" name="llm_apply" value="0" {{ 'checked' if s.llm_apply else '' }}> <span>Auto-file mail by LLM category (uses the folder map below)</span></label>
+    <label class="check"><input type="checkbox" name="assistant_actions_apply" value="1"><input type="hidden" name="assistant_actions_apply" value="0" {{ 'checked' if s.assistant_actions_apply else '' }}> <span>Assistant may act on mail (create folders, move, flag) — uncheck = dry-run</span></label>
+    <label class="check"><input type="checkbox" name="index_enabled" value="1"><input type="hidden" name="index_enabled" value="0" {{ 'checked' if s.index_enabled else '' }}> <span>Build the semantic search index (embeddings endpoint below)</span></label>
+    <label class="check"><input type="checkbox" name="rerank_enabled" value="1"><input type="hidden" name="rerank_enabled" value="0" {{ 'checked' if s.rerank_enabled else '' }}> <span>Rerank search results with the cross-encoder (better precision, slightly slower)</span></label>
+  </div>
+  <label for="p-ifolders">Indexed folders <span class="sub">(comma separated; blank = all except the excluded list in the RAG section)</span></label>
+  <input id="p-ifolders" type="text" name="index_folders" value="{{ s.index_folders|join(', ') }}">
   <div class="grid2">
-    <div><label>Max LLM calls per hour</label><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0"></div>
-    <div><label>LLM classifications per check</label><input type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1"></div>
+    <div><label for="p-max">Max LLM calls per hour</label><input id="p-max" type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0"></div>
+    <div><label for="p-batch">LLM classifications per check</label><input id="p-batch" type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1"></div>
   </div>
-  <label>Categories (comma separated)</label>
-  <input type="text" name="categories" value="{{ s.categories|join(', ') }}">
-  <label>Category → folder map <span class="sub">(one per line, "Category = Folder"; blank folder = keep in inbox)</span></label>
-  <textarea name="category_folders" rows="6" style="min-height:100px">{% for k, v in s.category_folders.items() %}{{ k }} = {{ v }}
+  <label for="p-cats">Categories (comma separated)</label>
+  <input id="p-cats" type="text" name="categories" value="{{ s.categories|join(', ') }}">
+  <label for="p-cmap">Category → folder map <span class="sub">(one per line, "Category = Folder"; blank folder = keep in inbox)</span></label>
+  <textarea id="p-cmap" name="category_folders" rows="6" style="min-height:100px">{% for k, v in s.category_folders.items() %}{{ k }} = {{ v }}
 {% endfor %}</textarea>
   <div class="grid2">
-    <div><label>Drafts folder <span class="sub">(blank = auto-detect)</span></label><input type="text" name="drafts_folder" value="{{ s.drafts_folder }}"></div>
+    <div><label for="p-drafts">Drafts folder <span class="sub">(blank = auto-detect)</span></label><input id="p-drafts" type="text" name="drafts_folder" value="{{ s.drafts_folder }}"></div>
   </div>
-  <p style="margin-top:14px"><button class="btn primary" type="submit">Save settings</button></p>
+  <div class="savebar"><button class="btn primary" type="submit">Save settings</button><span class="sub">Applies on the next worker cycle.</span></div>
 </form>
 
-<div class="card">
-  <h3>LLM endpoint <span class="sub">— any OpenAI-compatible /chat/completions server</span></h3>
+<div class="card" id="llm">
+  <div class="card-h"><h3>LLM endpoint</h3><span class="sub">any OpenAI-compatible /chat/completions server</span></div>
   <form method="post">
     <input type="hidden" name="section" value="llm">
     <div class="grid2">
-      <div><label>Base URL <span class="sub">(e.g. http://100.93.139.49:8040/v1)</span></label><input type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}"></div>
-      <div><label>Model</label><input type="text" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model }}"></div>
+      <div><label for="l-base">Base URL <span class="sub">(e.g. http://100.93.139.49:8040/v1)</span></label><input id="l-base" type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}"></div>
+      <div><label for="l-model">Model</label><input id="l-model" type="text" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model }}"></div>
     </div>
     <div class="grid2">
-      <div><label>API key <span class="sub">(blank keeps the stored key; enter a new one to replace)</span></label><input type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}"></div>
-      <div><label>Timeout (seconds) <span class="sub">(blank = default)</span></label><input type="number" name="llm_timeout" min="0" value="{{ s.llm_timeout or '' }}" placeholder="90"></div>
+      <div><label for="l-key">API key <span class="sub">(blank keeps the stored key; enter a new one to replace)</span></label><input id="l-key" type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}"></div>
+      <div><label for="l-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="l-timeout" type="number" name="llm_timeout" min="0" value="{{ s.llm_timeout or '' }}" placeholder="90"></div>
     </div>
     <div class="grid2">
-      <div><label>Thinking / reasoning channel</label>
-        <select name="llm_thinking">
+      <div><label for="l-think">Thinking / reasoning channel</label>
+        <select id="l-think" name="llm_thinking">
           <option value="auto" {{ 'selected' if s.llm_thinking != 'off' else '' }}>auto — send the vLLM thinking extension, drop it if the endpoint rejects it</option>
           <option value="off" {{ 'selected' if s.llm_thinking == 'off' else '' }}>off — never send it (strict OpenAI-compatible servers)</option>
         </select>
       </div>
-      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="llm_api_key_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored API key</label></div>
+      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="llm_api_key_clear" value="1"> <span>Clear the stored API key</span></label></div>
     </div>
     <h4>Fallback endpoint <span class="sub">(optional; used automatically when the primary fails)</span></h4>
     <div class="grid2">
-      <div><label>Base URL</label><input type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}"></div>
-      <div><label>Model <span class="sub">(blank = same as primary)</span></label><input type="text" name="llm_fallback_model" value="{{ s.llm_fallback_model }}" placeholder="{{ (llm.fallback.model if llm.fallback else '') or '' }}"></div>
+      <div><label for="l-fbase">Base URL</label><input id="l-fbase" type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}"></div>
+      <div><label for="l-fmodel">Model <span class="sub">(blank = same as primary)</span></label><input id="l-fmodel" type="text" name="llm_fallback_model" value="{{ s.llm_fallback_model }}" placeholder="{{ (llm.fallback.model if llm.fallback else '') or '' }}"></div>
     </div>
     <div class="grid2">
-      <div><label>API key <span class="sub">(blank keeps the stored key)</span></label><input type="password" name="llm_fallback_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if (llm.fallback and llm.fallback.key) else 'not set' }}"></div>
-      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="llm_fallback_api_key_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored fallback key</label></div>
+      <div><label for="l-fkey">API key <span class="sub">(blank keeps the stored key)</span></label><input id="l-fkey" type="password" name="llm_fallback_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if (llm.fallback and llm.fallback.key) else 'not set' }}"></div>
+      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="llm_fallback_api_key_clear" value="1"> <span>Clear the stored fallback key</span></label></div>
     </div>
-    <p style="margin-top:14px"><button class="btn primary" type="submit">Save LLM endpoint</button></p>
+    <div class="savebar">
+      <button class="btn primary" type="submit">Save LLM endpoint</button>
+      <span class="sub">Blank fields fall back to the env file.</span>
+    </div>
   </form>
-  <div class="row" style="margin-top:8px">
+  <div class="row" style="margin-top:10px">
     <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit">Test primary</button></form>
     <form class="inline" method="post" action="{{ url_for('settings_test_llm', which='fallback') }}"><button class="btn" type="submit">Test fallback</button></form>
     <span class="sub">tests the saved settings — save first if you just edited them</span>
   </div>
 </div>
 
-<div class="card">
-  <h3>RAG / semantic search <span class="sub">— embeddings + reranker endpoints</span></h3>
+<div class="card" id="rag">
+  <div class="card-h"><h3>RAG / semantic search</h3><span class="sub">embeddings + reranker endpoints</span></div>
   <form method="post">
     <input type="hidden" name="section" value="rag">
     <h4>Embeddings</h4>
     <div class="grid2">
-      <div><label>Base URL</label><input type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}"></div>
-      <div><label>Model</label><input type="text" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model }}"></div>
+      <div><label for="e-base">Base URL</label><input id="e-base" type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}"></div>
+      <div><label for="e-model">Model</label><input id="e-model" type="text" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model }}"></div>
     </div>
     <div class="grid2">
-      <div><label>Protocol</label>
-        <select name="embed_protocol">
+      <div><label for="e-proto">Protocol</label>
+        <select id="e-proto" name="embed_protocol">
           <option value="tei" {{ 'selected' if s.embed_protocol != 'openai' else '' }}>TEI — POST /embed {"inputs": [...]}</option>
           <option value="openai" {{ 'selected' if s.embed_protocol == 'openai' else '' }}>OpenAI — POST /embeddings {"input": [...]} (OpenAI, Ollama, LM Studio, TEI /v1)</option>
         </select>
       </div>
-      <div><label>API key <span class="sub">(blank keeps the stored key; only for gated endpoints)</span></label><input type="password" name="embed_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if ecfg.key else 'not set' }}"></div>
+      <div><label for="e-key">API key <span class="sub">(blank keeps the stored key; only for gated endpoints)</span></label><input id="e-key" type="password" name="embed_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if ecfg.key else 'not set' }}"></div>
     </div>
     <div class="grid2">
-      <div><label>Timeout (seconds) <span class="sub">(blank = default)</span></label><input type="number" name="embed_timeout" min="0" value="{{ s.embed_timeout or '' }}" placeholder="180"></div>
-      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="embed_api_key_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored key</label></div>
+      <div><label for="e-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="e-timeout" type="number" name="embed_timeout" min="0" value="{{ s.embed_timeout or '' }}" placeholder="180"></div>
+      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="embed_api_key_clear" value="1"> <span>Clear the stored key</span></label></div>
     </div>
-    <label>Query instruction prefix <span class="sub">(prepended to search queries only, never to documents; Qwen3-Embedding needs one, most other models want this blank)</span></label>
-    <textarea name="embed_query_prefix" rows="2" style="min-height:60px">{{ s.embed_query_prefix }}</textarea>
+    <label for="e-prefix">Query instruction prefix <span class="sub">(prepended to search queries only, never to documents; Qwen3-Embedding needs one, most other models want this blank)</span></label>
+    <textarea id="e-prefix" name="embed_query_prefix" rows="2" style="min-height:60px">{{ s.embed_query_prefix }}</textarea>
     <h4>Reranker</h4>
     <div class="grid2">
-      <div><label>Base URL</label><input type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}"></div>
-      <div><label>Model</label><input type="text" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model }}"></div>
+      <div><label for="r-base">Base URL</label><input id="r-base" type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}"></div>
+      <div><label for="r-model">Model</label><input id="r-model" type="text" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model }}"></div>
     </div>
     <div class="grid2">
-      <div><label>Protocol</label>
-        <select name="rerank_protocol">
+      <div><label for="r-proto">Protocol</label>
+        <select id="r-proto" name="rerank_protocol">
           <option value="tei" {{ 'selected' if s.rerank_protocol != 'cohere' else '' }}>TEI — {"query", "texts"}</option>
           <option value="cohere" {{ 'selected' if s.rerank_protocol == 'cohere' else '' }}>Cohere-style — {"query", "documents"} (Cohere, Jina, Infinity)</option>
         </select>
       </div>
-      <div><label>API key <span class="sub">(blank keeps the stored key)</span></label><input type="password" name="rerank_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if rcfg.key else 'not set' }}"></div>
+      <div><label for="r-key">API key <span class="sub">(blank keeps the stored key)</span></label><input id="r-key" type="password" name="rerank_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if rcfg.key else 'not set' }}"></div>
     </div>
     <div class="grid2">
-      <div><label>Timeout (seconds) <span class="sub">(blank = default)</span></label><input type="number" name="rerank_timeout" min="0" value="{{ s.rerank_timeout or '' }}" placeholder="90"></div>
-      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="rerank_api_key_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored key</label></div>
+      <div><label for="r-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="r-timeout" type="number" name="rerank_timeout" min="0" value="{{ s.rerank_timeout or '' }}" placeholder="90"></div>
+      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="rerank_api_key_clear" value="1"> <span>Clear the stored key</span></label></div>
     </div>
     <h4>Index</h4>
     <div class="grid2">
-      <div><label>Idle refresh interval (minutes)</label><input type="number" name="index_refresh_minutes" value="{{ s.index_refresh_minutes }}" min="1"></div>
+      <div><label for="i-refresh">Idle refresh interval (minutes)</label><input id="i-refresh" type="number" name="index_refresh_minutes" value="{{ s.index_refresh_minutes }}" min="1"></div>
     </div>
-    <label>Excluded folders <span class="sub">(comma separated, case-insensitive substrings; blank = index everything)</span></label>
-    <input type="text" name="rag_exclude_folders" value="{{ s.rag_exclude_folders|join(', ') }}">
-    <p style="margin-top:14px"><button class="btn primary" type="submit">Save RAG settings</button></p>
+    <label for="i-excl">Excluded folders <span class="sub">(comma separated, case-insensitive substrings; blank = index everything)</span></label>
+    <input id="i-excl" type="text" name="rag_exclude_folders" value="{{ s.rag_exclude_folders|join(', ') }}">
+    <div class="savebar">
+      <button class="btn primary" type="submit">Save RAG settings</button>
+      <span class="sub">Changing the embedding model or dimension requires an index rebuild (Dashboard).</span>
+    </div>
   </form>
-  <div class="row" style="margin-top:8px">
+  <div class="row" style="margin-top:10px">
     <form class="inline" method="post" action="{{ url_for('settings_test_embed') }}"><button class="btn" type="submit">Test embeddings</button></form>
     <form class="inline" method="post" action="{{ url_for('settings_test_rerank') }}"><button class="btn" type="submit">Test reranker</button></form>
-    <span class="sub">changing the embedding model or dimension requires an index rebuild (Dashboard → Rebuild).</span>
+    <span class="sub">tests the saved settings</span>
   </div>
 </div>
 
-<div class="card">
-  <h3>Mail connection</h3>
+<div class="card" id="connection">
+  <div class="card-h"><h3>Mail connection</h3><span class="sub">where mail comes from</span></div>
   <form method="post">
     <input type="hidden" name="section" value="connection">
-    <label>Where does mail come from?</label>
-    <select name="proxy_mode">
-      <option value="embedded" {{ 'selected' if s.proxy_mode != 'external' else '' }}>Embedded proxy (recommended) — accounts and OAuth are managed on the Accounts page</option>
-      <option value="external" {{ 'selected' if s.proxy_mode == 'external' else '' }}>External server — connect to the IMAP host/port below</option>
-    </select>
     <div class="grid2">
-      <div><label>External IMAP host <span class="sub">(blank = env)</span></label><input type="text" name="imap_host" value="{{ s.imap_host }}" placeholder="{{ cfg.IMAP_HOST }}"></div>
-      <div><label>Port <span class="sub">(blank = env)</span></label><input type="text" name="imap_port" value="{{ s.imap_port }}" placeholder="{{ cfg.IMAP_PORT }}"></div>
+      <div><label for="c-mode">Mode</label>
+        <select id="c-mode" name="proxy_mode">
+          <option value="embedded" {{ 'selected' if s.proxy_mode != 'external' else '' }}>Embedded proxy (recommended) — accounts and OAuth are managed on the Accounts page</option>
+          <option value="external" {{ 'selected' if s.proxy_mode == 'external' else '' }}>External server — connect to the IMAP host/port below</option>
+        </select>
+      </div>
+      <div><label for="c-host">External IMAP host <span class="sub">(blank = env)</span></label><input id="c-host" type="text" name="imap_host" value="{{ s.imap_host }}" placeholder="{{ cfg.IMAP_HOST }}"></div>
     </div>
     <div class="grid2">
-      <div><label>External IMAP user <span class="sub">(blank = env / first account)</span></label><input type="text" name="imap_user" value="{{ s.imap_user }}" placeholder="{{ cfg.IMAP_USER }}"></div>
-      <div><label>External IMAP password <span class="sub">(blank keeps the stored value; env fallback)</span></label><input type="password" name="imap_password" value="" autocomplete="new-password" placeholder="{{ 'set' if icfg.password else 'not set' }}"></div>
+      <div><label for="c-port">Port <span class="sub">(blank = env)</span></label><input id="c-port" type="text" name="imap_port" value="{{ s.imap_port }}" placeholder="{{ cfg.IMAP_PORT }}"></div>
+      <div><label for="c-user">External IMAP user <span class="sub">(blank = env / first account)</span></label><input id="c-user" type="text" name="imap_user" value="{{ s.imap_user }}" placeholder="{{ cfg.IMAP_USER }}"></div>
     </div>
     <div class="grid2">
-      <div><label>TLS <span class="sub">(blank = env)</span></label>
-        <select name="imap_tls">
+      <div><label for="c-pass">External IMAP password <span class="sub">(blank keeps the stored value; env fallback)</span></label><input id="c-pass" type="password" name="imap_password" value="" autocomplete="new-password" placeholder="{{ 'set' if icfg.password else 'not set' }}"></div>
+      <div><label for="c-tls">TLS <span class="sub">(blank = env)</span></label>
+        <select id="c-tls" name="imap_tls">
           <option value="" {{ 'selected' if s.imap_tls in ('', none) else '' }}>(env)</option>
           <option value="0" {{ 'selected' if s.imap_tls == '0' else '' }}>0 — plain (proxy)</option>
           <option value="1" {{ 'selected' if s.imap_tls == '1' else '' }}>1 — TLS</option>
         </select></div>
-      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="imap_password_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored password</label></div>
     </div>
-    <label>Tailnet host <span class="sub">(for tailnet-mode OAuth redirect URIs, e.g. node.tailnet.ts.net)</span></label>
-    <input type="text" name="proxy_tailnet_host" value="{{ s.proxy_tailnet_host }}" placeholder="node.tailnet.ts.net">
-    <p style="margin-top:14px"><button class="btn primary" type="submit">Save connection</button></p>
+    <div class="grid2">
+      <div><label for="c-tailnet">Tailnet host <span class="sub">(for tailnet-mode OAuth redirect URIs, e.g. node.tailnet.ts.net)</span></label><input id="c-tailnet" type="text" name="proxy_tailnet_host" value="{{ s.proxy_tailnet_host }}" placeholder="node.tailnet.ts.net"></div>
+      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="imap_password_clear" value="1"> <span>Clear the stored password</span></label></div>
+    </div>
+    <div class="savebar"><button class="btn primary" type="submit">Save connection</button><span class="sub">Embedded mode reads mail through the in-app proxy; external mode wins over the container env.</span></div>
   </form>
-  <p class="sub" style="margin-bottom:0">Embedded mode reads mail through the in-app proxy (the Accounts page
-  supplies user, listener port and local password; tokens never leave the host). External mode wins over the
-  container env for host/port/user/password/TLS.</p>
 </div>
 
-<div class="card">
-  <h3>Connection &amp; runtime</h3>
-  <div class="sub mono">
-    IMAP: {{ icfg.user or '?' }} @ {{ icfg.host }}:{{ icfg.port }} ({{ icfg.mode }}) ·<br>
+<div class="card" id="runtime">
+  <div class="card-h"><h3>Runtime</h3><span class="sub">effective values right now</span></div>
+  <div class="sub mono" style="line-height:1.9">
+    IMAP: {{ icfg.user or '?' }} @ {{ icfg.host }}:{{ icfg.port }} ({{ icfg.mode }})<br>
     LLM: {{ llm.base }} · model {{ llm.model }} · key {{ 'set' if llm.key else 'MISSING' }}{% if llm.fallback %} · fallback: {{ llm.fallback.model }}{% endif %}<br>
     Embed: {{ ecfg.base or '— not configured —' }} · {{ ecfg.model }} · Rerank: {{ rcfg.base or '— not configured —' }} · {{ rcfg.model }}<br>
     state: {{ engine_state }} · db: {{ cfg.DB_PATH }}
@@ -2534,6 +2710,8 @@ SETTINGS_TMPL = """
   blank fields fall back to the container env file, so an existing .env keeps working.</p>
 </div>
 """
+
+
 
 
 def _form_int(name, default, lo=None, hi=None):
@@ -3099,17 +3277,26 @@ ACCOUNT_EDIT_TMPL = """
 
 
 PROXY_LOG_TMPL = """
-<h2>Proxy log</h2>
-<div class="card">
-  <div class="row" style="justify-content:space-between">
-    <div class="sub">Last {{ n }} lines of <code>{{ log_file }}</code></div>
-    <div class="row"><a class="btn small" href="{{ url_for('proxy_log') }}?n=200">200</a>
-    <a class="btn small" href="{{ url_for('proxy_log') }}?n=500">500</a>
-    <a class="btn small" href="{{ url_for('proxy_log') }}?n=2000">2000</a></div>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Proxy log</h1>
+    <div class="page-desc">The embedded email-oauth2-proxy — log file <span class="mono">{{ log_file }}</span></div>
   </div>
-  <pre class="log">{{ content }}</pre>
+  <div class="row">
+    <a class="chip" href="{{ url_for('proxy_log') }}?n=200">200</a>
+    <a class="chip{{ ' active' if n == 500 else '' }}" href="{{ url_for('proxy_log') }}?n=500">500</a>
+    <a class="chip" href="{{ url_for('proxy_log') }}?n=2000">2000</a>
+    <a class="btn small" href="{{ url_for('accounts') }}">Accounts</a>
+  </div>
+</div>
+<div class="card flush">
+  <pre class="log" style="border:0;margin:0">{{ content }}</pre>
 </div>
 """
+
+
+
+
 
 
 @app.route("/accounts")
@@ -3247,11 +3434,13 @@ def log():
     events = store.recent_events(1000)
     if not show_debug:
         events = [e for e in events if e.get("level") != "debug"]
+    errors = sum(1 for e in events if e.get("level") == "error")
     events = events[:300]
     for e in events:
         e["when"] = fmt_ts(e["ts"])
-        e["cls"] = {"error": "err", "info": "ok", "debug": ""}.get(e.get("level"), "")
-    return render(render_template_string(LOG_TMPL, events=events, show_debug=show_debug))
+        e["cls"] = {"error": "err", "info": "ok", "warn": "warn", "debug": ""}.get(e.get("level"), "")
+    return render(render_template_string(LOG_TMPL, events=events, show_debug=show_debug,
+                                         errors=errors))
 
 
 @app.route("/fonts/<name>")
