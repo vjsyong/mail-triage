@@ -903,6 +903,8 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
       <div class="nav-label">Automation</div>
       {{ navitem(url_for('rules'), 'Rules', p.startswith('/rules'), '
         <path d="M3 6h18M7 12h10M10 18h4"/>') }}
+      {{ navitem(url_for('simulate'), 'Simulator', p.startswith('/simulate'), '
+        <path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/>') }}
       {{ navitem(url_for('flows'), 'Flows', p.startswith('/flows'), '
         <path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/>') }}
       {{ navitem(url_for('classifiers'), 'Classifiers', p.startswith('/classifiers'), '
@@ -1153,6 +1155,7 @@ if(!window.__mtVt){
     ['/messages', 1, 10],   /* message list (filters/pages share this) */
     ['/assistant', 0, 20],
     ['/rules/', 0, 31], ['/rules', 1, 30],
+    ['/simulate', 0, 35],
     ['/classifiers/', 0, 41], ['/classifiers', 1, 40],
     ['/flows/', 0, 51], ['/flows', 1, 50],
     ['/templates/', 0, 61], ['/templates', 1, 60],
@@ -1680,6 +1683,7 @@ color:var(--fg);text-decoration:none}
 <div class="nav-label" style="margin:2px 2px 8px">Automation</div>
 <div class="more-list">
   <a class="more-row" href="{{ url_for('rules') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"/></svg><span class="grow"><b>Rules</b><span class="sub">First-match sorting rules and guards</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('simulate') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/></svg><span class="grow"><b>Simulator</b><span class="sub">Draft an email, see how rules and flows would handle it</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('flows') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/></svg><span class="grow"><b>Flows</b><span class="sub">Multi-step automations</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('classifiers') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/></svg><span class="grow"><b>Classifiers</b><span class="sub">Trained heuristic classifiers</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('templates') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/></svg><span class="grow"><b>Templates</b><span class="sub">Reply templates</span></span><span aria-hidden="true">&#8250;</span></a>
@@ -1811,6 +1815,13 @@ DASH_TMPL = """
 .frow .fmain b{display:block;font-size:.86rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .frow .fmain .sub{display:block;font-size:.76rem;margin-top:1px}
 .frow .fsrc{display:inline-block;font-size:.68rem;font-weight:500;color:var(--dim);border:1px solid var(--line);padding:1px 6px;margin-right:6px;vertical-align:1px}
+.arow2{display:grid;grid-template-columns:auto auto 1fr;gap:2px 8px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);font-size:.84rem}
+.arow2:first-of-type{border-top:0;padding-top:2px}
+.arow2 .atime{font-size:.72rem;color:var(--dim)}
+.arow2 .adetail{min-width:0;overflow-wrap:anywhere}
+.audit-pre{white-space:pre-wrap;font-size:.78rem;color:var(--dim);margin:6px 0 0;max-height:280px;overflow:auto}
+.simul{margin:4px 0 0;padding-left:18px;font-size:.88rem}
+.simul li{margin:3px 0}
 .dashgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
 @media(max-width:1023px){.dashgrid{grid-template-columns:1fr}}
 .dashgrid .card{margin:0}
@@ -2133,11 +2144,13 @@ def message_snooze(mid):
         store.snooze_message(mid, until)
         store.log_event("info", "snoozed message %d ('%s') until %s"
                         % (mid, (m.get("subject") or "")[:50], fmt_ts(until)))
+        store.log_msg_event(mid, "snooze", "snoozed until %s" % fmt_ts(until))
         flash("Snoozed until %s." % fmt_ts(until), "ok")
     else:
         store.snooze_message(mid, 0)
         store.log_event("info", "woke message %d ('%s')"
                         % (mid, (m.get("subject") or "")[:50]))
+        store.log_msg_event(mid, "wake", "back in the lists")
         flash("Back in your lists.", "ok")
     return redirect(request.referrer or url_for("message_detail", mid=mid))
 
@@ -2182,6 +2195,7 @@ RULES_TMPL = """
   <div class="row">
     <form class="inline" method="post" action="{{ url_for('rules_test') }}">
       <button class="btn" type="submit">Test against last {{ test_limit }} messages</button></form>
+    <a class="btn small" href="{{ url_for('simulate') }}">Simulate a draft</a>
     <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
   </div>
 </div>
@@ -3933,6 +3947,22 @@ MESSAGE_TMPL = """
         <div class="k">Message-ID</div><div class="mono" style="font-size:.77rem">{{ m.msgid or '—' }}</div>
       </div>
     </div>
+    <div class="card" id="audit">
+      <div class="card-h"><h3>Audit trail</h3><span class="sub">How this email was triaged, oldest first{% if m.audit %} · {{ m.audit|length }} event{{ 's' if m.audit|length != 1 else '' }}{% endif %}</span></div>
+      {% for ev in m.audit %}
+      <div class="arow2">
+        <span class="mono atime">{{ ev.when }}</span>
+        <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','wake':'ok','tag':'warn','draft':'acc'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
+        <div class="adetail">
+          {% if ev.meta %}
+          <b>{{ ev.meta.category or '(no category)' }}</b>{% if ev.meta.confidence is not none %} <span class="sub">{{ '%.0f' % (ev.meta.confidence * 100) }}%</span>{% endif %}{% if ev.meta.needs_reply %} <span class="badge warn">needs reply</span>{% endif %} <span class="sub">· {{ ev.meta.by }}</span>
+          {% if ev.meta.reason %}<div class="sub">why: {{ ev.meta.reason }}</div>{% endif %}
+          {% if ev.meta.thinking %}<details><summary class="sub" style="cursor:pointer">full reasoning</summary><pre class="mono audit-pre">{{ ev.meta.thinking }}</pre></details>{% endif %}
+          {% else %}{{ ev.detail }}{% endif %}
+        </div>
+      </div>
+      {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>{% endfor %}
+    </div>
   </div>
 </div>
 """
@@ -4182,6 +4212,15 @@ def message_detail(mid):
     su = m.get("snoozed_until") or 0
     m["snoozed_active"] = bool(su and su > time.time())
     m["snoozed_h"] = fmt_ts(su) if su else ""
+    m["audit"] = []
+    for ev in store.get_msg_events(mid, limit=200):
+        d = {"when": fmt_ts(ev["ts"]), "kind": ev["kind"], "detail": ev["detail"], "meta": None}
+        if ev["kind"] == "classify":
+            try:
+                d["meta"] = json.loads(ev["detail"])
+            except (TypeError, ValueError):
+                pass
+        m["audit"].append(d)
     show_images = request.args.get("imgs") == "1" or bool(store.get_setting("render_images"))
     plain = request.args.get("view") == "plain"
     filt = request.args.get("f") or "all"
@@ -4344,6 +4383,7 @@ def message_classify(mid):
 def message_tag(mid):
     tag = (request.form.get("tag") or "").strip()[:40]
     store.tag_messages([mid], tag)
+    store.log_msg_event(mid, "tag", ("tagged \u201c%s\u201d" % tag) if tag else "tag cleared")
     flash(("Tag saved: " + tag) if tag else "Tag cleared.", "ok")
     return redirect(url_for("message_detail", mid=mid))
 
@@ -4396,6 +4436,8 @@ def message_draft(mid):
     template_id = request.form.get("template_id") or None
     try:
         draft = engine.generate_draft(mid, int(template_id) if template_id else None)
+        store.log_msg_event(mid, "draft", "reply draft generated%s"
+                            % ((" with template %s" % template_id) if template_id else ""))
         return _render_message(m, draft=draft,
                                draft_template_id=int(template_id) if template_id else 0)
     except Exception as exc:
@@ -6355,6 +6397,107 @@ def log():
     return render(_render_src(LOG_TMPL, events=events, show_debug=show_debug,
                                          errors=errors, warns=warns, lvl=lvl, q=q, mins=mins,
                                          tz=tz_label()))
+
+
+SIMULATE_TMPL = """
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Simulator</h1>
+    <div class="page-desc">Draft an email and see exactly how the pipeline would treat it — guard/rule match, flows, classifier. Nothing is changed.</div>
+  </div>
+</div>
+<form method="post">
+  <div class="card">
+    <div class="card-h"><h3>The draft</h3></div>
+    <div class="grid2">
+      <div><label for="s-from">From</label><input id="s-from" type="text" name="from_addr" value="{{ form.from_addr }}" placeholder="sender@example.com" autocomplete="off"></div>
+      <div><label for="s-to">To (optional)</label><input id="s-to" type="text" name="to_addr" value="{{ form.to_addr }}" autocomplete="off"></div>
+    </div>
+    <div style="margin-top:10px"><label for="s-subj">Subject</label><input id="s-subj" type="text" name="subject" value="{{ form.subject }}"></div>
+    <div style="margin-top:10px"><label for="s-body">Body</label><textarea id="s-body" name="body" rows="7">{{ form.body }}</textarea></div>
+    <div class="row" style="margin-top:10px;align-items:center">
+      <label class="inline" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="use_llm" value="1" {{ 'checked' if form.use_llm else '' }}> Ask the classifier (uses the model — needed for AI category / topic flows)</label>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn primary" type="submit">Run simulation</button>
+    </div>
+  </div>
+</form>
+{% if result %}
+<div class="card">
+  <div class="card-h"><h3>What would happen</h3><span class="sub">Nothing was changed — this is a dry run.</span></div>
+  <ul class="simul">{% for w in result.would %}<li>{{ w }}</li>{% endfor %}</ul>
+  {% for n in result.notes %}<div class="sub" style="margin-top:6px">Note: {{ n }}</div>{% endfor %}
+</div>
+{% if result.guard or result.rule %}
+<div class="card">
+  <div class="card-h"><h3>{{ 'Guard rule' if result.guard else 'Rule match' }}</h3></div>
+  {% if result.guard %}
+  <div class="sub">“{{ result.guard }}” is a guard — all automated filing is blocked for this mail.</div>
+  {% else %}
+  <div><b>{{ result.rule.name }}</b> <span class="sub">(first match in list order)</span></div>
+  <div class="sub" style="margin-top:4px">{{ result.rule_actions|join(' · ') }}</div>
+  {% endif %}
+</div>
+{% endif %}
+{% if result.flow %}
+<div class="card">
+  <div class="card-h"><h3>Flow</h3><span class="sub">{{ result.flow.name }}</span></div>
+  <ol class="simul">{% for s in result.flow_taken %}<li>{{ s }}</li>{% endfor %}</ol>
+</div>
+{% endif %}
+{% if result.verdict %}
+<div class="card">
+  <div class="card-h"><h3>Classifier</h3><span class="sub">{{ result.verdict.by }}</span></div>
+  <div><b>{{ result.verdict.category or '(no category)' }}</b>{% if result.verdict.confidence %} <span class="sub">{{ '%.0f' % (result.verdict.confidence * 100) }}%</span>{% endif %}{% if result.verdict.needs_reply %} <span class="badge warn">needs reply</span>{% endif %}</div>
+  {% if result.verdict.reason %}<div class="sub" style="margin-top:4px">why: {{ result.verdict.reason }}</div>{% endif %}
+  {% if result.verdict.summary %}<div class="sub" style="margin-top:4px">{{ result.verdict.summary }}</div>{% endif %}
+  {% if result.suggested_folder %}<div class="sub" style="margin-top:4px">suggested folder: {{ result.suggested_folder }}</div>{% endif %}
+  {% if result.verdict.thinking %}<details style="margin-top:6px"><summary class="sub" style="cursor:pointer">full reasoning</summary><pre class="mono audit-pre">{{ result.verdict.thinking }}</pre></details>{% endif %}
+</div>
+{% endif %}
+{% if result %}<script>setTimeout(function(){try{var c=document.querySelector('.simul');if(c){c.scrollIntoView({block:'start'});window.scrollBy(0,-70);}}catch(e){}},60);</script>{% endif %}
+{% endif %}
+"""
+
+
+_SIM_RESULTS = {}
+
+
+def _sim_store(form, result):
+    """Short-lived store for simulator results. POST must redirect (Turbo skips
+    visits to the same URL unless action=replace, which a redirect provides)."""
+    now = time.time()
+    for k in [k for k, v in list(_SIM_RESULTS.items()) if now - v[0] > 1800]:
+        _SIM_RESULTS.pop(k, None)
+    key = os.urandom(8).hex()
+    _SIM_RESULTS[key] = (now, form, result)
+    while len(_SIM_RESULTS) > 30:
+        _SIM_RESULTS.pop(min(_SIM_RESULTS, key=lambda k: _SIM_RESULTS[k][0]))
+    return key
+
+
+@app.route("/simulate", methods=["GET", "POST"])
+def simulate():
+    form = {"from_addr": "", "to_addr": "", "subject": "", "body": "", "use_llm": True}
+    result = None
+    if request.method == "POST":
+        form["from_addr"] = (request.form.get("from_addr") or "").strip()[:200]
+        form["to_addr"] = (request.form.get("to_addr") or "").strip()[:200]
+        form["subject"] = (request.form.get("subject") or "").strip()[:300]
+        form["body"] = (request.form.get("body") or "").strip()[:8000]
+        form["use_llm"] = request.form.get("use_llm") == "1"
+        if not (form["subject"] or form["body"] or form["from_addr"]):
+            flash("Give the draft at least a sender, a subject or a body.", "err")
+            return redirect(url_for("simulate"))
+        result = engine.simulate_email(form["from_addr"], form["subject"], form["body"],
+                                       to_addr=form["to_addr"], use_llm=form["use_llm"])
+        return redirect(url_for("simulate", s=_sim_store(form, result)))
+    key = request.args.get("s") or ""
+    if key:
+        hit = _SIM_RESULTS.get(key)
+        if hit:
+            _ts, form, result = hit
+    return render(_render_src(SIMULATE_TMPL, form=form, result=result))
 
 
 @app.route("/fonts/<name>")

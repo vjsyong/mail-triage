@@ -128,3 +128,14 @@ Note: form-submission redirects (settings saves, rule saves, etc.) were ALREADY
 single-transition - Turbo hands the response to the replace visit in that path, so
 .no second render. The double only affected cross-location GET redirects, of which
 /assistant was the only one in this app.
+
+## Turbo quirk: forms must POST -> redirect (same-day finding)
+The simulator form was the first form in the app to render its response IN PLACE
+(POST /simulate -> 200 at the same URL). Turbo silently did nothing: submit-start
+and submit-end fired, no visit, no render, no error. Cause: Session.visit ignores
+locations equal to the current one unless the action is "replace"; a form POST at
+the same URL gets action "advance", so the visit is skipped. Every other form in
+the app works because it redirects, and a same-location redirect is converted to a
+replace visit by Turbo's #getDefaultAction.
+Rule for future forms: POST -> redirect -> GET. If results must persist across the
+redirect, stash them server-side keyed by a short id (see _SIM_RESULTS/_sim_store).

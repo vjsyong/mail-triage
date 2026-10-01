@@ -302,6 +302,14 @@ def _migrate(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS keep_ids (
         msgid TEXT PRIMARY KEY, ts INTEGER NOT NULL
     )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS msg_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        msg_id INTEGER NOT NULL,
+        ts INTEGER NOT NULL,
+        kind TEXT NOT NULL DEFAULT '',
+        detail TEXT NOT NULL DEFAULT ''
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msgev_msg ON msg_events(msg_id, id)")
     # one-time: retire assistant_actions_apply (False meant dry-run -> the three gated
     # tools become 'ask', so nothing the assistant did before can now happen silently)
     has_perm = conn.execute("SELECT COUNT(*) FROM settings WHERE k GLOB 'perm_*'").fetchone()[0]
@@ -636,17 +644,37 @@ def snooze_message(mid, until_ts):
 
 
 def record_move(msg, to_folder, source, from_folder=None):
-    """Record a filing for the undo trail (called before/after the IMAP move).
-    msg = pre-move message dict; from_folder overrides msg['folder'] for multi-step flows."""
+    """Record a filing for the undo trail + the per-message audit (called before
+    the IMAP move). msg = pre-move dict; from_folder overrides msg['folder'] for
+    multi-step flows."""
     if not msg or not msg.get("id"):
         return
+    origin = from_folder or msg.get("folder") or ""
     with db() as conn:
         conn.execute(
             "INSERT INTO undo_log (ts, msg_id, from_folder, to_folder, source, prev_status, prev_action_taken)"
             " VALUES (?,?,?,?,?,?,?)",
-            (int(time.time()), int(msg["id"]), (from_folder or msg.get("folder") or ""),
+            (int(time.time()), int(msg["id"]), origin,
              to_folder or "", source or "", msg.get("status") or "", msg.get("action_taken") or ""))
+        conn.execute("INSERT INTO msg_events (msg_id, ts, kind, detail) VALUES (?,?,?,?)",
+                     (int(msg["id"]), int(time.time()), "move",
+                      "%s: \u201c%s\u201d \u2192 \u201c%s\u201d" % (source or "move", origin, to_folder or "?")))
         conn.commit()
+
+
+def log_msg_event(msg_id, kind, detail):
+    if not msg_id:
+        return
+    with db() as conn:
+        conn.execute("INSERT INTO msg_events (msg_id, ts, kind, detail) VALUES (?,?,?,?)",
+                     (int(msg_id), int(time.time()), str(kind or "")[:24], str(detail or "")[:8000]))
+        conn.commit()
+
+
+def get_msg_events(msg_id, limit=200):
+    with db() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM msg_events WHERE msg_id=? ORDER BY id LIMIT ?", (int(msg_id), int(limit)))]
 
 
 def recent_moves(limit=8):

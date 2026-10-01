@@ -2691,6 +2691,59 @@ def main():
     r = client.get("/log?mins=15&q=needle-alpha&lvl=warn")
     check("combined filters compose", b"needle-alpha" in r.data)
 
+    section("T40 per-message audit trail")
+    add_msg(state, "audit@x.com", "Audit me", "audit body", "au@x")
+    engine.process_mailbox()
+    arow = [r for r in store.messages(limit=3000) if r["subject"] == "Audit me"][0]
+    aid = arow["id"]
+    client.post("/messages/%d/classify" % aid)
+    kinds = [e["kind"] for e in store.get_msg_events(aid)]
+    check("classification recorded in the audit trail", "classify" in kinds)
+    ev_c = [e for e in store.get_msg_events(aid) if e["kind"] == "classify"][0]
+    import json as _json
+    meta_c = _json.loads(ev_c["detail"])
+    check("classify event carries category + source",
+          bool(meta_c.get("category")) and bool(meta_c.get("by")))
+    r = client.get("/messages/%d" % aid)
+    check("viewer renders the audit trail card",
+          b"Audit trail" in r.data and b"classify" in r.data and b"full reasoning" in r.data)
+    store.update_message(aid, llm_suggested_folder="Archive")
+    client.post("/messages/%d/file" % aid)
+    kinds2 = [e["kind"] for e in store.get_msg_events(aid)]
+    check("filing recorded as a move event", "move" in kinds2)
+    lid2 = [e for e in store.recent_moves(limit=50) if e["msg_id"] == aid][0]["id"]
+    client.post("/undo/%d" % lid2)
+    kinds3 = [e["kind"] for e in store.get_msg_events(aid)]
+    check("undo recorded in the audit trail", "undo" in kinds3)
+    client.post("/messages/%d/snooze" % aid, data={"hours": "24"})
+    kinds4 = [e["kind"] for e in store.get_msg_events(aid)]
+    check("snooze recorded in the audit trail", "snooze" in kinds4)
+    r = client.post("/messages/%d/snooze" % aid, data={"hours": "0"})
+    kinds5 = [e["kind"] for e in store.get_msg_events(aid)]
+    check("wake recorded in the audit trail", "wake" in kinds5)
+
+    section("T41 draft simulator")
+    sim_rid = store.add_rule("Simulator match", "any",
+                             [{"field": "from", "op": "contains", "value": "sim.test"}],
+                             {"move_to": "Archive", "mark_read": True}, enabled=True)
+    r = client.post("/simulate", follow_redirects=True, data={"from_addr": "sim.test@x.com", "subject": "Hello sim",
+                                       "body": "does this work", "use_llm": "0"})
+    check("simulator names the matching rule + its actions",
+          b"Simulator match" in r.data and b"Archive" in r.data and b"mark as read" in r.data)
+    check("simulator labels the dry run", b"dry run" in r.data)
+    n_before = len(store.messages(limit=5000))
+    client.post("/simulate", follow_redirects=True, data={"from_addr": "sim.test@x.com", "subject": "x2", "body": "y"})
+    check("simulate runs add nothing to the mailbox", len(store.messages(limit=5000)) == n_before)
+    r = client.post("/simulate", follow_redirects=True, data={"from_addr": "nobody@x.com", "subject": "quiet draft", "body": "nothing here"})
+    check("no-match state is explained",
+          b"No rule or deterministic flow matches" in r.data)
+    r = client.post("/simulate", follow_redirects=True, data={"from_addr": "llm.sim@x.com", "subject": "Invoice question",
+                                       "body": "please resend the invoice", "use_llm": "1"})
+    check("simulator includes the classifier verdict", b"Classifier:" in r.data)
+    r = client.get("/simulate")
+    check("simulator page reachable via nav", r.status_code == 200 and b"Run simulation" in r.data)
+    store.update_rule(sim_rid, enabled=0)
+
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

@@ -973,6 +973,9 @@ def _process_flow(mc, flow, row, meta, settings, why=""):
                     % (flow.get("name"), "" if live else " (dry-run)",
                        ", ".join(taken) or "no steps", (meta.get("subject") or "")[:60],
                        (" [%s]" % why) if why else ""))
+    store.log_msg_event(row["id"], "flow", "flow \u201c%s\u201d%s \u2192 %s%s"
+                        % (flow.get("name") or flow.get("id"), "" if live else " (dry-run)",
+                           ", ".join(taken) or "no steps", (" [%s]" % why) if why else ""))
 
 
 # ---------------------------------------------------------------- LLM
@@ -1362,6 +1365,8 @@ def _process_folder(mc, folder, settings, rules, flows=None):
             store.log_event("info", "rule '%s' skipped — '%s' is kept (undo)"
                             % (rule.get("name") or rule["id"],
                                (meta.get("subject") or "")[:50]))
+            store.log_msg_event(row["id"], "rule", "rule \u201c%s\u201d skipped - mail is kept (undo)"
+                                % (rule.get("name") or rule["id"]))
         elif rule:
             try:
                 actions = json.loads(rule.get("actions") or "{}")
@@ -1400,6 +1405,9 @@ def _process_folder(mc, folder, settings, rules, flows=None):
                             % (rule.get("name") or rule["id"],
                                ", ".join(taken) or ("kept (guard)" if is_guard_rule(rule) else "suggest"),
                                (meta.get("subject") or "")[:60], meta.get("from_addr")))
+            store.log_msg_event(row["id"], "rule", "rule \u201c%s\u201d \u2192 %s"
+                                % (rule.get("name") or rule["id"],
+                                   ", ".join(taken) or ("kept (guard)" if is_guard_rule(rule) else "suggest")))
         elif flow and not kept:
             why = ("topic match %.2f" % f_ctx["last_topic_score"]) if "last_topic_score" in f_ctx else ""
             _process_flow(mc, flow, row, meta, settings, why=why)
@@ -1446,7 +1454,121 @@ def undo_filing(log_id):
     store.mark_undone(log_id, uid=new_uid or 0)
     store.log_event("info", "undo: '%s' moved back to %s (kept - automation will not re-file it)"
                     % ((msg.get("subject") or "")[:50], entry["from_folder"]))
+    store.log_msg_event(msg["id"], "undo", "moved back to \u201c%s\u201d - automation will not re-file it"
+                        % entry["from_folder"])
     return True, "Moved back to %s — automation will not re-file it." % entry["from_folder"]
+
+
+def _sim_flow_steps(flow, settings):
+    """Step descriptions for a flow in dry mode (no IMAP, no drafts, no writes)."""
+    fake = {"id": 0, "folder": "INBOX", "uid": 0, "msgid": "", "subject": ""}
+    try:
+        taken, _fields = _apply_flow(None, flow, fake, settings, live=False)
+        return taken or ["no steps configured"]
+    except Exception as exc:
+        return ["(could not simulate: %r)" % exc]
+
+
+def simulate_email(from_addr, subject, body, to_addr="", use_llm=False):
+    """Dry-run of the triage pipeline over a drafted email: which guard/rule
+    matches, which flows would fire, and (optionally) what the classifier thinks.
+    Nothing is changed - no mail, no rows, no events."""
+    settings = store.all_settings()
+    fields = {"from": from_addr or "", "to": to_addr or "",
+              "subject": subject or "", "body": body or ""}
+    out = {"guard": None, "rule": None, "rule_actions": [], "flow": None, "flow_taken": [],
+           "verdict": None, "suggested_folder": "", "would": [], "notes": [],
+           "rules_apply": bool(settings.get("rules_apply", True)),
+           "flows_apply": bool(settings.get("flows_apply", True)),
+           "llm_apply": bool(settings.get("llm_apply")), "use_llm": bool(use_llm)}
+    rule = match_first(store.list_rules(enabled_only=True), fields)
+    if rule and is_guard_rule(rule):
+        out["guard"] = rule.get("name") or ("rule %s" % rule.get("id"))
+        rule = None
+    out["rule"] = rule
+    if rule:
+        try:
+            acts = json.loads(rule.get("actions") or "{}")
+        except (TypeError, ValueError):
+            acts = {}
+        desc = []
+        if acts.get("move_to"):
+            desc.append("move to \u201c%s\u201d" % acts["move_to"])
+        if acts.get("tag"):
+            desc.append("tag \u201c%s\u201d" % acts["tag"])
+        if acts.get("mark_read"):
+            desc.append("mark as read")
+        if acts.get("flag"):
+            desc.append("flag it")
+        out["rule_actions"] = desc or ["keep in place (no actions)"]
+    flows = store.list_flows(enabled_only=True)
+    f_ctx = {"text": "%s\n%s" % (subject or "", body or "")}
+    if out["guard"]:
+        out["would"] = ["Guard rule \u201c%s\u201d matches - all automated filing is blocked; the mail stays put." % out["guard"]]
+    elif rule:
+        out["would"] = ["Rule \u201c%s\u201d matches first (rules run in list order)." % (rule.get("name") or rule.get("id"))]
+        out["would"] += ["Action: %s" % d for d in out["rule_actions"]]
+        if not out["rules_apply"]:
+            out["notes"].append("Rules are in dry-run mode - a live run would only suggest, nothing would move.")
+    else:
+        try:
+            fl = match_first_flows([f for f in flows if not _needs_verdict(f)], fields, f_ctx)
+        except Exception as exc:
+            fl = None
+            out["notes"].append("Flow conditions could not be evaluated: %r" % exc)
+        if fl:
+            out["flow"] = fl
+            out["flow_taken"] = _sim_flow_steps(fl, settings)
+            out["would"] = ["Flow \u201c%s\u201d matches." % (fl.get("name") or fl.get("id"))]
+            out["would"] += ["Step: %s" % s for s in out["flow_taken"]]
+            if not out["flows_apply"]:
+                out["notes"].append("Flows are in dry-run mode - a live run would only record what they would do.")
+        elif not out["use_llm"]:
+            out["would"] = ["No rule or deterministic flow matches."]
+            out["notes"].append("Tick \u201cAsk the classifier\u201d to also test AI category / topic flows.")
+    if out["use_llm"]:
+        sim_msg = {"from_addr": from_addr or "", "to_addr": to_addr or "",
+                   "subject": subject or "", "snippet": (body or "")[:500],
+                   "body": body or "", "msgid": "", "id": 0}
+        res, hres = classify_verdict(sim_msg, settings)
+        try:
+            conf = float(res.get("confidence") or 0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        out["verdict"] = {"category": res.get("category") or "", "confidence": conf,
+                          "reason": res.get("reason") or "", "summary": res.get("summary") or "",
+                          "needs_reply": bool(res.get("needs_reply")),
+                          "thinking": str(res.get("_thinking") or ""),
+                          "by": ("heuristic: %s" % hres.get("heuristic_name")) if hres else "LLM"}
+        folder = (settings.get("category_folders") or {}).get(out["verdict"]["category"], "")
+        out["suggested_folder"] = folder
+        line = "Classifier: %s" % (out["verdict"]["category"] or "(no category)")
+        if out["verdict"]["confidence"]:
+            line += " (%d%%)" % round(out["verdict"]["confidence"] * 100)
+        out["would"].append(line + " \u00b7 by %s" % out["verdict"]["by"])
+        if out["verdict"]["needs_reply"]:
+            out["would"].append("Would be flagged \u201cneeds reply\u201d.")
+        if not out["flow"] and not out["guard"]:
+            try:
+                vf = match_first_flows(
+                    [f for f in flows if _needs_verdict(f)], fields,
+                    {"verdict": {"category": out["verdict"]["category"],
+                                 "confidence": out["verdict"]["confidence"], "source": "sim"},
+                     "text": f_ctx["text"]})
+            except Exception as exc:
+                vf = None
+                out["notes"].append("AI flow conditions could not be evaluated: %r" % exc)
+            if vf:
+                out["flow"] = vf
+                out["flow_taken"] = _sim_flow_steps(vf, settings)
+                out["would"].append("Flow \u201c%s\u201d matches on the classification." % (vf.get("name") or vf.get("id")))
+                out["would"] += ["Step: %s" % s for s in out["flow_taken"]]
+            elif folder and not rule:
+                if out["llm_apply"]:
+                    out["would"].append("Auto-filing would move it to \u201c%s\u201d." % folder)
+                else:
+                    out["would"].append("Suggested folder \u201c%s\u201d (auto-filing is off - suggestion only)." % folder)
+    return out
 
 
 def _header_index(folder):
@@ -1700,15 +1822,9 @@ def heal_snippets(workers=6, rescue=True):
 
 
 
-def classify_and_store(msg, settings, mc=None):
-    """Classify one message, persist the result, file it when llm_apply is on.
-
-    Order: trained heuristic classifiers first (deterministic, no LLM call for a
-    confident verdict); the LLM only sees what the heuristics abstain on.
-
-    Returns the classification dict with '_moved_to' set when it was filed.
-    Raises on LLM failure. Reused by the worker queue and the manual batch job.
-    """
+def classify_verdict(msg, settings):
+    """Heuristic classifiers first (deterministic, no LLM call for a confident
+    verdict); the LLM only sees what the heuristics abstain on. Returns (res, hres)."""
     hres = heuristics.classify(msg) if settings.get("heuristics_enabled", True) else None
     if hres:
         res = {"category": hres["category"], "confidence": hres["confidence"],
@@ -1718,6 +1834,19 @@ def classify_and_store(msg, settings, mc=None):
     else:
         res = LLMClient().classify(msg, settings.get("categories") or [],
                                    settings.get("my_name", ""))
+    return res, hres
+
+
+def classify_and_store(msg, settings, mc=None):
+    """Classify one message, persist the result, file it when llm_apply is on.
+
+    Order: trained heuristic classifiers first (deterministic, no LLM call for a
+    confident verdict); the LLM only sees what the heuristics abstain on.
+
+    Returns the classification dict with '_moved_to' set when it was filed.
+    Raises on LLM failure. Reused by the worker queue and the manual batch job.
+    """
+    res, hres = classify_verdict(msg, settings)
     category = str(res.get("category", ""))
     try:
         conf = float(res.get("confidence") or 0)
@@ -1737,6 +1866,11 @@ def classify_and_store(msg, settings, mc=None):
         "classified_by": ("heuristic:%s %s" % (hres["heuristic_id"], hres["heuristic_name"])) if hres else "llm",
         "status": "classified",
     }
+    store.log_msg_event(msg.get("id"), "classify", json.dumps({
+        "category": category, "confidence": round(conf, 3), "by": fields["classified_by"],
+        "reason": fields["llm_reason"], "summary": fields["llm_summary"],
+        "needs_reply": bool(res.get("needs_reply")), "thinking": fields["llm_thinking"]},
+        ensure_ascii=False))
     res["_moved_to"] = ""
     res["_flow"] = ""
     verdict = {"category": category, "confidence": conf,
@@ -1753,6 +1887,8 @@ def classify_and_store(msg, settings, mc=None):
                 guard = r.get("name") or ("rule %s" % r.get("id"))
                 store.log_event("info", "kept '%s' in place (guard rule '%s')"
                                 % ((msg.get("subject") or "")[:50], guard))
+                store.log_msg_event(msg.get("id"), "guard",
+                                    "guard rule \u201c%s\u201d keeps it in place - automated filing skipped" % guard)
                 break
     if classify_flows and not already_filed and not guard and not kept:
         # fuzzy flows fire once the verdict is in; the first matching flow wins
@@ -1799,6 +1935,8 @@ def classify_and_store(msg, settings, mc=None):
             if new_uid:
                 fields["uid"] = new_uid
             res["_moved_to"] = folder
+            store.log_msg_event(msg.get("id"), "file",
+                                "auto-filed to \u201c%s\u201d (LLM suggested)" % folder)
         except Exception as exc:
             store.log_event("error", "LLM move to %s failed: %r" % (folder, exc))
         finally:
