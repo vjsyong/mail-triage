@@ -751,7 +751,12 @@ def match_first(rules, fields):
 #                     endpoint, evaluated at scan time; deterministic conditions
 #                     are checked first so obvious mail skips the AI cost.
 _TOPIC_QUERY_CACHE = {}
-_TOPIC_MIN_DEFAULT = 0.55
+_TOPIC_MIN_DEFAULT = 0.45
+# Qwen3-Embedding-style models score retrieval queries better when the query is
+# wrapped in an instruction; calibrated on a real mailbox where relevant matches
+# land ~0.45-0.55 and noise p90 sits ~0.36-0.41, so 0.45 is the useful default.
+_TOPIC_INSTR = ("Instruct: Given a description of the kind of email the user wants "
+                "to find, retrieve matching inbox messages\nQuery: ")
 _TOPIC_FAIL_TS = [0.0]
 
 
@@ -800,7 +805,7 @@ def _topic_matches(c, ctx):
     try:
         if ctx.get("_doc_vec") is None:
             ctx["_doc_vec"] = _topic_vector(text, "document")
-        score = _cosine(_topic_vector(desc, "query"), ctx["_doc_vec"])
+        score = _cosine(_topic_vector(_TOPIC_INSTR + desc, "query"), ctx["_doc_vec"])
     except Exception as exc:
         ctx["_topic_failed"] = True
         now = time.time()
@@ -2087,7 +2092,7 @@ How to work
 - BEFORE proposing a rule, call list_rules (or mailbox_overview) and check what already exists. If a similar rule exists (same sender/domain/subject), propose an UPDATE instead of a near-duplicate: pass updates_rule_id with the rule as it should look afterwards (name/conditions/actions). If you propose something that overlaps an existing rule without updates_rule_id, the app flags it to the user, so handle it yourself first.
 - Heuristic classifiers (train_classifier / list_classifiers / manage_classifier / evaluate_classifier): deterministic trained models that run BEFORE the LLM in triage. Suggest them when the user wants less LLM dependence, when a category has regular labelled mail (tags), or when classification feels inconsistent. decision_list suits sender/keyword patterns, naive_bayes fuzzier ones; retrain via retrain_id as labels grow; evaluate before claiming quality. After a tagging session, suggest training one when a category has around 8+ tagged examples.
 - Only tell the user a rule was proposed once propose_rule has returned ok:true in this turn; never claim a proposal you did not actually make.
-- MULTI-STEP AUTOMATIONS ARE FLOWS: when a request has an ordered sequence ("move it AND then draft/tag/star it", "prepare a draft that says ..."), call propose_flow with the steps in order - NOT propose_rule. A fixed draft body is fully supported (step {type:"draft", mode:"fixed", body:"..."}), and an LLM draft takes "instructions" (what the reply should say - tone, points, what to reference; e.g. "thank them and ask for the PO number"). WHEN conditions can be FUZZY: {kind:"category", value:"<one of the app's categories>"} fires right after the classifier sorts the mail that way - use it for "if it's a <type> email" asks (see the CATEGORIES list in CURRENT STATE); {kind:"topic", value:"<short description with the boundary>"} matches by MEANING via embeddings - use it for "if it's related to / about X" asks; write the description like the boundary, e.g. "parcels and deliveries - shipping notices, courier updates, pickup codes. NOT marketing." Optional threshold 0.2-0.95 (default 0.55). Keep deterministic from/subject conditions alongside when the user names a sender; deterministic conditions are checked first and cost nothing, AI conditions run only after they pass. Plain single-action requests stay rules. Check list_flows and list_rules first; flows run after rules, first matching flow wins.
+- MULTI-STEP AUTOMATIONS ARE FLOWS: when a request has an ordered sequence ("move it AND then draft/tag/star it", "prepare a draft that says ..."), call propose_flow with the steps in order - NOT propose_rule. A fixed draft body is fully supported (step {type:"draft", mode:"fixed", body:"..."}), and an LLM draft takes "instructions" (what the reply should say - tone, points, what to reference; e.g. "thank them and ask for the PO number"). WHEN conditions can be FUZZY: {kind:"category", value:"<one of the app's categories>"} fires right after the classifier sorts the mail that way - use it for "if it's a <type> email" asks (see the CATEGORIES list in CURRENT STATE); {kind:"topic", value:"<short description with the boundary>"} matches by MEANING via embeddings - use it for "if it's related to / about X" asks; write the description like the boundary, e.g. "parcels and deliveries - shipping notices, courier updates, pickup codes. NOT marketing." Optional threshold 0.2-0.95 (default 0.45). Keep deterministic from/subject conditions alongside when the user names a sender; deterministic conditions are checked first and cost nothing, AI conditions run only after they pass. Plain single-action requests stay rules. Check list_flows and list_rules first; flows run after rules, first matching flow wins.
 - Rule housekeeping: call list_rules (or list_flows) for the exact ids. If the user asks to REMOVE/DELETE a rule (for example an exact duplicate), call delete_rule with that id - delete one of a duplicate pair and keep the other. If they only want it paused ("turn it off for now"), call set_rule_enabled. Only touch rules and flows the user asked about; if it is unclear which one, ask one short question first. delete_flow and set_flow_enabled do the same for flows.
 - Decide once, then act. State one short plan in your thinking, call the tools, then answer. Never repeat the same reasoning paragraph; if a task needs a capability you do not have, say so in ONE sentence and offer the closest alternative instead of re-reading your tool list.
 - Condition values of 3 characters or fewer (letters/digits) match whole words: a value "PO" will not match "support" or "report".
@@ -2189,7 +2194,7 @@ ASSISTANT_TOOLS = [
                  "op": {"type": "string", "enum": ["contains", "equals", "regex"]},
                  "value": {"type": "string"},
                  "min_confidence": {"type": "number", "description": "category conditions: minimum classifier confidence 0-1"},
-                 "threshold": {"type": "number", "description": "topic conditions: similarity threshold 0.2-0.95 (default 0.55)"}}}},
+                 "threshold": {"type": "number", "description": "topic conditions: similarity threshold 0.2-0.95 (default 0.45)"}}}},
          "steps": {"type": "array", "description": "THEN steps, in order (1-10)", "items": {
              "type": "object",
              "properties": {

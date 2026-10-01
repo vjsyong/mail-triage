@@ -47,7 +47,14 @@ Two fuzzy condition kinds, both first-class in flows (engine + builder + assista
 2. **About (topic)** (`{kind:"topic", value:"<description with boundary>", threshold?:0.2-0.95}`) -
    semantic match via embeddings (local embed endpoint): cosine(message subject+snippet,
    description) >= threshold. Evaluated at scan time. No LLM contention, cheap,
-   deterministic-ish. Default threshold 0.55.
+   deterministic-ish. Default threshold 0.45.
+
+**Calibration (real mailbox, real model, 250 messages):** with the embed model in
+production, relevant matches land ~0.44-0.55 while noise sits at p50 ~0.25-0.30,
+p90 ~0.36-0.41 - so the default was set to 0.45 (0.55 would never fire). Topic
+queries are wrapped in a retrieval instruction prefix ("Instruct: ... Query: ..."),
+which lifts top hits a few points. Scores are logged per run ("[topic match 0.47]")
+so thresholds can be tuned from evidence.
 
 Plus: **instructed LLM drafts** - draft steps with mode "llm" accept free-text
 `instructions` ("thank them and ask for the PO number") so "reply using that

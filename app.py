@@ -2460,11 +2460,11 @@ FLOW_EDIT_TMPL = """
         <option value="{{ o }}" {{ 'selected' if c.get('op') == o else '' }}>{{ o }}</option>{% endfor %}
       </select>
       <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Condition {{ i+1 }} value">
-      <input type="number" name="cond_score_{{ i }}" value="{{ c.get('min_confidence') or c.get('threshold') or '' }}" min="0" max="0.95" step="0.05" placeholder="auto" aria-label="Condition {{ i+1 }} minimum score" title="AI category: minimum confidence (0-1). about (topic): similarity threshold (default 0.55)." {{ 'disabled' if ck == 'field' else '' }}>
+      <input type="number" name="cond_score_{{ i }}" value="{{ c.get('min_confidence') or c.get('threshold') or '' }}" min="0" max="0.95" step="0.05" placeholder="auto" aria-label="Condition {{ i+1 }} minimum score" title="AI category: minimum confidence (0-1). about (topic): similarity threshold (default 0.45)." {{ 'disabled' if ck == 'field' else '' }}>
     </div>
     {% endfor %}
     <button type="button" class="btn small cond-more" onclick="this.parentNode.querySelectorAll('.cond-extra').forEach(function(e){e.classList.remove('cond-extra');}); this.remove();">Show 3 more conditions</button>
-    <div class="sub">match field is an exact text match &mdash; checked first, no AI cost. AI category fires when the classifier tags the message with that category (use the exact name from your categories list). about (topic) matches by meaning &mdash; describe the kind of mail WITH its boundary: &ldquo;parcels and deliveries - shipping notices, courier updates, pickup codes. NOT marketing.&rdquo; min score is optional: topic threshold (default 0.55) or category confidence floor (0 = any). Short values (&le;3 letters) match whole words only.</div>
+    <div class="sub">match field is an exact text match &mdash; checked first, no AI cost. AI category fires when the classifier tags the message with that category (use the exact name from your categories list). about (topic) matches by meaning &mdash; describe the kind of mail WITH its boundary: &ldquo;parcels and deliveries - shipping notices, courier updates, pickup codes. NOT marketing.&rdquo; min score is optional: topic threshold (default 0.45) or category confidence floor (0 = any). Short values (&le;3 letters) match whole words only.</div>
   </div>
   <script>
   function condKind(sel){
@@ -2600,9 +2600,9 @@ def _cond_friendly(c):
         return s
     if kind == "topic":
         try:
-            th = float(c.get("threshold") or 0.55)
+            th = float(c.get("threshold") or 0.45)
         except (TypeError, ValueError):
-            th = 0.55
+            th = 0.45
         return "is about ‘%s’ (≥%.2f)" % (c.get("value"), th)
     return "%s %s ‘%s’" % (c.get("field"), c.get("op"), c.get("value"))
 
