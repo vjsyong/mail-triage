@@ -196,3 +196,27 @@ Request: "render images and text formatting properly". Built:
 - Bulk: `app.py --extract-html` fills the renderer cache for the existing mailbox
   (phase 2 rescues stale rows via the Message-ID index); new scans extract at
   scan time, so fresh mail renders with no extra fetch.
+
+
+## Seventh pass: settings subgroups, flows builder, assistant drawer (2026-10, same day)
+
+**Settings** - regrouped into six top-level groups with a sticky sub-nav (General / AI
+Settings / Mail & connection / Sorting & filing / Search index / System status); every
+control is now an item row in a list (name + helper left, control right), grouped under
+sub-cards (Language model, Classification, Classifiers, Embeddings & reranker,
+Assistant...). All field names and per-card partial saves unchanged.
+
+**Flows builder** - research said the proven pattern for scoped automation is the linear
+trigger->actions builder (Zapier "when/then", Asana rules), not a canvas: canvas tools
+(Make/n8n) trade clarity for freeform routing we don't need. Built exactly that: WHEN =
+condition list (reusing the rules condition UI, all/any), THEN = ordered step cards
+(add/reorder/remove, type-specific fields, hidden JSON payload). Engine runner applies
+steps in order with move-tracking between steps, per-message dedupe (flow_runs by
+msgid), dry-run mode, and event-log entries.
+
+**Assistant** - frontier-lab chat pattern: sessions table + per-chat transcript,
+history rail on the page, "Assistant" nav click always starts a fresh chat (recent
+empty chat reused so they never pile up), resume/delete from the rail. A shared chat
+engine (one JS implementation + one Jinja conversation fragment) powers both the page
+and a global right-side drawer (FAB button, collapsible, remembers the open state and
+the active chat per browser). Streamed turns announce their session first.

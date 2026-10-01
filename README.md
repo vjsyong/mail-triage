@@ -26,6 +26,8 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
 
 - **Polls your inbox** every 90 s (configurable) through the embedded proxy and records
 - The message viewer renders real HTML email (sanitized) - formatted text, tables, inline images; remote images are blocked by default (per-message *Load images*, or always-on in Settings).
+- **Flows** are multi-step automations: WHEN a message matches -> THEN run steps in order (move, tag, flag, mark read, draft from a template or with the LLM and save to Drafts). Rules stay for single-action cases; rules run first. Dry-run toggle in Settings.
+- The **assistant** keeps a chat history: every click on Assistant starts a fresh chat, old chats are listed on the left and can be resumed or deleted, and a collapsible drawer (bottom-right button) is available on every page.
   every new message in a local SQLite database.
 - **Accounts** (Accounts page): add mail accounts and sign them in via OAuth — the page
   shows the exact redirect URI to register at the provider, drives the Authorise flow
@@ -194,7 +196,7 @@ docker exec mail-triage python app.py --heal-snippets  # bulk-repair legacy raw-
 docker exec mail-triage python app.py --extract-html   # pre-extract sanitized HTML bodies
                                       # for old mail (viewer renders without a
                                       # per-message fetch; rescue for stale rows)
-.venv/bin/python tests/mock_e2e.py    # 269-check E2E suite (mock IMAP + mock LLM,
+.venv/bin/python tests/mock_e2e.py    # 306-check E2E suite (mock IMAP + mock LLM,
                                       # mock TEI embed/rerank; SSE streaming agent)
 .venv/bin/python tests/proxy_e2e.py   # 26-check live flow for the embedded proxy
                                       # (real emailproxy vs mock OAuth + IMAP servers)
