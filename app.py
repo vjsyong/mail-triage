@@ -969,6 +969,7 @@ window.assistantChat = function(opts){
         doneMsgId=d.message_id;
         if(d.reply && !content.textContent){ content.textContent=d.reply; rawText=d.reply; }
         finish();
+        if(opts.onDone) opts.onDone();
       }
       else if(ev==='error'){ fail(d.message||'unknown error'); }
       scrollBottom();
@@ -1039,12 +1040,14 @@ window.assistantChat = function(opts){
       });
     });
   }
+  function remember(sid){ try{ localStorage.setItem('assistant_sid', String(sid)); }catch(e){} }
   function bind(){
     var form=document.getElementById('dform');
     if(form.__chat){ form.__chat.setSession(curSid); form.__chat.refreshLive(); return form.__chat; }
     return window.assistantChat({ root: chat, form: form, ta: document.getElementById('dmsg'),
       sendBtn: document.getElementById('dsend'), stopBtn: document.getElementById('dstop'), sessionId: curSid,
-      onSession: function(ns){ curSid=ns; try{ localStorage.setItem('assistant_sid', String(ns)); }catch(e){} loadHist(); } });
+      onSession: function(ns){ curSid=ns; remember(ns); loadHist(); },
+      onDone: function(){ loadHist(); } });
   }
   function loadPanel(sid){
     return fetch('/assistant/panel?sid='+sid).then(function(r){ if(!r.ok) throw new Error('gone'); return r.text(); }).then(function(html){
@@ -1065,10 +1068,10 @@ window.assistantChat = function(opts){
     var sid=null; try{ sid=parseInt(localStorage.getItem('assistant_sid')||'',10)||null; }catch(e){}
     if(sid){
       loadPanel(sid).then(function(){ curSid=sid; bind(); loadHist(); }).catch(function(){
-        newSid().then(function(ns){ curSid=ns; return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+        newSid().then(function(ns){ curSid=ns; remember(ns); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
       });
     } else {
-      newSid().then(function(ns){ curSid=ns; return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+      newSid().then(function(ns){ curSid=ns; remember(ns); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
     }
   }
   document.getElementById('dnew').addEventListener('click', function(){ newSid().then(function(ns){ openSession(ns); }); });
