@@ -2213,7 +2213,7 @@ def message_part(mid, section):
     if not m:
         return ("no such message", 404)
     cache_dir = os.path.join(_data_dir(), "partcache")
-    key = "m%d-u%d-%s" % (mid, m["uid"], section)
+    key = "v2-m%d-u%d-%s" % (mid, m["uid"], section)
     bin_path = os.path.join(cache_dir, key + ".bin")
     meta_path = os.path.join(cache_dir, key + ".json")
     if os.path.exists(bin_path) and os.path.exists(meta_path):

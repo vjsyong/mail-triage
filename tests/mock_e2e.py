@@ -405,17 +405,14 @@ class IMAPHandler(socketserver.StreamRequestHandler):
         return walk(msg, "")
 
     def section_bytes(self, raw, section):
+        # like a real IMAP server: return the section AS STORED (CTE applied)
         part = self._section_part(raw, section)
         if part is None:
             return b""
-        try:
-            payload = part.get_payload(decode=True)
-        except Exception:
-            payload = None
-        if payload is None:
-            pl = part.get_payload()
-            payload = pl.encode("utf-8", "replace") if isinstance(pl, str) else b""
-        return payload
+        pl = part.get_payload()
+        if isinstance(pl, str):
+            return pl.encode("utf-8", "replace")
+        return pl if isinstance(pl, bytes) else b""
 
     def section_headers(self, raw, section):
         part = self._section_part(raw, section)

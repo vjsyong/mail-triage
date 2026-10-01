@@ -615,13 +615,25 @@ class MailClient:
         if not chunks:
             raise RuntimeError("no data for section %s" % section)
         mime_raw, data = (chunks[0], chunks[-1]) if len(chunks) >= 2 else (b"", chunks[-1])
-        ct = ""
+        ct, cte = "", ""
         if mime_raw:
             try:
                 hdr = email.parser.BytesHeaderParser().parsebytes(mime_raw)
                 ct = str(hdr.get("Content-Type") or "")
+                cte = str(hdr.get("Content-Transfer-Encoding") or "").strip().lower()
             except Exception:
-                ct = ""
+                ct, cte = "", ""
+        # BODY[section] returns the part AS STORED - undo the transfer encoding
+        if cte == "base64":
+            try:
+                data = base64.b64decode(re.sub(rb"\s+", b"", data))
+            except Exception:
+                pass
+        elif cte == "quoted-printable":
+            try:
+                data = quopri.decodestring(data)
+            except Exception:
+                pass
         if not ct or ct.lower().startswith("application/octet-stream"):
             ct = _sniff_image_type(data) or ct or "application/octet-stream"
         return ct.split(";")[0].strip(), data
