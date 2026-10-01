@@ -3008,6 +3008,53 @@ def main():
 
 
 
+    section("T46 test sets: frozen human-labeled evaluation")
+
+    sres = learning_mod.sample_eval_set(n_needs=10, n_cat=6)
+    counts = store.eval_counts()
+    check("sampling builds a frozen set across both tasks",
+          sres["items"] > 0 and counts.get("needs_reply", {}).get("total", 0) > 0
+          and counts.get("category", {}).get("total", 0) > 0)
+    check("sampled messages are distinct", sres["messages"] == len(store.eval_msg_ids()))
+    ctx = learning_mod.next_eval_context()
+    check("a next message is served for labeling", bool(ctx) and bool(ctx["need"]))
+    r = client.get("/learning/eval")
+    show_subj = (ctx["msg"]["subject"] or "?")[:25].encode()
+    check("labeling page renders one message, blind",
+          r.status_code == 200 and b"Label the test set" in r.data
+          and b"Does it need a reply from you?" in r.data
+          and show_subj in r.data)
+    mid = ctx["msg"]["id"]
+    client.post("/learning/eval/label", data={"msg": mid, "task": "needs_reply", "label": "1"},
+                follow_redirects=True)
+    saved = [i for i in store.eval_items(task="needs_reply") if i["msg_id"] == mid][0]
+    check("a hand label saves from the page",
+          saved["label"] == "1" and saved["labeled_at"] > 0)
+    for it in store.eval_items():
+        if it["labeled_at"]:
+            continue
+        msg = [m for m in store.messages(limit=5000) if m["id"] == it["msg_id"]][0]
+        if it["task"] == "needs_reply":
+            learning_mod.label_eval(it["msg_id"], "needs_reply",
+                                    "1" if msg.get("llm_needs_reply") == 1 else "0")
+        else:
+            learning_mod.label_eval(it["msg_id"], "category", msg.get("llm_category") or "Other")
+    gm = learning_mod.golden_metrics("needs_reply")
+    check("golden metrics grade the AI against the human",
+          gm["labeled"] > 0 and gm["ai"] is not None and bool(gm["model_text"]))
+    gm2 = learning_mod.golden_metrics("category")
+    check("golden metrics grade the running model, with the disagreement count",
+          gm2["labeled"] > 0 and gm2["model"] is not None and gm2["ai"] is not None
+          and gm2["disagreements"] is not None)
+    ds_samples, _meta = learning_mod.build_dataset("needs_reply")
+    skip_ids = store.eval_msg_ids()
+    check("test messages never enter training sets",
+          bool(skip_ids) and all(s["msg_id"] not in skip_ids for s in ds_samples))
+    r = client.get("/learning")
+    check("learning page shows the test set and its truth-based scores",
+          b"Test sets" in r.data and b"of your labels" in r.data)
+
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

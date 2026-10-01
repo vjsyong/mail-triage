@@ -6855,6 +6855,54 @@ def simulate():
                               prefill_note=prefill_note, targets=targets))
 
 
+EVAL_TMPL = """<style>
+.evmsgsub{font-size:.85rem;color:var(--dim);margin-top:2px}
+.evbody{white-space:pre-wrap;font-size:.88rem;line-height:1.55;margin-top:10px;max-height:340px;overflow:auto}
+.evbtns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+@media(max-width:767px){.evbody{max-height:150px}}
+</style>
+<div class="page-head">
+  <div>
+    <h1>Label the test set</h1>
+    <div class="page-desc">Answer from your own judgment. Nothing shows what any model thinks here - that is the point. Your answers become the test set everything gets scored against.</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-h"><h3>Progress</h3><span class="sub">{{ done }} of {{ total }} messages labeled{% if skipped %} - {{ skipped }} marked not sure{% endif %}</span></div>
+  <span class="eprog" style="min-width:220px"><i style="width:{{ (100 * done / total)|round|int if total else 0 }}%"></i></span>
+</div>
+{% if msg %}
+<div class="card">
+  <div class="card-h"><h3>{{ msg.subject or '(no subject)' }}</h3><span class="sub">{{ fmt_ts(msg.date_ts) }}</span></div>
+  <div class="evmsgsub">From: {{ msg.from_addr }}{% if msg.to_addr %} - To: {{ msg.to_addr }}{% endif %}</div>
+  <div class="evbody">{{ msg.snippet or '(no preview)' }}</div>
+  <div class="sub" style="margin-top:8px"><a href="/messages/{{ msg.id }}" target="_blank">Open the full message</a></div>
+</div>
+{% if 'needs_reply' in need %}
+<div class="card">
+  <div class="card-h"><h3>Does it need a reply from you?</h3></div>
+  <div class="evbtns">
+    <form method="post" action="{{ url_for('learning_eval_label') }}"><input type="hidden" name="msg" value="{{ msg.id }}"><input type="hidden" name="task" value="needs_reply"><input type="hidden" name="label" value="1"><button class="btn small" type="submit">Yes - needs a reply</button></form>
+    <form method="post" action="{{ url_for('learning_eval_label') }}"><input type="hidden" name="msg" value="{{ msg.id }}"><input type="hidden" name="task" value="needs_reply"><input type="hidden" name="label" value="0"><button class="btn small" type="submit">No reply needed</button></form>
+  </div>
+</div>
+{% endif %}
+{% if 'category' in need %}
+<div class="card">
+  <div class="card-h"><h3>Which category?</h3></div>
+  <div class="evbtns">
+    <form method="post" action="{{ url_for('learning_eval_label') }}"><input type="hidden" name="msg" value="{{ msg.id }}"><input type="hidden" name="task" value="category"><select class="evsel" name="label">{% for c in cats %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select><button class="btn small" type="submit">Save</button></form>
+    <form method="post" action="{{ url_for('learning_eval_label') }}"><input type="hidden" name="msg" value="{{ msg.id }}"><input type="hidden" name="task" value="category"><input type="hidden" name="label" value="__skip__"><button class="btn small" type="submit">Not sure</button></form>
+  </div>
+</div>
+{% endif %}
+{% else %}
+<div class="card"><div class="card-h"><h3>All done</h3></div><div class="sub">Every sampled message has your answers. The scores are on the <a href="{{ url_for('learning_page') }}">Learning page</a>.</div></div>
+{% endif %}
+<div class="sub" style="margin-top:10px"><a href="{{ url_for('learning_page') }}">Back to Learning</a></div>
+"""
+
+
 LEARN_TMPL = """<style>
 .lsteps{margin-top:6px}
 .lstep{display:grid;grid-template-columns:auto 1fr;gap:0 12px;padding:10px 0;position:relative}
@@ -6874,6 +6922,9 @@ LEARN_TMPL = """<style>
 .ltbl td,.ltbl th{vertical-align:top}
 .mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
 .mgrid .card{margin:0}
+.eprog{display:inline-block;min-width:110px;height:6px;border-radius:3px;background:var(--line);vertical-align:middle;margin-right:8px;overflow:hidden}
+.eprog i{display:block;height:100%;border-radius:3px;background:var(--acc)}
+.evsel{padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg,#fff);color:inherit;font:inherit;font-size:.85rem}
 @media(max-width:767px){.ltbl .hide-m{display:none}.lstep{padding:9px 0}}
 </style>
 {% set s = rep.current %}
@@ -6945,6 +6996,27 @@ LEARN_TMPL = """<style>
   <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(sp) }}</div>
 </div>
 {% endfor %}
+</div>
+<div class="card">
+  <div class="card-h"><h3>Test sets</h3><span class="sub">hand-labeled by you - frozen - kept out of training</span></div>
+  {% if rep.eval.any %}
+    <div style="margin-bottom:10px"><span class="eprog"><i style="width:{{ (100 * rep.eval.progress.done / rep.eval.progress.total)|round|int }}%"></i></span><span class="sub">{{ rep.eval.progress.done }} of {{ rep.eval.progress.total }} messages labeled</span></div>
+    {% for t, g in rep.eval.tasks.items() %}
+      {% if g.n %}
+      <div class="dsrow" style="margin-top:6px"><span class="dsk">{{ g.title }}</span><span class="dsv">{{ g.labeled }} of {{ g.n }}{% if g.skipped %} - {{ g.skipped }} not sure{% endif %}</span></div>
+      {% if g.model_text %}<div class="sub" style="margin:2px 0 6px">{{ g.model_text }}</div>{% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if rep.eval.progress.done < rep.eval.progress.total %}
+    <div class="row" style="margin-top:12px"><a class="btn small" href="{{ url_for('learning_eval') }}">Label now ({{ rep.eval.progress.total - rep.eval.progress.done }} left)</a></div>
+    {% endif %}
+    {% if rep.eval.stale_models %}
+    <div class="sub" style="margin-top:10px">Models were trained before this set existed. <b>Retrain</b> them so your test messages never leak into training.</div>
+    {% endif %}
+  {% else %}
+    <div class="sub" style="margin-bottom:10px">Scores against AI labels measure imitation - the AI taught the models. This samples ~50 real emails for <b>you</b> to answer by hand (about 10 minutes, once). From then on every model is scored against your answers: the only truth-based score here. The set is frozen, and the messages are kept out of all training.</div>
+    <form method="post" action="{{ url_for('learning_eval_sample') }}"><button class="btn small" type="submit">Build the test set</button></form>
+  {% endif %}
 </div>
 <div class="card">
   <div class="card-h"><h3>The newest learner</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ stat_word }}</span></div>
@@ -7082,6 +7154,41 @@ def learning_transition(sid):
     except Exception as exc:
         flash("Transition failed: %s" % exc, "err")
     return redirect(url_for("learning_page"))
+
+
+@app.route("/learning/eval")
+def learning_eval():
+    ctx = learning.next_eval_context()
+    prog = learning.eval_progress()
+    cats = list(store.get_setting("categories") or []) or learning.known_categories()
+    msg = ctx["msg"] if ctx else None
+    need = ctx["need"] if ctx else []
+    return render(_render_src(EVAL_TMPL, msg=msg, need=need, cats=cats,
+                              done=prog["done"], total=prog["total"],
+                              skipped=prog["skipped"], fmt_ts=fmt_ts))
+
+
+@app.route("/learning/eval/sample", methods=["POST"])
+def learning_eval_sample():
+    try:
+        res = learning.sample_eval_set()
+        flash("Test set built: %d messages picked (%d questions). Label them from the Learning page."
+              % (res["messages"], res["items"]), "ok")
+    except Exception as exc:
+        flash("Could not build the test set: %s" % exc, "err")
+    return redirect(url_for("learning_page"))
+
+
+@app.route("/learning/eval/label", methods=["POST"])
+def learning_eval_label():
+    msg_id = int(request.form.get("msg") or 0)
+    task = (request.form.get("task") or "").strip()
+    label = (request.form.get("label") or "").strip()
+    try:
+        learning.label_eval(msg_id, task, label)
+    except Exception as exc:
+        flash("Could not save that answer: %s" % exc, "err")
+    return redirect(url_for("learning_eval"))
 
 
 @app.route("/fonts/<name>")

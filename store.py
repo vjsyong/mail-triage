@@ -406,6 +406,17 @@ def _migrate(conn):
         UNIQUE(msg_id, task, label, source)
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_lab_msg ON labels(msg_id, task)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS eval_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        set_name TEXT NOT NULL DEFAULT 'golden',
+        msg_id INTEGER NOT NULL DEFAULT 0,
+        task TEXT NOT NULL DEFAULT '',
+        label TEXT NOT NULL DEFAULT '',
+        created INTEGER NOT NULL DEFAULT 0,
+        labeled_at INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(set_name, msg_id, task)
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_msg ON eval_items(set_name, msg_id)")
     # one-time: retire assistant_actions_apply (False meant dry-run -> the three gated
     # tools become 'ask', so nothing the assistant did before can now happen silently)
     has_perm = conn.execute("SELECT COUNT(*) FROM settings WHERE k GLOB 'perm_*'").fetchone()[0]
@@ -1791,3 +1802,70 @@ def get_rule_proposal(pid):
 def mark_rule_proposal_applied(pid):
     with db() as conn:
         conn.execute("UPDATE rule_proposals SET applied=1 WHERE id=?", (pid,))
+
+
+# ---------------------------------------------------------------- eval sets (test sets)
+
+def add_eval_item(msg_id, task, set_name="golden"):
+    """Idempotent: one row per (set, message, task). Returns 1 when added."""
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO eval_items (set_name, msg_id, task, created) VALUES (?,?,?,?)",
+            (set_name, int(msg_id), task, int(time.time())))
+        return cur.rowcount
+
+
+def eval_items(set_name="golden", task=None):
+    sql = "SELECT * FROM eval_items WHERE set_name=?"
+    args = [set_name]
+    if task:
+        sql += " AND task=?"
+        args.append(task)
+    with db() as conn:
+        return [dict(r) for r in conn.execute(sql, args)]
+
+
+def eval_counts(set_name="golden"):
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT task, COUNT(*) total, SUM(CASE WHEN labeled_at>0 THEN 1 ELSE 0 END) labeled "
+            "FROM eval_items WHERE set_name=? GROUP BY task", (set_name,)).fetchall()
+    return {r["task"]: {"total": r["total"], "labeled": r["labeled"] or 0} for r in rows}
+
+
+def eval_msg_ids(set_name="golden"):
+    with db() as conn:
+        return {r[0] for r in conn.execute(
+            "SELECT DISTINCT msg_id FROM eval_items WHERE set_name=?", (set_name,))}
+
+
+def set_eval_label(msg_id, task, label, set_name="golden"):
+    with db() as conn:
+        cur = conn.execute(
+            "UPDATE eval_items SET label=?, labeled_at=? "
+            "WHERE set_name=? AND msg_id=? AND task=?",
+            (str(label), int(time.time()), set_name, int(msg_id), task))
+        return cur.rowcount
+
+
+def next_eval_msg(set_name="golden"):
+    """First message that still has an unlabeled item (stable order)."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT msg_id FROM eval_items WHERE set_name=? AND labeled_at=0 "
+            "GROUP BY msg_id ORDER BY MIN(id) LIMIT 1", (set_name,)).fetchone()
+    return row[0] if row else None
+
+
+def eval_items_for_msg(msg_id, set_name="golden"):
+    with db() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM eval_items WHERE set_name=? AND msg_id=?",
+            (set_name, int(msg_id)))]
+
+
+def eval_created(set_name="golden"):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT MIN(created) c FROM eval_items WHERE set_name=?", (set_name,)).fetchone()
+    return row["c"] if row and row["c"] else None

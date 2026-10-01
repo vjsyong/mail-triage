@@ -23,6 +23,7 @@ Where things run (see engine.classify_and_store -> learning.observe_classificati
 """
 import json
 import math
+import random
 import re
 import sys
 import time
@@ -576,6 +577,9 @@ def build_dataset(task, limit=6000):
         args = (int(limit),)
     with store.db() as conn:
         rows = [dict(r) for r in conn.execute(sql, args)]
+    eval_skip = store.eval_msg_ids()
+    if eval_skip:
+        rows = [r for r in rows if r["id"] not in eval_skip]
     labels_by_msg = {}
     try:
         for lab in store.list_labels(task=task, limit=20000):
@@ -772,6 +776,193 @@ def route_decision(task_policy, coverage):
     if moderate:
         return ROUTE_VERIFY, moderate
     return ROUTE_SPECIALISTS, []
+
+
+# ---------------------------------------------------------------- golden test sets
+#
+# A frozen, human-labeled evaluation set. Everything else in a specialist's metrics
+# comes from AI weak labels (it measures imitation); this set is the only place the
+# scores mean truth. Samples are drawn once, labeled blind (no model output shown),
+# STORED IN eval_items, kept out of every training window, and never edited to make
+# a score look better - retire items deliberately instead.
+
+EVAL_SET = "golden"
+
+
+def _eval_pool(skip):
+    with store.db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id, llm_needs_reply, llm_category FROM messages "
+            "WHERE coalesce(llm_category,'')!='' AND llm_needs_reply IN (0,1)")]
+    return [r for r in rows if r["id"] not in skip]
+
+
+def sample_eval_set(n_needs=36, n_cat=18, seed="golden-v1", set_name=EVAL_SET):
+    """Stratified sample from classified mail: n_needs messages balanced on the
+    weak reply label, plus one per category up to n_cat. Deterministic for a
+    given pool + seed; messages already in the set are skipped (top-up safe)."""
+    rnd = random.Random(seed)
+    pool = _eval_pool(store.eval_msg_ids(set_name))
+    pos = [r["id"] for r in pool if r["llm_needs_reply"] == 1]
+    neg = [r["id"] for r in pool if r["llm_needs_reply"] == 0]
+    pick = set(rnd.sample(pos, min(int(n_needs) // 2, len(pos))))
+    pick.update(rnd.sample(neg, min(int(n_needs) // 2, len(neg))))
+    by_cat = {}
+    for r in pool:
+        by_cat.setdefault(r["llm_category"], []).append(r["id"])
+    per = max(1, int(n_cat) // max(1, len(by_cat)))
+    for cat in sorted(by_cat):
+        pick.update(rnd.sample(by_cat[cat], min(per, len(by_cat[cat]))))
+    added = 0
+    for mid in sorted(pick):
+        added += store.add_eval_item(mid, "needs_reply", set_name=set_name)
+        added += store.add_eval_item(mid, "category", set_name=set_name)
+    return {"messages": len(pick), "items": added, "set": set_name}
+
+
+def eval_progress(set_name=EVAL_SET):
+    with store.db() as conn:
+        total = conn.execute(
+            "SELECT COUNT(DISTINCT msg_id) n FROM eval_items WHERE set_name=?",
+            (set_name,)).fetchone()["n"]
+        done = conn.execute(
+            "SELECT COUNT(*) n FROM (SELECT msg_id FROM eval_items WHERE set_name=? "
+            "GROUP BY msg_id HAVING SUM(CASE WHEN labeled_at>0 THEN 1 ELSE 0 END)=COUNT(*))",
+            (set_name,)).fetchone()["n"]
+        skipped = conn.execute(
+            "SELECT COUNT(*) n FROM eval_items WHERE set_name=? AND label='__skip__'",
+            (set_name,)).fetchone()["n"]
+    return {"total": total, "done": done, "skipped": skipped,
+            "by_task": store.eval_counts(set_name)}
+
+
+def next_eval_context(set_name=EVAL_SET):
+    """The next message to label: content + which tasks are still unanswered.
+    Blind on purpose - model and AI outputs are NOT included."""
+    mid = store.next_eval_msg(set_name)
+    if mid is None:
+        return None
+    items = store.eval_items_for_msg(mid, set_name)
+    need = sorted({i["task"] for i in items if not i["labeled_at"]})
+    with store.db() as conn:
+        m = conn.execute(
+            "SELECT id, from_addr, to_addr, subject, snippet, date_ts "
+            "FROM messages WHERE id=?", (mid,)).fetchone()
+    if m is None or not need:
+        return None
+    return {"msg": dict(m), "need": need}
+
+
+def label_eval(msg_id, task, label, set_name=EVAL_SET):
+    label = str(label)
+    if task == "needs_reply" and label not in ("0", "1", "__skip__"):
+        raise RuntimeError("needs_reply labels are 0/1/__skip__")
+    return store.set_eval_label(msg_id, task, label, set_name=set_name)
+
+
+def known_categories():
+    with store.db() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT DISTINCT llm_category FROM messages "
+            "WHERE coalesce(llm_category,'')!='' ORDER BY llm_category")]
+
+
+def _current_specialist(task):
+    rank = {"active": 0, "shadow": 1, "degraded": 2, "validated": 3}
+    rows = [s for s in store.list_specialists(task=task) if s["status"] in rank]
+    rows.sort(key=lambda s: (rank[s["status"]], -s["id"]))
+    return rows[0] if rows else None
+
+
+def _wilson_pts(p, n):
+    if n <= 0:
+        return 0
+    return int(round(196.0 * math.sqrt(max(0.0, p * (1.0 - p)) / n)))
+
+
+def golden_metrics(task, set_name=EVAL_SET):
+    """Score the current specialist AND the stored AI verdict against the human
+    labels. The disagreement count (who sides with the human when model != AI)
+    is the number that matters most."""
+    t = TASKS[task]
+    items = store.eval_items(set_name=set_name, task=task)
+    labeled = [i for i in items if i["labeled_at"] and i["label"] not in ("", "__skip__")]
+    out = {"task": task, "title": TASK_TITLES.get(task, task), "n": len(items),
+           "labeled": len(labeled),
+           "skipped": len([i for i in items if i["label"] == "__skip__"]),
+           "specialist": None, "model": None, "ai": None,
+           "disagreements": None, "model_text": ""}
+    if not labeled:
+        return out
+    spec = _current_specialist(task)
+    model = None
+    if spec:
+        try:
+            model = json.loads(spec["model"])
+        except (TypeError, ValueError):
+            model = None
+        if model:
+            out["specialist"] = "%s v%d [%s]" % (spec["name"], spec["version"], spec["status"])
+    multi = bool(t.get("multi"))
+    ids = [i["msg_id"] for i in labeled]
+    with store.db() as conn:
+        msgs = {r["id"]: dict(r) for r in conn.execute(
+            "SELECT id, from_addr, to_addr, subject, snippet, date_ts, sort_ts, processed_at, "
+            "llm_needs_reply, llm_category FROM messages WHERE id IN (%s)"
+            % ",".join("?" * len(ids)), ids)}
+    rows = []
+    for it in labeled:
+        m = msgs.get(it["msg_id"])
+        if not m:
+            continue
+        if multi:
+            human = it["label"]
+            ai = (m.get("llm_category") or "") or None
+            mpred = None
+            if model:
+                pr = predict(t["kind"], model, extract_features(m))
+                mpred = pr.get("prediction") if pr else None
+            rows.append((human, ai, mpred))
+        else:
+            human = 1 if it["label"] in ("1", "True", "true") else 0
+            ai = m.get("llm_needs_reply")
+            ai = int(ai) if ai in (0, 1) else None
+            mpred = None
+            if model:
+                pr = predict(t["kind"], model, extract_features(m))
+                if pr:
+                    mpred = 1 if pr.get("prediction") else 0
+            rows.append((human, ai, mpred))
+
+    def _acc(idx):
+        use = [r for r in rows if r[idx] is not None]
+        if not use:
+            return None
+        k = sum(1 for r in use if r[0] == r[idx])
+        return {"accuracy": k / len(use), "n": len(use), "pm": _wilson_pts(k / len(use), len(use))}
+
+    out["ai"] = _acc(1)
+    out["model"] = _acc(2)
+    dis = [r for r in rows if r[2] is not None and r[1] is not None and r[2] != r[1]]
+    out["disagreements"] = {"n": len(dis), "model_right": sum(1 for r in dis if r[2] == r[0])}
+
+    def _fmt(x):
+        if not x:
+            return "-"
+        return "%.0f%% (+-%.0f, n=%d)" % (100 * x["accuracy"], x["pm"] or 0, x["n"])
+
+    parts = []
+    if out["model"]:
+        parts.append("the model is right on %s of your labels" % _fmt(out["model"]))
+    if out["ai"]:
+        parts.append("the AI on %s" % _fmt(out["ai"]))
+    text = " - ".join(parts)
+    if dis:
+        text += ". Where the two disagree (%d), the model matched you %d time%s." % (
+            len(dis), out["disagreements"]["model_right"],
+            "s" if out["disagreements"]["model_right"] != 1 else "")
+    out["model_text"] = text
+    return out
 
 
 # ---------------------------------------------------------------- runtime hooks
@@ -1078,6 +1269,12 @@ def status_report():
     elif specs:
         current = specs[0]
     classifiers = classifier_models()
+    ev = {"set": EVAL_SET, "created": store.eval_created(), "progress": eval_progress(),
+          "tasks": {t: golden_metrics(t) for t in ("needs_reply", "category")}}
+    ev["any"] = ev["progress"]["total"] > 0
+    ev["stale_models"] = bool(ev["created"] and any(
+        (x.get("updated") or x.get("created") or 0) < ev["created"]
+        for x in specs if x["status"] in ("active", "shadow", "degraded")))
     return {
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "route_mode": store.get_setting("learning_route_mode", "shadow"),
@@ -1085,6 +1282,7 @@ def status_report():
         "specialists": specs,
         "current": current,
         "classifiers": classifiers,
+        "eval": ev,
         "counts": {
             "classifiers_live": sum(1 for c in classifiers if c["status"] == "live"),
             "learners_running": len(running),
@@ -1119,6 +1317,10 @@ def _cli(argv):
         print("routing (last %d): escalation=%.1f%% would-skip=%.1f%% %s"
               % (r["window"], 100 * (r["escalation_rate"] or 0), 100 * (r["would_skip_rate"] or 0),
                  r["counts"]))
+        evp = (rep.get("eval") or {}).get("progress") or {}
+        print("test set (%s): %d of %d messages labeled, %d not-sure"
+              % ((rep.get("eval") or {}).get("set", "-"), evp.get("done", 0),
+                 evp.get("total", 0), evp.get("skipped", 0)))
         for s in rep["specialists"]:
             m = s["metrics_parsed"].get("val") or {}
             if m.get("classes"):
@@ -1155,7 +1357,15 @@ def _cli(argv):
     if argv[0] == "reconcile":
         print(json.dumps(reconcile(), indent=1))
         return 0
-    print("usage: python learning.py [report [--json] | train [task] | deploy <id> | promote <id> | reconcile]")
+    if argv[0] == "sample-eval":
+        n = int(argv[1]) if len(argv) > 1 else 36
+        print(json.dumps(sample_eval_set(n_needs=n), indent=1))
+        return 0
+    if argv[0] == "eval-report":
+        print(json.dumps({t: golden_metrics(t) for t in ("needs_reply", "category")}, indent=1))
+        return 0
+    print("usage: python learning.py [report [--json] | train [task] | deploy <id> | promote <id>"
+          " | reconcile | sample-eval [n] | eval-report]")
     return 2
 
 
