@@ -2412,6 +2412,22 @@ def main():
           r.status_code == 302 and len(af) == 1
           and '"kind": "topic"' in af[0]["conditions"] and '"instructions"' in af[0]["actions"])
 
+    section("T34 flow builder v2: canvas = trigger -> filters -> step chain")
+    np = client.get("/flows/new").data
+    check("canvas renders trigger + filter nodes",
+          b"flowcanvas" in np and b"New mail arrives" in np and b"Only when" in np)
+    check("step chain lives on connectors (insert buttons)",
+          b"fl-ins" in np and b"Insert a step here" in np and b"Add a step" in np)
+    check("AI filters are first-class palette entries",
+          b"+ \xe2\x9c\xa6 AI category" in np and b"+ \xe2\x9c\xa6 about (topic)" in np)
+    check("live summary bar present", b"fl-sum-text" in np and b"no filters (every message)" in np)
+    check("smart mini-form labels (min trust/score)",
+          b"min score" in np and b"k-field-f" in np and b"k-score" in np)
+    edit34 = client.get("/flows/%d/edit" % fl_food[0]["id"]).data
+    check("edit page loads the flow into the canvas",
+          b"fl-edge" in edit34 and b'value="all" checked' in edit34
+          and b"Food plans" in edit34 and b"lunch and restaurant plans" in edit34)
+
     section("T30 mobile shell: viewport, PWA manifest, tab bar, More page")
     rp = client.get("/")
     check("viewport meta invites edge-to-edge", b"viewport-fit=cover" in rp.data)

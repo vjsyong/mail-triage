@@ -2408,186 +2408,372 @@ FLOWS_TMPL = """
 FLOW_EDIT_TMPL = """
 {% if error %}<div class="msg err" role="alert" id="form-err" tabindex="-1">{{ error }}</div><script>try{document.getElementById("form-err").focus();}catch(e){}</script>{% endif %}
 <style>
-.stepcard{border:1px solid var(--line);padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:10px;align-items:start;background:#fff}
-.stepnum{width:24px;height:24px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:600}
-.stepcard select,.stepcard input[type=text]{width:100%}
-.stepfields{margin-top:8px;display:grid;grid-template-columns:120px minmax(0,1fr);gap:6px 10px;align-items:center}
+.flowcanvas{border:1px solid var(--line);background:#fff;background-image:radial-gradient(var(--line) 1.1px, transparent 1.1px);background-size:22px 22px;padding:26px 16px 20px;overflow:hidden}
+.fl-col{max-width:660px;margin:0 auto;display:flex;flex-direction:column}
+.fl-node{position:relative;background:#fff;border:1px solid var(--line);box-shadow:0 1px 0 rgba(0,0,0,.04)}
+.fl-head{display:flex;align-items:center;gap:9px;padding:9px 11px}
+.fl-node .fl-head{border-bottom:0}
+.fl-node.open .fl-head,.fl-node.filters .fl-head{border-bottom:1px solid var(--line)}
+.fl-ic{width:24px;height:24px;min-width:24px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.8rem;line-height:1}
+.fl-ic.ai{background:#0070f3}
+.fl-t{font-weight:600;font-size:.9rem}
+.fl-sub{color:var(--dim);font-size:.78rem}
+.fl-sp{flex:1}
+.fl-handle{position:absolute;left:50%;width:9px;height:9px;background:#fff;border:2px solid var(--ink);transform:translateX(-50%);z-index:1}
+.fl-handle.t{top:-6px}.fl-handle.b{bottom:-6px}
+.fl-edge{position:relative;height:30px;flex:none}
+.fl-edge::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--line);transform:translateX(-1px)}
+.fl-ins{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:26px;height:26px;border:1px solid var(--line);background:#fff;color:var(--dim);font-size:1rem;line-height:1;cursor:pointer;opacity:0;transition:opacity .12s;z-index:2}
+.fl-edge:hover .fl-ins,.fl-ins:focus-visible,.fl-ins.on{opacity:1;border-color:var(--ink);color:var(--ink)}
+.fl-insert-menu{position:absolute;left:50%;top:30px;transform:translateX(-50%);background:#fff;border:1px solid var(--ink);padding:6px;display:none;flex-wrap:wrap;gap:4px;z-index:5;box-shadow:0 10px 28px rgba(0,0,0,.10);width:max-content;max-width:92%}
+.fl-insert-menu.on{display:flex}
+.cond-row{border:1px solid var(--line);background:#fff;padding:8px 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cond-row + .cond-row{margin-top:6px}
+.cond-row.extra{display:none}
+.cond-row .k-sel{border:1px solid var(--line);background:#fafafa;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;padding:4px 6px;color:var(--dim);cursor:pointer}
+.cond-row.k-category .k-sel,.cond-row.k-topic .k-sel{color:#0070f3;border-color:#0070f3}
+.k-field-f{display:flex;gap:6px;min-width:0}
+.cond-row:not(.k-field) .k-field-f{display:none}
+.cond-row:not(.k-field) .k-score,.cond-row:not(.k-field) .k-score-lab{display:none}
+.cond-row .k-val{flex:1;min-width:120px}
+.cond-row .k-score{width:84px;flex:none}
+.k-label{font-size:.72rem;color:var(--dim);white-space:nowrap}
+.cond-rm{border:0;background:none;color:var(--dim);cursor:pointer;font-size:.85rem;padding:2px 4px}
+.cond-rm:hover{color:#d33}
+.stepcard{position:relative;background:#fff;border:1px solid var(--line)}
+.fl-step-head{display:flex;align-items:center;gap:9px;padding:9px 11px;cursor:pointer}
+.fl-step-head:hover{background:var(--hover)}
+.fl-step-sum{color:var(--dim);font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+.stepfields{padding:10px 11px;display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px 10px;align-items:center;border-top:1px solid var(--line)}
 .stepfields label{font-size:.78rem;color:var(--dim)}
 .steptools{display:flex;gap:4px}
+.fl-pal{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding:10px;border:1px dashed var(--line);background:rgba(255,255,255,.7)}
+.fl-pal-lab{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);width:100%}
+.fl-summary{display:flex;gap:10px;align-items:flex-start;margin-bottom:12px}
+.fl-sum-lab{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);padding-top:2px;white-space:nowrap}
+.fl-sum-text{font-size:.9rem}
+.fl-seg{display:inline-flex;border:1px solid var(--line)}
+.fl-seg label{padding:3px 9px;font-size:.78rem;cursor:pointer;color:var(--dim);position:relative}
+.fl-seg label+label{border-left:1px solid var(--line)}
+.fl-seg input{position:absolute;opacity:0;pointer-events:none}
+.fl-seg input:checked + span{color:#fff;background:var(--ink);margin:-3px -9px;padding:3px 9px;display:inline-block}
+.fl-seg input:focus-visible + span{outline:2px solid var(--focus);outline-offset:1px}
+@media(max-width:767px){
+  .flowcanvas{padding:16px 8px}
+  .fl-ins{opacity:1}
+  .fl-step-sum{max-width:140px}
+  .stepfields{grid-template-columns:1fr}
+  .fl-summary{flex-direction:column;gap:4px}
+}
 </style>
 <div class="page-head">
   <div>
-    <div class="sub" style="margin-bottom:4px"><a href="{{ url_for('flows') }}">&larr; Flows</a></div>
     <div class="backlink"><a href="{{ url_for('flows') }}">← Flows</a></div>
-    <h1 class="page-title">{{ 'Edit flow' if flow else 'New flow' }}</h1>
-    <div class="page-desc">WHEN a message matches, THEN run the steps, in order. Deterministic conditions are checked first; AI conditions (category / about) run only if they pass.</div>
+    <h1 class="page-title">{{ 'New flow' if is_new else 'Edit flow' }}</h1>
+    <div class="page-desc">A new message arrives, the filters decide, the steps run in order. Deterministic filters are exact and free; AI filters run only after they pass.</div>
   </div>
 </div>
 <form method="post" id="flowform">
 <input type="hidden" name="steps_json" id="steps_json">
-<div class="card">
-  <div class="card-h"><h3>Flow</h3></div>
-  <div class="grid2">
-    <div><label for="f-name">Name</label><input id="f-name" type="text" name="name" value="{{ flow.name if flow else '' }}" placeholder="e.g. Invoice &rarr; file + draft ack"></div>
-    <div><label class="check" style="margin-top:26px"><input type="checkbox" name="enabled" value="1" {{ 'checked' if (flow.enabled if flow else True) else '' }}> <span>Enabled &mdash; evaluated on every check</span></label></div>
-  </div>
+<div class="grid2" style="margin-bottom:12px">
+  <div><label for="f-name">Name</label><input id="f-name" type="text" name="name" value="{{ flow.name if flow else '' }}" placeholder="e.g. Invoice → file + draft ack"></div>
+  <div><label class="check" style="margin-top:26px"><input type="checkbox" name="enabled" value="1" {{ 'checked' if (flow.enabled if flow else True) else '' }}> <span>Enabled — evaluated on every check</span></label></div>
 </div>
 
-<div class="card">
-  <div class="card-h"><h3>WHEN &mdash; a message matches</h3>
-    <select name="match_mode" aria-label="Match mode" style="width:auto">
-      <option value="all" {{ 'selected' if not (flow and flow.match_mode == 'any') else '' }}>match all conditions</option>
-      <option value="any" {{ 'selected' if flow and flow.match_mode == 'any' else '' }}>match any condition</option>
-    </select>
-  </div>
-  <div id="conds">
-    <div class="grid5 sub cond-head" style="margin-bottom:2px"><div>kind</div><div>field</div><div>operator</div><div>value</div><div>min score</div></div>
-    {% for i in range(5) %}
-    {% set c = conditions[i] if conditions|length > i else {} %}
-    {% set ck = c.get('kind') or 'field' %}
-    <div class="grid5{{ ' cond-extra' if i >= 2 else '' }}" style="margin-bottom:6px">
-      <select name="cond_kind_{{ i }}" aria-label="Condition {{ i+1 }} kind" onchange="condKind(this)">
-        <option value="field" {{ 'selected' if ck == 'field' else '' }}>match field</option>
-        <option value="category" {{ 'selected' if ck == 'category' else '' }}>AI category</option>
-        <option value="topic" {{ 'selected' if ck == 'topic' else '' }}>about (topic)</option>
-      </select>
-      <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field" {{ 'disabled' if ck != 'field' else '' }}>
-        {% for f in ['from','to','subject','body'] %}
-        <option value="{{ f }}" {{ 'selected' if c.get('field') == f else '' }}>{{ f }}</option>{% endfor %}
-      </select>
-      <select name="cond_op_{{ i }}" aria-label="Condition {{ i+1 }} operator" {{ 'disabled' if ck != 'field' else '' }}>
-        {% for o in ['contains','equals','regex'] %}
-        <option value="{{ o }}" {{ 'selected' if c.get('op') == o else '' }}>{{ o }}</option>{% endfor %}
-      </select>
-      <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Condition {{ i+1 }} value">
-      <input type="number" name="cond_score_{{ i }}" value="{{ c.get('min_confidence') or c.get('threshold') or '' }}" min="0" max="0.95" step="0.05" placeholder="auto" aria-label="Condition {{ i+1 }} minimum score" title="AI category: minimum confidence (0-1). about (topic): similarity threshold (default 0.45)." {{ 'disabled' if ck == 'field' else '' }}>
+<div class="card fl-summary">
+  <span class="fl-sum-lab">Summary</span>
+  <div class="fl-sum-text" id="fl-sum-text" aria-live="polite">{{ summary_text }}</div>
+</div>
+
+<div class="flowcanvas">
+  <div class="fl-col" id="fl-col">
+
+    <div class="fl-node" id="fl-trigger">
+      <div class="fl-head">
+        <span class="fl-ic">▸</span>
+        <div>
+          <div class="fl-t">New mail arrives</div>
+          <div class="fl-sub">watches <strong>{{ watch_text }}</strong> every {{ poll_interval }}s — rules run first, then flows</div>
+        </div>
+      </div>
+      <span class="fl-handle b"></span>
     </div>
-    {% endfor %}
-    <button type="button" class="btn small cond-more" onclick="this.parentNode.querySelectorAll('.cond-extra').forEach(function(e){e.classList.remove('cond-extra');}); this.remove();">Show 3 more conditions</button>
-    <div class="sub">match field is an exact text match &mdash; checked first, no AI cost. AI category fires when the classifier tags the message with that category (use the exact name from your categories list). about (topic) matches by meaning &mdash; describe the kind of mail WITH its boundary: &ldquo;parcels and deliveries - shipping notices, courier updates, pickup codes. NOT marketing.&rdquo; min score is optional: topic threshold (default 0.45) or category confidence floor (0 = any). Short values (&le;3 letters) match whole words only.</div>
-  </div>
-  <script>
-  function condKind(sel){
-    var row = sel.closest('.grid5'); if(!row) return;
-    var k = sel.value;
-    var f = row.querySelector('[name^="cond_field_"]');
-    var o = row.querySelector('[name^="cond_op_"]');
-    var s = row.querySelector('[name^="cond_score_"]');
-    if(f) f.disabled = (k !== 'field');
-    if(o) o.disabled = (k !== 'field');
-    if(s) s.disabled = (k === 'field');
-  }
-  document.addEventListener('DOMContentLoaded', function(){
-    document.querySelectorAll('#conds select[name^="cond_kind_"]').forEach(condKind);
-  });
-  </script>
-</div>
 
-<div class="card">
-  <div class="card-h"><h3>THEN &mdash; do these steps, in order</h3><span class="sub">a draft step saves into your Drafts folder; nothing is ever sent. LLM drafts can follow your reply instructions</span></div>
-  <div id="steps"></div>
-  <span id="steps-live" class="vh" aria-live="polite"></span>
-  <noscript><div class="msg err" style="margin-top:8px">The step builder needs JavaScript — enable it to add steps.</div></noscript>
-  <div class="row">
-    <button class="btn small" type="button" onclick="addStep('move')">+ Move to folder</button>
-    <button class="btn small" type="button" onclick="addStep('draft')">+ Create a draft</button>
-    <button class="btn small" type="button" onclick="addStep('tag')">+ Tag</button>
-    <button class="btn small" type="button" onclick="addStep('mark_read')">+ Mark read</button>
-    <button class="btn small" type="button" onclick="addStep('flag')">+ Star</button>
+    <div class="fl-edge" id="fl-edge-0"></div>
+
+    <div class="fl-node filters" id="fl-filters">
+      <div class="fl-head">
+        <span class="fl-ic ai">✦</span>
+        <div class="fl-t">Only when</div>
+        <span class="fl-sp"></span>
+        <span class="fl-seg" role="group" aria-label="Match all or any filter">
+          <label><input type="radio" name="match_mode" value="all" {{ 'checked' if not (flow and flow.match_mode == 'any') else '' }}><span>match all</span></label>
+          <label><input type="radio" name="match_mode" value="any" {{ 'checked' if flow and flow.match_mode == 'any' else '' }}><span>match any</span></label>
+        </span>
+      </div>
+      <div style="padding:10px 11px">
+        <div class="empty-conds fl-sub" id="cond-empty" {% if conditions %}style="display:none"{% endif %}>No filters yet — this runs on every new message. Add one:</div>
+        {% for i in range(5) %}
+        {% set c = conditions[i] if conditions|length > i else {} %}
+        {% set ck = c.get('kind') or 'field' %}
+        <div class="cond-row k-{{ ck }}{{ ' extra' if i >= 2 and not c else '' }}" data-row="{{ i }}">
+          <select class="k-sel" name="cond_kind_{{ i }}" aria-label="Filter {{ i+1 }} kind" onchange="condKind(this)">
+            <option value="field" {{ 'selected' if ck == 'field' else '' }}>match</option>
+            <option value="category" {{ 'selected' if ck == 'category' else '' }}>✦ AI category</option>
+            <option value="topic" {{ 'selected' if ck == 'topic' else '' }}>✦ about</option>
+          </select>
+          <span class="k-field-f">
+            <select name="cond_field_{{ i }}" aria-label="Filter {{ i+1 }} field" {{ 'disabled' if ck != 'field' else '' }} style="width:100px">
+              {% for f in ['from','to','subject','body'] %}
+              <option value="{{ f }}" {{ 'selected' if c.get('field') == f else '' }}>{{ f }}</option>{% endfor %}
+            </select>
+            <select name="cond_op_{{ i }}" aria-label="Filter {{ i+1 }} operator" {{ 'disabled' if ck != 'field' else '' }} style="width:112px">
+              {% for o in ['contains','equals','regex'] %}
+              <option value="{{ o }}" {{ 'selected' if c.get('op') == o else '' }}>{{ o }}</option>{% endfor %}
+            </select>
+          </span>
+          <input class="k-val" type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Filter {{ i+1 }} value">
+          <span class="k-label k-score-lab">{{ 'min trust' if ck == 'category' else 'min score' }}</span>
+          <input class="k-score" type="number" name="cond_score_{{ i }}" value="{{ c.get('min_confidence') or c.get('threshold') or '' }}" min="0" max="0.95" step="0.05" placeholder="auto" aria-label="Filter {{ i+1 }} minimum score" title="AI category: minimum confidence (0-1). about: similarity threshold (default 0.45)." {{ 'disabled' if ck == 'field' else '' }}>
+          <button type="button" class="cond-rm" aria-label="Remove filter {{ i+1 }}" onclick="condClear(this)">✕</button>
+        </div>
+        {% endfor %}
+        <datalist id="fl-cats"></datalist>
+        <div class="fl-pal" style="margin-top:8px">
+          <span class="fl-pal-lab">Add a filter</span>
+          <button type="button" class="btn small" onclick="condAdd('field')">+ match text</button>
+          <button type="button" class="btn small" onclick="condAdd('category')">+ ✦ AI category</button>
+          <button type="button" class="btn small" onclick="condAdd('topic')">+ ✦ about (topic)</button>
+        </div>
+        <div class="fl-sub" style="margin-top:8px"><strong>match text</strong> = exact words (checked first, free) &middot; <strong>✦ AI category</strong> fires when the classifier tags the message &middot; <strong>✦ about (topic)</strong> matches by meaning — describe the kind of mail with its boundary, e.g. &ldquo;parcels and deliveries - shipping notices, pickup codes. NOT marketing.&rdquo; &middot; min score: topic threshold (default 0.45) or category confidence floor. Text values of 3 letters or fewer match whole words only.</div>
+      </div>
+      <span class="fl-handle b"></span>
+    </div>
+
+    <div id="steps"></div>
+
+    <div class="fl-pal" id="step-pal">
+      <span class="fl-pal-lab">Add a step</span>
+      <button type="button" class="btn small" onclick="addStep('move')">+ Move to folder</button>
+      <button type="button" class="btn small" onclick="addStep('draft')">+ Create a draft</button>
+      <button type="button" class="btn small" onclick="addStep('tag')">+ Tag</button>
+      <button type="button" class="btn small" onclick="addStep('mark_read')">+ Mark read</button>
+      <button type="button" class="btn small" onclick="addStep('flag')">+ Star</button>
+    </div>
+    <noscript><div class="msg err" style="margin-top:8px">The step builder needs JavaScript — enable it to add steps.</div></noscript>
   </div>
 </div>
 
 <div class="savebar"><button class="btn primary" type="submit">Save flow</button><a class="btn" href="{{ url_for('flows') }}">Cancel</a></div>
-</form>
 <script>
-var TEMPLATES = {{ templates_json|safe }};
-var steps = {{ steps_json|safe }};
 var stepsEl = document.getElementById('steps');
 var stepsInput = document.getElementById('steps_json');
-var TYPES = [['move','Move to folder'],['draft','Create a draft'],['tag','Tag'],['mark_read','Mark as read'],['flag','Star / flag']];
-function sync(){ stepsInput.value = JSON.stringify(steps); }
+var sumEl = document.getElementById('fl-sum-text');
+var TYPES = [['move','Move to folder','⇥'],['draft','Create a draft','✎'],['tag','Tag','#'],['mark_read','Mark as read','✓'],['flag','Star / flag','★']];
+var TEMPLATES = {{ templates_json|safe }};
+var CATS = {{ categories_json|safe }};
+var steps = {{ steps_json|safe }};
+steps.forEach(function(s){ s._open = false; });
 function el(tag, cls, txt){ var e = document.createElement(tag); if(cls) e.className = cls; if(txt != null) e.textContent = txt; return e; }
-function render(){
-  stepsEl.innerHTML = '';
-  steps.forEach(function(st, i){
-    var card = el('div','stepcard');
-    var sel = el('select');
-    TYPES.forEach(function(t){ var o = el('option', null, t[1]); o.value = t[0]; if(st.type === t[0]) o.selected = true; sel.appendChild(o); });
-    sel.onchange = function(){
-      st.type = sel.value;
-      if(st.type === 'move' && st.folder === undefined) st.folder = '';
-      if(st.type === 'tag' && st.tag === undefined) st.tag = '';
-      if(st.type === 'draft'){ if(!st.mode) st.mode = 'template'; if(st.template_id === undefined) st.template_id = ''; }
-      render();
-    };
-    var body = el('div');
-    body.appendChild(sel);
-    var f = el('div','stepfields');
-    if(st.type === 'move'){
-      f.appendChild(el('label', null, 'Folder'));
-      var inp = el('input'); inp.type = 'text'; inp.value = st.folder || ''; inp.placeholder = 'e.g. Receipts';
-      inp.oninput = function(){ st.folder = inp.value; sync(); };
-      f.appendChild(inp);
-    } else if(st.type === 'draft'){
-      f.appendChild(el('label', null, 'How'));
-      var m = el('select');
-      [['fixed','Fixed message'],['template','Fill a template'],['llm','Draft with the LLM']].forEach(function(t){ var o = el('option', null, t[1]); o.value = t[0]; if((st.mode || 'template') === t[0]) o.selected = true; m.appendChild(o); });
-      m.onchange = function(){ st.mode = m.value; render(); };
-      f.appendChild(m);
-      if((st.mode || 'template') === 'fixed'){
-        f.appendChild(el('label', null, 'Message'));
-        var ta = document.createElement('textarea'); ta.rows = 3; ta.value = st.body || '';
-        ta.placeholder = 'Thank you for your email, I will get back to you shortly';
-        ta.oninput = function(){ st.body = ta.value; sync(); };
-        f.appendChild(ta);
-      } else {
+function typeInfo(t){ for (var i = 0; i < TYPES.length; i++){ if(TYPES[i][0] === t) return TYPES[i]; } return [t || 'step', 'Step', '·']; }
+function stepSummary(st){
+  if(st.type === 'move') return st.folder ? ('move to ' + st.folder) : 'pick a folder';
+  if(st.type === 'tag') return st.tag ? ('tag "' + st.tag + '"') : 'name the tag';
+  if(st.type === 'mark_read') return 'mark as read';
+  if(st.type === 'flag') return 'star it';
+  if(st.type === 'draft'){
+    st.mode = st.mode || 'template';
+    if(st.mode === 'fixed') return 'fixed draft "' + String(st.body || '').slice(0, 40) + '" → Drafts';
+    if(st.mode === 'llm') return 'LLM draft' + (st.instructions ? ' guided by "' + String(st.instructions).slice(0, 40) + '"' : '') + ' → Drafts';
+    var t = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
+    return 'draft from ' + (t ? t.name : '(pick a template)') + ' → Drafts';
+  }
+  return 'step';
+}
+function matchWord(){ var r = document.querySelector('input[name=match_mode]:checked'); return (r && r.value === 'any') ? ' OR ' : ' AND '; }
+function condTexts(){
+  var out = [];
+  document.querySelectorAll('.cond-row').forEach(function(row){
+    var i = row.getAttribute('data-row');
+    var kind = row.querySelector('.k-sel').value;
+    var val = row.querySelector('.k-val').value.trim();
+    if(!val) return;
+    var sc = row.querySelector('.k-score').value;
+    if(kind === 'category') out.push('✦ classified as "' + val + '"' + (sc ? ' (≥' + Math.round(sc * 100) + '%)' : ''));
+    else if(kind === 'topic') out.push('✦ about "' + val + '"' + (sc ? ' (≥' + sc + ')' : ''));
+    else out.push(row.querySelector('[name^="cond_field_"]').value + ' ' + row.querySelector('[name^="cond_op_"]').value + ' "' + val + '"');
+  });
+  return out;
+}
+function renderSummary(){
+  var when = condTexts();
+  var acts = steps.map(stepSummary);
+  sumEl.textContent = 'new mail · ' + (when.length ? when.join(matchWord()) : 'no filters (every message)') + ' → ' + (acts.length ? acts.join(', then ') : 'no steps yet');
+}
+function sync(){
+  stepsInput.value = JSON.stringify(steps.map(function(s){ var o = {}; for (var k in s){ if(k.charAt(0) !== '_') o[k] = s[k]; } return o; }));
+  renderSummary();
+}
+function condKind(sel){
+  var row = sel.closest('.cond-row');
+  var kind = sel.value;
+  row.classList.remove('k-field','k-category','k-topic');
+  row.classList.add('k-' + kind);
+  var f = row.querySelector('[name^="cond_field_"]'), o = row.querySelector('[name^="cond_op_"]'), s = row.querySelector('.k-score'), v = row.querySelector('.k-val'), lab = row.querySelector('.k-score-lab');
+  if(f) f.disabled = (kind !== 'field');
+  if(o) o.disabled = (kind !== 'field');
+  if(s) s.disabled = (kind === 'field');
+  if(lab) lab.textContent = (kind === 'category') ? 'min trust' : 'min score';
+  if(v){
+    if(kind === 'category'){ v.setAttribute('list','fl-cats'); v.placeholder = 'category name'; }
+    else if(kind === 'topic'){ v.removeAttribute('list'); v.placeholder = 'describe it, include the boundary'; }
+    else { v.removeAttribute('list'); v.placeholder = 'value to match'; }
+  }
+  condEmpty(); renderSummary();
+}
+function condEmpty(){
+  var any = false;
+  document.querySelectorAll('.cond-row').forEach(function(r){ if(r.querySelector('.k-val').value.trim()) any = true; });
+  var e = document.getElementById('cond-empty'); if(e) e.style.display = any ? 'none' : '';
+}
+function condAdd(kind){
+  var rows = document.querySelectorAll('.cond-row');
+  var target = null;
+  rows.forEach(function(r){ if(!target && r.classList.contains('extra')) target = r; });
+  if(!target) rows.forEach(function(r){ if(!target && !r.querySelector('.k-val').value.trim()) target = r; });
+  if(!target) return;
+  target.classList.remove('extra');
+  var sel = target.querySelector('.k-sel'); sel.value = kind; condKind(sel);
+  var v = target.querySelector('.k-val'); v.focus();
+}
+function condClear(btn){
+  var row = btn.closest('.cond-row');
+  row.querySelector('.k-val').value = '';
+  row.querySelector('.k-score').value = '';
+  var sel = row.querySelector('.k-sel'); sel.value = 'field'; condKind(sel);
+  if(parseInt(row.getAttribute('data-row'), 10) >= 2) row.classList.add('extra');
+  condEmpty(); renderSummary();
+}
+function fieldsFor(st){
+  var f = el('div','stepfields');
+  if(st.type === 'move'){
+    f.appendChild(el('label', null, 'Folder'));
+    var inp = el('input'); inp.type = 'text'; inp.value = st.folder || ''; inp.placeholder = 'e.g. Receipts';
+    inp.oninput = function(){ st.folder = inp.value; renderSummary(); sync(); };
+    f.appendChild(inp);
+  } else if(st.type === 'draft'){
+    f.appendChild(el('label', null, 'How'));
+    var m = el('select');
+    [['fixed','Fixed message'],['template','Fill a template'],['llm','Draft with the LLM']].forEach(function(t){
+      var o = el('option', null, t[1]); o.value = t[0]; if((st.mode || 'template') === t[0]) o.selected = true; m.appendChild(o);
+    });
+    m.onchange = function(){ st.mode = m.value; render(); sync(); };
+    f.appendChild(m);
+    if((st.mode || 'template') === 'fixed'){
+      f.appendChild(el('label', null, 'Message'));
+      var ta = document.createElement('textarea'); ta.rows = 3; ta.value = st.body || '';
+      ta.placeholder = 'Thank you for your email, I will get back to you shortly';
+      ta.oninput = function(){ st.body = ta.value; renderSummary(); sync(); };
+      f.appendChild(ta);
+    } else {
       f.appendChild(el('label', null, (st.mode === 'llm') ? 'Template (optional guidance)' : 'Template'));
       var tSel = el('select');
       var none = el('option', null, '(none)'); none.value = ''; tSel.appendChild(none);
       TEMPLATES.forEach(function(t){ var o = el('option', null, t.name); o.value = String(t.id); if(String(st.template_id || '') === String(t.id)) o.selected = true; tSel.appendChild(o); });
-      tSel.onchange = function(){ st.template_id = tSel.value; sync(); };
+      tSel.onchange = function(){ st.template_id = tSel.value; renderSummary(); sync(); };
       f.appendChild(tSel);
       if(st.mode === 'llm'){
         f.appendChild(el('label', null, 'Reply instructions (optional)'));
         var ta2 = document.createElement('textarea'); ta2.rows = 2; ta2.value = st.instructions || '';
         ta2.placeholder = 'e.g. thank them and mention delivery within 5 working days';
-        ta2.oninput = function(){ st.instructions = ta2.value; sync(); };
+        ta2.oninput = function(){ st.instructions = ta2.value; renderSummary(); sync(); };
         f.appendChild(ta2);
       }
-      }
-    } else if(st.type === 'tag'){
-      f.appendChild(el('label', null, 'Tag'));
-      var tin = el('input'); tin.type = 'text'; tin.value = st.tag || ''; tin.placeholder = 'e.g. Follow up';
-      tin.oninput = function(){ st.tag = tin.value; sync(); };
-      f.appendChild(tin);
     }
-    if(f.childNodes.length) body.appendChild(f);
-    var tools = el('div','steptools');
-    var up = el('button', null, '\u2191'); up.type = 'button'; up.className = 'btn small'; up.disabled = (i === 0); up.setAttribute('aria-label', 'Move step ' + (i + 1) + ' up');
-    up.onclick = function(){ var t = steps[i-1]; steps[i-1] = steps[i]; steps[i] = t; render(); };
-    var dn = el('button', null, '\u2193'); dn.type = 'button'; dn.className = 'btn small'; dn.disabled = (i === steps.length - 1); dn.setAttribute('aria-label', 'Move step ' + (i + 1) + ' down');
-    dn.onclick = function(){ var t = steps[i+1]; steps[i+1] = steps[i]; steps[i] = t; render(); };
-    var rm = el('button', null, '\u2715'); rm.type = 'button'; rm.className = 'btn small'; rm.title = 'Remove step'; rm.setAttribute('aria-label', 'Remove step ' + (i + 1));
-    rm.onclick = function(){ steps.splice(i, 1); render(); };
-    tools.appendChild(up); tools.appendChild(dn); tools.appendChild(rm);
-    var num = el('div','stepnum', String(i + 1));
-    card.appendChild(num); card.appendChild(body); card.appendChild(tools);
-    stepsEl.appendChild(card);
-  });
-  var live = document.getElementById('steps-live');
-  if (live) live.textContent = steps.length + ' step(s) in this flow';
-  sync();
+  } else if(st.type === 'tag'){
+    f.appendChild(el('label', null, 'Tag'));
+    var tin = el('input'); tin.type = 'text'; tin.value = st.tag || ''; tin.placeholder = 'e.g. Follow up';
+    tin.oninput = function(){ st.tag = tin.value; renderSummary(); sync(); };
+    f.appendChild(tin);
+  }
+  return f;
 }
-function addStep(type){
+function insertStep(i, type){
   var st = {type: type};
   if(type === 'move') st.folder = '';
   if(type === 'draft'){ st.mode = 'template'; st.template_id = ''; }
   if(type === 'tag') st.tag = '';
-  steps.push(st); render();
+  st._open = true;
+  steps.splice(i, 0, st);
+  render(); sync();
 }
-render();
+function edge(i){
+  var e = el('div','fl-edge');
+  var b = el('button','fl-ins','+'); b.type = 'button'; b.setAttribute('aria-label','Insert a step here');
+  var m = el('div','fl-insert-menu');
+  TYPES.forEach(function(t){
+    var x = el('button','btn small','+ ' + t[1]); x.type = 'button';
+    x.onclick = function(ev){ ev.stopPropagation(); m.classList.remove('on'); insertStep(i, t[0]); };
+    m.appendChild(x);
+  });
+  b.onclick = function(ev){ ev.stopPropagation(); m.classList.toggle('on'); b.classList.toggle('on', m.classList.contains('on')); };
+  e.appendChild(b); e.appendChild(m);
+  return e;
+}
+function render(){
+  stepsEl.innerHTML = '';
+  if(!steps.length) stepsEl.appendChild(edge(0));
+  steps.forEach(function(st, i){
+    var card = el('div','stepcard fl-node' + (st._open ? ' open' : ''));
+    var head = el('div','fl-step-head');
+    var info = typeInfo(st.type);
+    head.appendChild(el('span','fl-ic', info[2]));
+    var tt = el('div');
+    tt.appendChild(el('div','fl-t', info[1]));
+    tt.appendChild(el('div','fl-step-sum', stepSummary(st)));
+    head.appendChild(tt); head.appendChild(el('span','fl-sp'));
+    var tools = el('div','steptools');
+    var ed = el('button', null, st._open ? '✓' : '✎'); ed.type = 'button'; ed.className = 'btn small';
+    ed.title = st._open ? 'Collapse' : 'Edit this step'; ed.setAttribute('aria-label', ed.title);
+    ed.onclick = function(ev){ ev.stopPropagation(); st._open = !st._open; render(); };
+    var up = el('button', null, '↑'); up.type = 'button'; up.className = 'btn small'; up.disabled = (i === 0); up.setAttribute('aria-label','Move step ' + (i + 1) + ' up');
+    up.onclick = function(ev){ ev.stopPropagation(); var t = steps[i-1]; steps[i-1] = steps[i]; steps[i] = t; render(); sync(); };
+    var dn = el('button', null, '↓'); dn.type = 'button'; dn.className = 'btn small'; dn.disabled = (i === steps.length - 1); dn.setAttribute('aria-label','Move step ' + (i + 1) + ' down');
+    dn.onclick = function(ev){ ev.stopPropagation(); var t = steps[i+1]; steps[i+1] = steps[i]; steps[i] = t; render(); sync(); };
+    var rm = el('button', null, '✕'); rm.type = 'button'; rm.className = 'btn small'; rm.title = 'Remove step'; rm.setAttribute('aria-label','Remove step ' + (i + 1));
+    rm.onclick = function(ev){ ev.stopPropagation(); steps.splice(i, 1); render(); sync(); };
+    tools.appendChild(ed); tools.appendChild(up); tools.appendChild(dn); tools.appendChild(rm);
+    head.appendChild(tools);
+    head.onclick = function(ev){ if(ev.target.closest('.steptools')) return; st._open = !st._open; render(); };
+    card.appendChild(head);
+    if(st._open) card.appendChild(fieldsFor(st));
+    card.appendChild(el('span','fl-handle t'));
+    card.appendChild(el('span','fl-handle b'));
+    stepsEl.appendChild(card);
+    if(i < steps.length - 1) stepsEl.appendChild(edge(i + 1));
+  });
+  sync();
+}
+function addStep(type){ insertStep(steps.length, type); }
+document.addEventListener('click', function(ev){
+  document.querySelectorAll('.fl-insert-menu.on').forEach(function(mm){
+    if(!mm.contains(ev.target)){ mm.classList.remove('on'); }
+  });
+  document.querySelectorAll('.fl-ins.on').forEach(function(bb){ bb.classList.remove('on'); });
+});
+var e0 = document.getElementById('fl-edge-0');
+if(e0){
+  var b0 = el('button','fl-ins','+'); b0.type = 'button'; b0.setAttribute('aria-label','Add a filter');
+  b0.onclick = function(ev){ ev.stopPropagation(); condAdd('field'); var v = document.querySelector('.cond-row.extra .k-val') || document.querySelector('.cond-row .k-val'); if(v) v.focus(); };
+  e0.appendChild(b0);
+}
+document.querySelectorAll('.cond-row .k-sel').forEach(condKind);
+document.querySelectorAll('input[name=match_mode]').forEach(function(r){ r.addEventListener('change', renderSummary); });
+CATS.forEach(function(c){ var o = document.createElement('option'); o.value = c; document.getElementById('fl-cats').appendChild(o); });
+render(); condEmpty();
 </script>
 """
+
 
 
 def _cond_friendly(c):
@@ -2714,10 +2900,21 @@ def _flow_from_form():
     return name, match_mode, conditions, steps, enabled
 
 
-def _flow_edit_context(error, name, mode, conds, steps, enabled):
+def _flow_edit_context(error, name, mode, conds, steps, enabled, is_new=False):
     flow = {"name": name, "match_mode": mode, "enabled": enabled}
+    settings = store.all_settings()
+    when = engine._flow_when_text({"conditions": json.dumps(conds or []),
+                                   "match_mode": mode}) if conds else ""
+    acts = engine._flow_steps_text(steps or []) if steps else ""
     return {"flow": flow, "conditions": conds, "steps_json": json.dumps(steps or []),
-            "error": error, "templates": store.list_templates(),
+            "error": error, "is_new": is_new,
+            "categories_json": json.dumps(settings.get("categories") or []),
+            "watch_text": ", ".join(settings.get("watch_folders") or ["INBOX"]),
+            "poll_interval": int(settings.get("poll_interval", 90) or 90),
+            "summary_text": "new mail · %s → %s"
+                            % (when or "no filters (every message)",
+                               acts or "no steps yet"),
+            "templates": store.list_templates(),
             "templates_json": json.dumps([{"id": x["id"], "name": x["name"]}
                                           for x in store.list_templates()])}
 
@@ -2739,16 +2936,14 @@ def flow_new():
         name, mode, conds, steps, enabled = _flow_from_form()
         if not conds or not steps:
             return render(_render_src(FLOW_EDIT_TMPL, **_flow_edit_context(
-                error=("Add at least one condition with a value." if not conds else "Add at least one step."),
-                name=name, mode=mode, conds=conds, steps=steps, enabled=enabled)))
+                error=("Add at least one filter with a value." if not conds else "Add at least one step."),
+                name=name, mode=mode, conds=conds, steps=steps, enabled=enabled, is_new=True)))
         store.add_flow(name, mode, conds, steps, enabled)
         store.log_event("info", "flow '%s' added (%d step(s))" % (name, len(steps)))
         flash("Flow added.", "ok")
         return redirect(url_for("flows"))
-    return render(_render_src(FLOW_EDIT_TMPL, flow=None, conditions=[], steps_json="[]",
-                             templates=store.list_templates(),
-                             templates_json=json.dumps(
-                                 [{"id": t["id"], "name": t["name"]} for t in store.list_templates()])))
+    return render(_render_src(FLOW_EDIT_TMPL,
+                              **_flow_edit_context(None, "", "all", [], [], True, is_new=True)))
 
 
 @app.route("/flows/<int:flow_id>/edit", methods=["GET", "POST"])
@@ -2761,7 +2956,7 @@ def flow_edit(flow_id):
         name, mode, conds, steps, enabled = _flow_from_form()
         if not conds or not steps:
             return render(_render_src(FLOW_EDIT_TMPL, **_flow_edit_context(
-                error=("Add at least one condition with a value." if not conds else "Add at least one step."),
+                error=("Add at least one filter with a value." if not conds else "Add at least one step."),
                 name=name, mode=mode, conds=conds, steps=steps, enabled=enabled)))
         store.update_flow(flow_id, name=name, match_mode=mode,
                           conditions=json.dumps(conds), actions=json.dumps(steps),
@@ -2776,11 +2971,9 @@ def flow_edit(flow_id):
         steps = json.loads(flow.get("actions") or "[]")
     except (TypeError, ValueError):
         steps = []
-    return render(_render_src(FLOW_EDIT_TMPL, flow=flow, conditions=conds,
-                             steps_json=json.dumps(steps),
-                             templates=store.list_templates(),
-                             templates_json=json.dumps(
-                                 [{"id": t["id"], "name": t["name"]} for t in store.list_templates()])))
+    return render(_render_src(FLOW_EDIT_TMPL, **_flow_edit_context(
+        None, flow.get("name") or "", flow.get("match_mode") or "all",
+        conds, steps, bool(flow.get("enabled")))))
 
 
 @app.route("/flows/<int:flow_id>/toggle", methods=["POST"])
