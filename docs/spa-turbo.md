@@ -110,3 +110,21 @@ slides in from the LEFT (the reported bug), messages->assistant unchanged
 (from the right); messages<->viewer, messages<->dashboard and history-back all
 correct. When adding a page, add its prefix to VTPOS or it falls back to
 always-forward for its pairings.
+
+## Redirect double-render fix (same day, v4) - /assistant renders directly
+Symptom: tapping the Assistant tab played the slide animation TWICE. Cause found by
+wrapping startViewTransition + listening to turbo:visit/before-render: Turbo's
+followRedirect() renders the redirected response (transition 1), then proposes a
+second "replace" visit to the final URL (transition 2, serialized after the first
+by Turbo's ViewTransitioner) - two visits, two renders, two SVTs for one tap.
+
+Fix: GET /assistant no longer 302-redirects. It renders the assistant page directly
+(shared `_assistant_page(sid)`, called by both /assistant and /assistant/s/<sid>);
+the template's first script replaceState()s the URL to /assistant/s/<sid>. One fetch,
+one render, one transition - verified by the same trace (1 SVT / 1 render / canonical
+URL at render time). Back/forward history behaves identically to the redirect era.
+
+Note: form-submission redirects (settings saves, rule saves, etc.) were ALREADY
+single-transition - Turbo hands the response to the replace visit in that path, so
+.no second render. The double only affected cross-location GET redirects, of which
+/assistant was the only one in this app.

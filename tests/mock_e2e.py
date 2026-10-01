@@ -967,8 +967,8 @@ def main():
         r = client.get(path)
         check("GET %s -> 200" % path, r.status_code == 200)
     r = client.get("/assistant")
-    check("GET /assistant -> fresh chat redirect", r.status_code == 302
-          and "/assistant/s/" in r.headers.get("Location", ""))
+    check("GET /assistant -> fresh chat rendered directly (no redirect; canonical URL via replaceState)",
+          r.status_code == 200 and b"/assistant/s/" in r.data and b"replaceState" in r.data)
     latest = store.messages(limit=1)[0]
     r = client.get("/messages/%d" % latest["id"])
     check("message detail renders", r.status_code == 200)
@@ -2215,13 +2215,15 @@ def main():
 
     section("T29 assistant chats: sessions, panel fragment, drawer")
     r = client.get("/assistant")
-    check("assistant tab starts a chat", r.status_code == 302
-          and "/assistant/s/" in r.headers.get("Location", ""))
-    loc1 = r.headers.get("Location", "")
+    check("assistant tab starts a chat (direct render, canonical URL via replaceState)",
+          r.status_code == 200 and b"replaceState" in r.data)
+    m29 = re.search(rb'replaceState\(history\.state, "", "/assistant/s/(\d+)"\)', r.data)
+    check("assistant page carries its canonical session URL", bool(m29))
+    sid29 = int(m29.group(1))
     r = client.get("/assistant")
+    m29b = re.search(rb'replaceState\(history\.state, "", "/assistant/s/(\d+)"\)', r.data)
     check("consecutive clicks reuse the same empty chat (no pile-up)",
-          r.headers.get("Location", "") == loc1)
-    sid29 = int(loc1.rstrip("/").split("/")[-1])
+          bool(m29b) and int(m29b.group(1)) == sid29)
     r = client.post("/assistant/stream", data={"message": "hello sessions", "session": str(sid29)})
     check("stream into the chosen session", b"event: session" in r.data and b"event: done" in r.data)
     s29 = store.get_session(sid29)
@@ -2229,8 +2231,9 @@ def main():
     r = client.get("/assistant/s/%d" % sid29)
     check("session page shows the transcript", b"hello sessions" in r.data)
     r = client.get("/assistant")
+    m29c = re.search(rb'replaceState\(history\.state, "", "/assistant/s/(\d+)"\)', r.data)
     check("next assistant click starts a genuinely new chat",
-          r.headers.get("Location", "") != loc1)
+          bool(m29c) and int(m29c.group(1)) != sid29)
     r = client.get("/assistant/sessions.json")
     check("sessions.json lists chats with titles",
           r.status_code == 200 and b"hello sessions" in r.data)

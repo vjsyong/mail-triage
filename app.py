@@ -4334,6 +4334,10 @@ CONVO_TMPL = r"""
 """
 
 ASSISTANT_TMPL = r"""
+<script>/* /assistant renders directly (no 302) so Turbo never double-renders;
+  keep the address bar on the canonical session URL. */
+(function(){ var p = location.pathname.replace(/\/$/, "");
+  if (p === "/assistant") { try { history.replaceState(history.state, "", "/assistant/s/{{ sid }}"); } catch (e) {} } })();</script>
 <div class="page-head am-head">
   <div>
     <h1 class="page-title">Assistant</h1>
@@ -4470,8 +4474,11 @@ def _proposal_view(p):
 
 @app.route("/assistant")
 def assistant():
-    # clicking the Assistant tab starts a fresh chat (a recent empty chat is reused)
-    return redirect(url_for("assistant_session", sid=store.find_or_create_session()))
+    # clicking the Assistant tab starts a fresh chat (a recent empty chat is reused).
+    # Rendered directly instead of 302-redirected: Turbo's followRedirect() would
+    # render this response, then propose a second "replace" visit to the final URL -
+    # two full page transitions for one tap. The template replaceState()s the URL.
+    return _assistant_page(store.find_or_create_session())
 
 
 ASSIST_SUGGESTIONS = {
@@ -4593,8 +4600,7 @@ def _assistant_fragment(sid, ctx_path="", back=""):
                               suggest=_suggestions_for_path(ctx_path), back=back)
 
 
-@app.route("/assistant/s/<int:sid>")
-def assistant_session(sid):
+def _assistant_page(sid):
     if not store.get_session(sid):
         flash("That chat no longer exists.", "err")
         return redirect(url_for("assistant"))
@@ -4610,6 +4616,11 @@ def assistant_session(sid):
         ASSISTANT_TMPL, sid=sid, sessions=sessions, convo=convo, convo_html=convo_html,
         llm=engine.llm_config(), pending=pending,
         perms_text=engine.agent_permissions_text()))
+
+
+@app.route("/assistant/s/<int:sid>")
+def assistant_session(sid):
+    return _assistant_page(sid)
 
 
 @app.route("/assistant/panel")
