@@ -694,8 +694,13 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 body.with-asb .asb{display:flex}
 body.with-asb .main{margin-right:46px;transition:margin-right .15s ease}
 .asb{transition:width .15s ease}
-html.asb-open body.with-asb .main{margin-right:352px}
-html.asb-open .asb{width:352px}
+.asb-grip{position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize;z-index:2;touch-action:none}
+.asb-grip:hover,.asb-grip:focus-visible{background:var(--hover);outline:none}
+html:not(.asb-open) .asb-grip{display:none}
+html.asb-resizing .asb,html.asb-resizing body.with-asb .main{transition:none}
+html.asb-resizing body{user-select:none;-webkit-user-select:none}
+html.asb-open body.with-asb .main{margin-right:var(--asb-w,352px)}
+html.asb-open .asb{width:var(--asb-w,352px)}
 .asb-rail{width:46px;flex:none;display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:12px;background:#fff;cursor:pointer}
 .asb-rail:hover{background:var(--hover)}
 .asb-rail button{border:0;background:none;font-size:1.05rem;color:var(--ink);cursor:pointer;padding:6px;line-height:1}
@@ -815,7 +820,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
 }
 @media(max-width:640px){pre.log{font-size:.78rem}}
 </style>
-<script>try{var v=localStorage.getItem('asb_open');if(v===null||v==='1')document.documentElement.classList.add('asb-open');}catch(e){}</script>
+<script>try{var v=localStorage.getItem('asb_open');if(v===null||v==='1')document.documentElement.classList.add('asb-open');var w=parseInt(localStorage.getItem('asb_w')||'',10);if(w>=280)document.documentElement.style.setProperty('--asb-w',Math.min(720,w)+'px');}catch(e){}</script>
 </head><body{% if show_asb %} class="with-asb"{% endif %}>
 <a class="skip" href="#main">Skip to content</a>
 {% set p = request.path %}
@@ -958,6 +963,7 @@ function cp(text, el){
 
 {% if show_asb %}
 <aside id="asb" class="asb" aria-label="Assistant sidebar">
+  <div class="asb-grip" id="asb-grip" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the assistant sidebar" title="Drag to resize — double-click to reset"></div>
   <div class="asb-rail" id="asb-rail" title="Expand the assistant">
     <button type="button" id="asb-toggle" aria-label="Expand the assistant">&#10022;</button>
     <span class="lab">Assistant</span>
@@ -1310,6 +1316,48 @@ window.guardApply = function(f){
   document.getElementById('asb-toggle').addEventListener('click', function(ev){ ev.stopPropagation(); setOpen(true); });
   document.getElementById('asb-rail').addEventListener('click', function(ev){ if(ev.target === this || ev.target.tagName === 'SPAN') setOpen(true); });
   document.getElementById('dclose').addEventListener('click', function(){ setOpen(false); });
+  /* ---- resize (drag the left edge; width persists) ---- */
+  var grip = document.getElementById('asb-grip');
+  var DEF_W = 352, MIN_W = 280;
+  var curW = DEF_W;
+  try{ var sw = parseInt(localStorage.getItem('asb_w') || '', 10); if(sw >= MIN_W) curW = sw; }catch(e){}
+  function maxW(){ return Math.min(720, Math.max(320, window.innerWidth - 480)); }
+  function clampW(w){ return Math.max(MIN_W, Math.min(maxW(), Math.round(w))); }
+  function applyW(w){
+    curW = clampW(w);
+    document.documentElement.style.setProperty('--asb-w', curW + 'px');
+    grip.setAttribute('aria-valuenow', String(curW));
+    grip.setAttribute('aria-valuemin', String(MIN_W));
+    grip.setAttribute('aria-valuemax', String(maxW()));
+  }
+  function saveW(){ try{ localStorage.setItem('asb_w', String(curW)); }catch(e){} }
+  applyW(curW);
+  grip.addEventListener('pointerdown', function(ev){
+    if(!expanded()) return;
+    ev.preventDefault();
+    var startX = ev.clientX, startW = curW;
+    document.documentElement.classList.add('asb-resizing');
+    try{ grip.setPointerCapture(ev.pointerId); }catch(e){}
+    function mv(e2){ applyW(startW + (startX - e2.clientX)); }
+    function end(){
+      document.documentElement.classList.remove('asb-resizing');
+      saveW();
+      grip.removeEventListener('pointermove', mv);
+      grip.removeEventListener('pointerup', end);
+      grip.removeEventListener('pointercancel', end);
+    }
+    grip.addEventListener('pointermove', mv);
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+  });
+  grip.addEventListener('dblclick', function(){ applyW(DEF_W); saveW(); });
+  grip.addEventListener('keydown', function(ev){
+    if(ev.key === 'ArrowLeft'){ applyW(curW + 24); saveW(); ev.preventDefault(); }
+    else if(ev.key === 'ArrowRight'){ applyW(curW - 24); saveW(); ev.preventDefault(); }
+  });
+  window.addEventListener('resize', function(){
+    if(expanded() && clampW(curW) !== curW){ applyW(curW); saveW(); }
+  });
   function post(url, data){ return fetch(url, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:data||''}); }
   function newSid(){ return post('/assistant/new.json').then(function(r){ return r.json(); }).then(function(d){ return d.sid; }); }
   function loadHist(){

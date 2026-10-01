@@ -2238,6 +2238,9 @@ def main():
           b'id="asb"' in r.data and b'id="asb-toggle"' in r.data
           and b'class="with-asb"' in r.data and b"assistantChat" in r.data
           and b'id="drawer"' not in r.data and b'id="dtoggle"' not in r.data)
+    check("sidebar is resizable (grip + persisted width)",
+          b'id="asb-grip"' in r.data and b"col-resize" in r.data
+          and b"var(--asb-w" in r.data and b"asb_w" in r.data)
     r = client.get("/assistant/s/%d" % sid29)
     check("no assistant sidebar on the assistant page itself",
           b'id="asb"' not in r.data and b'id="asb-toggle"' not in r.data
