@@ -71,3 +71,23 @@ Side-fix found by the slowed-down frames: the desktop Messages DATE column was
 only 55px wide and wrapped "10-01 18:30" into three fragments; `white-space:nowrap`
 on the date cell (and the classifiers "updated" column) — column now 101px,
 single line.
+
+## Direction-aware mobile transitions (final)
+Mobile now pushes horizontally like a native app, direction follows the navigation:
+- **Forward** (link/tab tap, form nav): old page slides off left, new page enters
+  from the right (0.28s matched-ease so the two layers move as one).
+- **Back** (history back/forward, and any `.backlink` ("← Parent") click): exact
+  mirror - old exits right, new enters from the left.
+- Direction is decided in a singleton listener: `turbo:visit` reads
+  `e.detail.action` ("restore" = back) and a capture-phase click listener flags
+  `.backlink` anchors as back (`window.__mtBack` consumed on the next visit).
+  The result lands on `html[data-vt-dir]` which flips the CSS animation set.
+- Desktop keeps the subtle fade + 8px rise (>=768px media); the horizontal set
+  is <=767px only. Reduced-motion still disables everything.
+
+Verified with slowed-down frames on a phone viewport: forward = old exiting left
+while new enters from the right over a clean vertical split; backlink and browser
+back = the exact mirror; top bar and bottom tab bar pinned in both. Desktop
+re-verified as fade+rise with zero horizontal displacement. Also classed the
+message viewer's "← Messages" link as `.backlink` (it was the last unclassed
+parent link, so it now slides from the left too).

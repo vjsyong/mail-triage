@@ -497,17 +497,29 @@ line-height:1.5;overflow:auto;max-height:70vh;white-space:pre-wrap;overflow-wrap
 border-left:3px solid #a3a3a3;animation:tin .18s ease}
 .toast2.ok{border-left-color:var(--ok)} .toast2.err{border-left-color:var(--err)}
 .turbo-progress-bar{height:2px !important;background:#000 !important}
-/* view transitions: chrome stays put, content breathes */
+/* view transitions: chrome stays put; desktop breathes, mobile pushes horizontally */
 @media (prefers-reduced-motion: no-preference){
   .side{view-transition-name:mt-side}
   .topbar{view-transition-name:mt-topbar}
   .bottom-nav{view-transition-name:mt-nav}
   #asb{view-transition-name:mt-asb}
-  ::view-transition-old(root){animation:mtvt-out .14s ease both}
-  ::view-transition-new(root){animation:mtvt-in .24s cubic-bezier(.2,.7,.3,1) both}
-  @keyframes mtvt-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-  @keyframes mtvt-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(-4px)}}
 }
+@media (prefers-reduced-motion: no-preference) and (min-width:768px){
+  html::view-transition-old(root){animation:mtvt-out .14s ease both}
+  html::view-transition-new(root){animation:mtvt-in .24s cubic-bezier(.2,.7,.3,1) both}
+}
+@media (prefers-reduced-motion: no-preference) and (max-width:767px){
+  html::view-transition-old(root){animation:mtvt-fwd-out .28s cubic-bezier(.2,.7,.3,1) both}
+  html::view-transition-new(root){animation:mtvt-fwd-in .28s cubic-bezier(.2,.7,.3,1) both}
+  html[data-vt-dir="back"]::view-transition-old(root){animation:mtvt-back-out .28s cubic-bezier(.2,.7,.3,1) both}
+  html[data-vt-dir="back"]::view-transition-new(root){animation:mtvt-back-in .28s cubic-bezier(.2,.7,.3,1) both}
+}
+@keyframes mtvt-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes mtvt-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(-4px)}}
+@keyframes mtvt-fwd-out{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+@keyframes mtvt-fwd-in{from{transform:translateX(100%)}to{transform:translateX(0)}}
+@keyframes mtvt-back-out{from{transform:translateX(0)}to{transform:translateX(100%)}}
+@keyframes mtvt-back-in{from{transform:translateX(-100%)}to{transform:translateX(0)}}
 @media (prefers-reduced-motion: reduce){
   ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none !important}
 }
@@ -1105,6 +1117,23 @@ function mdRender(src){
 }
 window.mdRender = mdRender;
 
+/* view-transition direction: forward = slide in from the right;
+   backlinks and history-back = slide in from the left (mobile) */
+if(!window.__mtVt){
+  window.__mtVt = 1;
+  var vtRoot = document.documentElement;
+  vtRoot.setAttribute('data-vt-dir', 'forward');
+  document.addEventListener('click', function(e){
+    var b = e.target && e.target.closest ? e.target.closest('.backlink') : null;
+    if(b && e.target.closest('a')) window.__mtBack = true;
+  }, true);
+  document.addEventListener('turbo:visit', function(e){
+    var a = e.detail && e.detail.action;
+    var dir = (window.__mtBack || a === 'restore') ? 'back' : 'forward';
+    window.__mtBack = false;
+    vtRoot.setAttribute('data-vt-dir', dir);
+  });
+}
 if(!window.__mtCopy){ window.__mtCopy = 1;
 document.addEventListener('click', function(e){
   var c=e.target.closest('.copy');
@@ -3612,7 +3641,7 @@ MESSAGE_TMPL = """
 </style>
 <div class="page-head">
   <div style="min-width:0">
-    <div class="sub" style="margin-bottom:4px"><a href="{{ url_for('messages') }}">← Messages</a></div>
+    <div class="backlink"><a href="{{ url_for('messages') }}">← Messages</a></div>
     <h1 class="page-title" style="font-size:1.12rem">{{ m.subject[:100] or '(no subject)' }}</h1>
     <div class="page-desc msgfrom">{{ m.from_addr }} · <span title="{{ m.date }}">{{ m.date_disp or m.date }}</span> · {{ m.folder }}</div>
   </div>
