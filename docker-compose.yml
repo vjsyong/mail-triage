@@ -10,5 +10,9 @@ services:
       # https://<node>:4181x to host 127.0.0.1:4181x). Loopback-mode accounts
       # complete via the paste-back box and do not need these.
       - "127.0.0.1:41810-41819:41810-41819"
+    environment:
+      # local (CPU/ONNX) embedding + reranker models for the lite RAG backend
+      FASTEMBED_CACHE_PATH: /ragmodels
     volumes:
       - ./data:/data
+      - ./ragmodels:/ragmodels
