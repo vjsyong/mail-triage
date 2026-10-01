@@ -959,15 +959,142 @@ def main():
     check("valid rule queued as proposal", r["ok"] and len(agent.proposals) == 1)
     r = agent.call_tool("nonsense_tool", {})
     check("unknown tool rejected", not r["ok"])
-    store.set_setting("assistant_actions_apply", False)
-    dry = engine.AssistantAgent()
-    r = dry.call_tool("move_message", {"folder": "INBOX", "uid": 6, "target_folder": "Budgets"})
-    check("dry-run move does not touch mail",
-          r["ok"] and r.get("dry_run") and 6 in state.get("INBOX")["uids"]
-          and state.get("Budgets") is None)
-    dry.close()
+    # ---- fine-grained agent permissions (docs/agent-permissions.md)
+    store.set_setting("perm_move", "off")
+    a0 = engine.AssistantAgent()
+    r = a0.call_tool("move_message", {"folder": "INBOX", "uid": 6, "target_folder": "Budgets"})
+    check("perm off: move refused, mail untouched",
+          (not r["ok"]) and r.get("permission_denied") == "move"
+          and 6 in state.get("INBOX")["uids"] and state.get("Budgets") is None)
+    a0.close()
+    row6_id = [x for x in store.messages(limit=100)
+               if x["uid"] == 6 and x["folder"] == "INBOX"][0]["id"]
+    store.set_setting("perm_move", "ask")
+    a1 = engine.AssistantAgent()
+    r = a1.call_tool("move_message", {"folder": "INBOX", "uid": 6, "target_folder": "Budgets"})
+    check("perm ask: queued for approval, no move yet",
+          r["ok"] and r.get("pending_approval") and isinstance(r.get("action_id"), int)
+          and 6 in state.get("INBOX")["uids"] and state.get("Budgets") is None)
+    aid = r["action_id"]
+    prow = store.get_agent_action(aid)
+    check("approval row stored (pending, preview, payload)",
+          bool(prow) and prow["status"] == "pending" and "Budgets" in prow["preview"]
+          and json.loads(prow["payload"])["tool"] == "move_message")
+    check("pending count for the nav badge", store.count_pending_agent_actions() == 1)
+    pl = json.loads(prow["payload"])
+    res = a1.call_tool(pl["tool"], pl["args"], approved=True)
+    store.set_agent_action(aid, "applied" if res.get("ok") else "failed",
+                           json.dumps({"summary": res.get("summary")}))
+    check("approval applies the move",
+          res["ok"] and 6 not in state.get("INBOX")["uids"] and state.get("Budgets") is not None)
+    check("approved action marked applied", store.get_agent_action(aid)["status"] == "applied")
+    # put it back so later sections still see the original inbox (live-IMAP checks depend on it)
+    rr = a1.call_tool("move_message", {"message_id": row6_id, "target_folder": "INBOX"}, approved=True)
+    check("approval round-trip: message restored to INBOX",
+          rr["ok"] and any(x["id"] == row6_id and x["folder"] == "INBOX"
+                           for x in store.messages(limit=100)))
+    a1.close()
+    # route-level approvals (create_folder: self-contained, no message needed)
+    store.set_setting("perm_create_folder", "ask")
+    a2 = engine.AssistantAgent()
+    r = a2.call_tool("create_folder", {"name": "PermRouteFolder"})
+    check("ask gate queues folder creation",
+          r["ok"] and r.get("pending_approval") and state.get("PermRouteFolder") is None)
+    aid2 = r["action_id"]
+    rpage = client.get("/assistant", follow_redirects=True)
+    check("pending panel visible on the assistant page",
+          rpage.status_code == 200 and b"Awaiting your approval" in rpage.data
+          and b"PermRouteFolder" in rpage.data)
+    rp = client.post("/agent/actions/%d/apply" % aid2, data={"session": "0"})
+    check("approve route executes the queued action",
+          rp.status_code in (301, 302, 303) and state.get("PermRouteFolder") is not None
+          and store.get_agent_action(aid2)["status"] == "applied")
+    client.post("/agent/actions/%d/apply" % aid2)
+    check("re-approving a finished action is refused",
+          store.get_agent_action(aid2)["status"] == "applied")
+    r = a2.call_tool("create_folder", {"name": "PermDismissFolder"})
+    aid3 = r["action_id"]
+    client.post("/agent/actions/%d/dismiss" % aid3)
+    check("dismiss route drops the action",
+          state.get("PermDismissFolder") is None
+          and store.get_agent_action(aid3)["status"] == "dismissed"
+          and store.count_pending_agent_actions() == 0)
+    a2.close()
+    store.set_setting("perm_create_folder", "auto")
+    # dangerous defaults + ask preview + refusal
+    pm = engine.agent_permissions()
+    check("dangerous capabilities default off", pm["delete"] == "off" and pm["send"] == "off")
+    a3 = engine.AssistantAgent()
+    r = a3.call_tool("delete_message", {"folder": "INBOX", "uid": 4})
+    check("delete refused while off",
+          (not r["ok"]) and r.get("permission_denied") == "delete" and 4 in state.get("INBOX")["uids"])
+    store.set_setting("perm_delete", "ask")
+    a4 = engine.AssistantAgent()
+    r = a4.call_tool("delete_message", {"folder": "INBOX", "uid": 4})
+    check("delete in ask mode queues a Trash approval",
+          r["ok"] and r.get("pending_approval")
+          and "Trash" in ((r.get("result") or {}).get("preview") or ""))
+    rp = client.get("/assistant", follow_redirects=True)
+    check("assistant page renders the approval panel",
+          rp.status_code == 200 and b"Awaiting your approval" in rp.data)
+    store.set_agent_action(r["action_id"], "dismissed")
+    store.set_setting("perm_delete", "off")
+    a4.close()
+    # send: dangerous by default; ask mode queues; approval composes + "sends" via a stub SMTP
+    import proxy as _proxy
+    import smtplib as _smtp
+    _proxy.upsert_account({"email": "perm-send@test.local", "provider": "gmail",
+                           "password": "pw", "imap_host": "imap.mock", "imap_port": 993,
+                           "imap_local_port": 1993, "smtp_host": "smtp.mock",
+                           "smtp_port": 465, "smtp_local_port": 2465})
+    store.set_setting("perm_send", "ask")
+    a5 = engine.AssistantAgent()
+    r = a5.call_tool("send_message", {"mode": "new", "to": "friend@example.com",
+                                      "subject": "Hello", "body": "Test body."})
+    check("send queues for approval when ask", r["ok"] and r.get("pending_approval"))
+    sid5 = r["action_id"]
+    _saved_smtp = _smtp.SMTP
+
+    class _FakeSMTP(object):
+        sent = []
+
+        def __init__(self, host, port, timeout=None):
+            self.host, self.port = host, port
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def ehlo(self):
+            pass
+
+        def login(self, u, p):
+            pass
+
+        def send_message(self, em):
+            _FakeSMTP.sent.append({"host": self.host, "port": self.port, "raw": em.as_bytes()})
+
+    _smtp.SMTP = _FakeSMTP
+    try:
+        pl5 = json.loads(store.get_agent_action(sid5)["payload"])
+        res5 = a5.call_tool(pl5["tool"], pl5["args"], approved=True)
+    finally:
+        _smtp.SMTP = _saved_smtp
+    raw5 = _FakeSMTP.sent[0]["raw"] if _FakeSMTP.sent else b""
+    check("approved send reaches SMTP with the right headers",
+          bool(res5["ok"]) and bool(_FakeSMTP.sent) and _FakeSMTP.sent[0]["port"] == 2465
+          and b"To: friend@example.com" in raw5 and b"Subject: Hello" in raw5
+          and b"Test body." in raw5)
+    store.set_agent_action(sid5, "applied", "{}")
+    check("send counted for the hourly cap", store.agent_actions_since("send", 0) >= 1)
+    store.set_setting("perm_send", "off")
+    a5.close()
+    _proxy.delete_account("perm-send@test.local")
+    a3.close()
     agent.close()
-    store.set_setting("assistant_actions_apply", True)
+    store.set_setting("perm_move", "auto")
 
     section("T9b assistant agent stream (SSE + tools + proposals)")
     rules_before = len(store.list_rules())

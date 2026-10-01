@@ -598,9 +598,9 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 </head><body>
 <a class="skip" href="#main">Skip to content</a>
 {% set p = request.path %}
-{% macro navitem(href, label, active, icon) -%}
+{% macro navitem(href, label, active, icon, badge=0) -%}
 <a class="nav-item{{ ' active' if active else '' }}" href="{{ href }}"{{ ' aria-current="page"'|safe if active else '' }}>
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon|safe }}</svg>{{ label }}</a>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon|safe }}</svg>{{ label }}{% if badge %}<span class="badge warn" style="margin-left:auto">{{ badge }}</span>{% endif %}</a>
 {%- endmacro %}
 <div class="app">
   <div class="scrim hidden" id="scrim"></div>
@@ -616,7 +616,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
       {{ navitem(url_for('messages'), 'Messages', p.startswith('/messages'), '
         <path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>') }}
       {{ navitem(url_for('assistant'), 'Assistant', p.startswith('/assistant'), '
-        <path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/>') }}
+        <path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/>', pend) }}
       <div class="nav-label">Automation</div>
       {{ navitem(url_for('rules'), 'Rules', p.startswith('/rules'), '
         <path d="M3 6h18M7 12h10M10 18h4"/>') }}
@@ -867,11 +867,11 @@ window.assistantChat = function(opts){
       cards[id]=c;
       toolsBox.style.display=''; toolsBox.appendChild(c);
     }
-    function toolDone(id,ok,summary,dry){
+    function toolDone(id,ok,summary,dry,pending){
       var c=cards[id]; if(!c) return;
       c.className='tool-chip '+(ok?'ok':'err');
       var tx=c.textContent.replace(/^[\u23f3\u2713\u2717]\s*/,'');
-      c.textContent=(ok?'\u2713 ':'\u2717 ')+tx+' \u2192 '+(dry?'[dry-run] ':'')+summary;
+      c.textContent=(ok?'\u2713 ':'\u2717 ')+tx+' \u2192 '+(pending?'[awaiting approval] ':(dry?'[dry-run] ':''))+summary;
     }
     function actsText(a){
       a=a||{}; var out=[];
@@ -923,7 +923,26 @@ window.assistantChat = function(opts){
       if(p.rationale) w.appendChild(mk('div','sub',p.rationale));
       box.appendChild(w);
     }
-    var proposals=[], doneMsgId=null;
+    function addPendingAction(a){
+      var w=mk('div','proposal');
+      var h=mk('div','spread');
+      var left=mk('div');
+      left.appendChild(mk('b','','Awaiting approval: '));
+      left.appendChild(document.createTextNode(a.preview||a.tool||'action'));
+      if(a.capability==='send'||a.capability==='delete'){ var bd=mk('span','badge err',' dangerous'); bd.style.marginLeft='6px'; left.appendChild(bd); }
+      h.appendChild(left);
+      var fa=mk('form'); fa.method='post'; fa.action='/agent/actions/'+a.id+'/apply'; fa.className='inline';
+      var i1=mk('input'); i1.type='hidden'; i1.name='session'; i1.value=sid; fa.appendChild(i1);
+      var ba=mk('button','btn small primary','Approve'); ba.type='submit'; fa.appendChild(ba);
+      var fd=mk('form'); fd.method='post'; fd.action='/agent/actions/'+a.id+'/dismiss'; fd.className='inline';
+      var i2=mk('input'); i2.type='hidden'; i2.name='session'; i2.value=sid; fd.appendChild(i2);
+      var bd2=mk('button','btn small','Dismiss'); bd2.type='submit'; fd.appendChild(bd2);
+      var row=mk('div','row'); row.appendChild(fa); row.appendChild(fd); h.appendChild(row);
+      w.appendChild(h);
+      w.appendChild(mk('div','note','This action only happens when you click Approve.'));
+      box.appendChild(w);
+    }
+    var proposals=[], pendingActions=[], doneMsgId=null;
     function finish(){
       if(finished) return; finished=true;
       stopTimer();
@@ -936,6 +955,7 @@ window.assistantChat = function(opts){
       meta.appendChild(cp);
       meta.appendChild(mk('span','',new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})));
       if(proposals.length && doneMsgId!=null) proposals.forEach(function(p,i){ addProposal(p,i,doneMsgId); });
+      if(pendingActions.length) pendingActions.forEach(function(a){ addPendingAction(a); });
       if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null;
       scrollBottom();
     }
@@ -962,8 +982,9 @@ window.assistantChat = function(opts){
       else if(ev==='content'){ content.textContent+=(d.text||''); rawText+=(d.text||''); label('writing\u2026'); }
       else if(ev==='content_break'){ if(content.textContent){ content.textContent+='\n\n'; rawText+='\n\n'; } }
       else if(ev==='tool_start'){ label('running '+d.name+'\u2026'); toolCard(d.id,d.name,d.args); }
-      else if(ev==='tool_end'){ toolDone(d.id,d.ok,d.summary,d.dry_run); label('thinking\u2026'); }
+      else if(ev==='tool_end'){ toolDone(d.id,d.ok,d.summary,d.dry_run,d.pending); label('thinking\u2026'); }
       else if(ev==='proposals'){ proposals=d.proposals||[]; }
+      else if(ev==='action_proposals'){ pendingActions=(d.actions||[]); }
       else if(ev==='thought_summary'){ if(det.style.display!=='none' && d.text){ det.dataset.summary='1'; detSum.textContent=d.text; } }
       else if(ev==='done'){
         doneMsgId=d.message_id;
@@ -1107,6 +1128,7 @@ def render(body):
     info["imap_user"] = (engine.imap_config().get("user") or "").strip()
     return _render_src(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
                                   info=info,
+                                  pend=store.count_pending_agent_actions(),
                                   w={"err": ws.get("last_error"), "last_ok_r": rel_time(ws.get("last_ok")),
                                      "interval": int(store.get_setting("poll_interval", 90) or 90)})
 
@@ -3252,7 +3274,7 @@ CONVO_TMPL = r"""
         {% endif %}
         {% if m.tool_steps %}
         <div class="tools">
-          {% for t in m.tool_steps %}<span class="tool-chip {{ 'ok' if t.ok else 'err' }}">{{ '✓' if t.ok else '✗' }} {{ t.name }}{% if t.dry_run %} · dry-run{% endif %} → {{ t.summary }}</span>{% endfor %}
+          {% for t in m.tool_steps %}<span class="tool-chip {{ 'ok' if t.ok else 'err' }}">{{ '✓' if t.ok else '✗' }} {{ t.name }}{% if t.dry_run %} · dry-run{% endif %}{% if t.pending %} · awaiting approval{% endif %} → {{ t.summary }}</span>{% endfor %}
         </div>
         {% endif %}
         <div class="md">{{ md(m.content)|safe }}</div>
@@ -3343,6 +3365,21 @@ ASSISTANT_TMPL = r"""
         <button type="button" class="btn small hidden" id="jump">\u2193 Jump to latest</button>
         <div class="chat" id="convo">{{ convo_html|safe }}</div>
       </div>
+      {% if pending %}
+      <div class="card" id="pending-panel" style="margin:10px 0 0">
+        <div class="card-h"><h3>Awaiting your approval ({{ pending|length }})</h3>
+          <span class="sub">The assistant queued these — nothing happens until you click.</span></div>
+        {% for a in pending %}
+        <div class="setrow">
+          <div class="st-l"><b>{{ a.preview }}</b><span class="sub">{{ a.capability }} · queued {{ a.when_h }}</span></div>
+          <div class="st-c row">
+            <form class="inline" method="post" action="{{ url_for('agent_action_apply', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small primary" type="submit">Approve</button></form>
+            <form class="inline" method="post" action="{{ url_for('agent_action_dismiss', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small" type="submit">Dismiss</button></form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       <form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
         <input type="hidden" name="session" value="{{ sid }}">
         <textarea name="message" id="msg" rows="1" placeholder="Message the assistant\u2026"></textarea>
@@ -3353,7 +3390,7 @@ ASSISTANT_TMPL = r"""
             <button class="btn primary" type="submit" id="asend">Send</button>
           </span>
         </div>
-        <div class="hint">runs on {{ llm.model }} \u00b7 actions {{ 'live' if actions_live else 'in dry-run (set it in Settings)' }}{% if convo %} \u00b7 <a href="#" id="aclear">clear this chat</a>{% endif %}</div>
+        <div class="hint">runs on {{ llm.model }} · agent permissions: {{ perms_text }} <a href="{{ url_for('settings') }}#ai-perms">edit</a>{% if convo %} · <a href="#" id="aclear">clear this chat</a>{% endif %}</div>
       </form>
       {% if convo %}<form id="clearform" method="post" action="{{ url_for('assistant_clear') }}"><input type="hidden" name="session" value="{{ sid }}"></form>{% endif %}
     </div>
@@ -3439,10 +3476,13 @@ def assistant_session(sid):
     for s in sessions:
         s["when"] = fmt_ts(s["last_ts"] or s["created"])
     convo, convo_html = _assistant_fragment(sid)
+    pending = store.pending_agent_actions()
+    for pa in pending:
+        pa["when_h"] = fmt_ts(pa.get("created_ts"))
     return render(_render_src(
         ASSISTANT_TMPL, sid=sid, sessions=sessions, convo=convo, convo_html=convo_html,
-        llm=engine.llm_config(),
-        actions_live=bool(store.get_setting("assistant_actions_apply", True))))
+        llm=engine.llm_config(), pending=pending,
+        perms_text=engine.agent_permissions_text()))
 
 
 @app.route("/assistant/panel")
@@ -3592,6 +3632,58 @@ def assistant_apply():
     return redirect(back)
 
 
+@app.route("/agent/actions/<int:aid>/apply", methods=["POST"])
+def agent_action_apply(aid):
+    row = store.get_agent_action(aid)
+    sid = 0
+    try:
+        sid = int(request.form.get("session") or (row or {}).get("session_id") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    back = (url_for("assistant_session", sid=sid)
+            if sid and store.get_session(sid) else url_for("assistant"))
+    if not row or row.get("status") != "pending":
+        flash("That approval is no longer pending.", "warn")
+        return redirect(back)
+    payload = {}
+    try:
+        payload = json.loads(row.get("payload") or "{}")
+    except (TypeError, ValueError):
+        payload = {}
+    agent = engine.AssistantAgent(session_id=sid)
+    try:
+        res = agent.call_tool(payload.get("tool") or row.get("tool"),
+                              payload.get("args") or {}, approved=True)
+    finally:
+        agent.close()
+    ok = bool(res.get("ok"))
+    summ = res.get("summary") or ("done" if ok else "failed")
+    store.set_agent_action(aid, "applied" if ok else "failed",
+                           json.dumps({"summary": summ, "ok": ok}, ensure_ascii=False))
+    store.log_event("info" if ok else "error",
+                    "agent action #%s (%s) %s by user: %s"
+                    % (aid, row.get("tool"), "applied" if ok else "failed", summ))
+    flash(("Approved: " if ok else "Failed: ") + summ, "ok" if ok else "err")
+    return redirect(back)
+
+
+@app.route("/agent/actions/<int:aid>/dismiss", methods=["POST"])
+def agent_action_dismiss(aid):
+    row = store.get_agent_action(aid)
+    sid = 0
+    try:
+        sid = int(request.form.get("session") or (row or {}).get("session_id") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    back = (url_for("assistant_session", sid=sid)
+            if sid and store.get_session(sid) else url_for("assistant"))
+    if row and row.get("status") == "pending":
+        store.set_agent_action(aid, "dismissed")
+        store.log_event("info", "agent action #%s (%s) dismissed by user" % (aid, row.get("tool")))
+        flash("Dismissed.", "ok")
+    return redirect(back)
+
+
 @app.route("/assistant/clear", methods=["POST"])
 def assistant_clear():
     try:
@@ -3660,10 +3752,17 @@ def _save_behavior_settings():
     if has("my_name"):
         store.set_setting("my_name", (f.get("my_name") or "Sean").strip())
     for k in ("rules_apply", "heuristics_enabled", "heuristic_autorefine", "llm_suggest",
-              "llm_apply", "assistant_actions_apply", "index_enabled", "rerank_enabled",
+              "llm_apply", "index_enabled", "rerank_enabled",
               "render_images", "flows_apply"):
         if has(k):
             store.set_setting(k, f.get(k) not in (None, "", "0"))
+    for cap, _l, _r, _t, _d in engine.AGENT_CAPS:
+        k = "perm_" + cap
+        if has(k):
+            v = (f.get(k) or "").strip().lower()
+            store.set_setting(k, v if v in ("off", "ask", "auto") else "off")
+    if has("sends_per_hour"):
+        store.set_setting("sends_per_hour", _form_int("sends_per_hour", 5, lo=0))
     if has("index_folders"):
         store.set_setting("index_folders",
                           [x.strip() for x in (f.get("index_folders") or "").split(",") if x.strip()])
@@ -3776,7 +3875,7 @@ SETTINGS_TMPL = """
   <a class="sn-sub" href="#ai-classify">Classification</a>
   <a class="sn-sub" href="#ai-classifiers">Classifiers</a>
   <a class="sn-sub" href="#ai-search">Embeddings &amp; reranker</a>
-  <a class="sn-sub" href="#ai-assistant">Assistant</a>
+  <a class="sn-sub" href="#ai-perms">Assistant</a>
   <a href="#mail">Mail &amp; connection</a>
   <a class="sn-sub" href="#mail-src">Mail source</a>
   <a class="sn-sub" href="#mail-check">Checking</a>
@@ -3931,15 +4030,46 @@ SETTINGS_TMPL = """
     </div>
   </div>
 
-  <div class="card" id="ai-assistant">
-    <div class="card-h"><h3>Assistant</h3><a class="sub" href="{{ url_for('assistant') }}">Open assistant →</a></div>
+  <div class="card" id="ai-perms">
+    <div class="card-h"><h3>Agent permissions</h3><a class="sub" href="{{ url_for('assistant') }}">Open assistant →</a></div>
+    <p class="sub" style="margin:0 2px 8px">What the assistant may do on its own. Every capability is enforced server-side — <b>Ask me first</b> queues the action as an approval card in the chat; <b>Off</b> refuses it. Dangerous capabilities are off by default.</p>
     <form method="post">
       <input type="hidden" name="section" value="behavior">
-      <input type="hidden" name="scope" value="Assistant">
-      <div class="setrow"><div class="st-l"><b>Assistant may act on mail</b><span class="sub">Create folders, move and flag. Unchecked = dry-run: the chat shows what it would have done.</span></div>
-        <div class="st-c"><label class="check"><input type="checkbox" name="assistant_actions_apply" value="1" {{ 'checked' if s.assistant_actions_apply else '' }}><input type="hidden" name="assistant_actions_apply" value="0"> <span>Allow actions</span></label></div></div>
-      <div class="savebar"><button class="btn primary" type="submit">Save assistant</button></div>
+      <input type="hidden" name="scope" value="Agent permissions">
+      {% set riskbadge = {'safe': 'ok', 'caution': 'warn', 'dangerous': 'err'} %}
+      {% for cap, label, risk, tools, desc in agcaps %}
+      <div class="setrow">
+        <div class="st-l"><b>{{ label }}</b> <span class="badge {{ riskbadge.get(risk, 'warn') }}">{{ risk }}</span>
+          <span class="sub">{{ desc }} <span class="mono" style="font-size:.72rem">{{ tools|join(', ') }}</span></span>
+          {% if risk == 'dangerous' %}<span class="sub" style="color:var(--err)">⚠ Dangerous — {{ 'sends mail as you to real recipients' if cap == 'send' else 'moves mail to Trash' }}. Only enable if you are sure.</span>{% endif %}
+        </div>
+        <div class="st-c">
+          <select name="perm_{{ cap }}" data-risk="{{ risk }}" aria-label="{{ label }} permission">
+            <option value="off" {{ 'selected' if s['perm_' ~ cap] == 'off' else '' }}>Off</option>
+            <option value="ask" {{ 'selected' if s['perm_' ~ cap] == 'ask' else '' }}>Ask me first</option>
+            <option value="auto" {{ 'selected' if s['perm_' ~ cap] == 'auto' else '' }}>Auto</option>
+          </select>
+        </div>
+      </div>
+      {% endfor %}
+      <div class="setrow"><div class="st-l"><b>Send cap</b><span class="sub">Maximum assistant sends per hour (0 = unlimited).</span></div>
+        <div class="st-c"><input type="number" name="sends_per_hour" min="0" value="{{ s.sends_per_hour }}" aria-label="Assistant sends per hour"></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save permissions</button><span class="sub">Applies to the next assistant turn.</span></div>
     </form>
+    <script>
+    (function(){
+      document.querySelectorAll('#ai-perms select[data-risk]').forEach(function(sel){
+        var orig=sel.value;
+        sel.addEventListener('change', function(){
+          if(sel.dataset.risk==='dangerous' && sel.value!=='off'){
+            var what = sel.name==='perm_send' ? 'SEND mail as you' : 'DELETE mail (move to Trash)';
+            if(!confirm('DANGER: this lets the assistant '+what+' on its own. Are you sure?')){ sel.value=orig; return; }
+          }
+          orig=sel.value;
+        });
+      });
+    })();
+    </script>
   </div>
 </section>
 
@@ -4116,6 +4246,7 @@ def settings():
         return redirect(url_for("settings"))
     return render(_render_src(
         SETTINGS_TMPL, s=store.all_settings(), engine_state=worker.state, cfg=config,
+        agcaps=engine.AGENT_CAPS,
         llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config(),
         icfg=engine.imap_config()))
 

@@ -674,11 +674,14 @@ class MailClient:
         self.M.expunge()
         return new_uid
 
-    def append_draft(self, folder, raw):
-        typ, dat = self.M.append('"%s"' % folder, r"(\Draft)",
+    def append_message(self, folder, raw, flags=r"(\Draft)"):
+        typ, dat = self.M.append('"%s"' % folder, flags,
                                  imaplib.Time2Internaldate(time.time()), raw)
         if typ != "OK":
             raise RuntimeError("APPEND to %s failed: %s %s" % (folder, typ, dat))
+
+    def append_draft(self, folder, raw):
+        self.append_message(folder, raw, r"(\Draft)")
 
 
 # ---------------------------------------------------------------- rules
@@ -1891,8 +1894,8 @@ ASSISTANT_SYSTEM = """You are the mail operations assistant for "Mail Triage", a
 How to work
 - Ground every answer with tools instead of guessing. semantic_search finds mail by MEANING across every indexed folder and years of history (paraphrases welcome) — use it first for content questions ("what did the landlord want", "the trip itinerary email"). search_messages reads the app's local index; search_mail runs a live IMAP search for exact tokens or folders outside the index. For any question about the user's mail, search first.
 - Reference specific messages in your answers as [msg:ID] (the message_id from tool results); the UI turns those into links. Use read_message for the full text of anything you quote.
-- You may act directly on what the user asks for: create_folder, move_message, flag_message. Moving never deletes mail. For ongoing sorting, propose a rule with propose_rule instead (the user approves proposals with one click).
-- You cannot send mail, reply to mail, or delete mail; never claim that you did.
+- Capability permissions are enforced by the app. Current grants: %(permissions)s. Honour them: tools under "may do directly" you may call; tools under "requires the user's approval" you may still call - the app turns them into a pending approval card the user clicks (say it is waiting; never claim it happened); tools under "disabled" are refused - tell the user the capability is off and where to enable it (Settings, AI settings, Agent permissions).
+- For ongoing sorting, propose a rule with propose_rule (the user approves with one click). Moving never deletes mail; only a delete capability moves mail to Trash, only send sends mail.
 - Keep searches bounded: small limits, use since/before for windows. Summarize results; never dump raw rows.
 - When you read a message, never paste long verbatim quotes into the answer: give the gist in your own words, keep only short key phrases (prices, dates, rules), and cite the message as [msg:ID].
 - The user can also tag mail by hand on the Messages page. If they ask you to learn rules from their tags, call list_tagged first and base propose_rule calls on the tag-to-pattern evidence.
@@ -2027,7 +2030,95 @@ ASSISTANT_TOOLS = [
         {"id": {"type": "integer", "description": "classifier id"},
          "limit": {"type": "integer", "description": "max examples to check (default 500)"}},
         ("id",)),
+    _fn("classify_message",
+        "Classify ONE message now with the normal pipeline (category, confidence, summary, needs-reply) and store the result; filing follows the auto-filing setting exactly like the Classify button.",
+        {"message_id": {"type": "integer"},
+         "folder": {"type": "string"},
+         "uid": {"type": "integer"}}),
+    _fn("tag_message",
+        "Tag one message with a short label (like the user's own tagging), or untag it with add=false. Your tags are recorded as assistant-sourced.",
+        {"tag": {"type": "string", "description": "short label"},
+         "add": {"type": "boolean", "description": "false removes the tag (default true)"},
+         "message_id": {"type": "integer"},
+         "folder": {"type": "string"},
+         "uid": {"type": "integer"}},
+        ("tag",)),
+    _fn("draft_reply",
+        "Write a reply to one message and save it in the Drafts folder for the user to review and send. Nothing is sent; sending is a separate, dangerous capability.",
+        {"message_id": {"type": "integer"},
+         "folder": {"type": "string"},
+         "uid": {"type": "integer"},
+         "template_id": {"type": "integer", "description": "optional reply template id"}}),
+    _fn("delete_message",
+        "DANGEROUS (permission-gated): move one message to the Trash folder. It stays recoverable until the server purges Trash.",
+        {"message_id": {"type": "integer"},
+         "folder": {"type": "string"},
+         "uid": {"type": "integer"}}),
+    _fn("send_message",
+        "DANGEROUS (permission-gated): send mail as the account owner - a new message, a reply, or reply-all. Replies get proper threading and a copy lands in Sent.",
+        {"mode": {"type": "string", "enum": ["new", "reply", "reply_all"], "description": "default new"},
+         "to": {"type": "string", "description": "recipient(s) for a new message; replies derive it from the original"},
+         "subject": {"type": "string"},
+         "body": {"type": "string"},
+         "message_id": {"type": "integer", "description": "for reply modes"},
+         "folder": {"type": "string"},
+         "uid": {"type": "integer"}},
+        ("body",)),
 ]
+
+
+# ---------------------------------------------------------------- agent permissions
+# Fine-grained, enforced boundaries for the assistant (docs/agent-permissions.md).
+# (capability, label, risk, tools, description)
+
+AGENT_CAPS = [
+    ("classify", "Classify messages", "safe", ["classify_message"],
+     "Run the classification pipeline on a message (same as the Classify button)."),
+    ("flag", "Flag & read state", "caution", ["flag_message"],
+     "Mark mail read/unread and starred."),
+    ("tag", "Tag messages", "caution", ["tag_message"],
+     "Apply short labels (recorded as assistant-sourced)."),
+    ("move", "Move messages", "caution", ["move_message"],
+     "Move mail between folders. Never deletes."),
+    ("create_folder", "Create folders", "safe", ["create_folder"],
+     "Create new (empty) folders."),
+    ("classifiers", "Manage classifiers", "caution", ["train_classifier", "manage_classifier"],
+     "Train, enable or delete heuristic classifiers."),
+    ("draft", "Draft replies", "safe", ["draft_reply"],
+     "Write a reply and save it to Drafts for review."),
+    ("delete", "Delete messages", "dangerous", ["delete_message"],
+     "Moves mail to Trash (recoverable until the server purges it)."),
+    ("send", "Send mail", "dangerous", ["send_message"],
+     "Send mail as the account owner, through the connected proxy."),
+]
+AGENT_CAP_OF_TOOL = {t: cap for cap, _l, _r, tools, _d in AGENT_CAPS for t in tools}
+AGENT_PERM_LEVELS = ("off", "ask", "auto")
+
+
+def agent_permissions():
+    """Effective permission level per capability (off | ask | auto)."""
+    out = {}
+    for cap, _label, risk, _tools, _desc in AGENT_CAPS:
+        lvl = store.get_setting("perm_" + cap, None)
+        if lvl not in AGENT_PERM_LEVELS:
+            lvl = "off" if risk == "dangerous" else "auto"
+        out[cap] = lvl
+    return out
+
+
+def agent_permissions_text():
+    perms = agent_permissions()
+    buckets = {"auto": [], "ask": [], "off": []}
+    for cap, _label, _risk, _tools, _desc in AGENT_CAPS:
+        buckets[perms[cap]].append(cap)
+    parts = []
+    if buckets["auto"]:
+        parts.append("may do directly: " + ", ".join(buckets["auto"]))
+    if buckets["ask"]:
+        parts.append("requires the user's approval (pending-action card): " + ", ".join(buckets["ask"]))
+    if buckets["off"]:
+        parts.append("disabled: " + ", ".join(buckets["off"]))
+    return "; ".join(parts) or "no action capabilities enabled"
 
 
 def _safe_json(text, default):
@@ -2255,13 +2346,13 @@ def _assistant_context():
         "LLM classifier categories: %s\n"
         "Category → folder map: %s\n"
         "Watched folders: %s | check interval: %ss\n"
-        "Indexed messages: %d | assistant actions: %s\n"
+        "Indexed messages: %d | assistant permissions: %s\n"
         % (_rules_to_text(store.list_rules()),
            ", ".join(settings.get("categories") or []),
            ", ".join("%s=%s" % (k, v) for k, v in (settings.get("category_folders") or {}).items()) or "(none)",
            ", ".join(settings.get("watch_folders") or ["INBOX"]),
            settings.get("poll_interval", 90), total,
-           "live" if settings.get("assistant_actions_apply", True) else "dry-run")
+           agent_permissions_text())
     )
 
 
@@ -2283,7 +2374,11 @@ class AssistantAgent:
         self.session_id = int(session_id or 0)
         self.proposals = []
         self.tools_log = []
-        self.actions_apply = bool(store.get_setting("assistant_actions_apply", True))
+        self.perms = agent_permissions()
+        self.pending_actions = []
+        # back-compat only: True when any folder/flag action runs live
+        self.actions_apply = any(self.perms.get(k) == "auto"
+                                 for k in ("move", "flag", "create_folder"))
         self._budget = self.TRANSCRIPT_BUDGET
         self.steps_used = 0
 
@@ -2303,21 +2398,117 @@ class AssistantAgent:
 
     # ---- tool dispatch
 
-    def call_tool(self, name, args):
+    def call_tool(self, name, args, approved=False):
         fn = getattr(self, "_tool_" + str(name or ""), None)
         if fn is None:
             return {"ok": False, "summary": "unknown tool %r" % name,
                     "result": {"error": "unknown tool",
                                "available": [t["function"]["name"] for t in ASSISTANT_TOOLS]}}
+        args = args if isinstance(args, dict) else {}
+        cap = AGENT_CAP_OF_TOOL.get(str(name))
+        row_id = None
+        if cap and not approved:
+            lvl = self.perms.get(cap, "auto")
+            if lvl == "off":
+                store.log_event("info", "agent: %s denied - '%s' is off in Agent permissions" % (name, cap))
+                return {"ok": False, "permission_denied": cap,
+                        "summary": "%s is disabled (Agent permissions: %s = off)" % (name, cap),
+                        "result": {"error": "permission_denied", "capability": cap, "level": "off",
+                                   "note": ("This capability is switched off in Settings - AI settings - "
+                                            "Agent permissions. Tell the user; do not retry.")}}
+            if lvl == "ask":
+                pending = self._make_pending(cap, name, args)
+                if pending.get("error"):
+                    return {"ok": False, "summary": pending["error"],
+                            "result": {"error": pending["error"]}}
+                self.pending_actions.append(pending)
+                store.log_event("info", "agent: %s pending approval [action %s] %s"
+                                % (name, pending["id"], pending["preview"]))
+                return {"ok": True, "pending_approval": True, "action_id": pending["id"],
+                        "summary": "waiting for approval: " + pending["preview"],
+                        "result": {"pending_approval": True, "action_id": pending["id"],
+                                   "preview": pending["preview"],
+                                   "note": ("This action needs the user's approval - it is queued on the "
+                                            "Assistant page. Tell the user it is waiting; never claim it happened.")}}
+            row_id = store.add_agent_action(cap, name, "", {"tool": name, "args": args},
+                                            session_id=self.session_id)
         try:
-            out = fn(args if isinstance(args, dict) else {})
+            out = fn(args)
         except Exception as exc:
+            if row_id:
+                store.set_agent_action(row_id, "failed", json.dumps({"error": repr(exc)}))
             return {"ok": False, "summary": "tool %s failed: %r" % (name, exc),
                     "result": {"error": repr(exc)}}
         out.setdefault("ok", True)
         out.setdefault("summary", str(name))
         out.setdefault("result", {})
+        if row_id:
+            store.set_agent_action(row_id, "applied" if out.get("ok") else "failed",
+                                   json.dumps({"summary": out.get("summary"), "ok": bool(out.get("ok"))},
+                                              ensure_ascii=False))
+            out["action_id"] = row_id
+            if out.get("ok"):
+                store.log_event("info", "agent: %s applied [action %s] %s"
+                                % (name, row_id, out.get("summary")))
         return out
+
+    def _make_pending(self, cap, name, args):
+        preview, resolved = self._pending_preview(name, args)
+        if preview is None:
+            return {"error": resolved}
+        aid = store.add_agent_action(cap, name, preview,
+                                     {"tool": name, "args": args, "resolved": resolved},
+                                     session_id=self.session_id)
+        return {"id": aid, "capability": cap, "tool": name, "preview": preview, "args": args}
+
+    def _pending_preview(self, name, args):
+        """-> (human preview | None, resolved info | error text)."""
+        if name == "create_folder":
+            nm = (args.get("name") or "").strip()
+            return (("Create folder '%s'" % nm), {"name": nm}) if nm else (None, "name is required")
+        if name == "train_classifier":
+            return ("Train classifier '%s' (%s, category %s)"
+                    % (args.get("name") or "?", args.get("kind") or "decision_list",
+                       args.get("category") or "?"), dict(args))
+        if name == "manage_classifier":
+            return ("Classifier %s #%s" % (args.get("action") or "?", args.get("id") or "?"), dict(args))
+        if name == "send_message":
+            mode = (args.get("mode") or "new").strip().lower()
+            if mode == "new":
+                to = (args.get("to") or "").strip()
+                if not to:
+                    return None, "to is required"
+                return ("SEND new mail to %s: '%s'"
+                        % (to, _truncate(args.get("subject") or "(no subject)", 60)), dict(args))
+        row, folder, uid, err = self._resolve_message(args)
+        if err:
+            return None, err
+        label = _truncate((row or {}).get("subject") or ("message %s" % (args.get("message_id") or uid)), 60)
+        base = {"folder": folder, "uid": uid, "message_id": (row or {}).get("id"), "label": label}
+        if name == "move_message":
+            return "Move '%s' to %s" % (label, (args.get("target_folder") or "?").strip() or "?"), base
+        if name == "flag_message":
+            bits = []
+            seen = _as_bool(args.get("seen"))
+            flg = _as_bool(args.get("flagged"))
+            if seen is not None:
+                bits.append("mark read" if seen else "mark unread")
+            if flg is not None:
+                bits.append("star" if flg else "unstar")
+            return "%s '%s'" % (" + ".join(bits) or "Update flags on", label), base
+        if name == "tag_message":
+            if _as_bool(args.get("add")) is False:
+                return "Remove tag from '%s'" % label, base
+            return "Tag '%s' as '%s'" % (label, args.get("tag") or "?"), base
+        if name == "draft_reply":
+            return "Draft a reply to '%s' and save it to Drafts" % label, base
+        if name == "delete_message":
+            return "Move '%s' to Trash" % label, base
+        if name == "classify_message":
+            return "Classify '%s'" % label, base
+        if name == "send_message":
+            return "SEND reply to '%s': '%s'" % (label, _truncate(args.get("subject") or "(original subject)", 60)), base
+        return name, dict(args)
 
     # ---- tool implementations
 
@@ -2357,7 +2548,7 @@ class AssistantAgent:
             "categories": settings.get("categories"),
             "category_folders": settings.get("category_folders"),
             "watched_folders": settings.get("watch_folders"),
-            "assistant_actions_live": self.actions_apply,
+            "assistant_actions_live": self.actions_apply, "assistant_permissions": self.perms,
         }
         return {"ok": True,
                 "summary": "%d indexed messages · %d folders · %d rules"
@@ -2575,13 +2766,6 @@ class AssistantAgent:
         row, folder, uid, err = self._resolve_message(a)
         if err:
             return {"ok": False, "summary": err, "result": {"error": err}}
-        if not self.actions_apply:
-            store.log_event("info", "assistant (dry-run): would move %s uid %s → %s"
-                            % (folder, uid, target))
-            return {"ok": True, "dry_run": True,
-                    "summary": "dry-run: would move uid %s from %s to %s" % (uid, folder, target),
-                    "result": {"dry_run": True, "would_move": {"folder": folder, "uid": uid,
-                                                               "to": target}}}
         mc = self._mail()
         try:
             mc.ensure_folder(target)
@@ -2613,10 +2797,6 @@ class AssistantAgent:
             ops.append(("+FLAGS" if seen else "-FLAGS", r"(\Seen)"))
         if flagged is not None:
             ops.append(("+FLAGS" if flagged else "-FLAGS", r"(\Flagged)"))
-        if not self.actions_apply:
-            return {"ok": True, "dry_run": True,
-                    "summary": "dry-run: would update flags on uid %s in %s" % (uid, folder),
-                    "result": {"dry_run": True}}
         mc = self._mail()
         try:
             mc.ensure_selected(folder)
@@ -2839,7 +3019,8 @@ class AssistantAgent:
         store.add_assistant_message("user", user_text[:4000], session_id=self.session_id)
         today = time.strftime("%Y-%m-%d (%a)", time.gmtime(time.time() + 8 * 3600))
         system = (ASSISTANT_SYSTEM % {"user": imap_config()["user"], "today": today,
-                                      "max_calls": self.MAX_CALLS_PER_TURN}
+                                      "max_calls": self.MAX_CALLS_PER_TURN,
+                                      "permissions": agent_permissions_text()}
                   + "\n\n" + _assistant_context())
         convo = [{"role": m["role"], "content": m["content"]}
                  for m in store.assistant_messages(limit=24, session_id=self.session_id)]
@@ -2903,11 +3084,13 @@ class AssistantAgent:
                                                "ok": bool(res.get("ok")),
                                                "summary": _truncate(res.get("summary") or "", 300),
                                                "dry_run": bool(res.get("dry_run")),
+                                               "pending": bool(res.get("pending_approval")),
                                                "elapsed": res["elapsed"]})
                         yield {"type": "tool_end", "id": c["id"], "name": c["name"],
                                "ok": bool(res.get("ok")),
                                "summary": _truncate(res.get("summary") or "", 400),
-                               "dry_run": bool(res.get("dry_run")), "elapsed": res["elapsed"]}
+                               "dry_run": bool(res.get("dry_run")),
+                               "pending": bool(res.get("pending_approval")), "elapsed": res["elapsed"]}
                     payload = json.dumps(res.get("result", {}), ensure_ascii=False)
                     cap = min(self.RESULT_CHARS, max(800, self._budget))
                     payload = _truncate(payload, cap)
@@ -2931,17 +3114,219 @@ class AssistantAgent:
         meta = {"reasoning": _truncate(reasoning_text, 20000),
                 "reasoning_summary": thought_summary,
                 "tools": self.tools_log, "steps": steps, "usage": usage,
-                "actions_live": self.actions_apply}
+                "actions_live": self.actions_apply, "permissions": self.perms}
         msg_id = store.add_assistant_message("assistant", reply[:4000],
                                              proposals=json.dumps(self.proposals),
                                              meta=json.dumps(meta, ensure_ascii=False),
                                              session_id=self.session_id)
         if self.proposals:
             yield {"type": "proposals", "proposals": self.proposals}
+        if self.pending_actions:
+            yield {"type": "action_proposals", "actions": self.pending_actions}
         yield {"type": "done", "message_id": msg_id, "reply": reply, "steps": steps}
         if thought_summary:
             # after done so the final answer never waits on the summary call
             yield {"type": "thought_summary", "text": thought_summary}
+
+    # ---- fine-grained permission tools
+
+    def _tool_classify_message(self, a):
+        row, folder, uid, err = self._resolve_message(a)
+        if err:
+            return {"ok": False, "summary": err, "result": {"error": err}}
+        if not row:
+            return {"ok": False, "summary": "the message is not in the local index yet",
+                    "result": {"error": "not_indexed"}}
+        msg = store.get_message(row["id"])
+        if not msg:
+            return {"ok": False, "summary": "message not found", "result": {"error": "not_found"}}
+        try:
+            res = classify_and_store(msg, store.all_settings())
+        except Exception as exc:
+            return {"ok": False, "summary": "classification failed: %r" % exc, "result": {"error": repr(exc)}}
+        fresh = store.get_message(row["id"]) or {}
+        moved = str(res.get("_moved_to") or "")
+        store.log_event("info", "assistant classified msg %s ('%s') -> %s%s"
+                        % (row["id"], _truncate(row.get("subject") or "", 40), res.get("category"),
+                           (" [filed to %s]" % moved) if moved else ""))
+        return {"ok": True,
+                "summary": "classified as %s%s" % (res.get("category"), (" [filed to %s]" % moved) if moved else ""),
+                "result": {"message_id": row["id"], "category": res.get("category"),
+                           "confidence": res.get("confidence"),
+                           "summary": (fresh.get("llm_summary") or "")[:200],
+                           "needs_reply": bool(fresh.get("llm_needs_reply")),
+                           "moved_to": moved}}
+
+    def _tool_tag_message(self, a):
+        tag = (a.get("tag") or "").strip()[:40]
+        add = _as_bool(a.get("add"))
+        if add is None:
+            add = True
+        if add and not tag:
+            return {"ok": False, "summary": "tag is required", "result": {"error": "tag is required"}}
+        row, folder, uid, err = self._resolve_message(a)
+        if err:
+            return {"ok": False, "summary": err, "result": {"error": err}}
+        if not row:
+            return {"ok": False, "summary": "the message is not in the local index yet",
+                    "result": {"error": "not_indexed"}}
+        store.tag_messages([row["id"]], tag if add else "", by="assistant")
+        store.log_event("info", "assistant %s msg %s ('%s')"
+                        % (("tagged '%s'" % tag) if add else "untagged",
+                           row["id"], _truncate(row.get("subject") or "", 40)))
+        return {"ok": True, "summary": ("tagged as '%s'" % tag) if add else "tag removed",
+                "result": {"message_id": row["id"], "tag": tag if add else "", "source": "assistant"}}
+
+    def _tool_draft_reply(self, a):
+        row, folder, uid, err = self._resolve_message(a)
+        if err:
+            return {"ok": False, "summary": err, "result": {"error": err}}
+        if not row:
+            return {"ok": False, "summary": "the message is not in the local index yet",
+                    "result": {"error": "not_indexed"}}
+        tid = None
+        if a.get("template_id") not in (None, "", 0, "0"):
+            try:
+                tid = int(a.get("template_id"))
+            except (TypeError, ValueError):
+                tid = None
+        try:
+            draft = generate_draft(row["id"], tid)
+            body = ""
+            subject = ""
+            if isinstance(draft, dict):
+                for key in ("body", "draft", "text", "content"):
+                    if draft.get(key):
+                        body = str(draft[key])
+                        break
+                subject = str(draft.get("subject") or "")
+            else:
+                body = str(draft or "")
+            if not body.strip():
+                raise RuntimeError("the model returned an empty draft")
+            saved_to = save_draft(row["id"], body)
+        except Exception as exc:
+            return {"ok": False, "summary": "draft failed: %r" % exc, "result": {"error": repr(exc)}}
+        store.log_event("info", "assistant drafted a reply to msg %s ('%s') -> %s"
+                        % (row["id"], _truncate(row.get("subject") or "", 40), saved_to))
+        return {"ok": True, "summary": "draft saved to %s" % saved_to,
+                "result": {"message_id": row["id"], "saved_to": saved_to,
+                           "subject": subject, "body_preview": _truncate(body, 500)}}
+
+    def _tool_delete_message(self, a):
+        row, folder, uid, err = self._resolve_message(a)
+        if err:
+            return {"ok": False, "summary": err, "result": {"error": err}}
+        mc = self._mail()
+        trash = mc.find_special_use("\\Trash")
+        if not trash:
+            return {"ok": False, "summary": "no Trash folder on this account - delete is unavailable",
+                    "result": {"error": "no_trash_folder"}}
+        try:
+            mc.ensure_selected(folder)
+            new_uid = mc.move(uid, trash)
+        except Exception as exc:
+            return {"ok": False, "summary": "move to Trash failed: %r" % exc, "result": {"error": repr(exc)}}
+        if row:
+            mv = {"status": "assistant-deleted", "action_taken": "trash", "folder": trash}
+            if new_uid:
+                mv["uid"] = new_uid
+            store.update_message(row["id"], **mv)
+        store.log_event("info", "assistant moved %s uid %s ('%s') to Trash"
+                        % (folder, uid, _truncate((row or {}).get("subject") or "", 50)))
+        return {"ok": True, "summary": "moved to Trash (%s)" % trash,
+                "result": {"trashed": {"folder": folder, "uid": uid, "to": trash}}}
+
+    def _tool_send_message(self, a):
+        import smtplib
+        from email.message import EmailMessage
+        mode = (a.get("mode") or "new").strip().lower()
+        if mode not in ("new", "reply", "reply_all"):
+            mode = "new"
+        body = str(a.get("body") or "")
+        if not body.strip():
+            return {"ok": False, "summary": "body is required", "result": {"error": "body is required"}}
+        try:
+            cap = int(store.get_setting("sends_per_hour", 5) or 0)
+        except (TypeError, ValueError):
+            cap = 5
+        if cap:
+            recent = store.agent_actions_since("send", int(time.time()) - 3600,
+                                               statuses=("applied", "pending"))
+            if recent > cap:
+                store.log_event("warn", "agent send blocked by the hourly cap (%d)" % cap)
+                return {"ok": False, "summary": "hourly send cap reached (%d/h)" % cap,
+                        "result": {"error": "send_cap", "cap": cap}}
+        icfg = imap_config()
+        if not icfg.get("user"):
+            return {"ok": False, "summary": "no mail account connected", "result": {"error": "no_account"}}
+        smtp_port = 0
+        try:
+            acct = proxy.get_account(icfg.get("user"))
+            smtp_port = int((acct or {}).get("smtp_local_port") or 0)
+        except Exception:
+            smtp_port = 0
+        if not smtp_port:
+            return {"ok": False, "summary": "the account has no SMTP listener - re-authorise it on the Accounts page",
+                    "result": {"error": "no_smtp_listener"}}
+        to_addr = (a.get("to") or "").strip()
+        subject = (a.get("subject") or "").strip()
+        orig_msgid = ""
+        cc_addr = ""
+        if mode in ("reply", "reply_all"):
+            row, folder, uid, err = self._resolve_message(a)
+            if err:
+                return {"ok": False, "summary": err, "result": {"error": err}}
+            try:
+                mc = self._mail()
+                mc.ensure_selected(folder)
+                meta = mc.fetch_meta(uid) or {}
+            except Exception as exc:
+                return {"ok": False, "summary": "cannot read the original message: %r" % exc,
+                        "result": {"error": repr(exc)}}
+            to_addr = to_addr or (meta.get("from_addr") or "").strip()
+            subject = subject or (meta.get("subject") or "").strip()
+            if subject and not subject.lower().startswith("re:"):
+                subject = "Re: " + subject
+            orig_msgid = (meta.get("msgid") or "").strip()
+            if mode == "reply_all":
+                cc_addr = (meta.get("to_addr") or "").strip()
+        if not to_addr:
+            return {"ok": False, "summary": "no recipient address", "result": {"error": "no_to"}}
+        em = EmailMessage()
+        em["From"] = icfg["user"]
+        em["To"] = to_addr
+        if cc_addr and cc_addr.lower() != (icfg["user"] or "").lower():
+            em["Cc"] = cc_addr
+        em["Subject"] = subject or "(no subject)"
+        if orig_msgid:
+            mid_hdr = orig_msgid if orig_msgid.startswith("<") else "<%s>" % orig_msgid
+            em["In-Reply-To"] = mid_hdr
+            em["References"] = mid_hdr
+        em.set_content(body)
+        try:
+            with smtplib.SMTP("127.0.0.1", smtp_port, timeout=45) as smtp:
+                smtp.ehlo()
+                try:
+                    smtp.login(icfg["user"], icfg.get("password") or "")
+                except smtplib.SMTPException as exc:
+                    store.log_event("debug", "send: local SMTP AUTH not accepted (%r) - sending without" % exc)
+                smtp.send_message(em)
+        except Exception as exc:
+            return {"ok": False, "summary": "send failed: %r" % exc, "result": {"error": repr(exc)}}
+        sent_note = ""
+        try:
+            mc2 = self._mail()
+            sent = mc2.find_special_use("\\Sent")
+            if sent:
+                mc2.append_message(sent, em.as_bytes(), flags=r"(\Seen)")
+                sent_note = sent
+        except Exception as exc:
+            store.log_event("debug", "send: could not append to Sent (%r)" % exc)
+        store.log_event("info", "assistant sent mail to %s ('%s')%s"
+                        % (to_addr, _truncate(subject, 60), (" [%s]" % sent_note) if sent_note else ""))
+        return {"ok": True, "summary": "sent to %s" % to_addr,
+                "result": {"to": to_addr, "subject": subject, "mode": mode, "saved_to": sent_note}}
 
     def _summarize_thoughts(self, reasoning_text):
         """One short sentence describing what the reasoning was about (best-effort)."""
