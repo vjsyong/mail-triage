@@ -2200,6 +2200,23 @@ def main():
     check("icon route serves the png",
           rp.status_code == 200 and rp.data[:8] == b"\x89PNG\r\n\x1a\n")
 
+    section("T31 dashboard rethink: system line, hero, demoted detail")
+    rp = client.get("/")
+    d = rp.data
+    check("system status is a one-line collapsible",
+          b'class="card syswrap"' in d and b'data-alert="' in d and b'sys-sum' in d)
+    check("index management folded into the system block",
+          b'sys-ix-actions' in d and b"Index now" in d)
+    check("hero keeps the primary metric + context line",
+          b'class="metric primary"' in d and b"need a reply" in d
+          and b'class="mlines"' in d and b"rules active" in d)
+    check("actions live in the hero card", b'dashactions' in d and b"Open messages" in d)
+    check("page-head actions tagged for mobile hiding", b'dh-actions' in d)
+    check("activity collapses on phones",
+          b'class="card flush actwrap"' in d and b'act-sum' in d and b"Full log" in d)
+    check("index card tagged for mobile hiding", b'card ixcard' in d)
+    check("mobile collapse script present", b"removeAttribute('open')" in d)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

@@ -1384,20 +1384,48 @@ DASH_TMPL = """
 .dashgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
 @media(max-width:1023px){.dashgrid{grid-template-columns:1fr}}
 .dashgrid .card{margin:0}
-@media(max-width:767px){.metric{min-width:calc(50% - 24px);padding:6px 16px}}
+.syswrap>summary{display:none}
+.actwrap>summary{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;cursor:pointer;list-style:none}
+.actwrap>summary::-webkit-details-marker{display:none}
+.actwrap>summary h3{margin:0}
+.act-lnk{margin-left:auto}
+.act-chev,.sys-chev{color:var(--dim);font-size:.78rem}
+.act-chev::after{content:'▾'}
+.actwrap:not([open]) .act-chev::after{content:'▸'}
+.dashactions,.mlines,.sys-ix-actions{display:none}
+@media(max-width:767px){
+  .dh-actions{display:none}
+  .syswrap>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;padding:2px 0}
+  .syswrap>summary::-webkit-details-marker{display:none}
+  .sys-sum-t{font-weight:600;font-size:.86rem}
+  .sys-chev{margin-left:auto}
+  .sys-chev::after{content:'▸'}
+  .syswrap[open] .sys-chev::after{content:'▾'}
+  .metrics .metric:not(.primary){display:none}
+  .metric.primary{flex:1 1 100%;padding:6px 0}
+  .metric.primary b{font-size:2.2rem}
+  .mlines{display:block;font-size:.78rem;color:var(--dim);margin-top:6px;line-height:1.55}
+  .dashactions{display:flex;gap:8px;margin-top:12px}
+  .dashactions .btn{flex:1;text-align:center;justify-content:center}
+  .sys-ix-actions{display:flex;gap:8px;margin-top:10px;align-items:center}
+  .ixcard{display:none}
+  .tbl.mcards tr:nth-child(n+5){display:none}
+  .actwrap .logpanel{max-height:240px}
+}
 </style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Dashboard</h1>
     <div class="page-desc">System status, workload and what arrived recently.</div>
   </div>
-  <div class="row">
+  <div class="row dh-actions">
     <form class="inline" method="post" action="{{ url_for('check_now') }}"><button class="btn primary" type="submit" {{ 'disabled' if worker_state.running else '' }}>Check now</button></form>
     <a class="btn" href="{{ url_for('messages') }}">Open messages</a>
   </div>
 </div>
 
-<div class="card">
+<details class="card syswrap" open data-alert="{{ '1' if sys_alert else '0' }}">
+  <summary class="sys-sum"><span class="dot {{ 'err' if sys_alert else 'ok' }}"></span><span class="sys-sum-t">{% if sys_alert %}Something needs attention{% else %}All systems normal{% endif %}</span><span class="sys-chev" aria-hidden="true"></span></summary>
   <div class="sys">
     <div class="sysitem">
       <span class="dot {{ 'err' if worker_state.last_error else ('acc' if worker_state.running else 'ok') }}"></span>
@@ -1467,7 +1495,12 @@ DASH_TMPL = """
     <a class="btn small" href="{{ url_for('messages', f='queued') }}">View queue</a>
   </div>
   {% endif %}
-</div>
+  <div class="sysline sys-ix-actions">
+    <span class="sub" style="font-weight:600">Search index</span>
+    <form class="inline" method="post" action="{{ url_for('index_run') }}"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Index now</button></form>
+    <form class="inline" method="post" action="{{ url_for('index_rebuild') }}" onsubmit="return confirm('Rebuild the search index from scratch? Mail is untouched.');"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Rebuild</button></form>
+  </div>
+</details>
 
 <div class="card">
   <div class="metrics">
@@ -1503,6 +1536,11 @@ DASH_TMPL = """
     </div>
   </div>
   <div class="sub" style="margin-top:12px">Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }} · LLM classification {{ 'on' if settings.llm_suggest else 'off' }} · auto-filing {{ 'ON' if settings.llm_apply else 'off (suggests only)' }} — <a href="{{ url_for('settings') }}">change</a></div>
+  <div class="mlines">{{ st.moved }} sorted by rules · {{ st.classified }} classified ({{ '%.0f' % (st.classified * 100.0 / st.total) if st.total else 0 }}% of {{ st.total }}) · {{ st.rules }} rules active</div>
+  <div class="dashactions">
+    <a class="btn primary" href="{{ url_for('messages') }}">Open messages</a>
+    <form class="inline" method="post" action="{{ url_for('check_now') }}"><button class="btn" type="submit" {{ 'disabled' if worker_state.running else '' }}>Check now</button></form>
+  </div>
 </div>
 
 <div class="dashgrid">
@@ -1534,7 +1572,7 @@ DASH_TMPL = """
     {% endif %}
   </div>
   <div style="display:flex;flex-direction:column;gap:14px">
-    <div class="card">
+    <div class="card ixcard">
       <div class="card-h"><h3>Search index</h3>
         {% if ix.running %}<span class="badge acc">indexing</span>
         {% elif ix.last_error %}<span class="badge err">error</span>
@@ -1547,15 +1585,23 @@ DASH_TMPL = """
         <form class="inline" method="post" action="{{ url_for('index_rebuild') }}" onsubmit="return confirm('Rebuild the search index from scratch? Mail is untouched.');"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Rebuild</button></form>
       </div>
     </div>
-    <div class="card flush">
-      <div class="card-h" style="padding:14px 16px 10px;margin:0"><h3>Activity</h3><a class="sub" href="{{ url_for('log') }}">Full log →</a></div>
+    <details class="card flush actwrap" open>
+      <summary class="act-sum"><h3>Activity</h3><a class="sub act-lnk" href="{{ url_for('log') }}">Full log →</a><span class="act-chev" aria-hidden="true"></span></summary>
       <div class="logpanel" style="border:0;max-height:320px;overflow:auto">
         {% for e in events %}<div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span class="lmsg">{{ e.message }}</span></div>
         {% else %}<div class="sub">No events yet.</div>{% endfor %}
       </div>
-    </div>
+    </details>
   </div>
 </div>
+<script>
+(function(){
+  if(!window.matchMedia || !window.matchMedia('(max-width:767px)').matches) return;
+  var sw=document.querySelector('.syswrap');
+  if(sw && sw.getAttribute('data-alert')!=='1') sw.removeAttribute('open');
+  var aw=document.querySelector('.actwrap'); if(aw) aw.removeAttribute('open');
+})();
+</script>
 {% if ix.running %}<script>setTimeout(function(){location.reload();}, 8000);</script>{% endif %}
 """
 
@@ -1591,10 +1637,14 @@ def dashboard():
         px = {"running": False, "installed": True, "ports": {}, "restarts": 0,
               "last_error": repr(exc)}
     px["listener_rows"] = [{"port": port} for port, _up in sorted((px.get("ports") or {}).items())]
+    llm_cfg = engine.llm_config()
+    ix_st = index_status()
+    sys_alert = bool(ws.get("last_error") or not px.get("running")
+                     or ix_st.get("last_error") or not llm_cfg.get("base"))
     return render(_render_src(
         DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
-        settings=store.all_settings(), ix=index_status(), px=px,
-        llm=engine.llm_config(), llm_used=store.llm_count_last_hour()))
+        settings=store.all_settings(), ix=ix_st, px=px,
+        llm=llm_cfg, llm_used=store.llm_count_last_hour(), sys_alert=sys_alert))
 
 
 @app.route("/check", methods=["POST"])
