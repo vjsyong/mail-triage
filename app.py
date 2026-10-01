@@ -6856,87 +6856,156 @@ def simulate():
                               prefill_note=prefill_note, targets=targets))
 
 
-LEARN_TMPL = """
-<style>
+LEARN_TMPL = """<style>
+.lsteps{margin-top:6px}
+.lstep{display:grid;grid-template-columns:auto 1fr;gap:0 12px;padding:10px 0;position:relative}
+.lstep:not(:last-child)::before{content:'';position:absolute;left:3px;top:25px;bottom:-1px;width:1px;background:var(--line)}
+.lstep .dot{margin-top:5px}
+.lstep.now .dot{background:var(--acc)}
+.lstep b{font-size:.9rem;letter-spacing:-.01em}
+.lstep .sub{font-size:.82rem;margin-top:2px;line-height:1.5}
+.lstep.todo b,.lstep.todo .sub{color:var(--dim)}
+.lead{font-size:.98rem;font-weight:600;letter-spacing:-.01em;line-height:1.5;margin-bottom:2px}
+.lfold{border-top:1px solid var(--line)}
+.lfold>summary{cursor:pointer;padding:13px 2px;font-weight:600;font-size:.9rem;list-style:none;display:flex;align-items:center;gap:8px}
+.lfold>summary::-webkit-details-marker{display:none}
+.lfold>summary::before{content:'▸';font-size:.7rem;color:var(--dim)}
+.lfold[open]>summary::before{content:'▾'}
+.lfold .lfold-i{padding:0 0 14px}
 .ltbl td,.ltbl th{vertical-align:top}
-@media(max-width:767px){.ltbl .hide-m{display:none}}
+@media(max-width:767px){.ltbl .hide-m{display:none}.lstep{padding:9px 0}}
 </style>
+{% set s = rep.current %}
+{% set m = (s.metrics_parsed.val or {}) if s else {} %}
+{% set ds = (s.stats_parsed.dataset or {}) if s else {} %}
+{% set live = s.live if s else {} %}
+{% set stat_word = {'validated': 'Trained · not watching yet', 'shadow': 'Watching quietly', 'active': 'Taking over confident calls', 'degraded': 'Needs attention', 'retired': 'Retired', 'rejected': 'Rejected', 'proposed': 'Prepared'}.get(s.status, s.status) if s else '' %}
 <div class="page-head">
   <div>
     <h1 class="page-title">Learning</h1>
-    <div class="page-desc">Repeated LLM reasoning becomes cheap deterministic decisions here —
-      discovered, validated, and shadowed before anything ever acts. In shadow mode nothing on this page
-      changes how mail is handled.</div>
+    <div class="page-desc">The AI reads every email today. Here, small cheap models are being taught to take that work over — one task at a time. Nothing on this page changes your mail until you explicitly let it.</div>
   </div>
-  <form method="post" action="{{ url_for('learning_train') }}">
-    <button class="btn primary" type="submit">Train needs_reply specialist</button>
-  </form>
+  {% if s %}<form method="post" action="{{ url_for('learning_train') }}"><button class="btn primary" type="submit">Retrain reply detector</button></form>{% endif %}
 </div>
-<div class="grid2" style="align-items:start">
-  <div class="card">
-    <div class="card-h"><h3>Routing</h3><span class="sub">{{ 'shadow mode: specialists record only' if rep.route_mode == 'shadow' else 'enforce mode' }}</span></div>
-    <div class="dsrow"><span class="dsk">LLM escalation rate</span><span class="dsv">{{ '%.0f' % (rep.routing.escalation_rate * 100) if rep.routing.escalation_rate is not none else '—' }}%<span class="dsp"> of last {{ rep.routing.n }}</span></span></div>
-    <div class="dsrow"><span class="dsk">Would skip the LLM (coverage)</span><span class="dsv">{{ '%.0f' % (rep.routing.would_skip_rate * 100) if rep.routing.would_skip_rate is not none else '—' }}%</span></div>
-    <div class="dsrow"><span class="dsk">Verify queue (moderate confidence)</span><span class="dsv">{{ rep.routing.counts['verify'] }}</span></div>
-    <div class="sub" style="margin-top:8px">Escalation falls as specialists cover more of the tasks a call answers
-      (today: needs_reply by specialist, category by rules / heuristics / LLM).</div>
+{% if not s %}
+<div class="card">
+  <div class="empty">
+    <h4>Nothing is being learned yet</h4>
+    <p>Training takes about five seconds. The model studies every classification the AI has already made on your mail, learns to imitate its “needs a reply” call, and then waits. You decide what it may do, step by step.</p>
+    <form method="post" action="{{ url_for('learning_train') }}" style="margin-top:12px"><button class="btn primary" type="submit">Train the first model</button></form>
   </div>
-  <div class="card">
-    <div class="card-h"><h3>Library</h3><span class="sub">feature schema v{{ rep.feature_schema_version }}</span></div>
-    <div class="dsrow"><span class="dsk">Decisions recorded</span><span class="dsv">{{ "{:,}".format(rep.library.decisions) }}</span></div>
-    <div class="dsrow"><span class="dsk">Observations (user behavior)</span><span class="dsv">{{ "{:,}".format(rep.library.observations) }}</span></div>
-    <div class="dsrow"><span class="dsk">Labels</span><span class="dsv">{{ "{:,}".format(rep.library.labels) }}</span></div>
-    <div class="sub" style="margin-top:8px">{% for src, n in rep.library.labels_by_source.items() %}{{ src }}: {{ n }}{{ ' · ' if not loop.last }}{% endfor %}{% if not rep.library.labels_by_source %}No labels yet — LLM verdicts act as weak labels until corrections arrive.{% endif %}</div>
+</div>
+{% else %}
+<div class="card">
+  <div class="card-h"><h3>Status</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ stat_word }}</span></div>
+  <div class="lead">{% if s.status == 'shadow' %}Watching quietly — it sees every classified email, records what it would decide, and changes nothing.
+    {% elif s.status == 'active' %}Taking over confident calls — everything it is unsure about still goes to the AI.
+    {% elif s.status == 'validated' %}Trained and scored — ready to start watching. It still changes nothing until it watches for a while and you promote it.
+    {% elif s.status == 'degraded' %}Quality dropped below its bar — it is back to watching until retrained.
+    {% elif s.status == 'retired' %}Retired — kept for the record. Retrain to bring it back.
+    {% else %}Prepared but not running.{% endif %}</div>
+  <div class="sub" style="margin:2px 0 4px">Reply detector · version {{ s.version }}{% if live.last_at %} · last check {{ fmt_ts(live.last_at) }}{% elif s.created %} · trained {{ fmt_ts(s.created) }}{% endif %}</div>
+  <div class="lsteps">
+    <div class="lstep done"><span class="dot ok"></span><div><b>1 · Learned from your past mail</b>
+      <div class="sub">{{ "{:,}".format(ds.n or 0) }} classifications to study — every label was written by the AI itself, not by you.</div></div></div>
+    <div class="lstep done"><span class="dot ok"></span><div><b>2 · Scored against history</b>
+      <div class="sub">Checked on the newest {{ m.n or 0 }} emails: it catches {{ '%.0f' % (m.recall * 100) if m.recall else '—' }}% of the AI's “needs a reply” flags, and is right {{ '%.0f' % (m.precision * 100) if m.precision else '—' }}% of the times it raises one.</div></div></div>
+    {% if s.status in ('shadow', 'active') %}
+    <div class="lstep now"><span class="dot acc"></span><div><b>3 · Watching new mail</b> <span class="badge acc">now</span>
+      <div class="sub">{% if live.n %}Checked {{ live.n }} so far, agrees with the AI on {{ live.agree }} of them ({{ '%.0f' % (live.agreement * 100) }}%). Every check is recorded below.{% else %}Running — the first check appears with the next classified email.{% endif %}</div></div></div>
+    {% else %}
+    <div class="lstep todo"><span class="dot"></span><div><b>3 · Watch new mail</b>
+      <div class="sub">Not started — press “Start watching new mail” below.</div></div></div>
+    {% endif %}
+    <div class="lstep {{ 'now' if s.status == 'active' else 'todo' }}"><span class="dot {{ 'acc' if s.status == 'active' else '' }}"></span><div><b>4 · Take over confident calls</b>{% if s.status == 'active' %} <span class="badge ok">on</span>{% endif %}
+      <div class="sub">{{ 'Emails it is confident about stop going to the AI. The rest still escalate.' if s.status == 'active' else 'The end goal: emails it is confident about stop going to the AI. Needs more watching time and your go-ahead.' }}</div></div></div>
   </div>
 </div>
 <div class="card">
-  <div class="card-h"><h3>Specialists</h3><span class="sub">one per task · versioned · rollback = revert the active version</span></div>
-  {% if rep.specialists %}
-  <div class="tablewrap"><table class="tbl ltbl">
-    <tr><th>Model</th><th>Status</th><th>Validation</th><th class="hide-m">Live agreement</th><th></th></tr>
-    {% for s in rep.specialists %}
-    <tr>
-      <td><b>{{ s.name }}</b> <span class="sub">v{{ s.version }} · {{ s.kind }} · #{{ s.id }}</span>
-        <div class="sub">{{ s.task }}{% set n = (s.stats_parsed.dataset or {}).get('n') %}{% if n %} · {{ n }} samples{% if s.stats_parsed.weak_labels %} ({{ s.stats_parsed.weak_labels }} weak){% endif %}{% endif %}</div></td>
-      <td><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ s.status }}</span></td>
-      <td class="sub">{% set m = s.metrics_parsed.val or {} %}P {{ m.precision or '—' }} · R {{ m.recall or '—' }} · F1 {{ m.f1 or '—' }} <span class="sub">n={{ m.n or 0 }}</span></td>
-      <td class="sub hide-m">{% if s.live.n %}{{ '%.0f' % (s.live.agreement * 100) }}% <span class="sub">of {{ s.live.n }}</span>{% else %}—{% endif %}</td>
-      <td class="r">
-        {% if s.status == 'validated' %}
-        <form class="inline" method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Deploy to shadow</button></form>
-        {% elif s.status == 'shadow' %}
-        <form class="inline" method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="active"><button class="btn small primary" type="submit">Promote to active</button></form>
-        <form class="inline" method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
-        {% elif s.status == 'active' %}
-        <form class="inline" method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table></div>
-  {% else %}
-  <div class="empty"><h4>No specialists yet</h4>
-  <p>Train the first candidate from the mail already classified: the model learns from the LLM's past
-  verdicts (weak labels), gets validated on a held-out, newer slice, and then waits — deployment to shadow
-  is a separate, explicit step.</p></div>
-  {% endif %}
+  <div class="card-h"><h3>Reply detector</h3><span class="sub">one job: does this email need a reply from you?</span></div>
+  <div class="sub" style="margin-bottom:8px">The same call the AI makes on every email today. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.</div>
+  <div class="dsrow"><span class="dsk">Catches the AI's “needs a reply” flags</span><span class="dsv">{{ '%.0f' % (m.recall * 100) if m.recall else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Right when it raises a flag</span><span class="dsv">{{ '%.0f' % (m.precision * 100) if m.precision else '—' }}%</span></div>
+  <div class="dsrow"><span class="dsk">Agrees with the AI on new mail</span><span class="dsv">{% if live.n %}{{ live.agree }} of {{ live.n }}{% else %}no checks yet{% endif %}</span></div>
+  <div class="sub" style="margin-top:8px">These compare it to the AI's answers on your newest 20% of mail — a ceiling, not the truth: the AI is not always right. Corrections from you weigh several times more than the AI's own labels when retraining.</div>
+  <div class="row" style="margin-top:12px;align-items:center;gap:8px">
+    {% if s.status == 'validated' %}
+    <form method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching new mail</button></form>
+    <span class="sub">Changes nothing — it only records what it would decide.</span>
+    {% elif s.status == 'shadow' %}
+    <form method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="active"><button class="btn small" type="submit">Let it take over confident calls</button></form>
+    <form method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+    <span class="sub">Takes effect once live routing is on; everything is reversible.</span>
+    {% elif s.status == 'active' %}
+    <form method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+    <span class="sub">Retiring keeps every version and all history.</span>
+    {% endif %}
+  </div>
 </div>
 <div class="card">
-  <div class="card-h"><h3>Recent shadow disagreements</h3><span class="sub">specialist vs the decision that actually ran</span></div>
-  {% if rep.disagreements %}
-  <div class="tablewrap"><table class="tbl ltbl">
-    <tr><th>Message</th><th>Specialist</th><th>System</th><th class="hide-m">When</th></tr>
-    {% for d in rep.disagreements %}
-    <tr>
-      <td><a href="{{ url_for('message_detail', mid=d.msg_id) }}">#{{ d.msg_id }}</a></td>
-      <td><span class="badge warn">{{ 'reply' if d.specialist else 'no reply' }}</span> <span class="sub">{{ '%.2f' % d.specialist_conf }}</span></td>
-      <td><span class="badge">{{ 'reply' if d.system else 'no reply' }}</span> <span class="sub">{{ d.system_source }}</span></td>
-      <td class="sub hide-m">{{ fmt_ts(d.ts) }}</td>
-    </tr>
-    {% endfor %}
-  </table></div>
-  {% else %}<div class="sub">No disagreements recorded yet — they appear once a deployed specialist audits new mail.</div>{% endif %}
+  <details class="lfold">
+    <summary>Where it disagrees with the AI{% if rep.disagreements %} · {{ rep.disagreements|length }} recent{% endif %}</summary>
+    <div class="lfold-i">
+      <div class="sub" style="margin-bottom:8px">Shadow checks — the AI's decision still ran; these are the moments the model would have said something different. Open one to judge for yourself.</div>
+      {% if rep.disagreements %}
+      <div class="tablewrap"><table class="tbl ltbl">
+        <tr><th>Email</th><th>This model said</th><th>The AI said</th><th class="hide-m">When</th></tr>
+        {% for d in rep.disagreements %}
+        <tr>
+          <td><a href="{{ url_for('message_detail', mid=d.msg_id) }}">{{ d.subject or ('#' ~ d.msg_id) }}</a><div class="sub">{{ d.from_addr }}</div></td>
+          <td><span class="badge warn">{{ 'needs reply' if d.specialist else 'no reply' }}</span> <span class="sub">{{ '%.2f' % d.specialist_conf }}</span></td>
+          <td><span class="badge">{{ 'needs reply' if d.system else 'no reply' }}</span> <span class="sub">{{ d.system_source }}</span></td>
+          <td class="sub hide-m">{{ fmt_ts(d.ts) }}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+      {% else %}<div class="sub">Nothing yet — disagreements appear once it has watched some new mail.</div>{% endif %}
+    </div>
+  </details>
+  <details class="lfold">
+    <summary>Raw numbers</summary>
+    <div class="lfold-i">
+      <div class="dsrow"><span class="dsk">Emails still sent to the AI</span><span class="dsv">{{ '%.0f' % (rep.routing.escalation_rate * 100) if rep.routing.escalation_rate is not none else '—' }}%<span class="dsp"> of last {{ rep.routing.n }}</span></span></div>
+      <div class="dsrow"><span class="dsk">Could have skipped the AI</span><span class="dsv">{{ '%.0f' % (rep.routing.would_skip_rate * 100) if rep.routing.would_skip_rate is not none else '—' }}%</span></div>
+      <div class="dsrow"><span class="dsk">Sent for a second look</span><span class="dsv">{{ rep.routing.counts['verify'] }}</span></div>
+      <div class="dsrow"><span class="dsk">Decisions recorded</span><span class="dsv">{{ "{:,}".format(rep.library.decisions) }}</span></div>
+      <div class="dsrow"><span class="dsk">Your actions recorded (tags, moves, undos)</span><span class="dsv">{{ "{:,}".format(rep.library.observations) }}</span></div>
+      <div class="dsrow"><span class="dsk">Confirmed labels (from your corrections)</span><span class="dsv">{{ "{:,}".format(rep.library.labels) }}</span></div>
+      <div class="sub" style="margin-top:8px">“Emails still sent to the AI” is the number that should fall as models take over. Labels written by you are worth several AI labels each{% if rep.library.labels_by_source %} — so far: {% for src, n in rep.library.labels_by_source.items() %}{{ src }} {{ n }}{{ ' · ' if not loop.last }}{% endfor %}{% endif %}.</div>
+    </div>
+  </details>
+  <details class="lfold">
+    <summary>All models &amp; versions · {{ rep.specialists|length }}</summary>
+    <div class="lfold-i">
+      <div class="tablewrap"><table class="tbl ltbl">
+        <tr><th>Model</th><th>Status</th><th>Catches / right</th><th class="hide-m">Agrees on new mail</th><th></th></tr>
+        {% for sp in rep.specialists %}
+        {% set spm = sp.metrics_parsed.val or {} %}
+        <tr>
+          <td><b>{{ sp.name }}</b> <span class="sub">v{{ sp.version }} · {{ sp.kind }} · #{{ sp.id }}</span><div class="sub">{{ sp.task }}{% set n = (sp.stats_parsed.dataset or {}).get('n') %}{% if n %} · {{ n }} samples{% endif %}</div></td>
+          <td><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(sp.status, '') }}">{{ sp.status }}</span></td>
+          <td class="sub">{{ '%.0f' % (spm.recall * 100) if spm.recall else '—' }}% / {{ '%.0f' % (spm.precision * 100) if spm.precision else '—' }}%</td>
+          <td class="sub hide-m">{% if sp.live.n %}{{ sp.live.agree }} of {{ sp.live.n }}{% else %}—{% endif %}</td>
+          <td class="r">{% if sp.status == 'validated' and (not s or sp.id != s.id) %}<form class="inline" method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+    </div>
+  </details>
+  <details class="lfold">
+    <summary>How this works</summary>
+    <div class="lfold-i">
+      <div class="sub" style="line-height:1.6">The goal is simple: <b>use the AI for novel mail, use small models for the repetitive parts.</b> The loop in plain words: the system watches what the AI decides → when a pattern repeats, a small model is trained to imitate that one decision → it is scored against history → it watches real mail without acting → if it holds up, you can let it take over → anything it is unsure about still goes to the AI. “Emails still sent to the AI” (in Raw numbers) is the number that should fall as this works.</div>
+      <ul class="simul" style="margin-top:6px">
+        <li>“Watching quietly” really means quiet — shadow decisions are recorded, never acted on, and marked as such everywhere.</li>
+        <li>A model's own predictions never become training data — only the AI's answers and <b>your</b> corrections teach it.</li>
+        <li>Every version is kept forever; promoting and retiring are reversible; deleting is not a thing here.</li>
+        <li>Small print: “the AI said” is not ground truth either — until you correct enough emails, all scores measure imitation, not truth.</li>
+      </ul>
+    </div>
+  </details>
 </div>
+{% endif %}
 """
 
 

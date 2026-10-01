@@ -573,9 +573,10 @@ def transition(sid, to, reason="", by="ui"):
         raise RuntimeError("illegal transition %s -> %s" % (frm, to))
     enabled = 1 if to in ("shadow", "active", "degraded") else 0
     fields = {"status": to, "enabled": enabled}
-    if to == "active":
-        # a new ACTIVE version supersedes prior active ones of the same task
-        for other in store.list_specialists(task=row["task"], statuses=("active",)):
+    if to in ("shadow", "active", "degraded"):
+        # one running version per task: anything already running is superseded
+        for other in store.list_specialists(task=row["task"],
+                                            statuses=("shadow", "active", "degraded")):
             if other["id"] != row["id"]:
                 store.update_specialist(other["id"], status="retired", enabled=0,
                                         superseded_by=row["id"])
@@ -743,7 +744,7 @@ def specialist_live_stats(name=None, sid=None, window=500):
         except (TypeError, ValueError):
             pass
     return {"n": n, "agree": agree, "agreement": round(agree / n, 4) if n else None,
-            "window": window}
+            "window": window, "last_at": (decs[0]["ts"] if decs else None)}
 
 
 def routing_stats(window=500):
@@ -772,9 +773,12 @@ def recent_disagreements(limit=15):
         except (TypeError, ValueError):
             continue
         if a != b:
+            row = store.get_message(d["msg_id"]) or {}
             out.append({"msg_id": d["msg_id"], "specialist": a, "specialist_conf": d["confidence"],
                         "system": b, "system_source": sysd["source_id"], "ts": d["ts"],
-                        "source_id": d["source_id"]})
+                        "source_id": d["source_id"],
+                        "subject": (row.get("subject") or "")[:90],
+                        "from_addr": (row.get("from_addr") or "")[:70]})
         if len(out) >= limit:
             break
     return out
@@ -826,11 +830,19 @@ def status_report():
                 label_sources[r["source"]] = r["n"]
     except Exception:
         pass
+    current = None
+    for st in ("active", "shadow", "degraded"):
+        current = next((x for x in specs if x["status"] == st), None)
+        if current:
+            break
+    if current is None and specs:
+        current = specs[0]
     return {
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "route_mode": store.get_setting("learning_route_mode", "shadow"),
         "enabled": bool(store.get_setting("learning_enabled", True)),
         "specialists": specs,
+        "current": current,
         "routing": routing_stats(),
         "library": {
             "decisions": store.count_decisions(),

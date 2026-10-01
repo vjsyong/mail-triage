@@ -330,3 +330,16 @@ would-skip 0% until a category specialist exists. `llm_log` already counts calls
   provenance, idempotency, illegal-transition guard, shadow decisions + evidence,
   router intent, no-labels-from-predictions, live stats, page render, retire.
 - Suite: **489 passed, 0 failed.**
+
+## UI (2026-10, same day): the Learning page, redesigned for newcomers
+
+Research round (TheFinch *UX Best Practices for AI/ML Dashboards*: jobs-to-be-done ordering,
+10-second scan vs 2-minute investigation, hierarchy top=state / middle=drivers / bottom=evidence,
+plain-language uncertainty, versioning/lineage visible, "what it means" + "what to do" near
+indicators; Lollypop *Progressive Disclosure*: essential first, labelled reveals, never hide
+task-critical info): the page was rebuilt as a story - **Status** (one plain sentence + a 4-step
+tracker: learned -> scored -> watching now -> take over) -> **Reply detector** card (one-sentence
+job, plain-language scores, "ceiling not truth" honesty note, actions) -> **folds** (disagreements
+with subjects, raw numbers, all versions, how-it-works + guard-rails). Hero always shows the
+RUNNING version; a retrain produces a `validated` candidate deployable from the Versions fold;
+deploying any version supersedes other running versions of the same task (one runner per task).

@@ -2953,9 +2953,10 @@ def main():
     check("live shadow agreement computes against system decisions",
           live["n"] >= 1 and live["agreement"] is not None)
     r = client.get("/learning")
-    check("learning page renders specialists + routing",
-          r.status_code == 200 and b"Specialists" in r.data and b"Routing" in r.data
-          and b"Train needs_reply specialist" in r.data)
+    check("learning page explains the loop at a glance",
+          r.status_code == 200 and b"Reply detector" in r.data and b"Watching quietly" in r.data
+          and b"Where it disagrees with the AI" in r.data and b"How this works" in r.data
+          and b"Retrain reply detector" in r.data)
     r = client.post("/learning/specialists/%d/transition" % sid, data={"to": "retired"},
                     follow_redirects=True)
     check("retire transition works from the page route",
