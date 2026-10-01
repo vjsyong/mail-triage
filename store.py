@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "llm_apply": False,           # act on LLM category -> folder mapping (off until trusted)
     "max_llm_per_hour": 40,
     "llm_batch_per_cycle": 5,
+    "render_images": False,       # viewer: load remote images without asking first
     "classify_concurrency": 8,    # parallel LLM requests for batch classification
     "heuristics_enabled": True,   # run trained heuristic classifiers before the LLM
     "heuristic_autorefine": True,  # retrain tag-sourced heuristics when labels grow
@@ -211,6 +212,12 @@ def _migrate(conn):
         conn.execute("ALTER TABLE messages ADD COLUMN llm_thinking TEXT DEFAULT ''")
     if "classified_by" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN classified_by TEXT DEFAULT ''")
+    if "body_html" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN body_html TEXT NOT NULL DEFAULT ''")
+    if "body_cids" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN body_cids TEXT NOT NULL DEFAULT ''")
+    if "body_html_at" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN body_html_at INTEGER DEFAULT 0")
     hcols = [r[1] for r in conn.execute("PRAGMA table_info(heuristics)")]
     if hcols and "excluded" not in hcols:
         conn.execute("ALTER TABLE heuristics ADD COLUMN excluded TEXT NOT NULL DEFAULT '[]'")
@@ -440,11 +447,14 @@ def insert_message(folder, uid, uidvalidity, fields):
     with db() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO messages (folder, uid, uidvalidity, msgid, from_addr, to_addr, "
-            "subject, date, date_ts, snippet, status, processed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "subject, date, date_ts, snippet, status, processed_at, body_html, body_cids, "
+            "body_html_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (folder, uid, uidvalidity, fields.get("msgid", ""), fields.get("from_addr", ""),
              fields.get("to_addr", ""), fields.get("subject", ""), fields.get("date", ""),
              fields.get("date_ts") or date_ts_from(fields.get("date", "")),
-             fields.get("snippet", ""), fields.get("status", "new"), int(time.time())))
+             fields.get("snippet", ""), fields.get("status", "new"), int(time.time()),
+             fields.get("body_html", ""), fields.get("body_cids", ""),
+             fields.get("body_html_at") or 0))
         return cur.lastrowid, conn.total_changes
 
 

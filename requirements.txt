@@ -2,4 +2,5 @@ flask>=3.0
 requests>=2.31
 sqlite-vec>=0.1.9
 beautifulsoup4>=4.12
+nh3>=0.2
 emailproxy==2026.7.3

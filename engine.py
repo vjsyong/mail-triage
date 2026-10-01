@@ -13,6 +13,7 @@ import email.utils
 import html
 import imaplib
 import json
+import nh3
 import quopri
 import re
 import threading
@@ -197,17 +198,109 @@ def html_to_text(html_text):
     return text.strip()
 
 
+_EMAIL_TAGS = {
+    "a", "abbr", "b", "blockquote", "br", "caption", "center", "cite", "code",
+    "dd", "div", "dl", "dt", "em", "figcaption", "figure", "font", "h1", "h2",
+    "h3", "h4", "h5", "h6", "hr", "i", "img", "ins", "kbd", "li", "mark", "ol",
+    "p", "pre", "q", "s", "small", "span", "strike", "strong", "sub", "sup",
+    "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul", "var", "wbr",
+}
+_EMAIL_ATTRS = {
+    "a": {"href", "title", "name"},
+    "img": {"src", "alt", "title", "width", "height", "border"},
+    "font": {"color", "face", "size"},
+    "table": {"border", "cellpadding", "cellspacing", "width", "height", "align",
+              "bgcolor", "dir", "role"},
+    "td": {"colspan", "rowspan", "width", "height", "align", "valign", "bgcolor", "dir"},
+    "th": {"colspan", "rowspan", "width", "height", "align", "valign", "bgcolor", "dir"},
+    "tr": {"align", "valign", "bgcolor", "dir"},
+    "p": {"align", "dir"},
+    "*": {"style", "class", "title", "dir", "lang", "id", "width", "height", "align", "valign"},
+}
+
+
+def sanitize_email_html(html):
+    """Sanitize untrusted email HTML for the viewer (nh3/ammonia). Keeps layout,
+    formatting, tables and cid:/http(s) image refs; strips scripts, stylesheets,
+    forms, frames and event handlers."""
+    if not html:
+        return ""
+    try:
+        return nh3.clean(
+            html,
+            tags=_EMAIL_TAGS,
+            attributes=_EMAIL_ATTRS,
+            url_schemes={"http", "https", "mailto", "tel", "cid"},
+            clean_content_tags={"script", "style", "iframe", "object", "embed",
+                                "form", "head", "title", "meta", "link", "base"})
+    except Exception:
+        return ""
+
+
+def _walk_sections(part, section=""):
+    """Yield (imap_section, leaf_part) in depth-first order; sections follow the
+    IMAP part-numbering scheme ('1', '2', '2.1', ...)."""
+    if part.is_multipart():
+        for i, sub in enumerate(part.get_payload() or [], 1):
+            sub_sec = ("%s.%d" % (section, i)) if section else str(i)
+            for item in _walk_sections(sub, sub_sec):
+                yield item
+    else:
+        yield (section or "1"), part
+
+
+def _sniff_image_type(data):
+    """Magic-number fallback when a part carries no usable Content-Type."""
+    if not data:
+        return ""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:2] == b"BM":
+        return "image/bmp"
+    head = data[:512].lstrip()
+    if head.startswith(b"<svg") or head.startswith(b"<?xml"):
+        return "image/svg+xml"
+    return ""
+
+
+def image_url_ok(url):
+    """http(s) only, and every resolved address must be public (SSRF guard)."""
+    try:
+        from urllib.parse import urlparse
+        import socket
+        import ipaddress
+        p = urlparse(url)
+        if p.scheme not in ("http", "https") or not p.hostname:
+            return False
+        port = p.port or (443 if p.scheme == "https" else 80)
+        infos = socket.getaddrinfo(p.hostname, port)
+        if not infos:
+            return False
+        for info in infos:
+            if not ipaddress.ip_address(info[4][0]).is_global:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def parse_full_message(raw, limit=20000):
     """Parse a full RFC822 message into {"meta": ..., "text": ...} in one pass.
 
     Prefers text/plain parts; falls back to HTML -> text; skips attachments.
     """
     if not raw:
-        return {"meta": {}, "text": ""}
+        return {"meta": {}, "text": "", "html": "", "cids": {}}
     try:
         msg = email.message_from_bytes(raw, policy=email.policy.default)
     except Exception:
-        return {"meta": {}, "text": _clean_snippet(raw)}
+        return {"meta": {}, "text": _clean_snippet(raw), "html": "", "cids": {}}
 
     def hdr(name):
         v = msg.get(name)
@@ -223,12 +316,17 @@ def parse_full_message(raw, limit=20000):
         "subject": re.sub(r"\s+", " ", _decode_header(hdr("Subject"))).strip(),
         "date": hdr("Date"),
     }
-    plain, html_parts = [], []
+    plain, html_parts, cids = [], [], {}
     try:
-        for part in msg.walk():
-            if part.is_multipart():
-                continue
+        for sec, part in _walk_sections(msg):
             ctype = part.get_content_type()
+            cid = str(part.get("Content-ID") or "").strip().strip("<>")
+            if cid and ctype.startswith("image/"):
+                try:
+                    cids[cid] = {"section": sec, "type": ctype,
+                                 "name": _decode_header(str(part.get_filename() or ""))}
+                except Exception:
+                    pass
             if "attachment" in str(part.get("Content-Disposition") or "").lower():
                 continue
             if ctype in ("text/plain", "text/html"):
@@ -244,6 +342,7 @@ def parse_full_message(raw, limit=20000):
     except Exception:
         pass
     text = "\n".join(plain).strip()
+    html = max(html_parts, key=len).strip() if html_parts else ""
     if not text and html_parts:
         text = html_to_text("\n".join(html_parts))
     if not text:
@@ -251,7 +350,9 @@ def parse_full_message(raw, limit=20000):
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if limit and len(text) > limit:
         text = text[:limit]
-    return {"meta": meta, "text": text}
+    if len(html) > 400000:
+        html = html[:400000]
+    return {"meta": meta, "text": text, "html": html, "cids": cids}
 
 
 class _SafeDict(dict):
@@ -448,6 +549,10 @@ class MailClient:
             if meta:
                 meta = dict(meta)
                 meta["snippet"] = parsed.get("text", "")
+                meta["body_html_at"] = int(time.time())
+                if parsed.get("html"):
+                    meta["body_html"] = sanitize_email_html(parsed["html"])
+                    meta["body_cids"] = json.dumps(parsed.get("cids") or {})
                 return meta
         except RuntimeError:
             pass
@@ -489,6 +594,37 @@ class MailClient:
         except RuntimeError:
             raw = self._fetch_literal(uid, "(BODY.PEEK[TEXT])")[:limit]
         return readable_body(raw, limit=limit)
+
+    def fetch_body_payload(self, uid, limit=6000):
+        """Viewer payload in one round trip: text + sanitized html + cid map."""
+        raw = self._fetch_literal(uid, "(BODY.PEEK[])")
+        parsed = parse_full_message(raw, limit=limit)
+        return {"text": parsed.get("text") or "",
+                "html": sanitize_email_html(parsed.get("html") or ""),
+                "cids": parsed.get("cids") or {}}
+
+    def fetch_section(self, uid, section):
+        """(content_type, bytes) for one MIME part ('2', '2.1', ...) - fetched as
+        two small literals: the part's MIME headers plus its content."""
+        typ, dat = self.M.uid("FETCH", str(uid),
+                              "(BODY.PEEK[%s.MIME] BODY.PEEK[%s])" % (section, section))
+        if typ != "OK":
+            raise RuntimeError("FETCH %s failed: %s %s" % (section, typ, dat))
+        chunks = [item[1] for item in (dat or [])
+                  if isinstance(item, tuple) and len(item) >= 2 and item[1]]
+        if not chunks:
+            raise RuntimeError("no data for section %s" % section)
+        mime_raw, data = (chunks[0], chunks[-1]) if len(chunks) >= 2 else (b"", chunks[-1])
+        ct = ""
+        if mime_raw:
+            try:
+                hdr = email.parser.BytesHeaderParser().parsebytes(mime_raw)
+                ct = str(hdr.get("Content-Type") or "")
+            except Exception:
+                ct = ""
+        if not ct or ct.lower().startswith("application/octet-stream"):
+            ct = _sniff_image_type(data) or ct or "application/octet-stream"
+        return ct.split(";")[0].strip(), data
 
     def fetch_full(self, uid, limit=20000):
         """Full message in one round trip: header meta + cleaned text body."""
@@ -1108,6 +1244,58 @@ def rescue_stale_snippets(rows, workers=6):
 
     _run_parallel(groups, fetch_chunk, workers)
     return {"fixed": fixed[0], "not_found": not_found}
+
+
+def extract_rendered(workers=6):
+    """One-shot: extract + sanitize the HTML body for every row that has not been
+    through it yet, so the viewer renders without a per-message IMAP fetch.
+    Returns {"updated", "remaining"}."""
+    rows = [r for r in store.messages(limit=999999) if not (r.get("body_html_at") or 0)]
+    if not rows:
+        return {"updated": 0, "remaining": 0}
+    by_folder = {}
+    for r in rows:
+        by_folder.setdefault(r["folder"], []).append(r)
+    updated, lock = [0], threading.Lock()
+
+    def chunk_fn(chunk):
+        for folder, items in chunk:
+            try:
+                mc = MailClient().connect()
+                mc.select(folder)
+            except Exception:
+                continue
+            try:
+                for r in items:
+                    try:
+                        got = mc.fetch_body_payload(r["uid"], limit=6000)
+                    except Exception:
+                        continue
+                    txt = got.get("text") or ""
+                    if not txt or not looks_readable(txt):
+                        continue
+                    fields = {"body_html_at": int(time.time())}
+                    if got.get("html"):
+                        fields["body_html"] = got["html"][:400000]
+                        fields["body_cids"] = json.dumps(got.get("cids") or {})
+                    if looks_like_mime_junk(r.get("snippet") or ""):
+                        fields["snippet"] = txt[:4000]
+                    store.update_message(r["id"], **fields)
+                    with lock:
+                        updated[0] += 1
+            finally:
+                try:
+                    mc.close()
+                except Exception:
+                    pass
+
+    groups = sorted(by_folder.items(), key=lambda kv: -len(kv[1]))
+    _run_parallel(groups, chunk_fn, workers)
+    remaining = sum(1 for r in store.messages(limit=999999)
+                    if not (r.get("body_html_at") or 0))
+    store.log_event("info", "render-extract: %d row(s) done, %d remaining"
+                    % (updated[0], remaining))
+    return {"updated": updated[0], "remaining": remaining}
 
 
 def heal_snippets(workers=6, rescue=True):

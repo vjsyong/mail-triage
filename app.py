@@ -8,12 +8,14 @@ classification of the rest, reply templates with LLM-drafted replies saved to Dr
 Run:  python app.py            (serves the UI and starts the background worker)
       python app.py --check    (read-only connectivity check, prints JSON)
 """
+import hashlib
 import json
 import os
 import re
 import sys
 import time
 from html import escape as html_escape
+from urllib.parse import quote
 
 from flask import Flask, Response, flash, jsonify, redirect, render_template_string, request, url_for
 
@@ -1843,6 +1845,15 @@ MESSAGE_TMPL = """
 .quote summary{cursor:pointer}
 .quote .qbody{white-space:pre-wrap;margin-top:8px}
 .msgfrom{overflow-wrap:anywhere}
+.emailtools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 0}
+.emailtools .sp{flex:1}
+.emailbody{margin:12px 0 2px;border:1px solid var(--line);background:#fff;padding:16px 18px;overflow-x:auto;font-size:.94rem;line-height:1.6;color:var(--ink)}
+.emailbody img{max-width:100%;height:auto}
+.emailbody table{max-width:100%;border-collapse:collapse}
+.emailbody a{text-decoration:underline;text-underline-offset:2px}
+.emailbody h1{font-size:1.35em;margin:.6em 0 .4em}.emailbody h2{font-size:1.2em;margin:.6em 0 .4em}.emailbody h3{font-size:1.05em;margin:.5em 0 .3em}
+.emailbody blockquote{margin:10px 0;padding-left:12px;border-left:2px solid var(--line);color:var(--dim)}
+.emailbody p{margin:0 0 .7em}
 </style>
 <div class="page-head">
   <div style="min-width:0">
@@ -1871,7 +1882,15 @@ MESSAGE_TMPL = """
       {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
         ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.reason %} · why: {{ classify_result.reason }}{% endif %}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
       {% if m.body_note %}<div class="note" style="margin-top:12px">{{ m.body_note }}</div>{% endif %}
-      {% if m.body_html %}<div class="msgbody">{{ m.body_html|safe }}</div>
+      {% if m.email_html or (m.plain_view and (m.body_html or '').strip()) %}
+      <div class="emailtools">
+        {% if m.email_html and m.email_blocked %}<span class="badge warn">remote images blocked</span><a class="btn small" href="{{ url_for('message_detail', mid=m.id, imgs=1) }}">Load images</a>{% endif %}
+        {% if m.email_html %}<span class="sp"></span><a class="sub" href="{{ url_for('message_detail', mid=m.id, view='plain') }}">View plain text</a>{% endif %}
+        {% if m.plain_view %}<span class="sp"></span><a class="sub" href="{{ url_for('message_detail', mid=m.id) }}">View formatted</a>{% endif %}
+      </div>
+      {% endif %}
+      {% if m.email_html %}<div class="emailbody">{{ m.email_html|safe }}</div>
+      {% elif m.body_text_html %}<div class="msgbody">{{ m.body_text_html|safe }}</div>
       {% else %}<div class="empty" style="padding:26px 0 10px"><h4>Body unavailable</h4><p>Reload to retry the fetch, or open this message in your mail client.</p></div>{% endif %}
     </div>
 
@@ -2007,60 +2026,159 @@ def message_body_html(text):
             % (len(lines) - idx, quoted))
 
 
-def _message_body_for_view(m):
-    """Readable body for the message viewer: the stored snippet when clean, else
-    re-fetch from the mailbox (falling back to a Message-ID search when the row's
-    folder/uid went stale), extract text properly and cache it back onto the row.
-    Returns (body_text, note)."""
+def _message_body_payload(m):
+    """Viewer payload {text, html, cids, note}: the stored copy when complete,
+    else re-fetch from the mailbox (Message-ID rescue when the row went stale),
+    cache text + sanitized html + cid map back onto the row."""
     stored = m.get("snippet") or ""
-    if stored and not engine.looks_like_mime_junk(stored) and engine.looks_readable(stored):
-        return stored[:4000], None
+    text_ok = bool(stored) and not engine.looks_like_mime_junk(stored) and engine.looks_readable(stored)
+    html_cached = bool((m.get("body_html") or "").strip())
+    html_checked = html_cached or bool(m.get("body_html_at") or 0)
+    if text_ok and html_checked:
+        return {"text": stored[:4000], "html": m.get("body_html") or "",
+                "cids": m.get("body_cids") or "", "note": None}
+
+    fetched, moved = None, None
     try:
         mc = engine.MailClient().connect()
-    except Exception:
-        mc = None
-    if mc is not None:
         try:
-            text, folder, uid = "", None, None
             try:
                 mc.select(m["folder"])
-                text = mc.fetch_body_text(m["uid"], limit=6000)
+                got = mc.fetch_body_payload(m["uid"], limit=6000)
+                if got.get("text") and not engine.looks_like_mime_junk(got["text"]) \
+                        and engine.looks_readable(got["text"]):
+                    fetched = got
             except Exception:
-                text = ""
-            if not text or engine.looks_like_mime_junk(text):
+                fetched = None
+            if fetched is None:
                 loc = _find_message_location(mc, m.get("msgid"))
                 if loc:
-                    folder, uid = loc
                     try:
-                        mc.select(folder)
-                        text = mc.fetch_body_text(uid, limit=6000)
+                        mc.select(loc[0])
+                        got = mc.fetch_body_payload(loc[1], limit=6000)
+                        if got.get("text") and not engine.looks_like_mime_junk(got["text"]) \
+                                and engine.looks_readable(got["text"]):
+                            fetched = got
+                            moved = loc
                     except Exception:
-                        text = ""
-            if text and not engine.looks_like_mime_junk(text) and engine.looks_readable(text):
-                fields = {"snippet": text[:4000]}
-                if folder and (folder != m.get("folder") or uid != m.get("uid")):
-                    fields["folder"], fields["uid"] = folder, uid
-                    m["folder"], m["uid"] = folder, uid
-                store.update_message(m["id"], **fields)
-                return text[:4000], None
+                        pass
         finally:
             try:
                 mc.close()
             except Exception:
                 pass
+    except Exception:
+        fetched = None
+
+    if fetched is not None:
+        text = (fetched.get("text") or "")[:4000]
+        fields = {"snippet": text, "body_html_at": int(time.time())}
+        if fetched.get("html"):
+            fields["body_html"] = fetched["html"][:400000]
+            fields["body_cids"] = json.dumps(fetched.get("cids") or {})
+        if moved:
+            fields["folder"], fields["uid"] = moved
+            m["folder"], m["uid"] = moved
+        store.update_message(m["id"], **fields)
+        m["body_html"] = fields.get("body_html", m.get("body_html") or "")
+        m["body_cids"] = fields.get("body_cids", m.get("body_cids") or "")
+        return {"text": text, "html": m["body_html"], "cids": m["body_cids"], "note": None}
+
+    if text_ok:
+        return {"text": stored[:4000], "html": m.get("body_html") or "",
+                "cids": m.get("body_cids") or "", "note": None}
     salv = engine.readable_body(stored, limit=4000)
     if salv and not engine.looks_like_mime_junk(salv) and engine.looks_readable(salv):
-        return salv[:4000], "Shown from a repaired stored copy — the mailbox re-fetch failed."
-    return "", ("This message could not be decoded: the stored copy is raw MIME and the "
-                "mailbox copy could not be read. Reload to retry.")
+        return {"text": salv[:4000], "html": "", "cids": "",
+                "note": "Shown from a repaired stored copy — the mailbox re-fetch failed."}
+    return {"text": "", "html": "", "cids": "",
+            "note": ("This message could not be decoded: the stored copy is raw MIME and "
+                     "the mailbox copy could not be read. Reload to retry.")}
 
 
-def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0):
+_IMG_PLACEHOLDER = ("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' "
+                    "width='132' height='40'><rect width='132' height='40' fill='%23f4f4f4' "
+                    "stroke='%23e5e5e5'/><text x='66' y='24' font-size='10' fill='%23a3a3a3' "
+                    "text-anchor='middle' font-family='sans-serif'>image blocked</text></svg>")
+
+
+def _email_body_html(m, show_images):
+    """Render-ready email HTML: cid: refs -> inline part route, remote refs ->
+    the image proxy (or a placeholder while images are blocked for this view)."""
+    html = (m.get("body_html") or "").strip()
+    if not html:
+        return "", False
+    try:
+        cids = json.loads(m.get("body_cids") or "{}")
+    except Exception:
+        cids = {}
+    mid = m["id"]
+
+    def cid_url(cid):
+        sec = (cids.get(cid) or {}).get("section")
+        return "/messages/%d/part/%s" % (mid, sec) if sec else ""
+
+    def repl_cid_attr(mo):
+        url = cid_url(mo.group(3))
+        if not url:
+            return mo.group(0)
+        q = mo.group(2)
+        if q:
+            return '%s=%s%s' % (mo.group(1), q, url)  # original closing quote remains
+        return '%s="%s"' % (mo.group(1), url)         # add both quotes
+
+    html = re.sub(r'(?i)(src|background)\s*=\s*(["\']?)cid:([^"\'\s>)]+)', repl_cid_attr, html)
+
+    def repl_cid_css(mo):
+        url = cid_url(mo.group(2))
+        return mo.group(0) if not url else 'url("%s")' % url
+
+    html = re.sub(r'(?i)url\(\s*(["\']?)cid:([^"\')]+)\1\s*\)', repl_cid_css, html)
+
+    def proxy(u):
+        return "/messages/%d/img?u=%s" % (mid, quote(u, safe=""))
+
+    def repl_remote_attr(mo):
+        q = mo.group(2)
+        if q:
+            return '%s=%s%s' % (mo.group(1), mo.group(2), proxy(mo.group(3)))
+        return '%s="%s"' % (mo.group(1), proxy(mo.group(3)))
+
+    html = re.sub(r'(?i)(src|background)\s*=\s*(["\']?)(https?://[^"\'\s>]+)', repl_remote_attr, html)
+
+    def repl_remote_css(mo):
+        return 'url(%s)' % proxy(mo.group(1))
+
+    html = re.sub(r'(?i)url\(\s*["\']?(https?://[^"\')]+)["\']?\s*\)', repl_remote_css, html)
+
+    has_remote = "/img?u=" in html
+    if has_remote and not show_images:
+        prefix = re.escape("/messages/%d/img?u=" % mid)
+        html = re.sub(r'(?i)(src|background)="' + prefix + r'[^"]*"',
+                      lambda mo: '%s="%s"' % (mo.group(1), _IMG_PLACEHOLDER), html)
+        html = re.sub(r'url\(' + prefix + r'[^)]*\)', 'none', html)
+    return html, has_remote
+
+
+def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0,
+                    show_images=False, plain=False):
     if "body" not in m:
-        m["body"], m["body_note"] = _message_body_for_view(m)
-        m["body_html"] = message_body_html(m["body"])
+        payload = _message_body_payload(m)
+        m["body"] = payload["text"]
+        m["body_note"] = payload["note"]
+        m["body_html"] = payload["html"]
+        m["body_cids"] = payload["cids"]
+        m["body_text_html"] = message_body_html(m["body"])
     if "date_disp" not in m:
         m["date_disp"] = _display_date(m.get("date"))
+    m["email_html"] = ""
+    has_remote = False
+    if not plain and (m.get("body_html") or "").strip():
+        m["email_html"], has_remote = _email_body_html(m, show_images)
+    m["email_blocked"] = bool(has_remote and not show_images)
+    m["email_has_remote"] = has_remote
+    m["show_images"] = show_images
+    m["plain_view"] = plain
     return render(render_template_string(
         MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
         draft_error=draft_error, draft_template_id=draft_template_id,
@@ -2074,7 +2192,103 @@ def message_detail(mid):
         flash("No such message.", "err")
         return redirect(url_for("messages"))
     m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
-    return _render_message(m)
+    show_images = request.args.get("imgs") == "1" or bool(store.get_setting("render_images"))
+    plain = request.args.get("view") == "plain"
+    return _render_message(m, show_images=show_images, plain=plain)
+
+
+def _data_dir():
+    try:
+        return config.DATA_DIR
+    except Exception:
+        return os.path.dirname(config.DB_PATH)
+
+
+@app.route("/messages/<int:mid>/part/<section>")
+def message_part(mid, section):
+    """Inline MIME part (images referenced as cid:...) for the message viewer."""
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", section or ""):
+        return ("bad section", 404)
+    m = store.get_message(mid)
+    if not m:
+        return ("no such message", 404)
+    cache_dir = os.path.join(_data_dir(), "partcache")
+    key = "m%d-u%d-%s" % (mid, m["uid"], section)
+    bin_path = os.path.join(cache_dir, key + ".bin")
+    meta_path = os.path.join(cache_dir, key + ".json")
+    if os.path.exists(bin_path) and os.path.exists(meta_path):
+        try:
+            with open(bin_path, "rb") as fh:
+                data = fh.read()
+            with open(meta_path) as fh:
+                ct = (json.load(fh) or {}).get("ct") or "application/octet-stream"
+            return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=2592000"})
+        except Exception:
+            pass
+    try:
+        mc = engine.MailClient().connect()
+        try:
+            mc.select(m["folder"])
+            ct, data = mc.fetch_section(m["uid"], section)
+        finally:
+            mc.close()
+    except Exception as exc:
+        store.log_event("error", "inline part fetch failed for msg %d [%s]: %r" % (mid, section, exc))
+        return ("part fetch failed", 502)
+    if not (ct or "").lower().startswith("image/"):
+        return ("not an image part", 404)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(bin_path, "wb") as fh:
+            fh.write(data)
+        with open(meta_path, "w") as fh:
+            json.dump({"ct": ct}, fh)
+    except Exception:
+        pass
+    return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=2592000"})
+
+
+@app.route("/messages/<int:mid>/img")
+def message_img(mid):
+    """Remote image proxy + cache for the viewer (SSRF-guarded, images only)."""
+    url = request.args.get("u") or ""
+    if not engine.image_url_ok(url):
+        return ("blocked", 404)
+    cache_dir = os.path.join(_data_dir(), "imgcache")
+    key = hashlib.sha1(url.encode("utf-8")).hexdigest()
+    bin_path = os.path.join(cache_dir, key + ".bin")
+    meta_path = os.path.join(cache_dir, key + ".json")
+    if os.path.exists(bin_path) and os.path.exists(meta_path):
+        try:
+            with open(bin_path, "rb") as fh:
+                data = fh.read()
+            with open(meta_path) as fh:
+                ct = (json.load(fh) or {}).get("ct") or "application/octet-stream"
+            return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=2592000"})
+        except Exception:
+            pass
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "mail-triage-viewer/1.0"})
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            ct = str(resp.headers.get("Content-Type") or "").split(";")[0].strip()
+            data = resp.read(8 * 1024 * 1024 + 1)
+        if len(data) > 8 * 1024 * 1024:
+            return ("too large", 502)
+    except Exception as exc:
+        store.log_event("warn", "remote image fetch failed (%s): %r" % (url[:110], exc))
+        return ("fetch failed", 502)
+    if not ct.lower().startswith("image/"):
+        return ("not an image", 404)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(bin_path, "wb") as fh:
+            fh.write(data)
+        with open(meta_path, "w") as fh:
+            json.dump({"ct": ct}, fh)
+    except Exception:
+        pass
+    return Response(data, mimetype=ct, headers={"Cache-Control": "public, max-age=2592000"})
 
 
 @app.route("/messages/<int:mid>/classify", methods=["POST"])
@@ -3056,6 +3270,7 @@ SETTINGS_TMPL = """
       <div><label for="p-name">Your name <span class="sub">(used when drafting replies)</span></label><input id="p-name" type="text" name="my_name" value="{{ s.my_name }}"></div>
       <div><label for="p-tz">Time display offset <span class="sub">(hours from UTC; timestamps show as {{ tz }})</span></label><input id="p-tz" type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14"></div>
     </div>
+    <label class="check" style="margin-top:14px"><input type="checkbox" name="render_images" value="1" {{ 'checked' if s.render_images else '' }}><input type="hidden" name="render_images" value="0"> <span>Always load remote images in the message viewer <span class="sub">(unchecked: each message keeps a "Load images" button)</span></span></label>
     <div class="savebar"><button class="btn primary" type="submit">Save general</button></div>
   </form>
 </div>
@@ -3143,7 +3358,8 @@ def _save_behavior_settings():
     if has("my_name"):
         store.set_setting("my_name", (f.get("my_name") or "Sean").strip())
     for k in ("rules_apply", "heuristics_enabled", "heuristic_autorefine", "llm_suggest",
-              "llm_apply", "assistant_actions_apply", "index_enabled", "rerank_enabled"):
+              "llm_apply", "assistant_actions_apply", "index_enabled", "rerank_enabled",
+              "render_images"):
         if has(k):
             store.set_setting(k, f.get(k) not in (None, "", "0"))
     if has("index_folders"):
@@ -3948,6 +4164,9 @@ if __name__ == "__main__":
             print("usage: python app.py --import-proxy /path/to/ui_state.json")
             sys.exit(1)
         print(json.dumps(proxy.import_legacy_state(args[0]), indent=1))
+        sys.exit(0)
+    if "--extract-html" in sys.argv:
+        print(json.dumps(engine.extract_rendered(workers=6)))
         sys.exit(0)
     if "--heal-snippets" in sys.argv:
         print(json.dumps(engine.heal_snippets(workers=6)))

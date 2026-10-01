@@ -388,6 +388,42 @@ class IMAPHandler(socketserver.StreamRequestHandler):
                           + data + b")\r\n")
         self.send("%s OK UID FETCH completed" % tag)
 
+    @staticmethod
+    def _section_part(raw, section):
+        from email import message_from_bytes
+        msg = message_from_bytes(raw)
+
+        def walk(part, sec):
+            if part.is_multipart():
+                for i, sub in enumerate(part.get_payload() or [], 1):
+                    found = walk(sub, ("%s.%d" % (sec, i)) if sec else str(i))
+                    if found is not None:
+                        return found
+                return None
+            return part if (sec or "1") == section else None
+
+        return walk(msg, "")
+
+    def section_bytes(self, raw, section):
+        part = self._section_part(raw, section)
+        if part is None:
+            return b""
+        try:
+            payload = part.get_payload(decode=True)
+        except Exception:
+            payload = None
+        if payload is None:
+            pl = part.get_payload()
+            payload = pl.encode("utf-8", "replace") if isinstance(pl, str) else b""
+        return payload
+
+    def section_headers(self, raw, section):
+        part = self._section_part(raw, section)
+        if part is None:
+            return b""
+        lines = ["%s: %s" % (k, v) for k, v in part.items()]
+        return ("\r\n".join(lines) + "\r\n\r\n").encode()
+
     def do_fetch(self, tag, uid, spec):
         f = self.server.state.get(self.cur)
         msg = f["msgs"].get(uid) if f else None
@@ -396,6 +432,17 @@ class IMAPHandler(socketserver.StreamRequestHandler):
             return
         seq = f["uids"].index(uid) + 1
         raw = msg["raw"]
+        secs = re.findall(r"BODY\.PEEK\[(\d(?:\.\d+)*)(\.MIME)?\]", spec, re.I)
+        if secs:
+            out = b"* %d FETCH (UID %d " % (seq, uid)
+            for i, (snum, mime) in enumerate(secs):
+                data = self.section_headers(raw, snum) if mime else self.section_bytes(raw, snum)
+                label = "BODY[%s%s]" % (snum, ".MIME" if mime else "")
+                out += b"%s {%d}\r\n" % (label.encode(), len(data)) + data
+                out += b" " if i < len(secs) - 1 else b")\r\n"
+            self.raw_send(out)
+            self.send("%s OK UID FETCH completed" % tag)
+            return
         sep = raw.find(b"\r\n\r\n")
         header = raw[:sep + 4] if sep >= 0 else raw
         body = raw[sep + 4:] if sep >= 0 else b""
@@ -1434,6 +1481,77 @@ def main():
     r = client.get("/messages/%d" % ghostrow["id"])
     check("undecodable row shows the unavailable state, not garbage",
           r.status_code == 200 and b"could not be decoded" in r.data)
+
+    # ---- proper email renderer: html, inline cid images, remote blocking ----
+    import base64 as _b642
+    tiny_png = _b642.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5"
+        "AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=")
+    png_b64 = _b642.b64encode(tiny_png).decode()
+    png_lines = "\r\n".join(png_b64[i:i+76] for i in range(0, len(png_b64), 76))
+    html_part = ('<html><body><p>Hello <b>bold</b> and <i>italic</i>, '
+                 '<a href="https://example.com/x">a link</a>.</p>'
+                 '<table><tr><td>cell one</td><td>cell two</td></tr></table>'
+                 '<img src="cid:img1@x" alt="inline">'
+                 '<img src="https://tracker.example.com/pixel.gif" alt="remote">'
+                 '<script>alert(1)</script><p onclick="hack()">safe text</p>'
+                 '</body></html>')
+    raw_html_mail = (
+        "From: news@example.com\r\nTo: seanyong@ust.hk\r\n"
+        "Subject: Formatted mail test\r\nDate: Wed, 30 Sep 2026 09:00:00 +0800\r\n"
+        "Message-ID: <htmlmail@x>\r\nMIME-Version: 1.0\r\n"
+        'Content-Type: multipart/related; boundary="REL"\r\n\r\n'
+        "--REL\r\n"
+        'Content-Type: multipart/alternative; boundary="ALT"\r\n\r\n'
+        "--ALT\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+        "plain version text\r\n"
+        "--ALT\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        + html_part + "\r\n"
+        "--ALT--\r\n"
+        "--REL\r\nContent-Type: image/png\r\nContent-ID: <img1@x>\r\n"
+        "Content-Transfer-Encoding: base64\r\n\r\n"
+        + png_lines + "\r\n"
+        "--REL--\r\n"
+    ).encode()
+    html_uid = state.add("INBOX", raw_html_mail)
+    engine.process_mailbox()
+    hrow = [r for r in store.messages(limit=3000) if r["uid"] == html_uid][0]
+    check("scan extracted + sanitized the html body",
+          (hrow["body_html"] or "").find("<b>bold</b>") >= 0
+          and "alert(1)" not in (hrow["body_html"] or "")
+          and "img1@x" in (hrow["body_cids"] or ""))
+    page = client.get("/messages/%d" % hrow["id"]).data
+    check("html mail renders formatted (bold + table kept)",
+          b"<b>bold</b>" in page and b"cell one" in page)
+    check("scripts, handlers stripped from the render",
+          b"alert(1)" not in page and b"onclick" not in page)
+    check("cid image rewritten to the inline part route",
+          ('/messages/%d/part/2"' % hrow["id"]).encode() in page and b"cid:img1" not in page)
+    check("remote image blocked by default with a load button",
+          b"Load images" in page and b"/img?u=" not in page
+          and b"tracker.example.com" not in page)
+    r = client.get("/messages/%d?imgs=1" % hrow["id"])
+    check("load-images rewrites remote srcs to the proxy",
+          ('/messages/%d/img?u=https%%3A%%2F%%2Ftracker.example.com%%2Fpixel.gif'
+           % hrow["id"]).encode() in r.data)
+    r = client.get("/messages/%d/part/2" % hrow["id"])
+    check("inline part route serves the image bytes",
+          r.status_code == 200 and r.mimetype == "image/png" and r.data == tiny_png)
+    r = client.get("/messages/%d?view=plain" % hrow["id"])
+    check("plain-text view toggle serves the text alternative",
+          b"plain version text" in r.data and b"View formatted" in r.data)
+    check("remote fetch guard rejects private hosts and odd schemes",
+          engine.image_url_ok("http://127.0.0.1/x") is False
+          and engine.image_url_ok("http://192.168.0.10/x") is False
+          and engine.image_url_ok("ftp://example.com/x") is False)
+
+    # bulk html extraction (maintenance CLI: app.py --extract-html)
+    store.update_message(hrow["id"], body_html="", body_cids="", body_html_at=0)
+    eres = engine.extract_rendered(workers=2)
+    hrow2 = store.get_message(hrow["id"])
+    check("bulk extract fills the renderer cache",
+          eres["updated"] >= 1 and "<b>bold</b>" in (hrow2["body_html"] or "")
+          and (hrow2["body_html_at"] or 0) > 0)
 
     # collapsed base64 salvage (legacy snippets lost their line breaks)
     collapsed = ("------=_NextPart_9ZZ Content-Type: text/plain; charset=\"utf-8\" "
