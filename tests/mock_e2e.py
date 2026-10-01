@@ -2233,9 +2233,21 @@ def main():
     r = client.post("/assistant/session/%d/delete" % junk_sid, data={"json": "1"})
     check("chat delete works (json)", r.status_code == 200 and store.get_session(junk_sid) is None)
     r = client.get("/messages")
-    check("drawer + fab present on every page",
-          b'id="drawer"' in r.data and b'id="dtoggle"' in r.data
-          and b"assistantChat" in r.data)
+    check("assistant sidebar present on pages (collapsible rail, no fab)",
+          b'id="asb"' in r.data and b'id="asb-toggle"' in r.data
+          and b'class="with-asb"' in r.data and b"assistantChat" in r.data
+          and b'id="drawer"' not in r.data and b'id="dtoggle"' not in r.data)
+    r = client.get("/assistant/s/%d" % sid29)
+    check("no assistant sidebar on the assistant page itself",
+          b'id="asb"' not in r.data and b'id="asb-toggle"' not in r.data
+          and b'class="with-asb"' not in r.data)
+    esid29 = int(json.loads(client.post("/assistant/new.json").data)["sid"])
+    r = client.get("/assistant/panel?sid=%d&path=/rules" % esid29)
+    check("empty-chat suggestions follow the page (rules)",
+          b"Explain my rules" in r.data and b"Suggest rules for me" not in r.data)
+    r = client.get("/assistant/panel?sid=%d&path=/messages" % esid29)
+    check("suggestions change with the page (messages)", b"Oldest unread" in r.data)
+    client.post("/assistant/session/%d/delete" % esid29, data={"json": "1"})
 
     section("T31 assistant: repetition guard + rule housekeeping tools")
     r = client.post("/assistant/stream", data={"message": "loopme now please"})
@@ -2303,6 +2315,14 @@ def main():
           r.status_code == 302 and len(flows32) == 1
           and "seanyong97@hotmail.com" in flows32[0]["conditions"]
           and "fixed" in flows32[0]["actions"])
+    r = client.post("/assistant/apply", data={"msg_id": pm["id"], "idx": 0, "session": str(sid32)})
+    flows_again = [f for f in store.list_flows() if "Hotmail" in (f["name"] or "")]
+    check("double-apply is gated (no duplicate flow)", len(flows_again) == 1)
+    row32 = store.get_assistant_message(pm["id"])
+    check("proposal marked applied in the stored message", '"applied"' in (row32["proposals"] or ""))
+    page32 = client.get("/assistant/s/%d" % sid32).data
+    check("card greys to Added after apply",
+          "\u2713 Added".encode("utf-8") in page32 and b">Add flow</button>" not in page32)
     check("flow builder offers fixed drafts",
           b"Fixed message" in client.get("/flows/new").data)
     before_a = len(state.appended)

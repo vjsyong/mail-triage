@@ -639,7 +639,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   *{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
 }
 
-/* ---- assistant chat (shared: page + drawer) ---- */
+/* ---- assistant chat (shared: page + sidebar) ---- */
 .assistant-shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}
 .assistant-rail{position:sticky;top:14px;display:flex;flex-direction:column;border:1px solid var(--line);background:#fff;max-height:calc(100vh - 120px);overflow:auto}
 .assistant-rail .arow{display:flex;gap:8px;align-items:center;padding:9px 11px;border-bottom:1px solid var(--line)}
@@ -689,11 +689,24 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
 @media (max-width:640px){.bubble{max-width:86%}.assistant-flex{height:calc(100vh - 250px);min-height:400px}.chat{padding:12px 10px}
   .assistant-shell{grid-template-columns:1fr}.assistant-rail{position:static;max-height:180px}}
-/* ---- assistant drawer ---- */
-.fab{position:fixed;right:16px;bottom:16px;z-index:60;background:#000;color:#fff;border:1px solid #000;padding:9px 15px;font-size:.84rem;font-weight:600;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.18)}
-.fab:hover{background:#222}
-.drawer{position:fixed;top:0;right:0;height:100vh;width:min(430px, 97vw);background:#fff;border-left:1px solid var(--line);z-index:220;display:none;flex-direction:column;box-shadow:-8px 0 24px rgba(0,0,0,.08)}
-.drawer.open{display:flex}
+/* ---- assistant sidebar (docked right; collapses to a rail) ---- */
+.asb{position:fixed;top:0;right:0;bottom:0;z-index:45;width:46px;background:#fff;border-left:1px solid var(--line);display:none;flex-direction:row}
+body.with-asb .asb{display:flex}
+body.with-asb .main{margin-right:46px;transition:margin-right .15s ease}
+.asb{transition:width .15s ease}
+html.asb-open body.with-asb .main{margin-right:352px}
+html.asb-open .asb{width:352px}
+.asb-rail{width:46px;flex:none;display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:12px;background:#fff;cursor:pointer}
+.asb-rail:hover{background:var(--hover)}
+.asb-rail button{border:0;background:none;font-size:1.05rem;color:var(--ink);cursor:pointer;padding:6px;line-height:1}
+.asb-rail .lab{writing-mode:vertical-rl;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+html.asb-open .asb-rail{display:none}
+html:not(.asb-open) .asb-main{display:none}
+.asb-main{flex:1;min-width:0;display:flex;flex-direction:column}
+@media(max-width:1023px){
+  body.with-asb .asb,html.asb-open body.with-asb .asb{display:none}
+  body.with-asb .main{margin-right:0 !important}
+}
 .dw-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
 .dw-hist{border-bottom:1px solid var(--line);max-height:42vh;overflow:auto;background:#fff}
 .dhist-item{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
@@ -704,7 +717,6 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .dw-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#fff}
 .dw-body .chat{border:0;background:#fff;padding:14px 12px}
 .dw-comp{margin:0;border-left:0;border-right:0;border-bottom:0}
-@media (max-width:640px){.drawer{width:100vw}.fab{right:12px;bottom:12px}}
 /* ================= mobile shell (docs/mobile-ui.md) ================= */
 :root{color-scheme:light}
 *{-webkit-tap-highlight-color:transparent}
@@ -725,7 +737,6 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
 }
 @media(max-width:1023px){
   .topbar{padding-top:calc(env(safe-area-inset-top) + 10px)}
-  .drawer{height:100dvh}
   .assistant-flex{height:calc(100dvh - 300px)}
   .assistant-shell{grid-template-columns:1fr}
   .assistant-rail{position:static;max-height:220px}
@@ -743,9 +754,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .bottom-nav a.on svg{opacity:1}
   .topbar #menuBtn{display:none}
   .content{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
-  .fab{display:none}
   .savebar{bottom:calc(72px + env(safe-area-inset-bottom))}
-  .drawer{width:100vw;max-width:none;height:100dvh}
   .page-desc{display:none}
   .foot{display:none}
   .am-head{display:none}
@@ -806,7 +815,8 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
 }
 @media(max-width:640px){pre.log{font-size:.78rem}}
 </style>
-</head><body>
+<script>try{var v=localStorage.getItem('asb_open');if(v===null||v==='1')document.documentElement.classList.add('asb-open');}catch(e){}</script>
+</head><body{% if show_asb %} class="with-asb"{% endif %}>
 <a class="skip" href="#main">Skip to content</a>
 {% set p = request.path %}
 {% macro navitem(href, label, active, icon, badge=0) -%}
@@ -946,14 +956,19 @@ function cp(text, el){
 })();
 </script>
 
-<button type="button" id="dtoggle" class="fab" aria-label="Open the assistant">&#10022; Assistant</button>
-<aside id="drawer" class="drawer" aria-label="Assistant drawer">
+{% if show_asb %}
+<aside id="asb" class="asb" aria-label="Assistant sidebar">
+  <div class="asb-rail" id="asb-rail" title="Expand the assistant">
+    <button type="button" id="asb-toggle" aria-label="Expand the assistant">&#10022;</button>
+    <span class="lab">Assistant</span>
+  </div>
+  <div class="asb-main">
   <div class="dw-head">
-    <b style="font-size:.9rem">Assistant</b>
+    <b style="font-size:.9rem">&#10022; Assistant</b>
     <span class="row" style="margin-left:auto;gap:6px">
       <button type="button" class="btn small" id="dnew">New</button>
       <button type="button" class="btn small" id="dhist">History</button>
-      <button type="button" class="btn small" id="dclose" aria-label="Close">&#10005;</button>
+      <button type="button" class="btn small" id="dclose" aria-label="Collapse the assistant" title="Collapse">&#187;</button>
     </span>
   </div>
   <div id="dhistlist" class="dw-hist hidden"></div>
@@ -968,10 +983,12 @@ function cp(text, el){
       </span>
     </div>
   </form>
+  </div>
 </aside>
+{% endif %}
 
 <script>
-/* ---- assistant chat: shared engine for the page and the drawer ---- */
+/* ---- assistant chat: shared engine for the page and the sidebar ---- */
 (function(){
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function mdRender(src){
@@ -1272,70 +1289,83 @@ window.assistantChat = function(opts){
   return inst;
 };
 
-/* ---- drawer ---- */
+/* ---- assistant sidebar (docked right; collapses to a rail) ---- */
+window.guardApply = function(f){
+  var b = f.querySelector('button[type=submit]');
+  if(!b || b.disabled) return false;
+  b.disabled = true; b.textContent = 'Adding…';
+  return true;
+};
 (function(){
-  var fab=document.getElementById('dtoggle'), drawer=document.getElementById('drawer');
-  if(!fab||!drawer) return;
-  var chat=document.getElementById('dchat'), histList=document.getElementById('dhistlist');
-  var inited=false, curSid=null;
-  function setOpen(open){ drawer.classList.toggle('open', open); try{ localStorage.setItem('assistant_open', open?'1':'0'); }catch(e){} }
-  fab.addEventListener('click', function(){ var open=!drawer.classList.contains('open'); setOpen(open); if(open) ensure(); });
+  var asb = document.getElementById('asb');
+  if(!asb) return;
+  var chat = document.getElementById('dchat'), histList = document.getElementById('dhistlist');
+  var inited = false, curSid = null;
+  function expanded(){ return document.documentElement.classList.contains('asb-open'); }
+  function setOpen(open){
+    document.documentElement.classList.toggle('asb-open', open);
+    try{ localStorage.setItem('asb_open', open ? '1' : '0'); }catch(e){}
+    if(open) ensure();
+  }
+  document.getElementById('asb-toggle').addEventListener('click', function(ev){ ev.stopPropagation(); setOpen(true); });
+  document.getElementById('asb-rail').addEventListener('click', function(ev){ if(ev.target === this || ev.target.tagName === 'SPAN') setOpen(true); });
   document.getElementById('dclose').addEventListener('click', function(){ setOpen(false); });
   function post(url, data){ return fetch(url, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:data||''}); }
   function newSid(){ return post('/assistant/new.json').then(function(r){ return r.json(); }).then(function(d){ return d.sid; }); }
   function loadHist(){
     return fetch('/assistant/sessions.json').then(function(r){ return r.json(); }).then(function(d){
-      histList.innerHTML='';
+      histList.innerHTML = '';
       (d.sessions||[]).forEach(function(s){
-        var row=document.createElement('div'); row.className='dhist-item'+(String(s.id)===String(curSid)?' cur':'');
-        var t1=document.createElement('span'); t1.className='t'; t1.textContent=s.title||'Untitled chat'; row.appendChild(t1);
-        var w=document.createElement('span'); w.className='when'; w.textContent=s.when||''; row.appendChild(w);
-        var del=document.createElement('button'); del.type='button'; del.className='btn small'; del.textContent='\u2715';
+        var row = document.createElement('div'); row.className = 'dhist-item' + (String(s.id) === String(curSid) ? ' cur' : '');
+        var t1 = document.createElement('span'); t1.className = 't'; t1.textContent = s.title || 'Untitled chat'; row.appendChild(t1);
+        var w = document.createElement('span'); w.className = 'when'; w.textContent = s.when || ''; row.appendChild(w);
+        var del = document.createElement('button'); del.type = 'button'; del.className = 'btn small'; del.textContent = '✕';
         del.addEventListener('click', function(ev){ ev.stopPropagation();
           if(!confirm('Delete this chat?')) return;
-          post('/assistant/session/'+s.id+'/delete', 'json=1').then(function(){
-            if(String(curSid)===String(s.id)) curSid=null;
+          post('/assistant/session/' + s.id + '/delete', 'json=1').then(function(){
+            if(String(curSid) === String(s.id)) curSid = null;
             loadHist();
           });
         });
         row.appendChild(del);
-        row.addEventListener('click', function(){ openSession(s.id); });
+        row.addEventListener('click', function(){ histList.classList.add('hidden'); openSession(s.id); });
         histList.appendChild(row);
       });
     });
   }
   function remember(sid){ try{ localStorage.setItem('assistant_sid', String(sid)); }catch(e){} }
   function bind(){
-    var form=document.getElementById('dform');
+    var form = document.getElementById('dform');
     if(form.__chat){ form.__chat.setSession(curSid); form.__chat.refreshLive(); return form.__chat; }
     return window.assistantChat({ root: chat, form: form, ta: document.getElementById('dmsg'),
       sendBtn: document.getElementById('dsend'), stopBtn: document.getElementById('dstop'), sessionId: curSid,
-      onSession: function(ns){ curSid=ns; remember(ns); loadHist(); },
+      onSession: function(ns){ curSid = ns; remember(ns); loadHist(); },
       onDone: function(){ loadHist(); } });
   }
   function loadPanel(sid){
-    return fetch('/assistant/panel?sid='+sid).then(function(r){ if(!r.ok) throw new Error('gone'); return r.text(); }).then(function(html){
-      chat.innerHTML=html;
-      chat.scrollTop=chat.scrollHeight;
+    var u = '/assistant/panel?sid=' + sid + '&path=' + encodeURIComponent(location.pathname);
+    return fetch(u).then(function(r){ if(!r.ok) throw new Error('gone'); return r.text(); }).then(function(html){
+      chat.innerHTML = html;
+      chat.scrollTop = chat.scrollHeight;
     });
   }
   function openSession(sid){
-    curSid=sid;
+    curSid = sid;
     try{ localStorage.setItem('assistant_sid', String(sid)); }catch(e){}
     loadPanel(sid).then(function(){ bind(); loadHist(); }).catch(function(){
-      newSid().then(function(ns){ curSid=ns; return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+      newSid().then(function(ns){ curSid = ns; return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
     });
   }
   function ensure(){
     if(inited) return;
-    inited=true;
-    var sid=null; try{ sid=parseInt(localStorage.getItem('assistant_sid')||'',10)||null; }catch(e){}
+    inited = true;
+    var sid = null; try{ sid = parseInt(localStorage.getItem('assistant_sid') || '', 10) || null; }catch(e){}
     if(sid){
-      loadPanel(sid).then(function(){ curSid=sid; bind(); loadHist(); }).catch(function(){
-        newSid().then(function(ns){ curSid=ns; remember(ns); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+      loadPanel(sid).then(function(){ curSid = sid; bind(); loadHist(); }).catch(function(){
+        newSid().then(function(ns){ curSid = ns; remember(ns); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
       });
     } else {
-      newSid().then(function(ns){ curSid=ns; remember(ns); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+      newSid().then(function(ns){ curSid = ns; remember(ns); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
     }
   }
   document.getElementById('dnew').addEventListener('click', function(){ newSid().then(function(ns){ openSession(ns); }); });
@@ -1343,8 +1373,8 @@ window.assistantChat = function(opts){
     histList.classList.toggle('hidden');
     if(!histList.classList.contains('hidden')) loadHist();
   });
-  var pref=null; try{ pref=localStorage.getItem('assistant_open'); }catch(e){}
-  if(pref==='1'){ setOpen(true); ensure(); }
+  if(expanded() && window.matchMedia && window.matchMedia('(min-width:1024px)').matches) ensure();
+})();
 })();
 })();
 </script>
@@ -1390,6 +1420,7 @@ def render(body):
     info["imap_user"] = (engine.imap_config().get("user") or "").strip()
     return _render_src(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
                                   info=info,
+                                  show_asb=not request.path.startswith("/assistant"),
                                   pend=store.count_pending_agent_actions(),
                                   w={"err": ws.get("last_error"), "last_ok_r": rel_time(ws.get("last_ok")),
                                      "last_ok_iso": (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ws.get("last_ok"))) if ws.get("last_ok") else ""),
@@ -4039,8 +4070,11 @@ CONVO_TMPL = r"""
             <div><b>{{ p.name }}</b> <span class="sub">({{ p.match_mode }})</span>{% if p.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}{% if p.updates %} <span class="badge warn">updates #{{ p.updates.id }} "{{ p.updates.name }}"</span>{% elif p.similar %} <span class="badge warn">overlaps #{{ p.similar.id }}</span>{% endif %}</div>
             <div class="row" style="white-space:nowrap">
               {% set tgt = p.updates if p.updates else p.similar %}
+              {% if p.applied %}
+              <span class="btn small" style="border-color:var(--line);color:var(--dim);pointer-events:none" aria-disabled="true">✓ Added</span>
+              {% else %}
               {% if tgt %}
-              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
+              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}" onsubmit="return guardApply(this)">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                 <input type="hidden" name="mode" value="update">
@@ -4049,19 +4083,20 @@ CONVO_TMPL = r"""
                 <button class="btn small primary" type="submit">{{ 'Update flow #%d' % tgt.id if p.kind == 'flow' else 'Update rule #%d' % tgt.id }}</button>
               </form>
               {% endif %}
-              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
+              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}" onsubmit="return guardApply(this)">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                 <input type="hidden" name="session" value="{{ sid }}">
                 <button class="btn small{{ '' if tgt else ' primary' }}" type="submit">{{ 'Add flow' if p.kind == 'flow' else 'Add rule' }}</button>
               </form>
-              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
+              <form class="inline" method="post" action="{{ url_for('assistant_apply') }}" onsubmit="return guardApply(this)">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                 <input type="hidden" name="disabled" value="1">
                 <input type="hidden" name="session" value="{{ sid }}">
                 <button class="btn small" type="submit">Add (disabled)</button>
               </form>
+              {% endif %}
             </div>
           </div>
           {% if p.updates %}
@@ -4084,10 +4119,9 @@ CONVO_TMPL = r"""
     <div class="sub">Searches your whole archive by meaning (not just keywords), reads messages, creates folders,
     moves or flags mail, and proposes rules you approve with one click. Its thinking and every tool step stream live.</div>
     <div class="chips">
-      <button type="button" class="chip" data-fill="What did my landlord last email me about?">What did the landlord want?</button>
-      <button type="button" class="chip" data-fill="Find the last invoice a vendor sent me and summarise it">Find an old invoice</button>
-      <button type="button" class="chip" data-fill="Search my mail for anything from the library">Library mail</button>
-      <button type="button" class="chip" data-fill="What rules would you suggest for my inbox?">Suggest rules for me</button>
+      {% for s in suggest %}
+      <button type="button" class="chip" data-fill="{{ s.prompt|e }}">{{ s.label }}</button>
+      {% endfor %}
     </div>
   </div>
 {% endif %}
@@ -4097,7 +4131,7 @@ ASSISTANT_TMPL = r"""
 <div class="page-head am-head">
   <div>
     <h1 class="page-title">Assistant</h1>
-    <div class="page-desc">Streams its thinking and every tool step live · chats are saved — resume any of them from the list, or open the drawer anywhere</div>
+    <div class="page-desc">Streams its thinking and every tool step live · chats are saved — resume any of them from the list, or use the sidebar on any page</div>
   </div>
   <div class="row">
     <a class="btn primary" href="{{ url_for('assistant') }}">New chat</a>
@@ -4206,6 +4240,7 @@ def _proposal_view(p):
             "rationale": p.get("rationale", ""),
             "similar": None,
             "similar_actions": "",
+            "applied": bool(p.get("applied")),
             "updates": upd,
             "updates_actions": engine._flow_steps_text((upd or {}).get("steps", [])) if upd else "",
         }
@@ -4221,6 +4256,7 @@ def _proposal_view(p):
         "rationale": p.get("rationale", ""),
         "similar": sim,
         "similar_actions": summarize_actions({"actions": json.dumps((sim or {}).get("actions", {}))}) if sim else "",
+        "applied": bool(p.get("applied")),
         "updates": upd,
         "updates_actions": summarize_actions({"actions": json.dumps((upd or {}).get("actions", {}))}) if upd else "",
     }
@@ -4230,6 +4266,96 @@ def _proposal_view(p):
 def assistant():
     # clicking the Assistant tab starts a fresh chat (a recent empty chat is reused)
     return redirect(url_for("assistant_session", sid=store.find_or_create_session()))
+
+
+ASSIST_SUGGESTIONS = {
+    "assistant": [
+        {"label": "What can you do?", "prompt": "What can you do? List your capabilities briefly."},
+        {"label": "Summarize my inbox", "prompt": "Give me a quick overview of what is in my inbox right now."},
+        {"label": "Suggest rules for me", "prompt": "What rules would you suggest for my inbox?"},
+        {"label": "Find an old invoice", "prompt": "Find the last invoice a vendor sent me and summarise it."},
+    ],
+    "dashboard": [
+        {"label": "What needs a reply?", "prompt": "Which recent emails need a reply from me? Rank them by importance."},
+        {"label": "Problems to fix?", "prompt": "Are there any errors, parked mail, or connection problems I should fix?"},
+        {"label": "Summarize today's mail", "prompt": "Summarize today's new mail for me."},
+        {"label": "Clean up newsletters", "prompt": "Find newsletters older than two weeks and propose how to clean them up."},
+    ],
+    "messages": [
+        {"label": "Which need replies?", "prompt": "Which recent emails still need a reply from me?"},
+        {"label": "Oldest unread", "prompt": "Find my oldest unread email and tell me what it wants."},
+        {"label": "Who mails me most?", "prompt": "Which senders email me the most, and is any of it worth muting?"},
+    ],
+    "rules": [
+        {"label": "Explain my rules", "prompt": "Explain what my current rules do, in list order."},
+        {"label": "Any overlaps?", "prompt": "Are any of my rules overlapping or duplicated? Suggest a cleanup."},
+        {"label": "New rule for invoices", "prompt": "Propose a rule that files invoice emails into the right folder."},
+    ],
+    "flows": [
+        {"label": "Explain my flows", "prompt": "Explain what my flows do and when they run."},
+        {"label": "Suggest an AI flow", "prompt": "Suggest a flow that uses an AI category or topic filter to help my inbox."},
+        {"label": "Check for conflicts", "prompt": "Do any of my flows or rules conflict with each other?"},
+    ],
+    "classifiers": [
+        {"label": "How are they doing?", "prompt": "Evaluate my heuristic classifiers - which are strong, which are weak?"},
+        {"label": "What should I train?", "prompt": "Based on my tags, which category should get a trained classifier next?"},
+    ],
+    "templates": [
+        {"label": "Suggest a template", "prompt": "Suggest a reply template worth adding for my common mail."},
+        {"label": "Improve my templates", "prompt": "Review my reply templates and suggest improvements."},
+    ],
+    "settings": [
+        {"label": "What am I running?", "prompt": "What LLM, embedding, and reranker setup am I running right now?"},
+        {"label": "Check for problems", "prompt": "Check the app status and tell me if anything is misconfigured."},
+    ],
+    "log": [
+        {"label": "Any errors today?", "prompt": "Summarize any errors in the event log from the last day."},
+        {"label": "What moved mail?", "prompt": "What has been moving my mail in the last day - rules, flows, or the LLM?"},
+    ],
+    "accounts": [
+        {"label": "Is my connection healthy?", "prompt": "Check my mail connection and token status and report anything wrong."},
+    ],
+    "default": [
+        {"label": "What needs a reply?", "prompt": "Which recent emails need a reply from me?"},
+        {"label": "Suggest rules for me", "prompt": "What rules would you suggest for my inbox?"},
+        {"label": "Summarize my inbox", "prompt": "Give me a quick overview of what is in my inbox right now."},
+    ],
+}
+
+
+def _suggestions_for_path(path):
+    """Contextual starter prompts for the assistant, keyed by the page path."""
+    parts = [seg for seg in (path or "/").split("?")[0].split("/") if seg]
+    key = "default"
+    if not parts:
+        key = "dashboard"
+    else:
+        seg = parts[0]
+        if seg == "messages":
+            key = "message" if len(parts) >= 2 else "messages"
+        elif seg in ("rules", "flows", "classifiers", "templates", "settings",
+                     "log", "accounts"):
+            key = seg
+        elif seg == "proxy":
+            key = "log"
+        elif seg == "assistant":
+            key = "assistant"
+    if key == "message":
+        try:
+            mid = int(parts[1])
+        except (ValueError, IndexError):
+            mid = 0
+        msg = store.get_message(mid) if mid else None
+        if msg:
+            subj = (msg.get("subject") or "").strip()
+            tail = (" (" + subj[:70] + ")") if subj else ""
+            return [
+                {"label": "Summarize this email", "prompt": "Summarize message %d%s and tell me what it wants from me." % (mid, tail)},
+                {"label": "Suggest a reply", "prompt": "Suggest a short reply I could send for message %d%s." % (mid, tail)},
+                {"label": "Any deadline?", "prompt": "Does message %d mention a deadline or due date? Read it and tell me." % mid},
+            ]
+        key = "messages"
+    return ASSIST_SUGGESTIONS.get(key) or ASSIST_SUGGESTIONS["default"]
 
 
 def _assistant_prep(convo):
@@ -4255,9 +4381,10 @@ def _assistant_prep(convo):
     return convo
 
 
-def _assistant_fragment(sid):
+def _assistant_fragment(sid, ctx_path=""):
     convo = _assistant_prep(store.session_messages(sid))
-    return convo, _render_src(CONVO_TMPL, convo=convo, sid=sid)
+    return convo, _render_src(CONVO_TMPL, convo=convo, sid=sid,
+                              suggest=_suggestions_for_path(ctx_path))
 
 
 @app.route("/assistant/s/<int:sid>")
@@ -4268,7 +4395,7 @@ def assistant_session(sid):
     sessions = store.list_sessions()
     for s in sessions:
         s["when"] = fmt_ts(s["last_ts"] or s["created"])
-    convo, convo_html = _assistant_fragment(sid)
+    convo, convo_html = _assistant_fragment(sid, "/assistant")
     pending = store.pending_agent_actions()
     for pa in pending:
         pa["when_h"] = fmt_ts(pa.get("created_ts"))
@@ -4286,7 +4413,7 @@ def assistant_panel():
         sid = 0
     if not sid or not store.get_session(sid):
         return ("no such chat", 404)
-    _, convo_html = _assistant_fragment(sid)
+    _, convo_html = _assistant_fragment(sid, request.args.get("path") or "")
     return Response(convo_html, mimetype="text/html")
 
 
@@ -4373,6 +4500,11 @@ def assistant_send():
     return redirect(url_for("assistant_session", sid=sid))
 
 
+def _mark_proposal_applied(mid, proposals, idx, mode):
+    proposals[idx]["applied"] = {"ts": time.time(), "mode": mode}
+    store.set_assistant_proposals(mid, json.dumps(proposals))
+
+
 @app.route("/assistant/apply", methods=["POST"])
 def assistant_apply():
     try:
@@ -4398,6 +4530,9 @@ def assistant_apply():
         flash("That proposal is no longer available.", "err")
         return redirect(back)
     prop = proposals[idx]
+    if prop.get("applied"):
+        flash("That proposal was already added - nothing to do. Ask the assistant if you want another version.", "warn")
+        return redirect(back)
     mode = (request.form.get("mode") or "add").strip()
     if (prop.get("kind") or "rule") == "flow":
         norm = engine.normalize_flow(prop) or prop
@@ -4414,11 +4549,13 @@ def assistant_apply():
                               match_mode=norm.get("match_mode", "all"),
                               conditions=json.dumps(norm.get("conditions", [])),
                               actions=json.dumps(norm.get("steps", [])))
+            _mark_proposal_applied(mid, proposals, idx, "update")
             store.log_event("info", "assistant updated flow #%d '%s'" % (fid, target["name"]))
             flash("Flow #%d '%s' updated." % (fid, target["name"]), "ok")
             return redirect(back)
         store.add_flow(norm.get("name", "Assistant flow"), norm.get("match_mode", "all"),
                        norm.get("conditions", []), norm.get("steps", []), enabled=not disabled)
+        _mark_proposal_applied(mid, proposals, idx, mode or "add")
         store.log_event("info", "assistant flow '%s' added (%s)"
                         % (norm.get("name"), "disabled" if disabled else "enabled"))
         flash("Flow '%s' added%s - see it on the Flows page; the dry-run toggle lives in Settings."
@@ -4438,12 +4575,14 @@ def assistant_apply():
                           match_mode=norm.get("match_mode", "all"),
                           conditions=json.dumps(norm.get("conditions", [])),
                           actions=json.dumps(norm.get("actions", {})))
+        _mark_proposal_applied(mid, proposals, idx, "update")
         store.log_event("info", "assistant updated rule #%d '%s'" % (rid, target["name"]))
         flash("Rule #%d '%s' updated - no duplicate added." % (rid, target["name"]), "ok")
         return redirect(back)
     store.add_rule(norm.get("name", "Assistant rule"), norm.get("match_mode", "all"),
                    norm.get("conditions", []), norm.get("actions", {}), enabled=not disabled,
                    position=norm.get("placement") or "bottom")
+    _mark_proposal_applied(mid, proposals, idx, mode or "add")
     store.log_event("info", "assistant rule '%s' added (%s)"
                     % (norm.get("name"), "disabled" if disabled else "enabled"))
     flash("Rule '%s' added%s - check it on the Rules page (the Test button dry-runs it against recent mail)."

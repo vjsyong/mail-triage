@@ -774,6 +774,12 @@ def add_assistant_message(role, content, proposals="[]", meta="", session_id=0):
     return msg_id
 
 
+def set_assistant_proposals(mid, proposals_json):
+    with db() as conn:
+        conn.execute("UPDATE assistant_messages SET proposals=? WHERE id=?",
+                     (proposals_json, mid))
+
+
 def assistant_messages(limit=40, session_id=None):
     q = "SELECT * FROM assistant_messages"
     args = []
