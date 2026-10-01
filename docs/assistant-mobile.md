@@ -75,3 +75,22 @@ and a 250ms poll for ~3s after focus. `window.__mtKbFit` is exposed for tests:
 emulate a keyboard by overriding `window.visualViewport` ({height, offsetTop}) and
 calling `__mtKbFit()` - verified composer bottom == keyboard line, nav none, restore
 clears everything.
+
+
+### Page context (same evening): "this email" means the email on screen
+- Client: a base-script tracker (`window.mtCtxPath` / `mtLastCtx` in sessionStorage)
+  remembers the last meaningful page (any non-/assistant path). Chat sends from the
+  drawer AND the assistant page attach `path=...` to the /assistant/stream POST;
+  when on the Assistant tab the last meaningful page is used instead, so tapping
+  over from a message keeps the email context.
+- Server: `engine.assistant_page_context(path)` resolves the page to a system-prompt
+  block: message (subject/from/to/date/folder/status/action/verdict + "pass id N to
+  tools"), flow (full conditions+steps text), rule (same), classifier, template,
+  messages list, known static pages; account pages stay generic (NO secrets ever).
+  The block is appended in AssistantAgent.stream() after _assistant_context().
+- UI: `.dw-ctx` (drawer) and `.am-ctx` (assistant page) chips show
+  "Context: message · <subject>" via /assistant/context.json; hidden when empty;
+  truncated with ellipsis.
+- Verified live: drawer chat from a message returned the subject+sender from the
+  page block; the chip carried across to the Assistant tab; flow/rule contexts
+  resolve with real ids.

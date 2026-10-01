@@ -763,6 +763,7 @@ html:not(.asb-open) .asb-main{display:none}
   body.with-asb .main{margin-right:0 !important}
 }
 .dw-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
+.dw-ctx,.am-ctx{font-size:.73rem;color:var(--dim);padding:5px 12px;border-bottom:1px solid var(--line);background:var(--card2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dw-hist{border-bottom:1px solid var(--line);max-height:42vh;overflow:auto;background:#fff}
 .dhist-item{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
 .dhist-item:hover{background:var(--hover)}
@@ -1063,6 +1064,7 @@ function cp(text, el){
     </span>
   </div>
   <div id="dhistlist" class="dw-hist hidden"></div>
+  <div class="dw-ctx" id="dwctx" hidden></div>
   <div class="dw-body"><div class="chat" id="dchat"></div></div>
   <form id="dform" class="composer dw-comp">
     <textarea id="dmsg" rows="1" enterkeyhint="send" placeholder="Message the assistant&hellip;"></textarea>
@@ -1407,7 +1409,8 @@ window.assistantChat = function(opts){
     }
     fetch('/assistant/stream', { method:'POST',
         headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: 'message='+encodeURIComponent(text)+'&session='+encodeURIComponent(sid),
+        body: 'message='+encodeURIComponent(text)+'&session='+encodeURIComponent(sid)
+              +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : ''),
         signal: currentAbort.signal
     }).then(function(resp){
       if(!resp.ok || !resp.body) throw new Error('HTTP '+resp.status);
@@ -1571,6 +1574,48 @@ window.guardApply = function(f){
   });
   if(expanded() && window.matchMedia && window.matchMedia('(min-width:1024px)').matches) ensure();
 })();
+})();
+</script>
+<script>
+/* assistant page context: remember the last meaningful page so the chat carries
+   "this email" / "this flow" context even from the Assistant tab, and keep the
+   context chip in the drawer + assistant page up to date. */
+(function(){
+  window.mtCtxPath = function(){
+    var p = location.pathname;
+    if (p.indexOf('/assistant') !== 0) return p + location.search;
+    try { return sessionStorage.getItem('mtLastCtx') || ''; } catch(e){ return ''; }
+  };
+  var lastFetched = '';
+  function updateChips(){
+    var chips = [document.getElementById('dwctx'), document.getElementById('amctx')];
+    if (!chips[0] && !chips[1]) return;
+    var path = window.mtCtxPath();
+    if (path === lastFetched) return;
+    lastFetched = path;
+    if (!path){ chips.forEach(function(c){ if(c) c.hidden = true; }); return; }
+    fetch('/assistant/context.json?path=' + encodeURIComponent(path))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        chips.forEach(function(c){
+          if (!c) return;
+          c.textContent = d.desc ? ('Context: ' + d.desc) : '';
+          c.hidden = !d.desc;
+        });
+      })
+      .catch(function(){});
+  }
+  function remember(){
+    if (location.pathname.indexOf('/assistant') !== 0){
+      try { sessionStorage.setItem('mtLastCtx', location.pathname + location.search); } catch(e){}
+    }
+    updateChips();
+  }
+  if (!window.__mtCtx){
+    window.__mtCtx = 1;
+    document.addEventListener('turbo:load', function(){ setTimeout(remember, 30); });
+  }
+  remember();
 })();
 </script>
 <script>
@@ -4594,6 +4639,7 @@ ASSISTANT_TMPL = r"""
         {% endfor %}
       </div>
       {% endif %}
+      <div class="am-ctx" id="amctx" hidden></div>
       <form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
         <input type="hidden" name="session" value="{{ sid }}">
         <textarea name="message" id="msg" rows="1" enterkeyhint="send" placeholder="Message the assistant…"></textarea>
@@ -4884,19 +4930,27 @@ def _sse(event, data):
     return "event: %s\ndata: %s\n\n" % (event, json.dumps(data, ensure_ascii=False))
 
 
+@app.route("/assistant/context.json")
+def assistant_context_json():
+    path = (request.args.get("path") or "")[:300]
+    _kind, desc, _block = engine.assistant_page_context(path)
+    return Response(json.dumps({"desc": desc}), mimetype="application/json")
+
+
 @app.route("/assistant/stream", methods=["POST"])
 def assistant_stream():
     """SSE stream of one assistant turn: reasoning/content deltas, tool
     start/end events, rule proposals, done/error. Scoped to a chat session."""
     text = (request.form.get("message") or "").strip()
     sid = _assistant_sid_from_form()
+    page_path = request.form.get("path") or ""
 
     def gen():
         yield _sse("session", {"sid": sid})
         if not text:
             yield _sse("error", {"message": "empty message"})
             return
-        agent = engine.AssistantAgent(session_id=sid)
+        agent = engine.AssistantAgent(session_id=sid, page_path=page_path)
         try:
             for ev in agent.stream(text):
                 etype = ev.pop("type")

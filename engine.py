@@ -2987,6 +2987,105 @@ def _assistant_context():
     )
 
 
+def assistant_page_context(path):
+    """The page the user is looking at, for the assistant's system prompt.
+    Returns (kind, short_desc, block). Never includes credentials."""
+    path = (path or "").strip()[:300]
+    p = path.split("?", 1)[0]
+    q = path.split("?", 1)[1] if "?" in path else ""
+
+    def filt_note():
+        m2 = re.search(r"(?:^|&)f=([a-z_]+)", q)
+        return (" (list filter: %s)" % m2.group(1)) if m2 else ""
+
+    m = re.match(r"^/messages/(\d+)", p)
+    if m:
+        row = store.get_message(int(m.group(1)))
+        if not row:
+            return "message", "message #%s (no longer exists)" % m.group(1), ""
+        conf = row.get("llm_confidence")
+        block = (
+            "CURRENT PAGE: the user is reading ONE specific email right now%s.\n"
+            "Message #%d\n"
+            "Subject: %r | From: %s | To: %s | Date: %s | Folder: %s\n"
+            "Status: %s | action_taken: %s | user tag: %r | needs_reply: %s | snoozed: %s\n"
+            "LLM verdict: %r%s | summary: %r | reason: %r\n"
+            "When the user says \u201cthis email\u201d, \u201cit\u201d or otherwise refers to something "
+            "on screen, they mean THIS message. Load it by id %d when you need the body, and "
+            "pass id %d to any tool that acts on it."
+            % (filt_note(), row["id"], (row.get("subject") or "(no subject)"),
+               row.get("from_addr") or "-", row.get("to_addr") or "-", row.get("date") or "-",
+               row.get("folder") or "-", row.get("status") or "-", row.get("action_taken") or "-",
+               row.get("user_tag") or "", "yes" if row.get("llm_needs_reply") else "no",
+               time.strftime("%Y-%m-%d %H:%M", time.localtime(row["snoozed_until"])) if row.get("snoozed_until") else "no",
+               row.get("llm_category") or "(not classified)",
+               (" %.0f%%" % (conf * 100)) if conf is not None else "",
+               row.get("llm_summary") or "", row.get("llm_reason") or "",
+               row["id"], row["id"]))
+        return "message", "message \u00b7 %s" % ((row.get("subject") or "(no subject)")[:70]), block
+    m = re.match(r"^/flows/(\d+)", p)
+    if m:
+        fl = store.get_flow(int(m.group(1)))
+        if fl:
+            block = ("CURRENT PAGE: the user is viewing one flow. When they say \u201cthis flow\u201d or "
+                     "\u201cit\u201d, they mean flow #%d below - pass this id to flow tools when acting.\n\n%s"
+                     % (fl["id"], _flows_to_text([fl])))
+            return "flow", "flow \u00b7 %s" % ((fl.get("name") or ("#%d" % fl["id"]))[:70]), block
+    if p == "/flows/new":
+        return ("flow", "new flow editor",
+                "CURRENT PAGE: the user is in the NEW FLOW editor building a draft flow. A bare "
+                "\u201cthis flow\u201d refers to that draft; they likely want help designing conditions "
+                "and steps.")
+    m = re.match(r"^/rules/(\d+)", p)
+    if m:
+        ru = store.get_rule(int(m.group(1)))
+        if ru:
+            block = ("CURRENT PAGE: the user is viewing one rule. When they say \u201cthis rule\u201d or "
+                     "\u201cit\u201d, they mean rule #%d below - pass this id to rule tools when acting.\n\n%s"
+                     % (ru["id"], _rules_to_text([ru])))
+            return "rule", "rule \u00b7 %s" % ((ru.get("name") or ("#%d" % ru["id"]))[:70]), block
+    if p == "/rules/new":
+        return ("rule", "new rule editor",
+                "CURRENT PAGE: the user is in the NEW RULE editor. A bare \u201cthis rule\u201d refers to "
+                "that draft.")
+    m = re.match(r"^/classifiers/(\d+)", p)
+    if m:
+        h = store.get_heuristic(int(m.group(1)))
+        if h:
+            block = ("CURRENT PAGE: the user is looking at classifier #%d %r (kind %s, category %r, "
+                     "enabled: %s). \u201cthis classifier\u201d means it."
+                     % (h["id"], h.get("name"), h.get("kind"), h.get("category"),
+                        "yes" if h.get("enabled") else "no"))
+            return "classifier", "classifier \u00b7 %s" % ((h.get("name") or ("#%d" % h["id"]))[:70]), block
+    m = re.match(r"^/templates/(\d+)", p)
+    if m:
+        t2 = store.get_template(int(m.group(1)))
+        if t2:
+            body = (t2.get("body") or "")[:600]
+            block = ("CURRENT PAGE: the user is editing reply template #%d %r. Its current text:\n%s"
+                     % (t2["id"], t2.get("name"), body))
+            return "template", "template \u00b7 %s" % ((t2.get("name") or ("#%d" % t2["id"]))[:70]), block
+    if p == "/messages":
+        try:
+            n = store.count_messages((re.search(r"(?:^|&)f=([a-z_]+)", q) or [None, "all"])[1] or "all")
+        except Exception:
+            n = 0
+        return ("messages", "messages list%s" % filt_note(),
+                "CURRENT PAGE: the user is on the messages list%s (%d matching). No single message "
+                "is selected." % (filt_note(), n))
+    lists = {"/flows": "flows list", "/rules": "rules list", "/classifiers": "classifiers list",
+             "/templates": "templates list", "/settings": "settings", "/more": "more",
+             "/accounts": "accounts", "/log": "activity log", "/simulate": "simulator",
+             "/proxy/log": "proxy log"}
+    if p in lists:
+        return ("page", lists[p],
+                "CURRENT PAGE: the user is on the %s. No specific item is selected." % lists[p])
+    if p:
+        return ("page", (p.rstrip("/")[:60] or "/"),
+                "CURRENT PAGE: the user is on %s. No specific item is selected." % p)
+    return "", "", ""
+
+
 def _repetition_loop(text, tail=200):
     """True when the last `tail` chars already appeared earlier in the same turn -
     catches the degenerate \"keeps repeating the same paragraph\" failure mode
@@ -3010,9 +3109,10 @@ class AssistantAgent:
     RESULT_CHARS = 4500       # max JSON chars of a tool result fed back to the model
     TRANSCRIPT_BUDGET = 30000  # cumulative tool-result chars before hard truncation
 
-    def __init__(self, session_id=0):
+    def __init__(self, session_id=0, page_path=None):
         self.mc = None
         self.session_id = int(session_id or 0)
+        self.page_path = (page_path or "").strip()[:300]
         self.proposals = []
         self.tools_log = []
         self.perms = agent_permissions()
@@ -3819,6 +3919,10 @@ class AssistantAgent:
                                       "max_calls": self.MAX_CALLS_PER_TURN,
                                       "permissions": agent_permissions_text()}
                   + "\n\n" + _assistant_context())
+        if self.page_path:
+            _kind, _desc, _block = assistant_page_context(self.page_path)
+            if _block:
+                system += "\n\n" + _block
         convo = [{"role": m["role"], "content": m["content"]}
                  for m in store.assistant_messages(limit=24, session_id=self.session_id)]
         llm = LLMClient()

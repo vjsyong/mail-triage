@@ -2744,6 +2744,35 @@ def main():
     check("simulator page reachable via nav", r.status_code == 200 and b"Run simulation" in r.data)
     store.update_rule(sim_rid, enabled=0)
 
+    section("T42 assistant page context (this email / this flow)")
+    add_msg(state, "ctx@x.com", "Context target email", "ctx body", "cx@x")
+    engine.process_mailbox()
+    crow = [r for r in store.messages(limit=3000) if r["subject"] == "Context target email"][0]
+    cid = crow["id"]
+    kind, desc, block = engine.assistant_page_context("/messages/%d?f=needs_reply" % cid)
+    check("message page context resolves",
+          kind == "message" and "Context target email" in desc
+          and "CURRENT PAGE" in block and ("#%d" % cid) in block and "needs_reply" in block)
+    fctx_id = store.add_flow("Context flow", "all",
+                             [{"field": "subject", "op": "contains", "value": "ctx"}],
+                             [{"type": "move", "folder": "Archive"}], enabled=True)
+    kind3, desc3, block3 = engine.assistant_page_context("/flows/%d/edit" % fctx_id)
+    check("flow page context resolves", kind3 == "flow" and "Context flow" in block3
+          and "CURRENT PAGE" in block3)
+    r = client.get("/assistant/context.json?path=/messages/%d" % cid)
+    check("context.json returns a description",
+          r.status_code == 200 and b"Context target email" in r.data)
+    page = client.get("/messages/%d" % cid).data
+    check("page ships the context wiring (tracker + chips + path on sends)",
+          b"mtCtxPath" in page and b"dwctx" in page and b"&path=" in page and b"mtLastCtx" in page)
+    r = client.post("/assistant/stream", data={"message": "what is on my screen?", "session": "0",
+                                               "path": "/messages/%d" % cid})
+    check("stream with a page path completes", b"event: done" in r.data)
+    sys_hit = any("CURRENT PAGE" in (c.get("system") or "")
+                  and "Context target email" in (c.get("system") or "")
+                  for c in llm_server.calls)
+    check("page context reached the model's system prompt", sys_hit)
+
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
