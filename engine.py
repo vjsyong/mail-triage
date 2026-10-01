@@ -166,6 +166,15 @@ def looks_like_mime_junk(s):
     return False
 
 
+def looks_readable(s, probe=4000):
+    """True when text is mostly printable - guards against binary salvage."""
+    if not s:
+        return False
+    head = s[:probe]
+    bad = sum(1 for c in head if not (c.isprintable() or c in "\r\n\t"))
+    return bad <= max(3, len(head) * 0.10)
+
+
 def _salvage_if_junk(s):
     return readable_body(s, limit=600) if looks_like_mime_junk(s) else (s or "")
 
@@ -1086,7 +1095,7 @@ def rescue_stale_snippets(rows, workers=6):
                 text = conn.fetch_body_text(uid, limit=6000)
             except Exception:
                 text = ""
-            if text and not looks_like_mime_junk(text):
+            if text and not looks_like_mime_junk(text) and looks_readable(text):
                 for r in rs:
                     store.update_message(r["id"], snippet=text[:4000], folder=folder, uid=uid)
                     with flock:
@@ -1141,7 +1150,7 @@ def heal_snippets(workers=6, rescue=True):
                         text = mc.fetch_body_text(r["uid"], limit=6000)
                     except Exception:
                         text = ""
-                    if text and not looks_like_mime_junk(text):
+                    if text and not looks_like_mime_junk(text) and looks_readable(text):
                         store.update_message(r["id"], snippet=text[:4000])
                         with lock:
                             fixed[0] += 1

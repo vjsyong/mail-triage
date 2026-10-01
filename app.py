@@ -2013,7 +2013,7 @@ def _message_body_for_view(m):
     folder/uid went stale), extract text properly and cache it back onto the row.
     Returns (body_text, note)."""
     stored = m.get("snippet") or ""
-    if stored and not engine.looks_like_mime_junk(stored):
+    if stored and not engine.looks_like_mime_junk(stored) and engine.looks_readable(stored):
         return stored[:4000], None
     try:
         mc = engine.MailClient().connect()
@@ -2036,7 +2036,7 @@ def _message_body_for_view(m):
                         text = mc.fetch_body_text(uid, limit=6000)
                     except Exception:
                         text = ""
-            if text and not engine.looks_like_mime_junk(text):
+            if text and not engine.looks_like_mime_junk(text) and engine.looks_readable(text):
                 fields = {"snippet": text[:4000]}
                 if folder and (folder != m.get("folder") or uid != m.get("uid")):
                     fields["folder"], fields["uid"] = folder, uid
@@ -2049,7 +2049,7 @@ def _message_body_for_view(m):
             except Exception:
                 pass
     salv = engine.readable_body(stored, limit=4000)
-    if salv and not engine.looks_like_mime_junk(salv):
+    if salv and not engine.looks_like_mime_junk(salv) and engine.looks_readable(salv):
         return salv[:4000], "Shown from a repaired stored copy — the mailbox re-fetch failed."
     return "", ("This message could not be decoded: the stored copy is raw MIME and the "
                 "mailbox copy could not be read. Reload to retry.")

@@ -1425,6 +1425,16 @@ def main():
           hres2["fixed"] >= 1 and "moved heal body text" in (mv2fixed["snippet"] or "")
           and mv2fixed["folder"] == "AgentTests")
 
+    # viewer: an undecodable legacy row shows the unavailable state, not garbage
+    ghost_uid = add_msg(state, "ghost@x.com", "Ghost mail", "ghost body", "ghost@x")
+    engine.process_mailbox()
+    ghostrow = [r for r in store.messages(limit=3000) if r["uid"] == ghost_uid][0]
+    store.update_message(ghostrow["id"], snippet="\x01\x02\x03" * 40,
+                         msgid="gone-gone@x", folder="NoSuch", uid=999999)
+    r = client.get("/messages/%d" % ghostrow["id"])
+    check("undecodable row shows the unavailable state, not garbage",
+          r.status_code == 200 and b"could not be decoded" in r.data)
+
     # collapsed base64 salvage (legacy snippets lost their line breaks)
     collapsed = ("------=_NextPart_9ZZ Content-Type: text/plain; charset=\"utf-8\" "
                  "Content-Transfer-Encoding: base64 " + enc_lines.replace("\r\n", " "))
