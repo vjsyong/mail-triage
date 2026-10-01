@@ -901,8 +901,9 @@ def main():
     section("T8 web UI smoke (Flask test client)")
     import app as app_mod
     client = app_mod.app.test_client()
-    for path in ("/", "/assistant", "/rules", "/classifiers", "/templates", "/messages",
-                 "/accounts", "/accounts/new", "/settings", "/log", "/proxy/log", "/healthz"):
+    for path in ("/", "/assistant", "/rules", "/flows", "/flows/new", "/classifiers", "/templates",
+                 "/messages", "/accounts", "/accounts/new", "/settings", "/log", "/proxy/log",
+                 "/healthz"):
         r = client.get(path)
         check("GET %s -> 200" % path, r.status_code == 200)
     latest = store.messages(limit=1)[0]
@@ -1948,6 +1949,58 @@ def main():
     ok, rerr = proxy_mod.remove_account("acct@example.com")
     check("removing the last account is a clean outcome", ok and not rerr)
     check("account removed", proxy_mod.list_accounts() == [])
+
+    section("T28 flows: multi-step builder, execution, dedupe, dry-run")
+    import app as app_mod2
+    tpl_id = store.list_templates()[0]["id"]
+    flow_steps = [{"type": "move", "folder": "FlowBox"},
+                  {"type": "tag", "tag": "auto-flow"},
+                  {"type": "draft", "mode": "template", "template_id": tpl_id}]
+    r = client.post("/flows/new", data={
+        "name": "Invoice flow", "match_mode": "all", "enabled": "1",
+        "cond_field_0": "subject", "cond_op_0": "contains", "cond_value_0": "flow target",
+        "steps_json": json.dumps(flow_steps)}, follow_redirects=False)
+    flow = [f for f in store.list_flows() if f["name"] == "Invoice flow"]
+    check("flow builder saves conditions + steps",
+          r.status_code == 302 and len(flow) == 1
+          and "flow target" in flow[0]["conditions"] and "FlowBox" in flow[0]["actions"])
+    flows_page = client.get("/flows").data
+    check("flows page renders the plain-language summary",
+          b"IF subject contains" in flows_page and b"move to FlowBox" in flows_page
+          and b"draft from" in flows_page)
+    edit_page = client.get("/flows/%d/edit" % flow[0]["id"]).data
+    check("flow editor renders the stored steps", b"FlowBox" in edit_page and b"stepcard" in edit_page)
+
+    before_appends = len(state.appended)
+    add_msg(state, "flowguy@x.com", "Flow target message", "please handle it", "flowt@x")
+    engine.process_mailbox()
+    frow = [r for r in store.messages(limit=3000) if r["msgid"] == "flowt@x"][0]
+    check("flow moved the message to FlowBox", frow["folder"] == "FlowBox")
+    check("flow recorded status + action",
+          frow["status"] == "flow" and (frow["action_taken"] or "").startswith("flow:Invoice flow"))
+    check("flow applied the tag step", frow["user_tag"] == "auto-flow")
+    check("flow saved one draft", len(state.appended) == before_appends + 1
+          and b"Re: Flow target message" in state.appended[-1]["raw"])
+
+    mc2 = engine.MailClient().connect()
+    try:
+        mc2.select("FlowBox")
+        engine._process_flow(mc2, flow[0], store.get_message(frow["id"]),
+                             {"subject": "Flow target message"}, store.all_settings())
+    finally:
+        mc2.close()
+    check("flow never runs twice for the same message (flow_runs guard)",
+          len(state.appended) == before_appends + 1
+          and store.flow_already_ran(flow[0]["id"], "flowt@x"))
+
+    store.set_setting("flows_apply", False)
+    add_msg(state, "flowguy2@x.com", "Flow target dry", "flow target again", "flowd@x")
+    engine.process_mailbox()
+    drow = [r for r in store.messages(limit=3000) if r["msgid"] == "flowd@x"][0]
+    check("flow dry-run keeps the message in place",
+          drow["folder"] == "INBOX" and drow["status"] == "flow-dry"
+          and len(state.appended) == before_appends + 1)
+    store.set_setting("flows_apply", True)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

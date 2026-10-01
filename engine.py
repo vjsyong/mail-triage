@@ -735,6 +735,109 @@ def match_first(rules, fields):
     return None
 
 
+# ---------------------------------------------------------------- flows
+
+def _apply_flow(mc, flow, row, settings, live):
+    """Execute one flow's steps in order. Returns (taken, fields). Move steps
+    update the DB row immediately so later steps (and drafts) address the
+    message's new location."""
+    try:
+        steps = json.loads(flow.get("actions") or "[]")
+    except (TypeError, ValueError):
+        steps = []
+    taken, fields = [], {}
+    cur_folder, cur_uid = row["folder"], row["uid"]
+    for st in steps:
+        t = (st.get("type") or "").lower()
+        if t == "move" and (st.get("folder") or "").strip():
+            dest = st["folder"].strip()
+            if live:
+                try:
+                    mc.ensure_folder(dest)
+                    mc.ensure_selected(cur_folder)
+                    new_uid = mc.move(cur_uid, dest)
+                    cur_folder = dest
+                    if new_uid:
+                        cur_uid = new_uid
+                    fields["folder"], fields["uid"] = cur_folder, cur_uid
+                    store.update_message(row["id"], folder=cur_folder, uid=cur_uid)
+                    taken.append("move:" + dest)
+                except Exception as exc:
+                    taken.append("move:%s FAILED" % dest)
+                    store.log_event("error", "flow '%s': move to %s failed: %r"
+                                    % (flow.get("name"), dest, exc))
+            else:
+                taken.append("move:" + dest)
+        elif t == "mark_read":
+            if live:
+                try:
+                    mc.ensure_selected(cur_folder)
+                    mc.set_flags(cur_uid, "+FLAGS", r"(\Seen)")
+                except Exception:
+                    pass
+            taken.append("read")
+        elif t == "flag":
+            if live:
+                try:
+                    mc.ensure_selected(cur_folder)
+                    mc.set_flags(cur_uid, "+FLAGS", r"(\Flagged)")
+                except Exception:
+                    pass
+            taken.append("flag")
+        elif t == "tag":
+            tg = (st.get("tag") or "").strip()[:40]
+            if live and tg:
+                fields["user_tag"] = tg
+            taken.append("tag:" + tg)
+        elif t == "draft":
+            if live:
+                try:
+                    row_now = store.get_message(row["id"]) or dict(row)
+                    tpl_id = st.get("template_id") or None
+                    try:
+                        tpl_id = int(tpl_id) if tpl_id else None
+                    except (TypeError, ValueError):
+                        tpl_id = None
+                    mode = (st.get("mode") or "template").lower()
+                    body = ""
+                    if mode == "llm":
+                        body = generate_draft(row_now["id"], tpl_id)
+                    else:
+                        tpl = store.get_template(tpl_id) if tpl_id else None
+                        if tpl:
+                            body = render_template_text(tpl.get("body") or "", row_now)
+                    if body:
+                        saved_to = save_draft(row_now["id"], body)
+                        taken.append("draft\u2192" + saved_to)
+                    else:
+                        taken.append("draft skipped (no template)")
+                except Exception as exc:
+                    taken.append("draft FAILED")
+                    store.log_event("error", "flow '%s': draft failed: %r" % (flow.get("name"), exc))
+            else:
+                taken.append("draft")
+    return taken, fields
+
+
+def _process_flow(mc, flow, row, meta, settings):
+    """Run one matching flow, once per message (flow_runs guards re-scans)."""
+    live = bool(settings.get("flows_apply", True))
+    key = (row.get("msgid") or "").strip() or ("id:%s" % row.get("id"))
+    if store.flow_already_ran(flow["id"], key):
+        store.log_event("debug", "flow '%s' already ran for '%s'"
+                        % (flow.get("name"), (meta.get("subject") or "")[:50]))
+        return
+    taken, fields = _apply_flow(mc, flow, row, settings, live)
+    fields["status"] = "flow" if live else "flow-dry"
+    fields["action_taken"] = "flow:%s" % (flow.get("name") or flow.get("id"))
+    store.update_message(row["id"], **fields)
+    if live:
+        store.record_flow_run(flow["id"], key, row["id"])
+    store.log_event("info", "flow '%s'%s \u2192 %s | %s"
+                    % (flow.get("name"), "" if live else " (dry-run)",
+                       ", ".join(taken) or "no steps", (meta.get("subject") or "")[:60]))
+
+
 # ---------------------------------------------------------------- LLM
 
 def llm_config():
@@ -1071,7 +1174,7 @@ def _fields_for(meta):
             "subject": meta.get("subject", ""), "body": meta.get("snippet", "")}
 
 
-def _process_folder(mc, folder, settings, rules):
+def _process_folder(mc, folder, settings, rules, flows=None):
     uv = mc.select(folder)
     last_uid, last_uv = store.last_uid(folder)
     if last_uid is not None and last_uv != uv:
@@ -1097,6 +1200,7 @@ def _process_folder(mc, folder, settings, rules):
             continue
         scanned += 1
         rule = match_first(rules, _fields_for(meta))
+        flow = None if rule else match_first(flows or [], _fields_for(meta))
         if rule:
             try:
                 actions = json.loads(rule.get("actions") or "{}")
@@ -1134,6 +1238,8 @@ def _process_folder(mc, folder, settings, rules):
                             % (rule.get("name") or rule["id"],
                                ", ".join(taken) or ("kept (guard)" if is_guard_rule(rule) else "suggest"),
                                (meta.get("subject") or "")[:60], meta.get("from_addr")))
+        elif flow:
+            _process_flow(mc, flow, row, meta, settings)
         else:
             store.update_message(row["id"], status="queued")
     if uids:
@@ -1499,11 +1605,12 @@ def process_mailbox():
     """One full pass: scan watched folders, apply rules, run the LLM queue."""
     settings = store.all_settings()
     rules = [r for r in store.list_rules() if r.get("enabled")]
+    flows = [f for f in store.list_flows() if f.get("enabled")]
     mc = MailClient().connect()
     scanned = moved = classified = 0
     try:
         for folder in settings.get("watch_folders") or ["INBOX"]:
-            s, m = _process_folder(mc, folder, settings, rules)
+            s, m = _process_folder(mc, folder, settings, rules, flows)
             scanned += s
             moved += m
         if settings.get("llm_suggest"):

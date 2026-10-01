@@ -553,6 +553,8 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
       <div class="nav-label">Automation</div>
       {{ navitem(url_for('rules'), 'Rules', p.startswith('/rules'), '
         <path d="M3 6h18M7 12h10M10 18h4"/>') }}
+      {{ navitem(url_for('flows'), 'Flows', p.startswith('/flows'), '
+        <path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/>') }}
       {{ navitem(url_for('classifiers'), 'Classifiers', p.startswith('/classifiers'), '
         <path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/>') }}
       {{ navitem(url_for('templates'), 'Templates', p.startswith('/templates'), '
@@ -1452,6 +1454,344 @@ def rule_move(rule_id):
     else:
         store.move_rule(rule_id, -1 if d == "up" else 1)
     return redirect(url_for("rules"))
+
+
+# ---------------------------------------------------------------- flows (multi-step automations)
+
+FLOWS_TMPL = """
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Flows</h1>
+    <div class="page-desc">Multi-step automations — when a message matches, the steps run in order (move, tag, flag, draft from a template). Rules stay for simple single-action cases; rules run first.</div>
+  </div>
+  <div class="row"><a class="btn primary" href="{{ url_for('flow_new') }}">New flow</a></div>
+</div>
+{% if flows %}
+<div class="stack">
+  {% for f in flows %}
+  <div class="card">
+    <div class="card-h" style="flex-wrap:wrap">
+      <h3 style="min-width:0">{{ f.name }}{% if not f.enabled %} <span class="badge">disabled</span>{% endif %}</h3>
+      <div class="row">
+        <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" aria-label="Move up">&#8593;</button></form>
+        <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" aria-label="Move down">&#8595;</button></form>
+        <form class="inline" method="post" action="{{ url_for('flow_toggle', flow_id=f.id) }}"><button class="btn small" type="submit">{{ 'Disable' if f.enabled else 'Enable' }}</button></form>
+        <a class="btn small" href="{{ url_for('flow_edit', flow_id=f.id) }}">Edit</a>
+        <form class="inline" method="post" action="{{ url_for('flow_delete', flow_id=f.id) }}" onsubmit="return confirm('Delete this flow?');"><button class="btn small" type="submit">Delete</button></form>
+      </div>
+    </div>
+    <div class="sub" style="margin-top:4px">{{ f.summary }}</div>
+    {% if f.last_run %}<div class="sub" style="margin-top:4px">last ran {{ f.last_run }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <h4>No flows yet</h4>
+  <p>A flow is &ldquo;when a message matches&hellip; then do several things, in order&rdquo; &mdash; for example: subject contains &ldquo;invoice&rdquo; &rarr; move to Receipts, tag it, and create a draft from a template.</p>
+  <a class="btn primary" href="{{ url_for('flow_new') }}">Build the first flow</a>
+</div>
+{% endif %}
+"""
+
+FLOW_EDIT_TMPL = """
+<style>
+.stepcard{border:1px solid var(--line);padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:10px;align-items:start;background:#fff}
+.stepnum{width:24px;height:24px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:600}
+.stepcard select,.stepcard input[type=text]{width:100%}
+.stepfields{margin-top:8px;display:grid;grid-template-columns:120px minmax(0,1fr);gap:6px 10px;align-items:center}
+.stepfields label{font-size:.78rem;color:var(--dim)}
+.steptools{display:flex;gap:4px}
+</style>
+<div class="page-head">
+  <div>
+    <div class="sub" style="margin-bottom:4px"><a href="{{ url_for('flows') }}">&larr; Flows</a></div>
+    <h1 class="page-title">{{ 'Edit flow' if flow else 'New flow' }}</h1>
+    <div class="page-desc">WHEN a message matches, THEN run the steps, in order.</div>
+  </div>
+</div>
+<form method="post" id="flowform">
+<input type="hidden" name="steps_json" id="steps_json">
+<div class="card">
+  <div class="card-h"><h3>Flow</h3></div>
+  <div class="grid2">
+    <div><label for="f-name">Name</label><input id="f-name" type="text" name="name" value="{{ flow.name if flow else '' }}" placeholder="e.g. Invoice &rarr; file + draft ack"></div>
+    <div><label class="check" style="margin-top:26px"><input type="checkbox" name="enabled" value="1" {{ 'checked' if (flow.enabled if flow else True) else '' }}> <span>Enabled &mdash; evaluated on every check</span></label></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>WHEN &mdash; a message matches</h3>
+    <select name="match_mode" aria-label="Match mode" style="width:auto">
+      <option value="all" {{ 'selected' if not (flow and flow.match_mode == 'any') else '' }}>match all conditions</option>
+      <option value="any" {{ 'selected' if flow and flow.match_mode == 'any' else '' }}>match any condition</option>
+    </select>
+  </div>
+  <div id="conds">
+    <div class="grid3 sub" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
+    {% for i in range(5) %}
+    {% set c = conditions[i] if conditions|length > i else {} %}
+    <div class="grid3" style="margin-bottom:6px">
+      <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field">
+        {% for f in ['from','to','subject','body'] %}
+        <option value="{{ f }}" {{ 'selected' if c.get('field') == f else '' }}>{{ f }}</option>{% endfor %}
+      </select>
+      <select name="cond_op_{{ i }}" aria-label="Condition {{ i+1 }} operator">
+        {% for o in ['contains','equals','regex'] %}
+        <option value="{{ o }}" {{ 'selected' if c.get('op') == o else '' }}>{{ o }}</option>{% endfor %}
+      </select>
+      <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Condition {{ i+1 }} value">
+    </div>
+    {% endfor %}
+    <div class="sub">Short values (&le;3 letters) match whole words only &mdash; &ldquo;PO&rdquo; won&rsquo;t fire on &ldquo;support&rdquo;.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>THEN &mdash; do these steps, in order</h3><span class="sub">a draft step saves into your Drafts folder; nothing is ever sent</span></div>
+  <div id="steps"></div>
+  <div class="row">
+    <button class="btn small" type="button" onclick="addStep('move')">+ Move to folder</button>
+    <button class="btn small" type="button" onclick="addStep('draft')">+ Create a draft</button>
+    <button class="btn small" type="button" onclick="addStep('tag')">+ Tag</button>
+    <button class="btn small" type="button" onclick="addStep('mark_read')">+ Mark read</button>
+    <button class="btn small" type="button" onclick="addStep('flag')">+ Star</button>
+  </div>
+</div>
+
+<div class="savebar"><button class="btn primary" type="submit">Save flow</button><a class="btn" href="{{ url_for('flows') }}">Cancel</a></div>
+</form>
+<script>
+var TEMPLATES = {{ templates_json|safe }};
+var steps = {{ steps_json|safe }};
+var stepsEl = document.getElementById('steps');
+var stepsInput = document.getElementById('steps_json');
+var TYPES = [['move','Move to folder'],['draft','Create a draft'],['tag','Tag'],['mark_read','Mark as read'],['flag','Star / flag']];
+function sync(){ stepsInput.value = JSON.stringify(steps); }
+function el(tag, cls, txt){ var e = document.createElement(tag); if(cls) e.className = cls; if(txt != null) e.textContent = txt; return e; }
+function render(){
+  stepsEl.innerHTML = '';
+  steps.forEach(function(st, i){
+    var card = el('div','stepcard');
+    var sel = el('select');
+    TYPES.forEach(function(t){ var o = el('option', null, t[1]); o.value = t[0]; if(st.type === t[0]) o.selected = true; sel.appendChild(o); });
+    sel.onchange = function(){
+      st.type = sel.value;
+      if(st.type === 'move' && st.folder === undefined) st.folder = '';
+      if(st.type === 'tag' && st.tag === undefined) st.tag = '';
+      if(st.type === 'draft'){ if(!st.mode) st.mode = 'template'; if(st.template_id === undefined) st.template_id = ''; }
+      render();
+    };
+    var body = el('div');
+    body.appendChild(sel);
+    var f = el('div','stepfields');
+    if(st.type === 'move'){
+      f.appendChild(el('label', null, 'Folder'));
+      var inp = el('input'); inp.type = 'text'; inp.value = st.folder || ''; inp.placeholder = 'e.g. Receipts';
+      inp.oninput = function(){ st.folder = inp.value; sync(); };
+      f.appendChild(inp);
+    } else if(st.type === 'draft'){
+      f.appendChild(el('label', null, 'How'));
+      var m = el('select');
+      [['template','Fill a template'],['llm','Draft with the LLM']].forEach(function(t){ var o = el('option', null, t[1]); o.value = t[0]; if((st.mode || 'template') === t[0]) o.selected = true; m.appendChild(o); });
+      m.onchange = function(){ st.mode = m.value; render(); };
+      f.appendChild(m);
+      f.appendChild(el('label', null, (st.mode === 'llm') ? 'Template (guidance, optional)' : 'Template'));
+      var tSel = el('select');
+      var none = el('option', null, '(none)'); none.value = ''; tSel.appendChild(none);
+      TEMPLATES.forEach(function(t){ var o = el('option', null, t.name); o.value = String(t.id); if(String(st.template_id || '') === String(t.id)) o.selected = true; tSel.appendChild(o); });
+      tSel.onchange = function(){ st.template_id = tSel.value; sync(); };
+      f.appendChild(tSel);
+    } else if(st.type === 'tag'){
+      f.appendChild(el('label', null, 'Tag'));
+      var tin = el('input'); tin.type = 'text'; tin.value = st.tag || ''; tin.placeholder = 'e.g. Follow up';
+      tin.oninput = function(){ st.tag = tin.value; sync(); };
+      f.appendChild(tin);
+    }
+    if(f.childNodes.length) body.appendChild(f);
+    var tools = el('div','steptools');
+    var up = el('button', null, '\u2191'); up.type = 'button'; up.className = 'btn small'; up.disabled = (i === 0);
+    up.onclick = function(){ var t = steps[i-1]; steps[i-1] = steps[i]; steps[i] = t; render(); };
+    var dn = el('button', null, '\u2193'); dn.type = 'button'; dn.className = 'btn small'; dn.disabled = (i === steps.length - 1);
+    dn.onclick = function(){ var t = steps[i+1]; steps[i+1] = steps[i]; steps[i] = t; render(); };
+    var rm = el('button', null, '\u2715'); rm.type = 'button'; rm.className = 'btn small'; rm.title = 'Remove step';
+    rm.onclick = function(){ steps.splice(i, 1); render(); };
+    tools.appendChild(up); tools.appendChild(dn); tools.appendChild(rm);
+    var num = el('div','stepnum', String(i + 1));
+    card.appendChild(num); card.appendChild(body); card.appendChild(tools);
+    stepsEl.appendChild(card);
+  });
+  sync();
+}
+function addStep(type){
+  var st = {type: type};
+  if(type === 'move') st.folder = '';
+  if(type === 'draft'){ st.mode = 'template'; st.template_id = ''; }
+  if(type === 'tag') st.tag = '';
+  steps.push(st); render();
+}
+render();
+</script>
+"""
+
+
+def _flow_summary(flow, tpl_names):
+    """One-line plain language: IF <conditions> -> <steps>."""
+    try:
+        conds = json.loads(flow.get("conditions") or "[]")
+    except (TypeError, ValueError):
+        conds = []
+    joiner = " and " if (flow.get("match_mode") or "all") == "all" else " or "
+    when = joiner.join("%s %s \u2018%s\u2019" % (c.get("field"), c.get("op"), c.get("value"))
+                      for c in conds) or "\u2014"
+    try:
+        steps = json.loads(flow.get("actions") or "[]")
+    except (TypeError, ValueError):
+        steps = []
+    acts = []
+    for st in steps:
+        t = st.get("type")
+        if t == "move":
+            acts.append("move to %s" % st.get("folder"))
+        elif t == "mark_read":
+            acts.append("mark as read")
+        elif t == "flag":
+            acts.append("star")
+        elif t == "tag":
+            acts.append("tag \u2018%s\u2019" % st.get("tag"))
+        elif t == "draft":
+            name = tpl_names.get(int(st.get("template_id") or 0), "")
+            if (st.get("mode") or "template") == "llm":
+                acts.append("draft with the LLM%s and save to Drafts"
+                            % ((" using \u2018%s\u2019" % name) if name else ""))
+            else:
+                acts.append("draft from \u2018%s\u2019 and save to Drafts" % name if name else "draft (no template)")
+    return "IF %s \u2192 %s" % (when, ", then ".join(acts) or "\u2014")
+
+
+def _flow_from_form():
+    name = (request.form.get("name") or "").strip() or "Untitled flow"
+    match_mode = request.form.get("match_mode", "all")
+    conditions = []
+    for i in range(5):
+        val = (request.form.get("cond_value_%d" % i) or "").strip()
+        if not val:
+            continue
+        conditions.append({"field": request.form.get("cond_field_%d" % i, "subject"),
+                           "op": request.form.get("cond_op_%d" % i, "contains"),
+                           "value": val})
+    try:
+        raw = json.loads(request.form.get("steps_json") or "[]")
+    except (TypeError, ValueError):
+        raw = []
+    steps = []
+    for st in (raw if isinstance(raw, list) else [])[:20]:
+        if not isinstance(st, dict):
+            continue
+        t = (st.get("type") or "").lower()
+        if t == "move" and (st.get("folder") or "").strip():
+            steps.append({"type": "move", "folder": st["folder"].strip()[:80]})
+        elif t == "draft":
+            tid = st.get("template_id") or None
+            try:
+                tid = int(tid) if tid not in (None, "", "0") else None
+            except (TypeError, ValueError):
+                tid = None
+            mode = "llm" if (st.get("mode") or "template") == "llm" else "template"
+            if tid or mode == "llm":
+                steps.append({"type": "draft", "mode": mode, "template_id": tid})
+        elif t == "tag" and (st.get("tag") or "").strip():
+            steps.append({"type": "tag", "tag": st["tag"].strip()[:40]})
+        elif t in ("mark_read", "flag"):
+            steps.append({"type": t})
+    enabled = bool(request.form.get("enabled"))
+    return name, match_mode, conditions, steps, enabled
+
+
+@app.route("/flows")
+def flows():
+    tpl_names = {t["id"]: t["name"] for t in store.list_templates()}
+    rows = []
+    for f in store.list_flows():
+        d = dict(f)
+        d["summary"] = _flow_summary(f, tpl_names)
+        rows.append(d)
+    return render(_render_src(FLOWS_TMPL, flows=rows))
+
+
+@app.route("/flows/new", methods=["GET", "POST"])
+def flow_new():
+    if request.method == "POST":
+        name, mode, conds, steps, enabled = _flow_from_form()
+        if not conds:
+            flash("Add at least one condition with a value.", "err")
+            return redirect(url_for("flow_new"))
+        if not steps:
+            flash("Add at least one step.", "err")
+            return redirect(url_for("flow_new"))
+        store.add_flow(name, mode, conds, steps, enabled)
+        store.log_event("info", "flow '%s' added (%d step(s))" % (name, len(steps)))
+        flash("Flow added.", "ok")
+        return redirect(url_for("flows"))
+    return render(_render_src(FLOW_EDIT_TMPL, flow=None, conditions=[], steps_json="[]",
+                             templates=store.list_templates(),
+                             templates_json=json.dumps(
+                                 [{"id": t["id"], "name": t["name"]} for t in store.list_templates()])))
+
+
+@app.route("/flows/<int:flow_id>/edit", methods=["GET", "POST"])
+def flow_edit(flow_id):
+    flow = store.get_flow(flow_id)
+    if not flow:
+        flash("No such flow.", "err")
+        return redirect(url_for("flows"))
+    if request.method == "POST":
+        name, mode, conds, steps, enabled = _flow_from_form()
+        if not conds:
+            flash("Add at least one condition with a value.", "err")
+            return redirect(url_for("flow_edit", flow_id=flow_id))
+        if not steps:
+            flash("Add at least one step.", "err")
+            return redirect(url_for("flow_edit", flow_id=flow_id))
+        store.update_flow(flow_id, name=name, match_mode=mode,
+                          conditions=json.dumps(conds), actions=json.dumps(steps),
+                          enabled=1 if enabled else 0)
+        flash("Flow saved.", "ok")
+        return redirect(url_for("flows"))
+    try:
+        conds = json.loads(flow.get("conditions") or "[]")
+    except (TypeError, ValueError):
+        conds = []
+    try:
+        steps = json.loads(flow.get("actions") or "[]")
+    except (TypeError, ValueError):
+        steps = []
+    return render(_render_src(FLOW_EDIT_TMPL, flow=flow, conditions=conds,
+                             steps_json=json.dumps(steps),
+                             templates=store.list_templates(),
+                             templates_json=json.dumps(
+                                 [{"id": t["id"], "name": t["name"]} for t in store.list_templates()])))
+
+
+@app.route("/flows/<int:flow_id>/toggle", methods=["POST"])
+def flow_toggle(flow_id):
+    flow = store.get_flow(flow_id)
+    if flow:
+        store.update_flow(flow_id, enabled=0 if flow["enabled"] else 1)
+    return redirect(url_for("flows"))
+
+
+@app.route("/flows/<int:flow_id>/delete", methods=["POST"])
+def flow_delete(flow_id):
+    store.delete_flow(flow_id)
+    return redirect(url_for("flows"))
+
+
+@app.route("/flows/<int:flow_id>/move", methods=["POST"])
+def flow_move(flow_id):
+    d = request.form.get("dir")
+    store.move_flow(flow_id, -1 if d == "up" else 1)
+    return redirect(url_for("flows"))
 
 
 # ---------------------------------------------------------------- templates
@@ -3310,13 +3650,15 @@ SETTINGS_TMPL = """
   <div class="sec-desc">What happens to arriving mail and where it ends up.</div>
 
   <div class="card" id="sort-rules">
-    <div class="card-h"><h3>Rules</h3><a class="sub" href="{{ url_for('rules') }}">Manage rules →</a></div>
+    <div class="card-h"><h3>Rules &amp; flows</h3><span class="row"><a class="sub" href="{{ url_for('rules') }}">Manage rules →</a><a class="sub" href="{{ url_for('flows') }}">Flows →</a></span></div>
     <form method="post">
       <input type="hidden" name="section" value="behavior">
       <input type="hidden" name="scope" value="Rules">
       <div class="setrow"><div class="st-l"><b>Apply rule actions for real</b><span class="sub">Uncheck for dry-run (suggest only). Rules match on from / to / subject / body.</span></div>
         <div class="st-c"><label class="check"><input type="checkbox" name="rules_apply" value="1" {{ 'checked' if s.rules_apply else '' }}><input type="hidden" name="rules_apply" value="0"> <span>Enabled</span></label></div></div>
-      <div class="savebar"><button class="btn primary" type="submit">Save rules</button></div>
+      <div class="setrow"><div class="st-l"><b>Apply flow actions for real</b><span class="sub">Multi-step automations (Flows). Uncheck for dry-run.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="flows_apply" value="1" {{ 'checked' if s.flows_apply else '' }}><input type="hidden" name="flows_apply" value="0"> <span>Enabled</span></label></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save rules &amp; flows</button></div>
     </form>
   </div>
 
@@ -3445,7 +3787,7 @@ def _save_behavior_settings():
         store.set_setting("my_name", (f.get("my_name") or "Sean").strip())
     for k in ("rules_apply", "heuristics_enabled", "heuristic_autorefine", "llm_suggest",
               "llm_apply", "assistant_actions_apply", "index_enabled", "rerank_enabled",
-              "render_images"):
+              "render_images", "flows_apply"):
         if has(k):
             store.set_setting(k, f.get(k) not in (None, "", "0"))
     if has("index_folders"):

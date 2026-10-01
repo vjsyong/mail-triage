@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "llm_apply": False,           # act on LLM category -> folder mapping (off until trusted)
     "max_llm_per_hour": 40,
     "llm_batch_per_cycle": 5,
+    "flows_apply": True,          # run multi-step flow automations for real (off = dry-run)
     "render_images": False,       # viewer: load remote images without asking first
     "classify_concurrency": 8,    # parallel LLM requests for batch classification
     "heuristics_enabled": True,   # run trained heuristic classifiers before the LLM
@@ -86,6 +87,24 @@ CREATE TABLE IF NOT EXISTS rules (
     actions TEXT NOT NULL DEFAULT '{}',
     created INTEGER, updated INTEGER
 );
+CREATE TABLE IF NOT EXISTS flows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    position INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    name TEXT NOT NULL DEFAULT '',
+    match_mode TEXT NOT NULL DEFAULT 'all',
+    conditions TEXT NOT NULL DEFAULT '[]',
+    actions TEXT NOT NULL DEFAULT '[]',
+    created INTEGER, updated INTEGER
+);
+CREATE TABLE IF NOT EXISTS flow_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    flow_id INTEGER NOT NULL,
+    msgid TEXT NOT NULL DEFAULT '',
+    message_id INTEGER DEFAULT 0,
+    ran_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_flow_runs ON flow_runs(flow_id, msgid);
 CREATE TABLE IF NOT EXISTS templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL DEFAULT '',
@@ -353,6 +372,81 @@ def update_rule(rule_id, **fields):
 def delete_rule(rule_id):
     with db() as conn:
         conn.execute("DELETE FROM rules WHERE id=?", (rule_id,))
+
+
+# ---------------------------------------------------------------- flows
+
+def list_flows(enabled_only=False):
+    q = "SELECT * FROM flows"
+    if enabled_only:
+        q += " WHERE enabled=1"
+    q += " ORDER BY position, id"
+    with db() as conn:
+        return [dict(r) for r in conn.execute(q)]
+
+
+def get_flow(flow_id):
+    with db() as conn:
+        row = conn.execute("SELECT * FROM flows WHERE id=?", (flow_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_flow(name, match_mode, conditions, actions, enabled=True, position="bottom"):
+    now = int(time.time())
+    with db() as conn:
+        if position == "top":
+            pos = conn.execute("SELECT COALESCE(MIN(position), 0) - 1 FROM flows").fetchone()[0]
+        else:
+            pos = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 FROM flows").fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO flows (position, enabled, name, match_mode, conditions, actions, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (pos, 1 if enabled else 0, name, match_mode,
+             json.dumps(conditions), json.dumps(actions), now, now))
+        return cur.lastrowid
+
+
+def update_flow(flow_id, **fields):
+    if not fields:
+        return
+    fields["updated"] = int(time.time())
+    sets = ", ".join("%s=?" % k for k in fields)
+    with db() as conn:
+        conn.execute("UPDATE flows SET %s WHERE id=?" % sets, (*fields.values(), flow_id))
+
+
+def delete_flow(flow_id):
+    with db() as conn:
+        conn.execute("DELETE FROM flows WHERE id=?", (flow_id,))
+        conn.execute("DELETE FROM flow_runs WHERE flow_id=?", (flow_id,))
+
+
+def move_flow(flow_id, delta):
+    """Move a flow one slot up/down (renumbers positions to keep it simple)."""
+    with db() as conn:
+        ids = [r["id"] for r in conn.execute("SELECT id FROM flows ORDER BY position, id")]
+        if flow_id not in ids:
+            return
+        i = ids.index(flow_id)
+        j = i + (1 if delta > 0 else -1)
+        if not (0 <= j < len(ids)):
+            return
+        ids[i], ids[j] = ids[j], ids[i]
+        for pos, fid in enumerate(ids):
+            conn.execute("UPDATE flows SET position=? WHERE id=?", (pos, fid))
+
+
+def flow_already_ran(flow_id, key):
+    with db() as conn:
+        row = conn.execute("SELECT 1 FROM flow_runs WHERE flow_id=? AND msgid=? LIMIT 1",
+                           (flow_id, key)).fetchone()
+    return row is not None
+
+
+def record_flow_run(flow_id, key, message_id):
+    with db() as conn:
+        conn.execute("INSERT INTO flow_runs (flow_id, msgid, message_id, ran_at) VALUES (?,?,?,?)",
+                     (flow_id, key, message_id, int(time.time())))
 
 
 # ---------------------------------------------------------------- heuristics
