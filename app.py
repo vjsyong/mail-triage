@@ -1470,7 +1470,7 @@ window.guardApply = function(f){
   function setOpen(open){
     document.documentElement.classList.toggle('asb-open', open);
     try{ localStorage.setItem('asb_open', open ? '1' : '0'); }catch(e){}
-    if(open) ensure();
+    if(open){ ensure(); setTimeout(function(){ if(window.__mtCtxKey && window.frameCtxKey) window.frameCtxKey(window.__mtCtxKey); }, 450); }
   }
   document.getElementById('asb-toggle').addEventListener('click', function(ev){ ev.stopPropagation(); setOpen(true); });
   document.getElementById('asb-rail').addEventListener('click', function(ev){ if(ev.target === this || ev.target.tagName === 'SPAN') setOpen(true); });
@@ -1579,6 +1579,25 @@ window.guardApply = function(f){
     }
   }
   document.getElementById('dnew').addEventListener('click', function(){ newSid().then(function(ns){ openSession(ns); }); });
+  /* contextual intelligence: when the page context changes (new tab / entity),
+     start a fresh session so the chat is scoped to what is on screen. Old chats
+     stay in History. */
+  var sessCtx = null;
+  try{ sessCtx = sessionStorage.getItem('mtSessCtx'); }catch(e){}
+  function frameCtxKey(k){
+    if(!k) return;
+    if(sessCtx === null){ sessCtx = k; try{ sessionStorage.setItem('mtSessCtx', k); }catch(e){} return; }
+    if(k === sessCtx) return;
+    sessCtx = k; try{ sessionStorage.setItem('mtSessCtx', k); }catch(e){}
+    var empty = !!document.querySelector('#dchat .chat-empty');
+    var sb = document.getElementById('dsend');
+    var busy = !!(sb && sb.disabled);
+    if(empty || busy || !inited) return;
+    newSid().then(function(ns){ openSession(ns); });
+  }
+  window.frameCtxKey = frameCtxKey;
+  window.addEventListener('mt:ctxkey', function(e){ frameCtxKey(e.detail || ''); });
+  if(window.__mtCtxKey) frameCtxKey(window.__mtCtxKey);
   document.getElementById('dhist').addEventListener('click', function(){
     histList.classList.toggle('hidden');
     if(!histList.classList.contains('hidden')) loadHist();
@@ -1613,6 +1632,8 @@ window.guardApply = function(f){
           c.textContent = d.desc ? ('Context: ' + d.desc) : '';
           c.hidden = !d.desc;
         });
+        window.__mtCtxKey = d.key || '';
+        try { window.dispatchEvent(new CustomEvent('mt:ctxkey', {detail: window.__mtCtxKey})); } catch(e){}
       })
       .catch(function(){});
   }
@@ -2785,8 +2806,20 @@ FLOWS_TMPL = """
     <h1 class="page-title">Flows</h1>
     <div class="page-desc">Multi-step automations — WHEN a message matches, THEN the steps run in order. Conditions can be exact fields or AI (category / about-topic); deterministic conditions are checked first and skip the AI cost when they fail. Rules stay for simple single-action cases; rules run first.</div>
   </div>
-  <div class="row"><a class="btn primary" href="{{ url_for('flow_new') }}">New flow</a></div>
+  <div class="row">
+    <a class="btn small" href="{{ url_for('simulate') }}">Simulate a draft</a>
+    <a class="btn primary" href="{{ url_for('flow_new') }}">New flow</a>
+  </div>
 </div>
+{% if test_id %}
+<div class="card" style="border-left:3px solid var(--acc)">
+  <div class="row" style="align-items:center;gap:10px;flex-wrap:wrap">
+    <b>Flow saved.</b>
+    <span class="sub" style="flex:1;min-width:200px">Want to see it work? The simulator can write a sample email that matches it — nothing to type.</span>
+    <a class="btn primary small" href="{{ url_for('simulate', flow=test_id) }}">Simulate a draft that tests it →</a>
+  </div>
+</div>
+{% endif %}
 {% if flows %}
 <div class="stack">
   {% for f in flows %}
@@ -3358,7 +3391,8 @@ def flows():
         d = dict(f)
         d["summary"] = _flow_summary(f, tpl_names)
         rows.append(d)
-    return render(_render_src(FLOWS_TMPL, flows=rows))
+    return render(_render_src(FLOWS_TMPL, flows=rows,
+                              test_id=request.args.get("test", type=int) or 0))
 
 
 @app.route("/flows/new", methods=["GET", "POST"])
@@ -3369,10 +3403,10 @@ def flow_new():
             return render(_render_src(FLOW_EDIT_TMPL, **_flow_edit_context(
                 error=("Add at least one filter with a value." if not conds else "Add at least one step."),
                 name=name, mode=mode, conds=conds, steps=steps, enabled=enabled, is_new=True)))
-        store.add_flow(name, mode, conds, steps, enabled)
+        nid = store.add_flow(name, mode, conds, steps, enabled)
         store.log_event("info", "flow '%s' added (%d step(s))" % (name, len(steps)))
         flash("Flow added.", "ok")
-        return redirect(url_for("flows"))
+        return redirect(url_for("flows", test=nid))
     return render(_render_src(FLOW_EDIT_TMPL,
                               **_flow_edit_context(None, "", "all", [], [], True, is_new=True)))
 
@@ -3393,7 +3427,7 @@ def flow_edit(flow_id):
                           conditions=json.dumps(conds), actions=json.dumps(steps),
                           enabled=1 if enabled else 0)
         flash("Flow saved.", "ok")
-        return redirect(url_for("flows"))
+        return redirect(url_for("flows", test=flow_id))
     try:
         conds = json.loads(flow.get("conditions") or "[]")
     except (TypeError, ValueError):
@@ -4593,7 +4627,8 @@ CONVO_TMPL = r"""
     moves or flags mail, and proposes rules you approve with one click. Its thinking and every tool step stream live.</div>
     <div class="chips">
       {% for s in suggest %}
-      <button type="button" class="chip" data-fill="{{ s.prompt|e }}">{{ s.label }}</button>
+      {% if s.href %}<a class="chip" href="{{ s.href }}">{{ s.label }}</a>
+      {% else %}<button type="button" class="chip" data-fill="{{ s.prompt|e }}">{{ s.label }}</button>{% endif %}
       {% endfor %}
     </div>
   </div>
@@ -4836,6 +4871,26 @@ def _suggestions_for_path(path):
                 {"label": "Any deadline?", "prompt": "Does message %d mention a deadline or due date? Read it and tell me." % mid},
             ]
         key = "messages"
+    if key == "flows" and len(parts) >= 2 and parts[1].isdigit():
+        fid = int(parts[1])
+        fl = store.get_flow(fid)
+        if fl:
+            nm = (fl.get("name") or "#%d" % fid)[:60]
+            return [
+                {"label": "Test it in the simulator \u2192", "href": "/simulate?flow=%d" % fid},
+                {"label": "Explain this flow", "prompt": "Explain what flow #%d (\u201c%s\u201d) does, in two lines." % (fid, nm)},
+                {"label": "When does it fire?", "prompt": "Walk me through when flow #%d (\u201c%s\u201d) fires and what each step does." % (fid, nm)},
+            ]
+    if key == "rules" and len(parts) >= 2 and parts[1].isdigit():
+        rid = int(parts[1])
+        ru = store.get_rule(rid)
+        if ru:
+            nm = (ru.get("name") or "#%d" % rid)[:60]
+            return [
+                {"label": "Test it in the simulator \u2192", "href": "/simulate?rule=%d" % rid},
+                {"label": "Explain this rule", "prompt": "Explain what rule #%d (\u201c%s\u201d) matches and does, in two lines." % (rid, nm)},
+                {"label": "Any conflicts?", "prompt": "Would rule #%d (\u201c%s\u201d) conflict with my other rules? Check match order too." % (rid, nm)},
+            ]
     return ASSIST_SUGGESTIONS.get(key) or ASSIST_SUGGESTIONS["default"]
 
 
@@ -4944,8 +4999,8 @@ def _sse(event, data):
 @app.route("/assistant/context.json")
 def assistant_context_json():
     path = (request.args.get("path") or "")[:300]
-    _kind, desc, _block = engine.assistant_page_context(path)
-    return Response(json.dumps({"desc": desc}), mimetype="application/json")
+    _kind, desc, _block, key = engine.assistant_page_context(path)
+    return Response(json.dumps({"desc": desc, "key": key}), mimetype="application/json")
 
 
 @app.route("/assistant/stream", methods=["POST"])
@@ -6507,6 +6562,7 @@ SIMULATE_TMPL = """
     <div class="page-desc">Draft an email and see how the pipeline would treat it — rules, flows, classifier. Nothing is changed.</div>
   </div>
 </div>
+{% if prefill_note %}<div class="card" style="border-left:3px solid var(--acc)"><span class="sub">{{ prefill_note }}</span></div>{% endif %}
 <div class="simgrid">
   <form method="post">
     <div class="card">
@@ -6519,6 +6575,14 @@ SIMULATE_TMPL = """
       <input id="s-subj" type="text" name="subject" value="{{ form.subject }}">
       <label for="s-body">Body</label>
       <textarea id="s-body" name="body" rows="7">{{ form.body }}</textarea>
+      <div class="row" style="margin-top:12px;align-items:center;gap:8px">
+        <label for="s-prefill" style="margin:0">Prefill from</label>
+        <select id="s-prefill" name="t" style="max-width:280px">
+          <option value="">Pick a flow or rule&hellip;</option>
+          {% for tg in targets %}<option value="{{ tg.value }}">{{ tg.label }}</option>{% endfor %}
+        </select>
+        <button class="btn small" type="submit" formmethod="get" formaction="{{ url_for('simulate') }}">Generate an example draft</button>
+      </div>
       <label class="simcheck" for="s-llm">
         <input id="s-llm" type="checkbox" name="use_llm" value="1" {{ 'checked' if form.use_llm else '' }}>
         <span><span class="t">Ask the classifier</span>
@@ -6669,7 +6733,35 @@ def simulate():
         hit = _SIM_RESULTS.get(key)
         if hit:
             _ts, form, result = hit
-    return render(_render_src(SIMULATE_TMPL, form=form, result=result))
+    prefill_note = ""
+    if not key:
+        target = (request.args.get("t") or "").strip()
+        if not target:
+            if request.args.get("flow"):
+                target = "flow:" + (request.args.get("flow") or "")
+            elif request.args.get("rule"):
+                target = "rule:" + (request.args.get("rule") or "")
+        if target and ":" in target:
+            k, _, g = target.partition(":")
+            try:
+                gid = int(g)
+            except ValueError:
+                gid = 0
+            ex = engine.example_draft_for(k, gid) if gid else None
+            if ex:
+                form = {"from_addr": ex["draft"].get("from_addr") or "", "to_addr": "",
+                        "subject": ex["draft"].get("subject") or "",
+                        "body": ex["draft"].get("body") or "", "use_llm": True}
+                prefill_note = ("Draft %s to exercise %s \u201c%s\u201d \u2014 edit anything, then Run. "
+                                "Nothing runs until you do."
+                                % ("written by the model" if ex["draft"].get("by") == "llm"
+                                   else "built from its conditions", ex["kind"], ex["name"]))
+    targets = ([{"value": "flow:%d" % f["id"], "label": "Flow: %s" % (f.get("name") or f["id"])}
+                for f in store.list_flows()]
+               + [{"value": "rule:%d" % r["id"], "label": "Rule: %s" % (r.get("name") or r["id"])}
+                  for r in store.list_rules()])
+    return render(_render_src(SIMULATE_TMPL, form=form, result=result,
+                              prefill_note=prefill_note, targets=targets))
 
 
 @app.route("/fonts/<name>")

@@ -2757,14 +2757,14 @@ def main():
     engine.process_mailbox()
     crow = [r for r in store.messages(limit=3000) if r["subject"] == "Context target email"][0]
     cid = crow["id"]
-    kind, desc, block = engine.assistant_page_context("/messages/%d?f=needs_reply" % cid)
+    kind, desc, block, ckey = engine.assistant_page_context("/messages/%d?f=needs_reply" % cid)
     check("message page context resolves",
           kind == "message" and "Context target email" in desc
           and "CURRENT PAGE" in block and ("#%d" % cid) in block and "needs_reply" in block)
     fctx_id = store.add_flow("Context flow", "all",
                              [{"field": "subject", "op": "contains", "value": "ctx"}],
                              [{"type": "move", "folder": "Archive"}], enabled=True)
-    kind3, desc3, block3 = engine.assistant_page_context("/flows/%d/edit" % fctx_id)
+    kind3, desc3, block3, fkey = engine.assistant_page_context("/flows/%d/edit" % fctx_id)
     check("flow page context resolves", kind3 == "flow" and "Context flow" in block3
           and "CURRENT PAGE" in block3)
     r = client.get("/assistant/context.json?path=/messages/%d" % cid)
@@ -2780,6 +2780,33 @@ def main():
                   and "Context target email" in (c.get("system") or "")
                   for c in llm_server.calls)
     check("page context reached the model's system prompt", sys_hit)
+
+    section("T43 contextual intelligence: scoped sessions + simulator prefill")
+    check("context keys are compact and id-scoped",
+          ckey == "message:%d" % cid and fkey == "flow:%d" % fctx_id)
+    r = client.get("/assistant/context.json?path=/messages/%d" % cid)
+    check("context.json carries the key", ("message:%d" % cid).encode() in r.data)
+    sg = app_mod._suggestions_for_path("/flows/%d/edit" % fctx_id)
+    check("flow page suggests testing it in the simulator",
+          sg[0].get("href") == "/simulate?flow=%d" % fctx_id and len(sg) >= 2)
+    sg2 = app_mod._suggestions_for_path("/rules/%d/edit" % sim_rid)
+    check("rule page suggests the simulator too",
+          sg2[0].get("href") == "/simulate?rule=%d" % sim_rid)
+    nsid = client.post("/assistant/new.json").get_json()["sid"]
+    r = client.get("/assistant/panel?sid=%d&path=/flows/%d/edit" % (nsid, fctx_id))
+    check("drawer panel renders the simulator chip as a link",
+          ("/simulate?flow=%d" % fctx_id).encode() in r.data)
+    page2 = client.get("/messages/%d" % cid).data
+    check("page ships context-scoped session wiring",
+          b"mtSessCtx" in page2 and b"mt:ctxkey" in page2 and b"frameCtxKey" in page2)
+    r = client.get("/simulate?flow=%d" % fctx_id)
+    check("simulator prefills a draft for the flow",
+          b"to exercise flow" in r.data and b"Context flow" in r.data
+          and b'name="subject" value=""' not in r.data)
+    r = client.get("/flows?test=%d" % fctx_id)
+    check("flows page shows the 'test it' banner after saving",
+          b"Simulate a draft that tests it" in r.data
+          and ("/simulate?flow=%d" % fctx_id).encode() in r.data)
 
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"

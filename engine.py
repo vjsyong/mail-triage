@@ -1469,6 +1469,82 @@ def _sim_flow_steps(flow, settings):
         return ["(could not simulate: %r)" % exc]
 
 
+EXAMPLE_DRAFT_SYSTEM = """You write ONE short, realistic example email used to test an \
+email-automation rule or flow in a simulator. Reply with STRICT JSON only:
+{"from": "sender@example.com", "subject": "...", "body": "..."}
+Rules for the example:
+- It MUST satisfy every condition of the rule/flow below (sender, subject keywords, etc).
+- Prefer the real sender addresses named in the conditions; otherwise use example.com.
+- Keep it 2-4 sentences, realistic, like real mail a person receives.
+- Do not include any explanation outside the JSON."""
+
+
+def _fallback_draft(kind, row):
+    """Deterministic example built from the conditions, when the model is off."""
+    try:
+        conds = json.loads(row.get("conditions") or "[]")
+    except (TypeError, ValueError):
+        conds = []
+    from_addr, subject, body = "", "", []
+    for c in conds:
+        fld = (c.get("field") or "").lower()
+        val = str(c.get("value") or "").strip()
+        if not val:
+            continue
+        if fld == "from":
+            from_addr = val if ("@" in val and " " not in val) else (
+                "%s@example.com" % re.sub(r"[^a-z0-9]+", ".", val.lower()).strip("."))
+        elif fld == "subject":
+            subject = ("Example: " + val)[:180]
+        elif fld in ("body", "text"):
+            body.append(val)
+    if not subject:
+        subject = "Example email for %s" % (row.get("name") or "the test")
+    if not from_addr:
+        from_addr = "someone@example.com"
+    body_text = ((" ".join(body) + " ") if body else "") + (
+        "This is a sample email written to test the \u201c%s\u201d %s. Edit anything and run the simulation."
+        % (row.get("name"), kind))
+    return {"from_addr": from_addr, "subject": subject, "body": body_text}
+
+
+def example_draft_for(kind, gid):
+    """One example email that exercises the given flow/rule: model-written when
+    possible, deterministic fallback from the conditions. Returns
+    {draft: {from_addr,subject,body,by}, name, kind} or None."""
+    kind = (kind or "").lower()
+    if kind == "flow":
+        row = store.get_flow(gid)
+        text = _flows_to_text([row]) if row else ""
+    elif kind == "rule":
+        row = store.get_rule(gid)
+        text = _rules_to_text([row]) if row else ""
+    else:
+        return None
+    if not row:
+        return None
+    name = row.get("name") or ("#%d" % gid)
+    draft = None
+    try:
+        content = LLMClient()._chat(EXAMPLE_DRAFT_SYSTEM + "\n\n" + text,
+                                    "Write the example email now.", json_mode=True)
+        m = re.search(r"\{.*\}", content or "", re.S)
+        if m:
+            obj = json.loads(m.group(0))
+            fr = str(obj.get("from") or "").strip()[:120]
+            su = str(obj.get("subject") or "").strip()[:200]
+            bo = str(obj.get("body") or "").strip()[:2000]
+            if su or bo:
+                draft = {"from_addr": fr, "subject": su, "body": bo, "by": "llm"}
+    except Exception as exc:
+        store.log_event("debug", "example draft generation failed (%r); using conditions" % exc)
+        draft = None
+    if not draft:
+        draft = _fallback_draft(kind, row)
+        draft["by"] = "rules"
+    return {"draft": draft, "name": name, "kind": kind}
+
+
 def simulate_email(from_addr, subject, body, to_addr="", use_llm=False):
     """Dry-run of the triage pipeline over a drafted email: which guard/rule
     matches, which flows would fire, and (optionally) what the classifier thinks.
@@ -2989,7 +3065,9 @@ def _assistant_context():
 
 def assistant_page_context(path):
     """The page the user is looking at, for the assistant's system prompt.
-    Returns (kind, short_desc, block). Never includes credentials."""
+    Returns (kind, short_desc, block, key). Never includes credentials. The key is
+    a compact context id (message:3563, flow:15, ...) used by the drawer to scope
+    chat sessions to the page."""
     path = (path or "").strip()[:300]
     p = path.split("?", 1)[0]
     q = path.split("?", 1)[1] if "?" in path else ""
@@ -3002,7 +3080,7 @@ def assistant_page_context(path):
     if m:
         row = store.get_message(int(m.group(1)))
         if not row:
-            return "message", "message #%s (no longer exists)" % m.group(1), ""
+            return "message", "message #%s (no longer exists)" % m.group(1), "", "message:%s" % m.group(1)
         conf = row.get("llm_confidence")
         block = (
             "CURRENT PAGE: the user is reading ONE specific email right now%s.\n"
@@ -3022,7 +3100,7 @@ def assistant_page_context(path):
                (" %.0f%%" % (conf * 100)) if conf is not None else "",
                row.get("llm_summary") or "", row.get("llm_reason") or "",
                row["id"], row["id"]))
-        return "message", "message \u00b7 %s" % ((row.get("subject") or "(no subject)")[:70]), block
+        return "message", "message \u00b7 %s" % ((row.get("subject") or "(no subject)")[:70]), block, "message:%d" % row["id"]
     m = re.match(r"^/flows/(\d+)", p)
     if m:
         fl = store.get_flow(int(m.group(1)))
@@ -3030,12 +3108,12 @@ def assistant_page_context(path):
             block = ("CURRENT PAGE: the user is viewing one flow. When they say \u201cthis flow\u201d or "
                      "\u201cit\u201d, they mean flow #%d below - pass this id to flow tools when acting.\n\n%s"
                      % (fl["id"], _flows_to_text([fl])))
-            return "flow", "flow \u00b7 %s" % ((fl.get("name") or ("#%d" % fl["id"]))[:70]), block
+            return "flow", "flow \u00b7 %s" % ((fl.get("name") or ("#%d" % fl["id"]))[:70]), block, "flow:%d" % fl["id"]
     if p == "/flows/new":
         return ("flow", "new flow editor",
                 "CURRENT PAGE: the user is in the NEW FLOW editor building a draft flow. A bare "
                 "\u201cthis flow\u201d refers to that draft; they likely want help designing conditions "
-                "and steps.")
+                "and steps.", "flow:new")
     m = re.match(r"^/rules/(\d+)", p)
     if m:
         ru = store.get_rule(int(m.group(1)))
@@ -3043,11 +3121,11 @@ def assistant_page_context(path):
             block = ("CURRENT PAGE: the user is viewing one rule. When they say \u201cthis rule\u201d or "
                      "\u201cit\u201d, they mean rule #%d below - pass this id to rule tools when acting.\n\n%s"
                      % (ru["id"], _rules_to_text([ru])))
-            return "rule", "rule \u00b7 %s" % ((ru.get("name") or ("#%d" % ru["id"]))[:70]), block
+            return "rule", "rule \u00b7 %s" % ((ru.get("name") or ("#%d" % ru["id"]))[:70]), block, "rule:%d" % ru["id"]
     if p == "/rules/new":
         return ("rule", "new rule editor",
                 "CURRENT PAGE: the user is in the NEW RULE editor. A bare \u201cthis rule\u201d refers to "
-                "that draft.")
+                "that draft.", "rule:new")
     m = re.match(r"^/classifiers/(\d+)", p)
     if m:
         h = store.get_heuristic(int(m.group(1)))
@@ -3056,7 +3134,7 @@ def assistant_page_context(path):
                      "enabled: %s). \u201cthis classifier\u201d means it."
                      % (h["id"], h.get("name"), h.get("kind"), h.get("category"),
                         "yes" if h.get("enabled") else "no"))
-            return "classifier", "classifier \u00b7 %s" % ((h.get("name") or ("#%d" % h["id"]))[:70]), block
+            return "classifier", "classifier \u00b7 %s" % ((h.get("name") or ("#%d" % h["id"]))[:70]), block, "classifier:%d" % h["id"]
     m = re.match(r"^/templates/(\d+)", p)
     if m:
         t2 = store.get_template(int(m.group(1)))
@@ -3064,7 +3142,7 @@ def assistant_page_context(path):
             body = (t2.get("body") or "")[:600]
             block = ("CURRENT PAGE: the user is editing reply template #%d %r. Its current text:\n%s"
                      % (t2["id"], t2.get("name"), body))
-            return "template", "template \u00b7 %s" % ((t2.get("name") or ("#%d" % t2["id"]))[:70]), block
+            return "template", "template \u00b7 %s" % ((t2.get("name") or ("#%d" % t2["id"]))[:70]), block, "template:%d" % t2["id"]
     if p == "/messages":
         try:
             n = store.count_messages((re.search(r"(?:^|&)f=([a-z_]+)", q) or [None, "all"])[1] or "all")
@@ -3072,18 +3150,20 @@ def assistant_page_context(path):
             n = 0
         return ("messages", "messages list%s" % filt_note(),
                 "CURRENT PAGE: the user is on the messages list%s (%d matching). No single message "
-                "is selected." % (filt_note(), n))
+                "is selected." % (filt_note(), n), "messages")
     lists = {"/flows": "flows list", "/rules": "rules list", "/classifiers": "classifiers list",
              "/templates": "templates list", "/settings": "settings", "/more": "more",
              "/accounts": "accounts", "/log": "activity log", "/simulate": "simulator",
              "/proxy/log": "proxy log"}
     if p in lists:
         return ("page", lists[p],
-                "CURRENT PAGE: the user is on the %s. No specific item is selected." % lists[p])
+                "CURRENT PAGE: the user is on the %s. No specific item is selected." % lists[p],
+                "page:" + p.strip("/"))
     if p:
         return ("page", (p.rstrip("/")[:60] or "/"),
-                "CURRENT PAGE: the user is on %s. No specific item is selected." % p)
-    return "", "", ""
+                "CURRENT PAGE: the user is on %s. No specific item is selected." % p,
+                "page:" + p.strip("/"))
+    return "", "", "", ""
 
 
 def _repetition_loop(text, tail=200):
@@ -3920,7 +4000,7 @@ class AssistantAgent:
                                       "permissions": agent_permissions_text()}
                   + "\n\n" + _assistant_context())
         if self.page_path:
-            _kind, _desc, _block = assistant_page_context(self.page_path)
+            _kind, _desc, _block, _key = assistant_page_context(self.page_path)
             if _block:
                 system += "\n\n" + _block
         convo = [{"role": m["role"], "content": m["content"]}

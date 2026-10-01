@@ -94,3 +94,28 @@ clears everything.
 - Verified live: drawer chat from a message returned the subject+sender from the
   page block; the chip carried across to the Assistant tab; flow/rule contexts
   resolve with real ids.
+
+
+### Contextual intelligence (same day): scoped sessions + proactive prefill
+- **Sessions scope to the page.** `assistant_page_context` now returns a compact
+  context KEY (message:3563, flow:15, rule:2, page:/settings). The base tracker
+  publishes it (`window.__mtCtxKey` + `mt:ctxkey` event); the drawer compares it to
+  `mtSessCtx` (sessionStorage) and silently starts a fresh session when the context
+  changes to a non-empty, non-streaming chat. Old conversations stay in History.
+  Empty chats just re-scope (no session spam). First load adopts (resumes).
+- **Entity suggestion chips.** `_suggestions_for_path` gained entity-level lists:
+  on a flow/rule page the first chip is "Test it in the simulator →" — a LINK chip
+  (new: chips may carry `href` instead of a prompt) straight to
+  `/simulate?flow=N` / `?rule=N`; the rest are explain/conflict prompts.
+- **Simulator prefill (nothing to type).** `engine.example_draft_for(kind, gid)`
+  writes ONE example email that satisfies the rule/flow conditions — model-written
+  (JSON mode) with a deterministic fallback built from the conditions. `/simulate`
+  accepts `?flow=N` / `?rule=N` / `?t=flow:N` (also via the "Prefill from" select +
+  "Generate an example draft" GET button inside the draft card); the form arrives
+  filled with a note explaining where the draft came from. Nothing runs until Run.
+- **After saving a flow**, `/flows` redirects with `?test=<id>` and shows a banner:
+  "Flow saved. … Simulate a draft that tests it →" (one click to the prefilled sim).
+- Verified live: message → chat → switch to a flow page = fresh scoped session
+  (DB-confirmed session count +1 per switch, send + reply verified); flow page chips
+  render the simulator link; click-through lands on a model-written prefilled draft
+  ("PhD Inquiry: Research Opportunities in your Lab" for the real PhD flow).
