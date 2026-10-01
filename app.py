@@ -336,8 +336,10 @@ a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 .vh{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .backlink{margin:0 0 4px;font-size:.84rem}
 #rules th:nth-child(1),#rules td:nth-child(1){white-space:nowrap}
+#rules .tbl th:nth-child(3),#rules .tbl td:nth-child(3){min-width:140px}
 #bulk .tbl th:nth-child(2),#bulk .tbl td:nth-child(2){white-space:nowrap}
 #classifiers .tbl th:nth-child(7),#classifiers .tbl td:nth-child(7){white-space:nowrap}
+#classifiers .tbl th:nth-child(2),#classifiers .tbl td:nth-child(2){white-space:nowrap}
 .skip:focus{left:8px}
 /* ---- app shell ---- */
 .app{display:flex;min-height:100vh}
@@ -371,7 +373,7 @@ h3{font-size:.98rem;margin:0 0 6px;font-weight:600;letter-spacing:-.01em}
 h4{font-size:.9rem;margin:14px 0 4px;font-weight:600;letter-spacing:-.01em}
 .sub{color:var(--dim);font-size:.86rem}
 .mono,code{font-family:var(--mono);font-size:.84rem;background:var(--card2);border:1px solid var(--line);
-padding:1px 5px;word-break:break-all}
+padding:1px 5px;overflow-wrap:anywhere}
 .page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 14px}
 .page-title{font-size:1.3rem;font-weight:700;letter-spacing:-.03em;margin:0}
 .page-desc{color:var(--dim);font-size:.88rem;margin-top:3px}
@@ -586,7 +588,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .tbl.mcards .rowacts{opacity:1}
   #bulk .tbl.mcards tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;position:relative;padding:10px 46px 10px 12px}
   #bulk .tbl.mcards td.sel{float:none;position:absolute;top:12px;right:12px}
-  #bulk .tbl.mcards td.sel input{width:20px;height:20px}
+  #bulk .tbl.mcards td.sel input{width:24px;height:24px}
   #bulk .tbl.mcards td:nth-child(2){order:2;margin-left:auto;white-space:nowrap}
   #bulk .tbl.mcards td:nth-child(3){order:1;font-weight:600;color:var(--fg);max-width:72%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #bulk .tbl.mcards td:nth-child(4){order:3;flex:1 1 100%;min-width:0}
@@ -597,8 +599,10 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .empty{padding:28px 14px}
   .empty .btn{width:100%;display:inline-flex;justify-content:center}
   .r-head{flex-direction:column;align-items:stretch}
-  .r-head .row{display:flex;gap:8px}
+  .r-head .row{display:flex;flex-wrap:wrap;gap:8px}
   .r-head .row .btn{flex:1;justify-content:center;text-align:center}
+  .r-head .row form.inline{flex:1 1 100%}
+  .r-head .row form.inline .btn{width:100%}
   .rowacts .ra-inline{display:none}
   .rowacts .ra-menu{display:inline-block}
   #rules .tbl.mcards tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
@@ -627,7 +631,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   #templates .tbl.mcards td:nth-child(2){order:2;flex:1 1 100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   #templates .tbl.mcards td:nth-child(3){order:3;flex:1 1 100%;margin-top:6px}
   #templates .tbl.mcards .rowacts{justify-content:flex-start !important;gap:8px;min-height:44px}
-  #rules .tbl.mcards .rowacts .btn,#classifiers .tbl.mcards .rowacts .btn,#templates .tbl.mcards .rowacts .btn{min-height:40px}
+  #rules .tbl.mcards .rowacts .btn,#classifiers .tbl.mcards .rowacts .btn,#templates .tbl.mcards .rowacts .btn{min-height:44px}
   .row.chiprow{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px;max-width:100%}
   .row.chiprow::-webkit-scrollbar{display:none}
   .row.chiprow>*{flex:none}
@@ -641,14 +645,14 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .dsx .tbl.mcards td:nth-child(3) select{width:100% !important}
   .dsx .tbl.mcards td:nth-child(3) form.inline::before{content:'Label: ';font-size:.78rem;color:var(--dim)}
   .dsx .tbl.mcards td:nth-child(4){order:4;flex:1 1 100%;margin-top:6px;text-align:left}
-  .dsx .tbl.mcards td:nth-child(4) .btn{min-height:38px}
+  .dsx .tbl.mcards td:nth-child(4) .btn{min-height:44px}
   .auth-paste .row{flex-wrap:wrap !important}
   .auth-paste .row input{flex:1 1 100%}
   .auth-paste .row .btn{flex:1 1 100%}
   .menu-pop{max-width:calc(100vw - 24px)}
   .spread>div:first-child{min-width:0}
   .spread h3{overflow-wrap:anywhere}
-  .card .spread + .row .btn{min-height:42px}
+  .card .spread + .row .btn{min-height:44px}
   .chat-head{padding-top:env(safe-area-inset-top)}
   .sheet-h{padding-top:calc(8px + env(safe-area-inset-top))}
   .dw-head{padding-top:max(10px, env(safe-area-inset-top))}
@@ -658,7 +662,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .tchips::-webkit-scrollbar{display:none}
   .tchips .chip{flex:none;height:34px}
   .tactions{display:flex;gap:8px;margin:10px 12px 0 0}
-  .tactions .btn{flex:1;min-height:38px}
+  .tactions .btn{flex:1;min-height:44px}
   .mhide{display:none}
   .pager{padding:12px;gap:8px}
   .pager>a.btn{flex:1;display:flex;align-items:center;justify-content:center;min-height:40px}
@@ -666,6 +670,10 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .pager .pp{display:none}
   .pager .pageno{flex:1 1 100%;text-align:center}
   .stat{min-width:calc(50% - 10px);margin-right:8px}
+}
+@media(min-width:768px){
+  #bulk .tbl.mcards td:nth-child(4) a{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  #bulk .tbl.mcards td:nth-child(4) div.sub{margin-top:3px}
 }
 @media(prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
@@ -677,7 +685,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .assistant-rail .arow{display:flex;gap:8px;align-items:center;padding:9px 11px;border-bottom:1px solid var(--line)}
 .assistant-rail .arow:last-child{border-bottom:0}
 .assistant-rail .arow.cur{background:var(--hover)}
-.assistant-rail .arow .t{flex:1;min-width:0;font-size:.84rem;font-weight:500;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.assistant-rail .arow .t{flex:1;min-width:0;font-size:.84rem;font-weight:500;color:var(--fg);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .assistant-rail .arow .t:hover{text-decoration:underline}
 .assistant-rail .arow .when{font-size:.7rem;color:var(--dim);white-space:nowrap}
 .assistant-flex{display:flex;flex-direction:column;height:calc(100vh - 300px);min-height:480px}
@@ -1884,9 +1892,9 @@ DASH_TMPL = """
       {% for m in messages %}
       <tr>
         <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
-        <td class="sub">{{ m.from_addr[:38] }}</td>
-        <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:70] or '(no subject)' }}</a>
-          {% if m.llm_summary %}<div class="sub" style="font-size:.77rem">{{ m.llm_summary[:110] }}</div>{% endif %}</td>
+        <td class="sub" title="{{ m.from_addr }}">{{ m.from_addr|clip(38) }}</td>
+        <td><a href="{{ url_for('message_detail', mid=m.id) }}" title="{{ m.subject }}">{{ m.subject|clip(70) or '(no subject)' }}</a>
+          {% if m.llm_summary %}<div class="sub" style="font-size:.77rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(110) }}</div>{% endif %}</td>
         <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span></td>
         <td class="sub">{{ m.llm }}</td>
       </tr>
@@ -3385,9 +3393,9 @@ MESSAGES_TMPL = """
       <tr>
         <td class="sel"><input type="checkbox" name="ids" value="{{ m.id }}" aria-label="Select message"></td>
         <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
-        <td class="sub">{{ m.from_addr[:34] }}</td>
-        <td><a href="{{ url_for('message_detail', mid=m.id) }}">{{ m.subject[:84] or '(no subject)' }}</a>
-          {% if m.llm_summary %}<div class="sub" style="font-size:.78rem">{{ m.llm_summary[:150] }}</div>{% endif %}</td>
+        <td class="sub" title="{{ m.from_addr }}">{{ m.from_addr|clip(34) }}</td>
+        <td><a href="{{ url_for('message_detail', mid=m.id) }}" title="{{ m.subject }}">{{ m.subject|clip(84) or '(no subject)' }}</a>
+          {% if m.llm_summary %}<div class="sub" style="font-size:.78rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(150) }}</div>{% endif %}</td>
         <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
         <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
         <td class="sub">{{ m.llm }}</td>
@@ -3771,13 +3779,22 @@ def _find_message_location(mc, msgid, first_folder=None):
     return None
 
 
+@app.template_filter("clip")
+def clip(s, n):
+    """Truncate a display value to n chars, adding an ellipsis only when it truncates."""
+    s = s or ""
+    return s if len(s) <= n else s[:n] + "…"
+
+
 def _display_date(raw):
-    """Human date for the viewer; falls back to the raw header value."""
+    """Human date for the viewer, in the display timezone; falls back to the raw header value."""
     if not raw:
         return ""
     try:
         from email.utils import parsedate_to_datetime
-        return parsedate_to_datetime(raw).strftime("%a %d %b %Y · %H:%M %z")
+        off = int(round(tz_offset_hours() * 3600))
+        shifted = parsedate_to_datetime(raw).timestamp() + off
+        return time.strftime("%a %d %b %Y · %H:%M", time.gmtime(shifted)) + " " + tz_label()
     except Exception:
         return raw
 
