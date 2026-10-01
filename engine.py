@@ -979,6 +979,8 @@ class LLMClient:
             "max_tokens": 2500,
             "stream": True,
             "stream_options": {"include_usage": True},
+            # mild anti-repetition: small local models can fall into verbatim CoT loops
+            "repetition_penalty": 1.05,
             "messages": [{"role": "system", "content": system}] + messages,
         }
         if tools:
@@ -993,10 +995,16 @@ class LLMClient:
         while True:
             r = requests.post(base + "/chat/completions", json=payload,
                               headers=headers, timeout=self.timeout, stream=True)
-            if r.status_code in (400, 404, 422) and "chat_template_kwargs" in payload:
-                payload.pop("chat_template_kwargs", None)
-                r.close()
-                continue
+            if r.status_code in (400, 404, 422):
+                # strict OpenAI-compatible servers reject our extensions one by one
+                if "chat_template_kwargs" in payload:
+                    payload.pop("chat_template_kwargs", None)
+                    r.close()
+                    continue
+                if "repetition_penalty" in payload:
+                    payload.pop("repetition_penalty", None)
+                    r.close()
+                    continue
             break
         try:
             if r.status_code != 200:
@@ -1903,6 +1911,8 @@ How to work
 - BEFORE proposing a rule, call list_rules (or mailbox_overview) and check what already exists. If a similar rule exists (same sender/domain/subject), propose an UPDATE instead of a near-duplicate: pass updates_rule_id with the rule as it should look afterwards (name/conditions/actions). If you propose something that overlaps an existing rule without updates_rule_id, the app flags it to the user, so handle it yourself first.
 - Heuristic classifiers (train_classifier / list_classifiers / manage_classifier / evaluate_classifier): deterministic trained models that run BEFORE the LLM in triage. Suggest them when the user wants less LLM dependence, when a category has regular labelled mail (tags), or when classification feels inconsistent. decision_list suits sender/keyword patterns, naive_bayes fuzzier ones; retrain via retrain_id as labels grow; evaluate before claiming quality. After a tagging session, suggest training one when a category has around 8+ tagged examples.
 - Only tell the user a rule was proposed once propose_rule has returned ok:true in this turn; never claim a proposal you did not actually make.
+- Rule housekeeping: call list_rules for the exact ids. If the user asks to REMOVE/DELETE a rule (for example an exact duplicate), call delete_rule with that id - delete one of a duplicate pair and keep the other. If they only want it paused ("turn it off for now"), call set_rule_enabled. Only touch rules the user asked about; if it is unclear which rule, ask one short question first.
+- Decide once, then act. State one short plan in your thinking, call the tools, then answer. Never repeat the same reasoning paragraph; if a task needs a capability you do not have, say so in ONE sentence and offer the closest alternative instead of re-reading your tool list.
 - Condition values of 3 characters or fewer (letters/digits) match whole words: a value "PO" will not match "support" or "report".
 - At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.
 
@@ -1978,6 +1988,15 @@ ASSISTANT_TOOLS = [
     _fn("list_tagged",
         "List the messages the user has manually tagged with their own labels (Messages page -> select rows -> Tag). Use when they ask to learn from their manual tagging; then turn the patterns into propose_rule calls.",
         {"limit": {"type": "integer", "description": "max rows (default 40, max 100)"}}),
+    _fn("delete_rule",
+        "Permanently delete one filter rule (rule_id from list_rules). Use when the user asks to remove/delete a rule - e.g. an exact duplicate (delete one and keep the other). Deleting cannot be undone; only delete rules the user has explicitly asked about. To just pause a rule use set_rule_enabled instead.",
+        {"rule_id": {"type": "integer", "description": "id shown by list_rules"}},
+        required=("rule_id",)),
+    _fn("set_rule_enabled",
+        "Enable or disable one filter rule without deleting it. Use for \"turn it off for now\" or \"stop sorting Y\" requests.",
+        {"rule_id": {"type": "integer"},
+         "enabled": {"type": "boolean", "description": "false pauses the rule, true resumes it"}},
+        required=("rule_id", "enabled")),
     _fn("propose_rule",
         "Propose a filter rule for the user to approve with one click. Approved rules sort matching mail automatically (top to bottom, first match wins). A rule with NO actions is a GUARD: matching mail stays put and nothing else (later rules, LLM filing) can move it.",
         {"name": {"type": "string", "description": "short rule name"},
@@ -2084,6 +2103,8 @@ AGENT_CAPS = [
      "Create new (empty) folders."),
     ("classifiers", "Manage classifiers", "caution", ["train_classifier", "manage_classifier"],
      "Train, enable or delete heuristic classifiers."),
+    ("rules", "Manage rules", "caution", ["delete_rule", "set_rule_enabled"],
+     "Delete a filter rule, or pause/resume one without deleting (proposals stay one-click)."),
     ("draft", "Draft replies", "safe", ["draft_reply"],
      "Write a reply and save it to Drafts for review."),
     ("delete", "Delete messages", "dangerous", ["delete_message"],
@@ -2356,6 +2377,16 @@ def _assistant_context():
     )
 
 
+def _repetition_loop(text, tail=200):
+    """True when the last `tail` chars already appeared earlier in the same turn -
+    catches the degenerate \"keeps repeating the same paragraph\" failure mode
+    before it eats the whole token budget."""
+    if len(text) < tail * 2 + 40:
+        return False
+    probe = text[-tail:]
+    return probe in text[:-tail]
+
+
 class AssistantAgent:
     """Streaming tool-calling harness for the assistant chat.
 
@@ -2480,6 +2511,19 @@ class AssistantAgent:
                     return None, "to is required"
                 return ("SEND new mail to %s: '%s'"
                         % (to, _truncate(args.get("subject") or "(no subject)", 60)), dict(args))
+        if name in ("delete_rule", "set_rule_enabled"):
+            try:
+                rid = int(args.get("rule_id") or 0)
+            except (TypeError, ValueError):
+                rid = 0
+            rule = store.get_rule(rid) if rid else None
+            if not rule:
+                return None, "rule %s not found (use list_rules)" % args.get("rule_id")
+            if name == "delete_rule":
+                return "Delete rule #%d '%s'" % (rid, rule["name"]), {"rule_id": rid}
+            en = _as_bool(args.get("enabled"))
+            return ("%s rule #%d '%s'" % ("Enable" if en else "Disable", rid, rule["name"]),
+                    {"rule_id": rid, "enabled": bool(en)})
         row, folder, uid, err = self._resolve_message(args)
         if err:
             return None, err
@@ -2841,6 +2885,44 @@ class AssistantAgent:
                            "note": "These are the user's manual labels; propose rules that reproduce them.",
                            "tagged": items}}
 
+    def _tool_delete_rule(self, a):
+        try:
+            rid = int(a.get("rule_id") or 0)
+        except (TypeError, ValueError):
+            rid = 0
+        rule = store.get_rule(rid) if rid else None
+        if not rule:
+            return {"ok": False,
+                    "summary": "no rule with id %s (call list_rules for the ids)" % a.get("rule_id"),
+                    "result": {"error": "rule_not_found"}}
+        store.delete_rule(rid)
+        store.log_event("info", "assistant deleted rule #%d '%s'" % (rid, rule["name"]))
+        return {"ok": True, "summary": "deleted rule #%d '%s'" % (rid, rule["name"]),
+                "result": {"deleted": {"id": rid, "name": rule["name"],
+                                       "conditions": _safe_json(rule["conditions"], []),
+                                       "actions": _safe_json(rule["actions"], {})}}}
+
+    def _tool_set_rule_enabled(self, a):
+        try:
+            rid = int(a.get("rule_id") or 0)
+        except (TypeError, ValueError):
+            rid = 0
+        rule = store.get_rule(rid) if rid else None
+        if not rule:
+            return {"ok": False,
+                    "summary": "no rule with id %s (call list_rules for the ids)" % a.get("rule_id"),
+                    "result": {"error": "rule_not_found"}}
+        en = _as_bool(a.get("enabled"))
+        if en is None:
+            return {"ok": False, "summary": "enabled (true/false) is required",
+                    "result": {"error": "enabled is required"}}
+        store.update_rule(rid, enabled=1 if en else 0)
+        store.log_event("info", "assistant %s rule #%d '%s'"
+                        % ("enabled" if en else "disabled", rid, rule["name"]))
+        return {"ok": True,
+                "summary": "%s rule #%d '%s'" % ("enabled" if en else "disabled", rid, rule["name"]),
+                "result": {"rule": {"id": rid, "name": rule["name"], "enabled": bool(en)}}}
+
     def _tool_propose_rule(self, a):
         norm, errors = _validate_rule(a)
         if not norm:
@@ -3031,6 +3113,8 @@ class AssistantAgent:
         steps = 0
         tools_mode = True
         error = None
+        loop_stopped = False
+        finish_reason = None
         try:
             while True:
                 steps += 1
@@ -3038,18 +3122,39 @@ class AssistantAgent:
                 calls = []
                 turn_reasoning = []
                 turn_content = []
+                turn_probe = []
+                probe_checked = 0
                 try:
-                    for ev in llm.chat_stream(system, convo, tools=use_tools, thinking=True):
-                        if ev["type"] == "reasoning_delta":
-                            turn_reasoning.append(ev["text"])
-                            yield {"type": "reasoning", "text": ev["text"]}
-                        elif ev["type"] == "content_delta":
-                            turn_content.append(ev["text"])
-                            yield {"type": "content", "text": ev["text"]}
-                        elif ev["type"] == "tool_calls":
-                            calls = ev["calls"]
-                        elif ev["type"] == "turn_done":
-                            usage = ev.get("usage") or usage
+                    gen = llm.chat_stream(system, convo, tools=use_tools, thinking=True)
+                    try:
+                        for ev in gen:
+                            if ev["type"] == "reasoning_delta":
+                                turn_reasoning.append(ev["text"])
+                                turn_probe.append(ev["text"])
+                                yield {"type": "reasoning", "text": ev["text"]}
+                            elif ev["type"] == "content_delta":
+                                turn_content.append(ev["text"])
+                                turn_probe.append(ev["text"])
+                                yield {"type": "content", "text": ev["text"]}
+                            elif ev["type"] == "tool_calls":
+                                calls = ev["calls"]
+                            elif ev["type"] == "turn_done":
+                                usage = ev.get("usage") or usage
+                                finish_reason = ev.get("finish_reason") or finish_reason
+                            if ev["type"] in ("reasoning_delta", "content_delta"):
+                                joined = "".join(turn_probe)
+                                if len(joined) - probe_checked >= 64:
+                                    probe_checked = len(joined)
+                                    if _repetition_loop(joined):
+                                        loop_stopped = True
+                                        store.log_event("warn", "assistant: degenerate repetition "
+                                                        "detected - turn stopped early")
+                                        break
+                    finally:
+                        try:
+                            gen.close()
+                        except Exception:
+                            pass
                 except Exception as exc:
                     if use_tools and _looks_like_tools_unsupported(exc):
                         store.log_event("info", "assistant: the model rejected tools (%s) — "
@@ -3058,6 +3163,8 @@ class AssistantAgent:
                         continue
                     raise
                 reasoning_all.append("".join(turn_reasoning))
+                if loop_stopped:
+                    break
                 if not calls or use_tools is None:
                     reply_parts = turn_content
                     break
@@ -3107,13 +3214,22 @@ class AssistantAgent:
             return
         reply = "".join(reply_parts).strip()
         if not reply:
-            reply = ("Proposed %d rule(s) — add them below, or ask for changes." % len(self.proposals)
-                     if self.proposals else "(no reply)")
+            if loop_stopped:
+                reply = ("I caught myself going in circles and stopped before doing anything — nothing was "
+                         "changed. Try phrasing it differently, or split it into smaller asks.")
+            elif self.proposals:
+                reply = "Proposed %d rule(s) — add them below, or ask for changes." % len(self.proposals)
+            elif finish_reason == "length":
+                reply = ("That turn ran out of room while I was still working it out — nothing was changed. "
+                         "Try again with a more direct request.")
+            else:
+                reply = "(no reply)"
         reasoning_text = "\n".join(r for r in reasoning_all if r)
         thought_summary = self._summarize_thoughts(reasoning_text) if reasoning_text else ""
         meta = {"reasoning": _truncate(reasoning_text, 20000),
                 "reasoning_summary": thought_summary,
                 "tools": self.tools_log, "steps": steps, "usage": usage,
+                "loop_stopped": loop_stopped, "finish_reason": finish_reason,
                 "actions_live": self.actions_apply, "permissions": self.perms}
         msg_id = store.add_assistant_message("assistant", reply[:4000],
                                              proposals=json.dumps(self.proposals),

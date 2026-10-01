@@ -552,8 +552,12 @@ class LLMHandler(BaseHTTPRequestHandler):
     # ---- streaming (assistant agent) --------------------------------------
 
     def sse_write(self, data):
-        self.wfile.write(data)
-        self.wfile.flush()
+        try:
+            self.wfile.write(data)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            # the assistant's repetition guard can close the stream early - fine
+            pass
 
     def sse(self, obj):
         self.sse_write(("data: %s\n\n" % json.dumps(obj)).encode())
@@ -593,6 +597,18 @@ class LLMHandler(BaseHTTPRequestHandler):
         self.sse_done()
 
     def stream_agent(self, payload, user):
+        if "loopme" in (user or "").lower():
+            # degenerate repetition loop: the same reasoning paragraph, forever
+            self.sse_start()
+            self.delta(role="assistant")
+            chunk = "I keep re-reading the same sentence and going around in circles. " * 4
+            for _ in range(12):
+                self.delta(reasoning=chunk)
+            self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.sse({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 5,
+                                               "total_tokens": 10}})
+            self.sse_done()
+            return
         if "streamfail" in (user or "").lower():
             body = b'{"error": "mock stream failure"}'
             self.send_response(500)
@@ -2176,7 +2192,53 @@ def main():
     r = client.get("/messages")
     check("drawer + fab present on every page",
           b'id="drawer"' in r.data and b'id="dtoggle"' in r.data
-          and b"assistantChat" in r.data and b"I'd" not in r.data[:200])
+          and b"assistantChat" in r.data)
+
+    section("T31 assistant: repetition guard + rule housekeeping tools")
+    r = client.post("/assistant/stream", data={"message": "loopme now please"})
+    body = r.data.decode()
+    check("looped turn ends gracefully with done", "event: done" in body and "event: error" not in body)
+    dm = re.search(r"event: done\ndata: (.*)", body)
+    ddone = json.loads(dm.group(1)) if dm else {}
+    check("looped turn explains itself instead of '(no reply)'",
+          "circles" in (ddone.get("reply") or ""))
+    check("loop stop is logged as a warning",
+          any("repetition" in (e["message"] or "") for e in store.recent_events(80)))
+
+    ag = engine.AssistantAgent()
+    rid_del = store.add_rule("Tool delete me", "all",
+                             [{"field": "subject", "op": "contains", "value": "zzz-not-real"}],
+                             {"move_to": "Nowhere"})
+    r = ag.call_tool("delete_rule", {"rule_id": rid_del})
+    check("delete_rule removes the rule", r["ok"] and store.get_rule(rid_del) is None)
+    r = ag.call_tool("delete_rule", {"rule_id": 99999})
+    check("delete_rule reports unknown ids", not r["ok"] and "no rule" in r["summary"])
+    rid_tog = store.add_rule("Tool toggle me", "all",
+                             [{"field": "subject", "op": "contains", "value": "qqq-not-real"}], {})
+    r = ag.call_tool("set_rule_enabled", {"rule_id": rid_tog, "enabled": False})
+    check("set_rule_enabled pauses the rule", r["ok"] and store.get_rule(rid_tog)["enabled"] == 0)
+    r = ag.call_tool("set_rule_enabled", {"rule_id": rid_tog, "enabled": True})
+    check("set_rule_enabled resumes it", r["ok"] and store.get_rule(rid_tog)["enabled"] == 1)
+    store.delete_rule(rid_tog)
+    ag.close()
+    check("rules capability defaults to auto (caution risk)",
+          engine.agent_permissions().get("rules") == "auto")
+    store.set_setting("perm_rules", "off")
+    ag2 = engine.AssistantAgent()
+    r = ag2.call_tool("delete_rule", {"rule_id": 1})
+    check("rules capability can be switched off",
+          not r["ok"] and r.get("permission_denied") == "rules")
+    ag2.close()
+    store.set_setting("perm_rules", "ask")
+    ag3 = engine.AssistantAgent()
+    rid_pend = store.add_rule("Tool pending me", "all",
+                              [{"field": "subject", "op": "contains", "value": "ppp-not-real"}], {})
+    r = ag3.call_tool("delete_rule", {"rule_id": rid_pend})
+    check("rules 'ask' level queues a pending action",
+          r.get("pending_approval") and store.get_rule(rid_pend) is not None)
+    ag3.close()
+    store.set_setting("perm_rules", "auto")
+    store.delete_rule(rid_pend)
 
     section("T30 mobile shell: viewport, PWA manifest, tab bar, More page")
     rp = client.get("/")

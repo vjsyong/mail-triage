@@ -39,6 +39,7 @@ always allowed — they are required for the product to function and mutate noth
 | move | `move_message` | caution | auto | Moves mail between folders (never deletes). |
 | create_folder | `create_folder` | safe | auto | Empty folder creation. |
 | classify-management | `train_classifier`, `manage_classifier` | caution | auto | Heuristics pipeline (currently ungated → bring under the matrix). |
+| rules | `delete_rule`, `set_rule_enabled` | caution | auto | Deletes a filter rule, or pauses/resumes one without deleting. Rule *proposals* (one-click cards) stay outside the matrix. |
 | draft | `draft_reply` *(new)* | safe | auto | Generates a reply and saves it into Drafts; nothing leaves the mailbox. |
 | delete | `delete_message` *(new)* | **dangerous** | **off** | Soft delete: moves mail to the Trash folder (recoverable until the server purges). Warning shown; default off. |
 | send | `send_message` *(new)* | **dangerous** | **off** | Sends new mail / replies via the embedded OAuth proxy's SMTP listener; appends a copy to Sent. Hourly cap `sends_per_hour` (default 5, 0 = unlimited). Warning shown; default off. |
