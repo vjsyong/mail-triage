@@ -601,7 +601,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 /* ---- assistant drawer ---- */
 .fab{position:fixed;right:16px;bottom:16px;z-index:60;background:#000;color:#fff;border:1px solid #000;padding:9px 15px;font-size:.84rem;font-weight:600;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.18)}
 .fab:hover{background:#222}
-.drawer{position:fixed;top:0;right:0;height:100vh;width:min(430px, 97vw);background:#fff;border-left:1px solid var(--line);z-index:70;display:none;flex-direction:column;box-shadow:-8px 0 24px rgba(0,0,0,.08)}
+.drawer{position:fixed;top:0;right:0;height:100vh;width:min(430px, 97vw);background:#fff;border-left:1px solid var(--line);z-index:220;display:none;flex-direction:column;box-shadow:-8px 0 24px rgba(0,0,0,.08)}
 .drawer.open{display:flex}
 .dw-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
 .dw-hist{border-bottom:1px solid var(--line);max-height:42vh;overflow:auto;background:#fff}
@@ -657,10 +657,38 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .drawer{width:100vw;max-width:none;height:100dvh}
   .page-desc{display:none}
   .foot{display:none}
-  .assistant-rail{max-height:96px}
-  .assistant-flex{height:calc(100vh - 470px);height:calc(100dvh - 470px);min-height:280px}
+  .am-head{display:none}
+  .assistant-shell{display:block;margin-top:0}
+  .assistant-shell > .assistant-rail{display:none}
+  .chat-head{display:flex;align-items:center;gap:4px;margin:0 0 8px}
+  .chat-head .ch-title{flex:1;text-align:center;font-weight:600;font-size:.95rem}
+  .chat-head .iconbtn{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;color:var(--fg);border:0;background:transparent}
+  .assistant-main{display:flex;flex-direction:column;height:calc(100vh - 160px);height:calc(100dvh - 160px)}
+  .assistant-flex{height:auto;flex:1;min-height:0}
+  .jumpwrap{min-height:0}
   .composer .hint{display:none}
   .composer .comp-row .sub{display:none}
+  .composer{display:flex;align-items:flex-end;gap:8px}
+  .composer .comp-row,.composer .comp-row .row{display:contents}
+  .composer textarea{flex:1;min-height:30px;max-height:120px}
+  .composer .btn{flex:none;min-height:40px}
+  .chat-empty{padding:14px 6px}
+  .chat-empty .sub{display:none}
+  .chat-empty .chips{margin-top:10px}
+  .chat-empty .chip{font-size:.8rem;padding:7px 10px;background:var(--hover);border-color:transparent}
+  .chat{display:flex;flex-direction:column}
+  body:has(.assistant-main) .topbar{display:none}
+  body:has(.assistant-main) .assistant-main{height:calc(100vh - 115px);height:calc(100dvh - 115px)}
+  .crow .avatar{display:none}
+  .crow.user{justify-content:flex-end}
+  .bubble{max-width:88%}
+  .bubble.ai{border:none;background:transparent;padding:2px 0;min-width:0}
+  .sheet-ov{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:190}
+  .sheet{position:absolute;top:0;bottom:0;left:0;width:min(86vw,340px);background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .sheet-h{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--line)}
+  .sheet-b{flex:1;overflow-y:auto}
+  .sheet-b .assistant-rail{display:flex;position:static;max-height:none;border:0}
+  .sheet-b .assistant-rail .arow{padding:13px 12px}
   body.kb-open .bottom-nav{display:none}
   .page-desc.msgfrom{display:block;font-size:.8rem;overflow-wrap:anywhere}
   .cond-head{display:none}
@@ -814,7 +842,7 @@ function cp(text, el){
   <div id="dhistlist" class="dw-hist hidden"></div>
   <div class="dw-body"><div class="chat" id="dchat"></div></div>
   <form id="dform" class="composer dw-comp">
-    <textarea id="dmsg" rows="1" placeholder="Message the assistant&hellip;"></textarea>
+    <textarea id="dmsg" rows="1" enterkeyhint="send" placeholder="Message the assistant&hellip;"></textarea>
     <div class="comp-row">
       <span class="sub" style="font-size:.75rem">Enter sends &middot; Shift+Enter new line</span>
       <span class="row" style="margin-left:auto">
@@ -3525,7 +3553,7 @@ CONVO_TMPL = r"""
 """
 
 ASSISTANT_TMPL = r"""
-<div class="page-head">
+<div class="page-head am-head">
   <div>
     <h1 class="page-title">Assistant</h1>
     <div class="page-desc">Streams its thinking and every tool step live · chats are saved — resume any of them from the list, or open the drawer anywhere</div>
@@ -3545,6 +3573,11 @@ ASSISTANT_TMPL = r"""
     {% endfor %}
   </aside>
   <div class="assistant-main">
+    <div class="chat-head">
+      <button type="button" class="iconbtn" id="ahist" aria-label="Chat history"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button>
+      <div class="ch-title">Assistant</div>
+      <a class="iconbtn" href="{{ url_for('assistant') }}" aria-label="New chat"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></a>
+    </div>
     <div class="assistant-flex">
       <div class="jumpwrap">
         <button type="button" class="btn small hidden" id="jump">↓ Jump to latest</button>
@@ -3567,7 +3600,7 @@ ASSISTANT_TMPL = r"""
       {% endif %}
       <form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
         <input type="hidden" name="session" value="{{ sid }}">
-        <textarea name="message" id="msg" rows="1" placeholder="Message the assistant…"></textarea>
+        <textarea name="message" id="msg" rows="1" enterkeyhint="send" placeholder="Message the assistant…"></textarea>
         <div class="comp-row">
           <span class="sub" style="font-size:.78rem">Enter sends · Shift+Enter new line</span>
           <span class="row" style="margin-left:auto">
@@ -3581,10 +3614,17 @@ ASSISTANT_TMPL = r"""
     </div>
   </div>
 </div>
+<div class="sheet-ov hidden" id="asheet-ov">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Chat history">
+    <div class="sheet-h"><b>Chats</b><button type="button" class="iconbtn" id="asheet-x" aria-label="Close">✕</button></div>
+    <div class="sheet-b" id="asheet-b"></div>
+  </div>
+</div>
 <script>
 (function(){
   var clearLink=document.getElementById('aclear'), clearForm=document.getElementById('clearform');
   if(clearLink && clearForm) clearLink.addEventListener('click', function(e){ e.preventDefault(); if(confirm('Clear this chat?')) clearForm.submit(); });
+  function initAssistant(){
   window.assistantChat({
     root: document.getElementById('convo'),
     form: document.getElementById('aform'),
@@ -3595,6 +3635,17 @@ ASSISTANT_TMPL = r"""
     sessionId: {{ sid }},
     onSession: function(ns){ try{ history.replaceState(null, '', '/assistant/s/' + ns); }catch(e){} }
   });
+  var ov=document.getElementById('asheet-ov'), rail=document.querySelector('.assistant-rail'), hbtn=document.getElementById('ahist');
+  if(ov && rail && window.matchMedia && window.matchMedia('(max-width:767px)').matches){
+    document.getElementById('asheet-b').appendChild(rail);
+    var closeSheet=function(){ ov.classList.add('hidden'); };
+    hbtn.addEventListener('click', function(){ ov.classList.remove('hidden'); });
+    document.getElementById('asheet-x').addEventListener('click', closeSheet);
+    ov.addEventListener('click', function(e){ if(e.target===ov) closeSheet(); });
+  } else if(ov){ ov.remove(); }
+  }
+  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', initAssistant); }
+  else { initAssistant(); }
 })();
 </script>
 """
