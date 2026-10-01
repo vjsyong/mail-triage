@@ -1837,14 +1837,18 @@ MESSAGE_TMPL = """
 .msgrid .stickycol{position:sticky;top:14px;display:flex;flex-direction:column;gap:14px}
 .msgrid .card{margin-top:0}
 @media(max-width:1023px){.msgrid{grid-template-columns:1fr}.msgrid .stickycol{position:static}}
-.msgbody{white-space:pre-wrap;margin:12px 0 2px;font-size:.92rem;line-height:1.55;overflow-wrap:anywhere}
+.msgbody{white-space:pre-wrap;margin:10px 0 2px;font-size:.94rem;line-height:1.65;overflow-wrap:anywhere;max-width:72ch}
+.msgbody a{text-decoration:underline;text-underline-offset:2px}
+.quote{margin-top:16px;border-left:2px solid var(--line);padding-left:12px;color:var(--dim);font-size:.88rem}
+.quote summary{cursor:pointer}
+.quote .qbody{white-space:pre-wrap;margin-top:8px}
 .msgfrom{overflow-wrap:anywhere}
 </style>
 <div class="page-head">
   <div style="min-width:0">
     <div class="sub" style="margin-bottom:4px"><a href="{{ url_for('messages') }}">← Messages</a></div>
     <h1 class="page-title" style="font-size:1.12rem">{{ m.subject[:100] or '(no subject)' }}</h1>
-    <div class="page-desc msgfrom">{{ m.from_addr }} · {{ m.date }} · {{ m.folder }}</div>
+    <div class="page-desc msgfrom">{{ m.from_addr }} · <span title="{{ m.date }}">{{ m.date_disp or m.date }}</span> · {{ m.folder }}</div>
   </div>
   <div class="row">
     <span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>
@@ -1866,7 +1870,9 @@ MESSAGE_TMPL = """
       {% if m.llm_thinking %}<details class="sub" style="margin:8px 0 0"><summary style="cursor:pointer">classifier thinking</summary><pre class="mono" style="white-space:pre-wrap;font-size:.8rem;color:var(--dim);margin:6px 0">{{ m.llm_thinking }}</pre></details>{% endif %}
       {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
         ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.reason %} · why: {{ classify_result.reason }}{% endif %}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
-      <div class="msgbody">{{ m.body[:4000] }}</div>
+      {% if m.body_note %}<div class="note" style="margin-top:12px">{{ m.body_note }}</div>{% endif %}
+      {% if m.body_html %}<div class="msgbody">{{ m.body_html|safe }}</div>
+      {% else %}<div class="empty" style="padding:26px 0 10px"><h4>Body unavailable</h4><p>Reload to retry the fetch, or open this message in your mail client.</p></div>{% endif %}
     </div>
 
     <div class="card">
@@ -1940,34 +1946,121 @@ MESSAGE_TMPL = """
 
 
 
+def _find_message_location(mc, msgid, first_folder=None):
+    """Locate a message by its Message-ID across folders: (folder, uid) or None.
+    Used when a stored row points at a folder/uid the message no longer occupies
+    (moved externally, uidvalidity bump)."""
+    needle = (msgid or "").strip().strip("<>").strip()
+    if not needle:
+        return None
+    tried = []
+    for name in ([first_folder] if first_folder else []) + list(mc.folders()):
+        if not name or name in tried:
+            continue
+        tried.append(name)
+        try:
+            mc.select(name)
+            hits = mc.search("HEADER", "Message-ID", needle)
+        except Exception:
+            continue
+        if hits:
+            return name, hits[-1]
+    return None
+
+
+def _display_date(raw):
+    """Human date for the viewer; falls back to the raw header value."""
+    if not raw:
+        return ""
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(raw).strftime("%a %d %b %Y · %H:%M %z")
+    except Exception:
+        return raw
+
+
+def message_body_html(text):
+    """Safe HTML for the message body: escaped, links clickable, long quoted
+    tails collapsed into a details block."""
+    if not text:
+        return ""
+    esc = html_escape(text)
+    esc = re.sub(r"https?://[^\s<>\"']+[^\s<>\"'.,;:\])\]]",
+                 lambda mo: '<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>'
+                            % (mo.group(0), mo.group(0)), esc)
+    lines = esc.split("\n")
+    idx = None
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if s.startswith("&gt;") and sum(1 for l in lines[i:i + 12]
+                                        if l.strip().startswith("&gt;")) >= 2:
+            idx = i
+            break
+        if re.match(r"^On .{3,90} wrote:$", s) or s.startswith("-----Original Message-----"):
+            idx = i
+            break
+    if idx is None:
+        return esc
+    main = "\n".join(lines[:idx]).strip()
+    quoted = "\n".join(lines[idx:]).strip()
+    return (main + '<details class="quote"><summary>\u00b7\u00b7\u00b7 show quoted text (%d lines)</summary><div class="qbody">%s</div></details>'
+            % (len(lines) - idx, quoted))
+
+
 def _message_body_for_view(m):
-    """Readable body for the message viewer: use the stored snippet when it is
-    already clean; otherwise refetch the full message, extract text properly and
-    cache the result back into the snippet."""
+    """Readable body for the message viewer: the stored snippet when clean, else
+    re-fetch from the mailbox (falling back to a Message-ID search when the row's
+    folder/uid went stale), extract text properly and cache it back onto the row.
+    Returns (body_text, note)."""
     stored = m.get("snippet") or ""
     if stored and not engine.looks_like_mime_junk(stored):
-        return stored[:4000]
+        return stored[:4000], None
     try:
         mc = engine.MailClient().connect()
+    except Exception:
+        mc = None
+    if mc is not None:
         try:
-            mc.select(m["folder"])
-            text = mc.fetch_body_text(m["uid"], limit=6000)
+            text, folder, uid = "", None, None
+            try:
+                mc.select(m["folder"])
+                text = mc.fetch_body_text(m["uid"], limit=6000)
+            except Exception:
+                text = ""
+            if not text or engine.looks_like_mime_junk(text):
+                loc = _find_message_location(mc, m.get("msgid"))
+                if loc:
+                    folder, uid = loc
+                    try:
+                        mc.select(folder)
+                        text = mc.fetch_body_text(uid, limit=6000)
+                    except Exception:
+                        text = ""
+            if text and not engine.looks_like_mime_junk(text):
+                fields = {"snippet": text[:4000]}
+                if folder and (folder != m.get("folder") or uid != m.get("uid")):
+                    fields["folder"], fields["uid"] = folder, uid
+                    m["folder"], m["uid"] = folder, uid
+                store.update_message(m["id"], **fields)
+                return text[:4000], None
         finally:
             try:
                 mc.close()
             except Exception:
                 pass
-        if text and not engine.looks_like_mime_junk(text):
-            store.update_message(m["id"], snippet=text[:4000])
-            return text[:4000]
-    except Exception:
-        pass
-    return engine.readable_body(stored, limit=4000) or stored[:4000]
+    salv = engine.readable_body(stored, limit=4000)
+    if salv and not engine.looks_like_mime_junk(salv):
+        return salv[:4000], "Shown from a repaired stored copy — the mailbox re-fetch failed."
+    return "", ("This message could not be decoded: the stored copy is raw MIME and the "
+                "mailbox copy could not be read. Reload to retry.")
 
 
 def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0):
     if "body" not in m:
-        m["body"] = _message_body_for_view(m)
+        m["body"], m["body_note"] = _message_body_for_view(m)
+        m["body_html"] = message_body_html(m["body"])
+    if "date_disp" not in m:
+        m["date_disp"] = _display_date(m.get("date"))
     return render(render_template_string(
         MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
         draft_error=draft_error, draft_template_id=draft_template_id,
@@ -2027,10 +2120,13 @@ def message_file(mid):
             try:
                 mc.ensure_selected(m["folder"])
                 mc.ensure_folder(target)
-                mc.move(m["uid"], target)
+                new_uid = mc.move(m["uid"], target)
             finally:
                 mc.close()
-            store.update_message(mid, status="llm-moved", action_taken="move:" + target)
+            mv = {"status": "llm-moved", "action_taken": "move:" + target, "folder": target}
+            if new_uid:
+                mv["uid"] = new_uid
+            store.update_message(mid, **mv)
             store.log_event("info", "filed message %d ('%s') → %s"
                             % (mid, (m.get("subject") or "")[:50], target))
             flash("Filed to '%s'." % target, "ok")

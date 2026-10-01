@@ -44,38 +44,66 @@ def _decode_header(value):
         return str(value)
 
 
+_B64_RUN = re.compile(r"[A-Za-z0-9+/=]{16,}(?:[ \t]+[A-Za-z0-9+/=]{16,})*")
+
+
+def _b64_decode_run(run_text):
+    """Decode one base64 run (whitespace-separated tokens joined up); None when it
+    does not decode to mostly-printable text."""
+    chunk = "".join(run_text.split())
+    if len(chunk) < 40:
+        return None
+    chunk += "=" * (-len(chunk) % 4)
+    try:
+        dec = base64.b64decode(chunk).decode("utf-8", "replace")
+    except Exception:
+        return None
+    printable = sum(1 for c in dec if c.isprintable() or c in "\r\n\t")
+    if dec.strip() and printable >= len(dec) * 0.8:
+        return dec
+    return None
+
+
 def _decode_b64_blocks(text):
-    """Decode runs of base64 lines (MIME bodies arriving without usable part
-    headers, or truncated mid-stream). Runs that do not decode cleanly are kept."""
-    lines = text.split("\n")
+    """Decode base64 runs wherever they appear: canonical MIME lines (buffered
+    across lines so short tail lines still join), runs that a whitespace collapse
+    joined with spaces, or runs sitting after part headers. Runs that do not
+    decode cleanly are kept unchanged."""
     out, buf = [], []
 
     def flush():
         if not buf:
             return
-        chunk = "".join(buf)
-        chunk += "=" * (-len(chunk) % 4)
-        try:
-            dec = base64.b64decode(chunk).decode("utf-8", "replace")
-            printable = sum(1 for c in dec if c.isprintable() or c in "\r\n\t")
-            if dec.strip() and printable >= len(dec) * 0.8:
-                out.append(dec)
-                buf.clear()
-                return
-        except Exception:
-            pass
-        out.extend(buf)
+        dec = _b64_decode_run(" ".join(buf))
+        if dec is not None:
+            out.append(dec)
+        else:
+            out.extend(buf)
         buf.clear()
 
-    for ln in lines:
+    for ln in text.split("\n"):
         s = ln.strip()
-        if len(s) >= 40 and re.fullmatch(r"[A-Za-z0-9+/=]{40,}", s):
+        if len(s) >= 16 and re.fullmatch(r"[A-Za-z0-9+/=]{16,}", s):
             buf.append(s)
         else:
             flush()
-            out.append(ln)
+            out.append(_B64_RUN.sub(
+                lambda m: _b64_decode_run(m.group(0)) or m.group(0), ln))
     flush()
     return "\n".join(out)
+
+
+_BOUNDARY_TOKEN = re.compile(r"(?<!\S)-{2,}[=_A-Za-z0-9][\w=._-]{2,}")
+
+
+def _strip_inline_mime_scaffold(text):
+    """Remove MIME scaffolding left inline in salvaged text (boundary markers,
+    Content-Type / Content-Transfer-Encoding fragments). Salvage paths only."""
+    text = _BOUNDARY_TOKEN.sub(" ", text)
+    text = re.sub(r"(?i)\bContent-Type\s*:\s*[^;\s]+(?:;\s*charset\s*=\s*\"?[\w.-]+\"?)?", " ", text)
+    text = re.sub(r"(?i)\bContent-Transfer-Encoding\s*:\s*[\w-]+", " ", text)
+    text = re.sub(r"(?i)\bcharset\s*=\s*\"?[\w.-]+\"?", " ", text)
+    return text
 
 
 def _clean_snippet(raw, limit=1500):
@@ -83,6 +111,7 @@ def _clean_snippet(raw, limit=1500):
     if not raw:
         return ""
     text = raw.decode("utf-8", "replace")
+    junk_in = looks_like_mime_junk(text)
     # quoted-printable leftovers (common on O365 text parts) without part headers
     if len(re.findall(r"=[0-9A-Fa-f]{2}", text)) > 20:
         try:
@@ -90,6 +119,8 @@ def _clean_snippet(raw, limit=1500):
         except Exception:
             pass
     text = _decode_b64_blocks(text)
+    if junk_in:
+        text = _strip_inline_mime_scaffold(text)
     text = re.sub(r"<[^>]+>", " ", text)
     text = html.unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
@@ -103,6 +134,7 @@ def readable_body(raw, limit=6000):
     if not raw:
         return ""
     text = raw.decode("utf-8", "replace")
+    junk_in = looks_like_mime_junk(text)
     if len(re.findall(r"=[0-9A-Fa-f]{2}", text)) > 20:
         try:
             text = quopri.decodestring(text.encode("latin-1", "replace")).decode("utf-8", "replace")
@@ -111,6 +143,8 @@ def readable_body(raw, limit=6000):
     text = _decode_b64_blocks(text)
     text = re.sub(r"<[^>]+>", " ", text)
     text = html.unescape(text)
+    if junk_in:
+        text = _strip_inline_mime_scaffold(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text[:limit]
@@ -124,6 +158,8 @@ def looks_like_mime_junk(s):
     if re.search(r"Content-(Type|Transfer-Encoding)\s*:", head):
         return True
     if re.match(r"\s*-{2,}[=_A-Za-z0-9]", s):
+        return True
+    if re.match(r"(Received|Return-Path|Delivered-To|Authentication-Results|DKIM-Signature)\s*:", head, re.I):
         return True
     if re.search(r"\S{80,}", s) and re.fullmatch(r"[\sA-Za-z0-9+/=]+", s or ""):
         return True
@@ -455,15 +491,31 @@ class MailClient:
         if typ != "OK":
             raise RuntimeError("STORE failed: %s %s" % (typ, dat))
 
+    @staticmethod
+    def _copyuid_new(dat):
+        """New UID from the server's COPYUID response (UIDPLUS), when present."""
+        for item in dat or []:
+            if not item:
+                continue
+            s = item.decode("utf-8", "replace") if isinstance(item, bytes) else str(item)
+            m = re.search(r"\[COPYUID\s+\d+\s+\S+\s+(\d+)\]", s)
+            if m:
+                return int(m.group(1))
+        return None
+
     def move(self, uid, folder):
+        """Move a message and return its UID in the destination folder when the
+        server reports one (UIDPLUS COPYUID), else None."""
         typ, dat = self.M.uid("MOVE", str(uid), '"%s"' % folder)
         if typ == "OK":
-            return
+            return self._copyuid_new(dat)
         typ, dat = self.M.uid("COPY", str(uid), '"%s"' % folder)
         if typ != "OK":
             raise RuntimeError("COPY %s failed: %s %s" % (folder, typ, dat))
+        new_uid = self._copyuid_new(dat)
         self.M.uid("STORE", str(uid), "+FLAGS", r"(\Deleted)")
         self.M.expunge()
+        return new_uid
 
     def append_draft(self, folder, raw):
         typ, dat = self.M.append('"%s"' % folder, r"(\Draft)",
@@ -894,14 +946,18 @@ def _process_folder(mc, folder, settings, rules):
             except (TypeError, ValueError):
                 actions = {}
             taken = []
+            mv_fields = {}
             apply = bool(settings.get("rules_apply", True))
             status = "matched-dry"
             if apply:
                 try:
                     if actions.get("move_to"):
                         mc.ensure_folder(actions["move_to"])
-                        mc.move(uid, actions["move_to"])
+                        new_uid = mc.move(uid, actions["move_to"])
                         taken.append("move:" + actions["move_to"])
+                        mv_fields = {"folder": actions["move_to"]}
+                        if new_uid:
+                            mv_fields["uid"] = new_uid
                     if actions.get("mark_read"):
                         mc.set_flags(uid, "+FLAGS", r"(\Seen)")
                         taken.append("read")
@@ -916,7 +972,7 @@ def _process_folder(mc, folder, settings, rules):
                     store.log_event("error", "rule '%s' action failed for uid=%s: %r"
                                     % (rule.get("name"), uid, exc))
             store.update_message(row["id"], status=status, rule_id=rule["id"],
-                                 action_taken=",".join(taken))
+                                 action_taken=",".join(taken), **mv_fields)
             store.log_event("info", "rule '%s' → %s | %s (%s)"
                             % (rule.get("name") or rule["id"],
                                ", ".join(taken) or ("kept (guard)" if is_guard_rule(rule) else "suggest"),
@@ -984,9 +1040,12 @@ def classify_and_store(msg, settings, mc=None):
                 mc = MailClient().connect()
             mc.ensure_selected(msg["folder"])
             mc.ensure_folder(folder)
-            mc.move(msg["uid"], folder)
+            new_uid = mc.move(msg["uid"], folder)
             fields["status"] = "llm-moved"
             fields["action_taken"] = "move:" + folder
+            fields["folder"] = folder
+            if new_uid:
+                fields["uid"] = new_uid
             res["_moved_to"] = folder
         except Exception as exc:
             store.log_event("error", "LLM move to %s failed: %r" % (folder, exc))
@@ -2011,11 +2070,14 @@ class AssistantAgent:
         try:
             mc.ensure_folder(target)
             mc.ensure_selected(folder)
-            mc.move(uid, target)
+            new_uid = mc.move(uid, target)
         except Exception as exc:
             return {"ok": False, "summary": "move failed: %r" % exc, "result": {"error": repr(exc)}}
         if row:
-            store.update_message(row["id"], status="assistant-moved", action_taken="move:" + target)
+            mv = {"status": "assistant-moved", "action_taken": "move:" + target, "folder": target}
+            if new_uid:
+                mv["uid"] = new_uid
+            store.update_message(row["id"], **mv)
         store.log_event("info", "assistant moved %s uid %s ('%s') → %s"
                         % (folder, uid, _truncate((row or {}).get("subject") or "", 50), target))
         return {"ok": True, "summary": "moved to %s" % target,

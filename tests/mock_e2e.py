@@ -84,6 +84,8 @@ class MockState:
                 s["uids"].remove(uid)
                 d["uids"].append(uid)
                 d["msgs"][uid] = msg
+                return uid
+        return None
 
     def copy(self, src, uid, dst):
         with self.lock:
@@ -95,6 +97,8 @@ class MockState:
                 d["uids"].append(new_uid)
                 d["msgs"][new_uid] = {"raw": s["msgs"][uid]["raw"],
                                       "flags": set(s["msgs"][uid]["flags"])}
+                return new_uid
+        return None
 
 
 # ---------------------------------------------------------------- mock IMAP
@@ -256,11 +260,14 @@ class IMAPHandler(socketserver.StreamRequestHandler):
                           % (seq, uid, " ".join(sorted(f["msgs"][uid]["flags"]))))
             self.send("%s OK UID STORE completed" % tag)
         elif sub == "MOVE":
-            st.move(self.cur, int(arg1), arg2.strip().strip('"'))
-            self.send("* OK [COPYUID 1 %s 1] moved" % arg1)
+            dst = st.move(self.cur, int(arg1), arg2.strip().strip('"'))
+            if dst:
+                self.send("* OK [COPYUID 1 %s %s] moved" % (arg1, dst))
             self.send("%s OK UID MOVE completed" % tag)
         elif sub == "COPY":
-            st.copy(self.cur, int(arg1), arg2.strip().strip('"'))
+            dst = st.copy(self.cur, int(arg1), arg2.strip().strip('"'))
+            if dst:
+                self.send("* OK [COPYUID 1 %s %s] copied" % (arg1, dst))
             self.send("%s OK UID COPY completed" % tag)
         else:
             self.send("%s BAD unknown UID command %s" % (tag, sub))
@@ -815,7 +822,7 @@ def main():
     rows_in = [r for r in store.messages(limit=500) if r["folder"] == "INBOX"]
     uids_rows = sorted(set(r["uid"] for r in rows_in))
     check("INBOX re-indexed without duplicate rows", len(uids_rows) == len(rows_in))
-    check("re-indexed rows cover original messages", set(uids_rows) == {2, 3, 4, 6})
+    check("INBOX rows cover the messages still in INBOX", set(uids_rows) == {4, 6})
     check("re-processing re-filed newsletter+receipt, kept lunch+boss",
           sorted(state.get("INBOX")["uids"]) == [4, 6])
 
@@ -931,7 +938,7 @@ def main():
           any("Second budget note" in json.dumps(c["payload"]) for c in llm_server.calls[-4:]))
     check("assistant moved the lunch mail",
           4 in (state.get("Personal") or {"uids": []})["uids"])
-    row4 = [x for x in store.messages(limit=100) if x["uid"] == 4 and x["folder"] == "INBOX"][0]
+    row4 = [x for x in store.messages(limit=100) if x["uid"] == 4 and x["folder"] == "Personal"][0]
     check("move recorded on the row",
           row4["status"] == "assistant-moved" and row4["action_taken"] == "move:Personal")
     check("move logged to events", any("assistant moved" in e["message"]
@@ -1148,10 +1155,8 @@ def main():
     job = engine.ClassifyJob()
     job._run_job()
     check("batch classified the backlog", job.state["done"] >= 3)
-    rowc1 = [r for r in store.messages(limit=2000)
-             if r["uid"] == c1 and r["folder"] == "INBOX"][0]
-    rowc3 = [r for r in store.messages(limit=2000)
-             if r["uid"] == c3 and r["folder"] == "INBOX"][0]
+    rowc1 = [r for r in store.messages(limit=2000) if r["uid"] == c1][0]
+    rowc3 = [r for r in store.messages(limit=2000) if r["uid"] == c3][0]
     check("batch classified lunch as Personal",
           store.get_message(rowc1["id"])["llm_category"] == "Personal")
     check("batch classified newsletter as Newsletter",
@@ -1349,6 +1354,39 @@ def main():
     check("viewer repairs junk snippets from IMAP",
           r.status_code == 200 and b"Content-Transfer-Encoding" not in r.data
           and "plain body for repair test" in (fixed["snippet"] or ""))
+
+    # move-tracking: app-initiated auto-filing records the destination on the row
+    raw_mv = raw_b64.replace(b"b64msg@x", b"b64moved@x")
+    mv_uid = state.add("INBOX", raw_mv)
+    engine.process_mailbox()
+    rowmv = [r for r in store.messages(limit=3000) if r["msgid"] == "b64moved@x"][0]
+    check("auto-filing records the destination folder on the row",
+          rowmv["folder"] == "Receipts" and rowmv["status"] == "llm-moved")
+    # server-side move by another client leaves the row stale; the viewer repairs it
+    store.update_message(rowmv["id"], snippet=junk_text)
+    mvcur = [name for name, f in state.folders.items() if mv_uid in f["uids"]][0]
+    state.move(mvcur, mv_uid, "AgentTests")
+    r = client.get("/messages/%d" % rowmv["id"])
+    fixedmv = store.get_message(rowmv["id"])
+    check("viewer repairs + relocates a message moved on the server",
+          r.status_code == 200 and b"decoded invoice text for September" in r.data
+          and fixedmv["folder"] == "AgentTests"
+          and "decoded invoice text" in (fixedmv["snippet"] or "")
+          and b"Content-Transfer-Encoding" not in r.data)
+
+    # collapsed base64 salvage (legacy snippets lost their line breaks)
+    collapsed = ("------=_NextPart_9ZZ Content-Type: text/plain; charset=\"utf-8\" "
+                 "Content-Transfer-Encoding: base64 " + enc_lines.replace("\r\n", " "))
+    salv2 = engine.readable_body(collapsed, limit=4000)
+    check("salvage handles space-collapsed base64 (legacy snippets)",
+          "decoded invoice text for September" in salv2
+          and "Content-Transfer-Encoding" not in salv2
+          and enc[:20] not in salv2)
+    check("b64 salvage leaves normal text alone",
+          engine._decode_b64_blocks("Hello team, meeting at 3pm.") == "Hello team, meeting at 3pm.")
+    check("junk detector flags raw headers, passes tracking-number text",
+          engine.looks_like_mime_junk("Received: from mail.example.com by mx1; Wed") is True
+          and engine.looks_like_mime_junk("Your order 1Z999AA10123456784 has shipped.") is False)
 
     section("T22 rule proposals consult existing rules (update vs add)")
     rules_all = store.list_rules()
