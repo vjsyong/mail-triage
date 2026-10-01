@@ -330,6 +330,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 "Geist",-apple
 a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .skip{position:absolute;left:-9999px;top:0;background:#000;color:#fff;padding:8px 12px;z-index:200}
+.vh{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .skip:focus{left:8px}
 /* ---- app shell ---- */
 .app{display:flex;min-height:100vh}
@@ -434,6 +435,7 @@ white-space:nowrap;background:#fbfbfb;position:sticky;top:0;z-index:2}
 .tbl td.sel,.tbl th.sel{width:34px;padding-right:2px}
 .tbl input[type=checkbox]{width:15px;height:15px;display:block}
 .rowacts{display:inline-flex;gap:6px;opacity:0;transition:opacity .12s}
+.cond-more{display:none}
 .rowacts .ra-menu{display:none}
 tr:hover .rowacts,tr:focus-within .rowacts{opacity:1}
 @media(hover:none){.rowacts{opacity:1}}
@@ -778,6 +780,11 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .note{overflow-wrap:anywhere}
   .msgrid form.inline select{min-width:0 !important;width:100% !important}
   .grid3 input[type=text]{grid-column:1/-1}
+  .stepcard{grid-template-columns:26px minmax(0,1fr)}
+  .steptools{grid-column:2;justify-content:flex-end;margin-top:6px;flex-wrap:wrap}
+  .stepfields{grid-template-columns:1fr}
+  .cond-extra{display:none}
+  .cond-more{display:inline-flex;margin:2px 0 6px}
   .jumpwrap{min-height:420px}
   .setrow input:not([type=checkbox]):not([type=radio]),
   input[type=text],input[type=number],input[type=password],input[type=search],
@@ -843,7 +850,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
     </header>
     <main id="main" class="content">
       {% with messages = get_flashed_messages(with_categories=true) %}
-        {% for cat, msg in messages %}<div class="msg {{ cat }}">{{ msg }}</div>{% endfor %}
+        {% for cat, msg in messages %}<div class="msg {{ cat }}" role="status">{{ msg }}</div>{% endfor %}
       {% endwith %}
       {{ body|safe }}
       <div class="foot">Times in {{ tz }} · app data in {{ cfg.DATA_DIR }} · never deletes mail (worst case: files it into a folder)</div>
@@ -2126,6 +2133,7 @@ def rules_test():
     return redirect(url_for("rules", tested="1"))
 
 RULE_EDIT_TMPL = """
+{% if error %}<div class="msg err" role="alert" id="form-err" tabindex="-1">{{ error }}</div><script>try{document.getElementById("form-err").focus();}catch(e){}</script>{% endif %}
 <div class="page-head">
   <div>
     <h1 class="page-title">{{ 'Edit rule' if rule else 'New rule' }}</h1>
@@ -2154,7 +2162,7 @@ RULE_EDIT_TMPL = """
       <div class="grid3 sub cond-head" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
       {% for i in range(5) %}
       {% set c = conditions[i] if conditions|length > i else {} %}
-      <div class="grid3" style="margin-bottom:6px">
+      <div class="grid3{{ ' cond-extra' if i >= 2 else '' }}" style="margin-bottom:6px">
         <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field">
           {% for f in ['from','to','subject','body'] %}
           <option value="{{ f }}" {{ 'selected' if c.get('field')==f else '' }}>{{ f }}</option>{% endfor %}
@@ -2166,6 +2174,7 @@ RULE_EDIT_TMPL = """
         <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Condition {{ i+1 }} value">
       </div>
       {% endfor %}
+      <button type="button" class="btn small cond-more" onclick="this.parentNode.querySelectorAll('.cond-extra').forEach(function(e){e.classList.remove('cond-extra');}); this.remove();">Show 3 more conditions</button>
     </div>
     <div class="sub" style="margin-top:6px">Values of 3 characters or fewer match whole words only — “PO” will not fire on “support”.</div>
   </div>
@@ -2212,6 +2221,12 @@ def _rule_from_form():
     return name, match_mode, conditions, actions, enabled
 
 
+def _rule_form_context_from_post(error):
+    name, mode, conds, actions, enabled = _rule_from_form()
+    return {"rule": {"name": name, "match_mode": mode, "enabled": enabled},
+            "conditions": conds, "actions": actions, "error": error}
+
+
 def _rule_form_context(rule=None):
     conditions, actions = [], {}
     if rule:
@@ -2231,8 +2246,8 @@ def rule_new():
     if request.method == "POST":
         name, mode, conds, actions, enabled = _rule_from_form()
         if not conds:
-            flash("Add at least one condition with a value.", "err")
-            return redirect(url_for("rule_new"))
+            return render(_render_src(RULE_EDIT_TMPL, **_rule_form_context_from_post(
+                "Add at least one condition with a value.")))
         store.add_rule(name, mode, conds, actions, enabled)
         store.log_event("info", "rule '%s' added" % name)
         flash("Rule added.", "ok")
@@ -2249,8 +2264,8 @@ def rule_edit(rule_id):
     if request.method == "POST":
         name, mode, conds, actions, enabled = _rule_from_form()
         if not conds:
-            flash("Add at least one condition with a value.", "err")
-            return redirect(url_for("rule_edit", rule_id=rule_id))
+            return render(_render_src(RULE_EDIT_TMPL, **_rule_form_context_from_post(
+                "Add at least one condition with a value.")))
         store.update_rule(rule_id, name=name, match_mode=mode,
                           conditions=json.dumps(conds), actions=json.dumps(actions),
                           enabled=1 if enabled else 0)
@@ -2330,6 +2345,7 @@ FLOWS_TMPL = """
 """
 
 FLOW_EDIT_TMPL = """
+{% if error %}<div class="msg err" role="alert" id="form-err" tabindex="-1">{{ error }}</div><script>try{document.getElementById("form-err").focus();}catch(e){}</script>{% endif %}
 <style>
 .stepcard{border:1px solid var(--line);padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:10px;align-items:start;background:#fff}
 .stepnum{width:24px;height:24px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:600}
@@ -2366,7 +2382,7 @@ FLOW_EDIT_TMPL = """
     <div class="grid3 sub cond-head" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
     {% for i in range(5) %}
     {% set c = conditions[i] if conditions|length > i else {} %}
-    <div class="grid3" style="margin-bottom:6px">
+    <div class="grid3{{ ' cond-extra' if i >= 2 else '' }}" style="margin-bottom:6px">
       <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field">
         {% for f in ['from','to','subject','body'] %}
         <option value="{{ f }}" {{ 'selected' if c.get('field') == f else '' }}>{{ f }}</option>{% endfor %}
@@ -2378,6 +2394,7 @@ FLOW_EDIT_TMPL = """
       <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Condition {{ i+1 }} value">
     </div>
     {% endfor %}
+    <button type="button" class="btn small cond-more" onclick="this.parentNode.querySelectorAll('.cond-extra').forEach(function(e){e.classList.remove('cond-extra');}); this.remove();">Show 3 more conditions</button>
     <div class="sub">Short values (&le;3 letters) match whole words only &mdash; &ldquo;PO&rdquo; won&rsquo;t fire on &ldquo;support&rdquo;.</div>
   </div>
 </div>
@@ -2385,6 +2402,8 @@ FLOW_EDIT_TMPL = """
 <div class="card">
   <div class="card-h"><h3>THEN &mdash; do these steps, in order</h3><span class="sub">a draft step saves into your Drafts folder; nothing is ever sent</span></div>
   <div id="steps"></div>
+  <span id="steps-live" class="vh" aria-live="polite"></span>
+  <noscript><div class="msg err" style="margin-top:8px">The step builder needs JavaScript — enable it to add steps.</div></noscript>
   <div class="row">
     <button class="btn small" type="button" onclick="addStep('move')">+ Move to folder</button>
     <button class="btn small" type="button" onclick="addStep('draft')">+ Create a draft</button>
@@ -2445,17 +2464,19 @@ function render(){
     }
     if(f.childNodes.length) body.appendChild(f);
     var tools = el('div','steptools');
-    var up = el('button', null, '\u2191'); up.type = 'button'; up.className = 'btn small'; up.disabled = (i === 0);
+    var up = el('button', null, '\u2191'); up.type = 'button'; up.className = 'btn small'; up.disabled = (i === 0); up.setAttribute('aria-label', 'Move step ' + (i + 1) + ' up');
     up.onclick = function(){ var t = steps[i-1]; steps[i-1] = steps[i]; steps[i] = t; render(); };
-    var dn = el('button', null, '\u2193'); dn.type = 'button'; dn.className = 'btn small'; dn.disabled = (i === steps.length - 1);
+    var dn = el('button', null, '\u2193'); dn.type = 'button'; dn.className = 'btn small'; dn.disabled = (i === steps.length - 1); dn.setAttribute('aria-label', 'Move step ' + (i + 1) + ' down');
     dn.onclick = function(){ var t = steps[i+1]; steps[i+1] = steps[i]; steps[i] = t; render(); };
-    var rm = el('button', null, '\u2715'); rm.type = 'button'; rm.className = 'btn small'; rm.title = 'Remove step';
+    var rm = el('button', null, '\u2715'); rm.type = 'button'; rm.className = 'btn small'; rm.title = 'Remove step'; rm.setAttribute('aria-label', 'Remove step ' + (i + 1));
     rm.onclick = function(){ steps.splice(i, 1); render(); };
     tools.appendChild(up); tools.appendChild(dn); tools.appendChild(rm);
     var num = el('div','stepnum', String(i + 1));
     card.appendChild(num); card.appendChild(body); card.appendChild(tools);
     stepsEl.appendChild(card);
   });
+  var live = document.getElementById('steps-live');
+  if (live) live.textContent = steps.length + ' step(s) in this flow';
   sync();
 }
 function addStep(type){
@@ -2543,6 +2564,14 @@ def _flow_from_form():
     return name, match_mode, conditions, steps, enabled
 
 
+def _flow_edit_context(error, name, mode, conds, steps, enabled):
+    flow = {"name": name, "match_mode": mode, "enabled": enabled}
+    return {"flow": flow, "conditions": conds, "steps_json": json.dumps(steps or []),
+            "error": error, "templates": store.list_templates(),
+            "templates_json": json.dumps([{"id": x["id"], "name": x["name"]}
+                                          for x in store.list_templates()])}
+
+
 @app.route("/flows")
 def flows():
     tpl_names = {t["id"]: t["name"] for t in store.list_templates()}
@@ -2558,12 +2587,10 @@ def flows():
 def flow_new():
     if request.method == "POST":
         name, mode, conds, steps, enabled = _flow_from_form()
-        if not conds:
-            flash("Add at least one condition with a value.", "err")
-            return redirect(url_for("flow_new"))
-        if not steps:
-            flash("Add at least one step.", "err")
-            return redirect(url_for("flow_new"))
+        if not conds or not steps:
+            return render(_render_src(FLOW_EDIT_TMPL, **_flow_edit_context(
+                error=("Add at least one condition with a value." if not conds else "Add at least one step."),
+                name=name, mode=mode, conds=conds, steps=steps, enabled=enabled)))
         store.add_flow(name, mode, conds, steps, enabled)
         store.log_event("info", "flow '%s' added (%d step(s))" % (name, len(steps)))
         flash("Flow added.", "ok")
@@ -2582,12 +2609,10 @@ def flow_edit(flow_id):
         return redirect(url_for("flows"))
     if request.method == "POST":
         name, mode, conds, steps, enabled = _flow_from_form()
-        if not conds:
-            flash("Add at least one condition with a value.", "err")
-            return redirect(url_for("flow_edit", flow_id=flow_id))
-        if not steps:
-            flash("Add at least one step.", "err")
-            return redirect(url_for("flow_edit", flow_id=flow_id))
+        if not conds or not steps:
+            return render(_render_src(FLOW_EDIT_TMPL, **_flow_edit_context(
+                error=("Add at least one condition with a value." if not conds else "Add at least one step."),
+                name=name, mode=mode, conds=conds, steps=steps, enabled=enabled)))
         store.update_flow(flow_id, name=name, match_mode=mode,
                           conditions=json.dumps(conds), actions=json.dumps(steps),
                           enabled=1 if enabled else 0)
@@ -2684,9 +2709,9 @@ TEMPLATE_EDIT_TMPL = """
     </div>
   </div>
   <div class="card">
-    <div class="card-h"><h3>Body</h3><span class="sub">keep it short — the LLM adapts it to the actual email</span></div>
-    <textarea id="t-body" name="body" rows="10">{{ template.body if template else '' }}</textarea>
-    <div class="sub" style="margin-top:6px">Placeholders: <span class="mono">{sender}</span> <span class="mono">{subject}</span> <span class="mono">{date}</span> <span class="mono">{my_name}</span> are filled in from the message.</div>
+    <div class="card-h"><h3 id="t-body-h">Body</h3><span class="sub">keep it short — the LLM adapts it to the actual email</span></div>
+    <div class="sub" id="t-body-help" style="margin-bottom:6px">Placeholders: <span class="mono">{sender}</span> <span class="mono">{subject}</span> <span class="mono">{date}</span> <span class="mono">{my_name}</span> are filled in from the message.</div>
+    <textarea id="t-body" name="body" rows="10" aria-labelledby="t-body-h" aria-describedby="t-body-help">{{ template.body if template else '' }}</textarea>
   </div>
   <div class="savebar"><button class="btn primary" type="submit">Save template</button><a class="btn" href="{{ url_for('templates') }}">Cancel</a></div>
 </form>
@@ -4248,6 +4273,7 @@ SETTINGS_TMPL = """
 .setrow .st-c textarea{width:100%}
 .setrow .st-c .check{margin:2px 0 0}
 @media(max-width:900px){.settings-grid{grid-template-columns:1fr}.setnav{flex-direction:row;flex-wrap:wrap;position:static;gap:4px;margin-bottom:6px}.setnav .sn-h{display:none}.setrow{grid-template-columns:1fr}}
+@media(max-width:767px){.setnav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}.setnav::-webkit-scrollbar{display:none}.setnav a{flex:none;border:1px solid var(--line);white-space:nowrap;padding:5px 10px}}
 </style>
 <div class="page-head">
   <div>
@@ -4321,7 +4347,9 @@ SETTINGS_TMPL = """
       <div class="setrow"><div class="st-l"><b>Clear the stored API key</b></div>
         <div class="st-c"><label class="check"><input type="checkbox" name="llm_api_key_clear" value="1"> <span>Clear key</span></label></div></div>
       <div class="hr"></div>
-      <h4>Fallback endpoint <span class="sub">(optional; used automatically when the primary fails)</span></h4>
+      <details class="fbx">
+        <summary style="cursor:pointer;font-weight:600;list-style:none">Fallback endpoint <span class="sub">(optional; used automatically when the primary fails)</span></summary>
+        <div style="margin-top:6px">
       <div class="setrow"><div class="st-l"><b>Base URL</b></div>
         <div class="st-c"><input type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}" aria-label="Fallback base URL"></div></div>
       <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Blank = same as primary.</span></div>
@@ -4330,6 +4358,8 @@ SETTINGS_TMPL = """
         <div class="st-c"><input type="password" name="llm_fallback_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if (llm.fallback and llm.fallback.key) else 'not set' }}" aria-label="Fallback API key"></div></div>
       <div class="setrow"><div class="st-l"><b>Clear the stored fallback key</b></div>
         <div class="st-c"><label class="check"><input type="checkbox" name="llm_fallback_api_key_clear" value="1"> <span>Clear fallback key</span></label></div></div>
+        </div>
+      </details>
       <div class="savebar"><button class="btn primary" type="submit">Save LLM endpoint</button><span class="sub">Blank fields fall back to the env file.</span></div>
     </form>
     <div class="row" style="margin-top:10px">
@@ -4606,6 +4636,22 @@ SETTINGS_TMPL = """
 """
 
 
+_SETTINGS_ANCHORS = {"llm": "ai-model", "rag": "ai-search", "connection": "mail-src", "behavior": "general"}
+
+
+def _settings_anchor(section, scope):
+    s = (scope or "").lower()
+    for key, val in (("sorting & filing", "sort-filing"), ("sorting", "sorting"),
+                     ("rules", "sort-rules"), ("classif", "ai-classify"),
+                     ("index", "searchidx"), ("checking", "mail-check"),
+                     ("mail source", "mail-src"), ("search", "ai-search"),
+                     ("llm", "ai-model"), ("permission", "ai-perms"),
+                     ("time", "general"), ("general", "general")):
+        if key in s:
+            return val
+    return _SETTINGS_ANCHORS.get(section, "")
+
+
 @app.route("/settings", methods=["GET", "POST"])
 def settings():
     if request.method == "POST":
@@ -4633,7 +4679,8 @@ def settings():
             _save_behavior_settings()
             flash(("%s saved." % scope) if scope else "Settings saved.", "ok")
         _TZ_CACHE["at"] = 0  # re-read the display timezone on the next render
-        return redirect(url_for("settings"))
+        anchor = _settings_anchor(section, scope)
+        return redirect(url_for("settings") + ("#" + anchor if anchor else ""))
     return render(_render_src(
         SETTINGS_TMPL, s=store.all_settings(), engine_state=worker.state, cfg=config,
         agcaps=engine.AGENT_CAPS,
@@ -4972,7 +5019,7 @@ ACCOUNT_NEW_TMPL = """
     </div>
     <div class="grid2">
       <div><label for="client_id">Client ID</label><input type="text" id="client_id" name="client_id"></div>
-      <div><label for="client_secret">Client secret <span class="sub">(if required)</span></label><input type="text" id="client_secret" name="client_secret"></div>
+      <div><label for="client_secret">Client secret <span class="sub">(if required)</span></label><input type="password" id="client_secret" name="client_secret" autocomplete="new-password"></div>
     </div>
   </div>
 
@@ -5062,14 +5109,14 @@ ACCOUNT_EDIT_TMPL = """
   <div class="card">
     <div class="card-h"><h3>Account</h3></div>
     <div class="grid2">
-      <div><label>Email</label><input type="text" value="{{ a.email }}" readonly></div>
+      <div><label>Email</label><div class="sub" style="padding-top:8px"><b>{{ a.email }}</b> <span class="sub">· cannot be changed</span></div></div>
       <div><label for="provider">Provider</label>
         <select id="provider" name="provider">
           {% for key, pr in presets.items() %}<option value="{{ key }}" {{ 'selected' if key==a.provider else '' }}>{{ pr.label }}</option>{% endfor %}
         </select></div>
     </div>
     <div class="grid2">
-      <div><label for="password">Local password</label><input type="text" id="password" name="password" value="{{ a.password }}"></div>
+      <div><label for="password">Local password <span class="sub">(local to this app — blank = keep current)</span></label><input type="text" id="password" name="password" value="{{ a.password }}" autocomplete="off" spellcheck="false" autocapitalize="none"></div>
       <div><label for="redirect_mode">Login mode</label>
         <select id="redirect_mode" name="redirect_mode">
           <option value="tailnet" {{ 'selected' if a.redirect_mode != 'loopback' else '' }}>Tailnet (browser on any tailnet device)</option>
@@ -5082,7 +5129,7 @@ ACCOUNT_EDIT_TMPL = """
     <div class="card-h"><h3>OAuth app</h3></div>
     <div class="grid2">
       <div><label for="client_id">Client ID</label><input type="text" id="client_id" name="client_id" value="{{ a.client_id }}"></div>
-      <div><label for="client_secret">Client secret <span class="sub">(blank = keep current)</span></label><input type="text" id="client_secret" name="client_secret" placeholder="{{ 'set' if a.client_secret else 'none' }}"></div>
+      <div><label for="client_secret">Client secret <span class="sub">({{ 'currently set' if a.client_secret else 'not set' }} — blank = keep current)</span></label><input type="password" id="client_secret" name="client_secret" autocomplete="new-password"></div>
     </div>
     <div class="grid2">
       <div><label for="permission_url">Permission URL</label><input type="text" id="permission_url" name="permission_url" value="{{ a.auth_url }}"></div>
