@@ -25,6 +25,7 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
 ## What it does
 
 - **Polls your inbox** every 90 s (configurable) through the embedded proxy and records
+- The message viewer renders real HTML email (sanitized) - formatted text, tables, inline images; remote images are blocked by default (per-message *Load images*, or always-on in Settings).
   every new message in a local SQLite database.
 - **Accounts** (Accounts page): add mail accounts and sign them in via OAuth — the page
   shows the exact redirect URI to register at the provider, drives the Authorise flow
@@ -190,6 +191,9 @@ docker exec mail-triage python app.py --reindex # wipe + rebuild the search inde
 docker exec mail-triage python app.py --heal-snippets  # bulk-repair legacy raw-MIME
                                       # snippets: refetch + Message-ID rescue for
                                       # moved mail (summary: /data/heal.log)
+docker exec mail-triage python app.py --extract-html   # pre-extract sanitized HTML bodies
+                                      # for old mail (viewer renders without a
+                                      # per-message fetch; rescue for stale rows)
 .venv/bin/python tests/mock_e2e.py    # 269-check E2E suite (mock IMAP + mock LLM,
                                       # mock TEI embed/rerank; SSE streaming agent)
 .venv/bin/python tests/proxy_e2e.py   # 26-check live flow for the embedded proxy

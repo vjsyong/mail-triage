@@ -176,3 +176,23 @@ Fixes shipped:
    response) on the row - no more stale folders for app-filed mail.
 4. Viewer layout: 72ch measure, .94rem/1.65 typography, linkified URLs, quoted
    tails collapsed, pretty date in the header, explicit "body unavailable" state.
+
+
+## Sixth pass: proper email renderer (2026-10, same day)
+
+Request: "render images and text formatting properly". Built:
+- HTML body extraction (depth-first MIME walk with IMAP section numbers) + cid
+  image map, sanitized ONCE at store time with nh3 (scripts/styles/forms gone;
+  layout, tables, inline styles kept - the Superhuman lesson: never clip or box
+  the mail, give it a document canvas).
+- Viewer: `.emailbody` canvas (white sheet, 1px frame, overflow-x for wide tables,
+  images max-width 100%); inline cid images via /messages/<id>/part/<n> (fetched
+  from IMAP as two small literals, transfer-encoding undone, disk-cached); remote
+  images blocked by default with a per-message "Load images" button and an
+  always-load setting, served through an SSRF-guarded proxy (verified fetch,
+  documented unverified retry for leaf-only CDN chains) with disk cache;
+  "View plain text" / "View formatted" toggle; nosniff + CSP sandbox headers on
+  all served mail media.
+- Bulk: `app.py --extract-html` fills the renderer cache for the existing mailbox
+  (phase 2 rescues stale rows via the Message-ID index); new scans extract at
+  scan time, so fresh mail renders with no extra fetch.
