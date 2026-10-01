@@ -20,6 +20,7 @@ from flask import Flask, Response, flash, jsonify, redirect, render_template_str
 import config
 import engine
 import heuristics
+import proxy
 import rag
 import store
 
@@ -346,6 +347,11 @@ padding:10px 16px;margin:0 8px 8px 0;text-align:center}
 .toast{position:fixed;right:18px;bottom:18px;background:#000;color:#fff;padding:11px 16px;font-size:.85rem;
 z-index:99;opacity:1;transition:opacity .6s;box-shadow:0 6px 20px rgba(0,0,0,.28);max-width:420px}
 .toast b{font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:.92rem;margin:8px 0}
+.kv .k{color:var(--dim)}
+.auth-panel{margin-top:12px;padding:12px;border:1px dashed var(--line)}
+.copy{cursor:pointer;user-select:none;color:var(--dim);border:1px solid var(--line);padding:1px 7px;font-size:.78rem;margin-left:6px;display:inline-block}
+.copy:hover{color:var(--acc);border-color:var(--acc)}
 .md p{margin:6px 0}
 .md .md-h{font-weight:600;margin:10px 0 4px}
 .md ul,.md ol{margin:6px 0 6px 22px;padding:0}
@@ -356,7 +362,7 @@ z-index:99;opacity:1;transition:opacity .6s;box-shadow:0 6px 20px rgba(0,0,0,.28
 </head><body>
 <div class="topbar"><div class="wrap2">
   <div><h1>Mail Triage</h1><div class="sub">{{ info.imap }} · LLM: {{ info.llm }}</div></div>
-  <nav class="sub"><a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('assistant') }}">Assistant</a><a href="{{ url_for('rules') }}">Rules</a><a href="{{ url_for('classifiers') }}">Classifiers</a><a href="{{ url_for('templates') }}">Templates</a><a href="{{ url_for('messages') }}">Messages</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('log') }}">Log</a></nav>
+  <nav class="sub"><a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('assistant') }}">Assistant</a><a href="{{ url_for('rules') }}">Rules</a><a href="{{ url_for('classifiers') }}">Classifiers</a><a href="{{ url_for('templates') }}">Templates</a><a href="{{ url_for('messages') }}">Messages</a><a href="{{ url_for('accounts') }}">Accounts</a><a href="{{ url_for('settings') }}">Settings</a><a href="{{ url_for('log') }}">Log</a></nav>
 </div></div>
 <div class="wrap">
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -379,8 +385,13 @@ def _header_info():
         llm_txt = ("%s @ %s" % (llm["model"], llm["base"])) if llm["base"] else "not configured"
     except Exception:
         llm_txt = "?"
-    return {"imap": "%s @ %s:%s" % (config.IMAP_USER, config.IMAP_HOST, config.IMAP_PORT),
-            "llm": llm_txt}
+    try:
+        ic = engine.imap_config()
+        imap_txt = "%s @ %s:%s (%s)" % (ic["user"] or "?", ic["host"] or "?", ic["port"],
+                                       ic["mode"])
+    except Exception:
+        imap_txt = "?"
+    return {"imap": imap_txt, "llm": llm_txt}
 
 
 # ---------------------------------------------------------------- dashboard
@@ -2256,9 +2267,44 @@ SETTINGS_TMPL = """
 </div>
 
 <div class="card">
+  <h3>Mail connection</h3>
+  <form method="post">
+    <input type="hidden" name="section" value="connection">
+    <label>Where does mail come from?</label>
+    <select name="proxy_mode">
+      <option value="embedded" {{ 'selected' if s.proxy_mode != 'external' else '' }}>Embedded proxy (recommended) — accounts and OAuth are managed on the Accounts page</option>
+      <option value="external" {{ 'selected' if s.proxy_mode == 'external' else '' }}>External server — connect to the IMAP host/port below</option>
+    </select>
+    <div class="grid2">
+      <div><label>External IMAP host <span class="sub">(blank = env)</span></label><input type="text" name="imap_host" value="{{ s.imap_host }}" placeholder="{{ cfg.IMAP_HOST }}"></div>
+      <div><label>Port <span class="sub">(blank = env)</span></label><input type="text" name="imap_port" value="{{ s.imap_port }}" placeholder="{{ cfg.IMAP_PORT }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>External IMAP user <span class="sub">(blank = env / first account)</span></label><input type="text" name="imap_user" value="{{ s.imap_user }}" placeholder="{{ cfg.IMAP_USER }}"></div>
+      <div><label>External IMAP password <span class="sub">(blank keeps the stored value; env fallback)</span></label><input type="password" name="imap_password" value="" autocomplete="new-password" placeholder="{{ 'set' if icfg.password else 'not set' }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>TLS <span class="sub">(blank = env)</span></label>
+        <select name="imap_tls">
+          <option value="" {{ 'selected' if s.imap_tls in ('', none) else '' }}>(env)</option>
+          <option value="0" {{ 'selected' if s.imap_tls == '0' else '' }}>0 — plain (proxy)</option>
+          <option value="1" {{ 'selected' if s.imap_tls == '1' else '' }}>1 — TLS</option>
+        </select></div>
+      <div><label class="row" style="margin-top:26px"><input type="checkbox" name="imap_password_clear" value="1" style="width:auto;margin-right:8px"> Clear the stored password</label></div>
+    </div>
+    <label>Tailnet host <span class="sub">(for tailnet-mode OAuth redirect URIs, e.g. node.tailnet.ts.net)</span></label>
+    <input type="text" name="proxy_tailnet_host" value="{{ s.proxy_tailnet_host }}" placeholder="node.tailnet.ts.net">
+    <p style="margin-top:14px"><button class="btn primary" type="submit">Save connection</button></p>
+  </form>
+  <p class="sub" style="margin-bottom:0">Embedded mode reads mail through the in-app proxy (the Accounts page
+  supplies user, listener port and local password; tokens never leave the host). External mode wins over the
+  container env for host/port/user/password/TLS.</p>
+</div>
+
+<div class="card">
   <h3>Connection &amp; runtime</h3>
   <div class="sub mono">
-    IMAP: {{ cfg.IMAP_USER }} @ {{ cfg.IMAP_HOST }}:{{ cfg.IMAP_PORT }} (via email-oauth2-proxy) ·<br>
+    IMAP: {{ icfg.user or '?' }} @ {{ icfg.host }}:{{ icfg.port }} ({{ icfg.mode }}) ·<br>
     LLM: {{ llm.base }} · model {{ llm.model }} · key {{ 'set' if llm.key else 'MISSING' }}{% if llm.fallback %} · fallback: {{ llm.fallback.model }}{% endif %}<br>
     Embed: {{ ecfg.base or '— not configured —' }} · {{ ecfg.model }} · Rerank: {{ rcfg.base or '— not configured —' }} · {{ rcfg.model }}<br>
     state: {{ engine_state }} · db: {{ cfg.DB_PATH }}
@@ -2383,6 +2429,20 @@ def _save_rag_settings():
     _save_secret("rerank_api_key")
 
 
+def _save_connection_settings():
+    f = request.form
+    if "proxy_mode" in f:
+        store.set_setting("proxy_mode",
+                          "external" if f.get("proxy_mode") == "external" else "embedded")
+    for k in ("imap_host", "imap_port", "imap_user", "proxy_tailnet_host"):
+        if k in f:
+            store.set_setting(k, (f.get(k) or "").strip())
+    if "imap_tls" in f:
+        v = (f.get("imap_tls") or "").strip()
+        store.set_setting("imap_tls", v if v in ("0", "1") else "")
+    _save_secret("imap_password")
+
+
 @app.route("/settings", methods=["GET", "POST"])
 def settings():
     if request.method == "POST":
@@ -2393,6 +2453,18 @@ def settings():
         elif section == "rag":
             _save_rag_settings()
             flash("RAG settings saved.", "ok")
+        elif section == "connection":
+            _save_connection_settings()
+            flash("Connection settings saved.", "ok")
+            try:
+                if (store.get_setting("proxy_mode") or "embedded") == "external":
+                    proxy.manager.stop()
+                elif proxy.list_accounts():
+                    ok, merr = proxy.manager.start()
+                    if not ok:
+                        flash("The embedded proxy did not start: %s" % merr, "warn")
+            except Exception as exc:
+                flash("Proxy apply failed: %r" % exc, "warn")
         else:
             _save_behavior_settings()
             flash("Settings saved.", "ok")
@@ -2400,7 +2472,8 @@ def settings():
         return redirect(url_for("settings"))
     return render(render_template_string(
         SETTINGS_TMPL, s=store.all_settings(), engine_state=worker.state, cfg=config,
-        llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config()))
+        llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config(),
+        icfg=engine.imap_config()))
 
 
 @app.route("/settings/test-llm", methods=["POST"])
@@ -2463,6 +2536,477 @@ def settings_test_rerank():
 
 
 
+# ---------------------------------------------------------------- accounts (embedded proxy)
+
+def _accounts_view():
+    accounts = []
+    for a in proxy.list_accounts():
+        cs = proxy.client_settings(a)
+        tok = proxy.token_status(a["email"])
+        if tok.get("expires_at"):
+            tok["expires_h"] = fmt_ts(tok["expires_at"])
+        accounts.append({
+            "email": a["email"],
+            "sid": re.sub(r"[^A-Za-z0-9]", "-", a["email"]),
+            "provider": a.get("provider"),
+            "provider_label": cs["provider_label"],
+            "redirect_uri": cs["redirect_uri"],
+            "mode": a.get("redirect_mode") or "tailnet",
+            "mode_note": cs["mode_note"],
+            "password": a.get("password", ""),
+            "imap_local_port": a.get("imap_local_port"),
+            "smtp_local_port": a.get("smtp_local_port"),
+            "token": tok,
+            "auth": proxy.auth_state(a["email"]),
+        })
+    return accounts
+
+
+def _proxy_status_view():
+    st = proxy.manager.status()
+    st["listener_rows"] = [{"port": port, "up": up}
+                           for port, up in sorted((st.get("ports") or {}).items())]
+    if st.get("started_at"):
+        st["started_h"] = fmt_ts(st["started_at"])
+    return st
+
+
+ACCOUNTS_TMPL = """
+<h2>Accounts <span class="sub">— the embedded email proxy signs in to your providers</span></h2>
+
+<div class="card">
+  <div class="spread">
+    <div class="sub">
+      Proxy:
+      {% if not p.installed %}<span class="badge err">emailproxy package missing</span>
+      {% elif p.running %}<span class="badge ok">running</span>
+      {% else %}<span class="badge warn">stopped</span>{% endif %}
+      {% if p.pid %} · pid {{ p.pid }}{% endif %}
+      {% if p.started_h %} · up since {{ p.started_h }}{% endif %}
+      {% if p.restarts %} · restarts {{ p.restarts }}{% endif %}
+      <br>listeners:
+      {% for l in p.listener_rows %}<span class="mono">127.0.0.1:{{ l.port }}</span> {{ 'up' if l.up else 'down' }}{% if not loop.last %} · {% endif %}{% else %}(none yet — add an account){% endfor %}
+      {% if p.last_error %}<br><span class="mono">{{ p.last_error }}</span>{% endif %}
+    </div>
+    <div class="row">
+      <form class="inline" method="post" action="{{ url_for('proxy_restart') }}"><button class="btn" type="submit">Restart proxy</button></form>
+      <a class="btn" href="{{ url_for('proxy_log') }}">Proxy log</a>
+      <a class="btn primary" href="{{ url_for('account_new') }}">Add account</a>
+    </div>
+  </div>
+</div>
+
+{% for a in accounts %}
+<div class="card" data-email="{{ a.email }}">
+  <div class="spread">
+    <div>
+      <h3>{{ a.email }} <span class="sub">· {{ a.provider_label }}</span></h3>
+      <div class="sub">
+        {% if a.auth.status in ['starting','triggering','triggered','url_ready'] %}<span class="badge acc">authorising…</span>
+        {% elif a.token.authorized %}<span class="badge ok">authorised</span>{% if a.token.expires_h %} · token until {{ a.token.expires_h }}{% endif %}
+        {% else %}<span class="badge warn">not authorised</span>{% endif %}
+        &nbsp;· {{ a.mode }} mode</div>
+    </div>
+  </div>
+  <div class="kv">
+    <div class="k">Redirect URI</div><div><code>{{ a.redirect_uri }}</code> <span class="sub">— register exactly this at your provider</span></div>
+    <div class="k">Local password</div><div><code>{{ a.password }}</code> <span class="copy" data-copy="{{ a.password }}">copy</span> <span class="sub">— the app signs in with it automatically</span></div>
+    <div class="k">Listener</div><div><code>127.0.0.1:{{ a.imap_local_port }}</code> IMAP{% if a.smtp_local_port %} · <code>127.0.0.1:{{ a.smtp_local_port }}</code> SMTP{% endif %}</div>
+    <div class="k">Mode</div><div class="sub">{{ a.mode_note }}</div>
+  </div>
+  <div class="row">
+    <button class="btn primary" onclick="startAuth('{{ a.email }}', this)">Authorise</button>
+    <a class="btn" href="{{ url_for('account_edit', email=a.email) }}">Edit</a>
+    <form class="inline" method="post" action="{{ url_for('account_reset_tokens', email=a.email) }}"
+          onsubmit="return confirm('Forget the cached OAuth tokens for {{ a.email }}? You will need to authorise again.');">
+      <button class="btn" type="submit">Reset tokens</button></form>
+    <form class="inline" method="post" action="{{ url_for('account_delete', email=a.email) }}"
+          onsubmit="return confirm('Remove account {{ a.email }}? Its tokens and config entry are deleted.');">
+      <button class="btn danger" type="submit">Remove</button></form>
+  </div>
+  <div class="auth-panel hidden" id="panel-{{ a.sid }}">
+    <div class="auth-msg sub">…</div>
+    <div class="auth-url hidden" style="margin-top:8px">
+      <div class="note">Open this link in a browser and sign in as <b>{{ a.email }}</b>.
+      {% if a.mode == 'tailnet' %}You should then see a \u201csuccessfully authenticated\u201d page
+      from the proxy — if the browser cannot reach it, copy the URL it ended on and paste it below.
+      {% else %}The browser will end on an address starting with <code>{{ a.redirect_uri }}</code>
+      that fails to load — that is expected. Copy the <b>whole address</b> from the address bar and
+      paste it below.{% endif %}</div>
+      <p><a class="btn primary" id="url-{{ a.sid }}" href="#" target="_blank" rel="noopener">Open login page →</a>
+      <span class="copy" onclick="cp(document.getElementById('url-{{ a.sid }}').href, this)">copy link</span></p>
+    </div>
+    <div class="auth-paste" style="margin-top:10px">
+      <div class="sub" style="margin-bottom:6px">Paste the URL the browser ended on:</div>
+      <div class="row" style="gap:8px;flex-wrap:nowrap">
+        <input type="text" id="paste-{{ a.sid }}" placeholder="https://localhost:.../?code=..." autocomplete="off">
+        <button class="btn" onclick="submitPaste('{{ a.email }}')">Submit</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="card"><p>No accounts yet. <a href="{{ url_for('account_new') }}">Add your first account</a>
+— the mail watcher picks it up automatically.</p></div>
+{% endfor %}
+
+<div class="card">
+  <h3>How this works</h3>
+  <div class="sub">The embedded <b>email-oauth2-proxy</b> signs in to your provider with OAuth 2.0 and
+  exposes a PLAIN local IMAP listener; Mail Triage reads mail through that listener and never stores a
+  provider password. OAuth tokens live in <code>{{ p.cache_file }}</code> and the generated config in
+  <code>{{ p.config_file }}</code> (the proxy log is in <code>{{ p.log_file }}</code>). Account changes
+  restart the proxy automatically.</div>
+</div>
+
+<script>
+function cp(text, el){
+  function done(){ if(el){ const t=el.textContent; el.textContent='copied'; setTimeout(()=>el.textContent=t,900);} }
+  if(navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(text).then(done, fallback); }
+  else { fallback(); }
+  function fallback(){
+    const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); done();
+  }
+}
+document.addEventListener('click', function(e){
+  const el = e.target && e.target.closest ? e.target.closest('.copy') : null;
+  if(el && el.dataset && el.dataset.copy !== undefined){ cp(el.dataset.copy, el); }
+});
+function startAuth(email, btn){
+  btn.disabled = true; btn.textContent = 'Starting…';
+  fetch('/api/proxy/auth/' + encodeURIComponent(email), {method:'POST'})
+    .then(r => r.json())
+    .then(j => {
+      if(!j.ok){ alert(j.message || 'Could not start authorisation'); btn.disabled=false; btn.textContent='Authorise'; return; }
+      pollAuth(email, btn);
+    })
+    .catch(e => { alert('Request failed: ' + e); btn.disabled=false; btn.textContent='Authorise'; });
+}
+function pollAuth(email, btn){
+  const sid = email.replace(/[^A-Za-z0-9]/g, '-');
+  const panel = document.getElementById('panel-' + sid);
+  const msg = panel.querySelector('.auth-msg');
+  const urlBox = panel.querySelector('.auth-url');
+  const urlLink = document.getElementById('url-' + sid);
+  panel.classList.remove('hidden');
+  btn.textContent = 'Authorising…';
+  const timer = setInterval(function(){
+    fetch('/api/proxy/auth/' + encodeURIComponent(email) + '/status')
+      .then(r => r.json())
+      .then(j => {
+        msg.textContent = j.message || j.status;
+        if(j.url){
+          urlBox.classList.remove('hidden'); urlLink.href = j.url;
+        }
+        if(['success','failed','timeout'].indexOf(j.status) !== -1){
+          clearInterval(timer);
+          btn.disabled = false; btn.textContent = 'Authorise';
+          if(j.status === 'success'){
+            msg.innerHTML = '<span class="badge ok">authorised</span> ' + (j.message||'');
+            setTimeout(function(){ location.reload(); }, 1800);
+          } else {
+            msg.innerHTML = '<span class="badge err">' + j.status + '</span> ' + (j.message||'');
+          }
+        } else if(j.status === 'url_ready'){
+          msg.innerHTML = '<span class="badge acc">waiting for login</span> ' + (j.message||'');
+        }
+      })
+      .catch(function(){});
+  }, 2000);
+}
+function submitPaste(email){
+  const sid = email.replace(/[^A-Za-z0-9]/g, '-');
+  const input = document.getElementById('paste-' + sid);
+  const panel = document.getElementById('panel-' + sid);
+  const msg = panel.querySelector('.auth-msg');
+  const val = (input.value || '').trim();
+  if(!val){ alert('Paste the URL from the browser first.'); return; }
+  const fd = new URLSearchParams(); fd.append('url', val);
+  fetch('/api/proxy/auth/' + encodeURIComponent(email) + '/complete', {method:'POST', body: fd})
+    .then(r => r.json())
+    .then(j => {
+      msg.innerHTML = '<span class="badge ' + (j.ok ? 'ok' : 'err') + '">' +
+        (j.ok ? 'submitted' : 'error') + '</span> ' + (j.message || '');
+      if(!j.ok){ alert(j.message || 'Could not submit the URL.'); }
+    })
+    .catch(e => alert('Request failed: ' + e));
+}
+</script>
+"""
+
+
+ACCOUNT_NEW_TMPL = """
+<h2>Add account</h2>
+<form method="post" class="card">
+  <label for="provider">Provider</label>
+  <select id="provider" name="provider" required onchange="toggleProvider()">
+    {% for key, pr in presets.items() %}<option value="{{ key }}" {{ 'selected' if key=='gmail' else '' }}>{{ pr.label }}</option>{% endfor %}
+  </select>
+  {% for key, pr in presets.items() %}
+  <div class="note" id="note-{{ key }}" style="margin-top:8px;display:none">{{ pr.register_notes }}</div>
+  {% endfor %}
+  <div id="reuse-row" class="note" style="display:none;margin-top:8px">
+    <label class="row" style="color:var(--fg);margin:0;font-size:.9rem">
+      <input type="checkbox" id="reuse_tb" onchange="applyReuse(this.checked)" style="width:auto;margin-right:8px">
+      <span>No Entra app of your own? Use <b>Thunderbird's public client ID</b> (personal Outlook/Hotmail,
+      and tenants where you cannot register an app). No client secret needed; loopback mode is used and the
+      login finishes via the paste box.</span>
+    </label>
+  </div>
+
+  <div class="grid2">
+    <div><label for="email">Email address</label><input type="text" id="email" name="email" placeholder="you@example.com" required></div>
+    <div><label for="password">Local password <span class="sub">(between the app and the proxy)</span></label>
+      <div class="row"><input type="text" id="password" name="password" value="{{ default_password }}">
+      <span class="copy" onclick="document.getElementById('password').value='{{ default_password }}'">reset</span></div></div>
+  </div>
+
+  <div class="grid2">
+    <div><label for="client_id">OAuth client ID</label><input type="text" id="client_id" name="client_id"></div>
+    <div><label for="client_secret">OAuth client secret <span class="sub">(if required)</span></label><input type="text" id="client_secret" name="client_secret"></div>
+  </div>
+
+  <label for="redirect_mode">How will you open the login page?</label>
+  <select id="redirect_mode" name="redirect_mode">
+    <option value="tailnet" selected>From any tailnet device (recommended — needs your own OAuth app with the redirect URI registered)</option>
+    <option value="loopback">Loopback + paste-back (needed with reused client IDs, e.g. Thunderbird's)</option>
+  </select>
+
+  <div id="custom-fields" style="display:none">
+    <h3 style="margin-top:18px">Custom provider details</h3>
+    <div class="grid2">
+      <div><label for="permission_url">Permission (authorize) URL</label><input type="text" id="permission_url" name="permission_url"></div>
+      <div><label for="token_url">Token URL</label><input type="text" id="token_url" name="token_url"></div>
+    </div>
+    <label for="scope">Scope</label><input type="text" id="scope" name="scope">
+    <div class="grid2">
+      <div><label for="imap_host">IMAP server</label><input type="text" id="imap_host" name="imap_host" placeholder="imap.example.com"></div>
+      <div><label for="imap_port">IMAP port</label><input type="number" id="imap_port" name="imap_port" value="993"></div>
+    </div>
+    <div class="grid2">
+      <div><label for="smtp_host">SMTP server <span class="sub">(optional)</span></label><input type="text" id="smtp_host" name="smtp_host" placeholder="smtp.example.com"></div>
+      <div><label for="smtp_port">SMTP port</label><input type="number" id="smtp_port" name="smtp_port" value="465"></div>
+    </div>
+    <label class="row" style="color:var(--fg)"><input type="checkbox" name="use_pkce" value="1" style="width:auto;margin-right:8px"> Use PKCE (no client secret)</label>
+  </div>
+
+  <p style="margin-top:16px"><button class="btn primary" type="submit">Add account</button></p>
+  <div class="sub">After adding: register the redirect URI shown on the account card at your provider
+  (if you use your own OAuth app), then press <b>Authorise</b> and log in from a browser.</div>
+</form>
+<script>
+var REUSE_CLIENT_ID = "{{ reuse_client_id }}";
+function applyReuse(on){
+  const cid = document.getElementById('client_id');
+  const secret = document.getElementById('client_secret');
+  const mode = document.getElementById('redirect_mode');
+  if(on){
+    cid.value = REUSE_CLIENT_ID;
+    cid.readOnly = true;
+    secret.value = '';
+    secret.readOnly = true;
+    mode.value = 'loopback';
+  } else {
+    if(cid.value === REUSE_CLIENT_ID){ cid.value = ''; }
+    cid.readOnly = false;
+    secret.readOnly = false;
+  }
+}
+function toggleProvider(){
+  const v = document.getElementById('provider').value;
+  document.getElementById('custom-fields').style.display = (v === 'custom') ? 'block' : 'none';
+  document.querySelectorAll('[id^=note-]').forEach(function(el){
+    el.style.display = (el.id === 'note-' + v) ? 'block' : 'none';
+  });
+  const reuseRow = document.getElementById('reuse-row');
+  const reuseBox = document.getElementById('reuse_tb');
+  if(v === 'outlook'){
+    reuseRow.style.display = 'block';
+  } else {
+    reuseRow.style.display = 'none';
+    if(reuseBox.checked){ reuseBox.checked = false; applyReuse(false); }
+  }
+  if(reuseBox.checked){ applyReuse(true); }
+}
+toggleProvider();
+</script>
+"""
+
+
+ACCOUNT_EDIT_TMPL = """
+<h2>Edit {{ a.email }}</h2>
+<form method="post" class="card">
+  <div class="grid2">
+    <div><label>Email</label><input type="text" value="{{ a.email }}" readonly></div>
+    <div><label for="provider">Provider</label>
+      <select id="provider" name="provider">
+        {% for key, pr in presets.items() %}<option value="{{ key }}" {{ 'selected' if key==a.provider else '' }}>{{ pr.label }}</option>{% endfor %}
+      </select></div>
+  </div>
+  <div class="grid2">
+    <div><label for="password">Local password</label><input type="text" id="password" name="password" value="{{ a.password }}"></div>
+    <div><label for="redirect_mode">Login mode</label>
+      <select id="redirect_mode" name="redirect_mode">
+        <option value="tailnet" {{ 'selected' if a.redirect_mode != 'loopback' else '' }}>Tailnet (browser on any tailnet device)</option>
+        <option value="loopback" {{ 'selected' if a.redirect_mode == 'loopback' else '' }}>Loopback + paste-back</option>
+      </select></div>
+  </div>
+  <div class="grid2">
+    <div><label for="client_id">OAuth client ID</label><input type="text" id="client_id" name="client_id" value="{{ a.client_id }}"></div>
+    <div><label for="client_secret">OAuth client secret <span class="sub">(blank = keep current)</span></label><input type="text" id="client_secret" name="client_secret" placeholder="{{ 'set' if a.client_secret else 'none' }}"></div>
+  </div>
+  <div class="grid2">
+    <div><label for="permission_url">Permission URL</label><input type="text" id="permission_url" name="permission_url" value="{{ a.auth_url }}"></div>
+    <div><label for="token_url">Token URL</label><input type="text" id="token_url" name="token_url" value="{{ a.token_url }}"></div>
+  </div>
+  <label for="scope">Scope</label><input type="text" id="scope" name="scope" value="{{ a.scopes }}">
+  <div class="grid2">
+    <div><label for="imap_host">IMAP server</label><input type="text" id="imap_host" name="imap_host" value="{{ a.imap_host }}"></div>
+    <div><label for="imap_port">IMAP port</label><input type="number" id="imap_port" name="imap_port" value="{{ a.imap_port }}"></div>
+  </div>
+  <div class="grid2">
+    <div><label for="smtp_host">SMTP server</label><input type="text" id="smtp_host" name="smtp_host" value="{{ a.smtp_host }}"></div>
+    <div><label for="smtp_port">SMTP port</label><input type="number" id="smtp_port" name="smtp_port" value="{{ a.smtp_port }}"></div>
+  </div>
+  <label class="row" style="color:var(--fg)"><input type="checkbox" name="use_pkce" value="1" {{ 'checked' if a.use_pkce else '' }} style="width:auto;margin-right:8px"> Use PKCE (no client secret)</label>
+  <p class="sub" style="margin-top:10px">Redirect URI: <code>{{ client_settings.redirect_uri }}</code> ·
+  listener 127.0.0.1:{{ a.imap_local_port }} · {{ client_settings.mode_note }}</p>
+  <p style="margin-top:12px"><button class="btn primary" type="submit">Save account</button></p>
+</form>
+"""
+
+
+PROXY_LOG_TMPL = """
+<h2>Proxy log</h2>
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <div class="sub">Last {{ n }} lines of <code>{{ log_file }}</code></div>
+    <div class="row"><a class="btn small" href="{{ url_for('proxy_log') }}?n=200">200</a>
+    <a class="btn small" href="{{ url_for('proxy_log') }}?n=500">500</a>
+    <a class="btn small" href="{{ url_for('proxy_log') }}?n=2000">2000</a></div>
+  </div>
+  <pre class="log">{{ content }}</pre>
+</div>
+"""
+
+
+@app.route("/accounts")
+def accounts():
+    return render(render_template_string(ACCOUNTS_TMPL, accounts=_accounts_view(),
+                                         p=_proxy_status_view()))
+
+
+@app.route("/accounts/new", methods=["GET", "POST"])
+def account_new():
+    if request.method == "POST":
+        rec, err = proxy.account_from_form(request.form)
+        if err:
+            flash(err, "err")
+            return redirect(url_for("account_new"))
+        if proxy.get_account(rec["email"]):
+            flash("An account for %s already exists." % rec["email"], "err")
+            return redirect(url_for("account_new"))
+        proxy.upsert_account(rec)
+        ok, merr = proxy.manager.apply()
+        store.log_event("info", "emailproxy: account %s added" % rec["email"])
+        if ok:
+            flash("Account %s added — press Authorise on the Accounts page, then log in."
+                  % rec["email"], "ok")
+        else:
+            flash("Account %s added, but the embedded proxy did not start: %s"
+                  % (rec["email"], merr), "warn")
+        return redirect(url_for("accounts"))
+    return render(render_template_string(
+        ACCOUNT_NEW_TMPL, presets=proxy.PRESETS,
+        default_password=proxy.default_password(),
+        reuse_client_id=proxy.PRESETS["outlook"]["reuse_client_id"]))
+
+
+@app.route("/accounts/<path:email>/edit", methods=["GET", "POST"])
+def account_edit(email):
+    acct = proxy.get_account(email)
+    if not acct:
+        flash("Unknown account %s." % email, "err")
+        return redirect(url_for("accounts"))
+    if request.method == "POST":
+        data = dict(request.form)
+        data["email"] = acct["email"]
+        if not (data.get("password") or "").strip():
+            data["password"] = acct.get("password") or ""
+        if not (data.get("client_secret") or "").strip():
+            data["client_secret"] = acct.get("client_secret") or ""
+        same_provider = (data.get("provider") or acct.get("provider")) == acct.get("provider")
+        rec, err = proxy.account_from_form(data, existing=acct if same_provider else None)
+        if err:
+            flash(err, "err")
+            return redirect(url_for("account_edit", email=acct["email"]))
+        proxy.upsert_account(rec)
+        ok, merr = proxy.manager.apply()
+        store.log_event("info", "emailproxy: account %s updated" % acct["email"])
+        if ok:
+            flash("Saved %s." % acct["email"], "ok")
+        else:
+            flash("Saved, but the embedded proxy did not restart: %s" % merr, "warn")
+        return redirect(url_for("accounts"))
+    return render(render_template_string(ACCOUNT_EDIT_TMPL, a=acct, presets=proxy.PRESETS,
+                                         client_settings=proxy.client_settings(acct)))
+
+
+@app.route("/accounts/<path:email>/reset-tokens", methods=["POST"])
+def account_reset_tokens(email):
+    ok, err = proxy.reset_tokens(email)
+    flash(("Cached tokens cleared for %s." % email) if ok else ("Reset failed: %s" % err),
+          "ok" if ok else "warn")
+    return redirect(url_for("accounts"))
+
+
+@app.route("/accounts/<path:email>/delete", methods=["POST"])
+def account_delete(email):
+    ok, err = proxy.remove_account(email)
+    flash(("Account %s removed." % email) if ok else ("Removal failed: %s" % err),
+          "ok" if ok else "warn")
+    return redirect(url_for("accounts"))
+
+
+@app.route("/proxy/restart", methods=["POST"])
+def proxy_restart():
+    ok, err = proxy.manager.restart()
+    store.log_event("info", "emailproxy: manual restart (%s)" % ("ok" if ok else err))
+    flash("Proxy restarted." if ok else "Proxy restart failed: %s" % err, "ok" if ok else "err")
+    return redirect(url_for("accounts"))
+
+
+@app.route("/proxy/log")
+def proxy_log():
+    n = request.args.get("n", type=int) or 300
+    return render(render_template_string(PROXY_LOG_TMPL, content=proxy.tail_log(n), n=n,
+                                         log_file=proxy.log_path()))
+
+
+@app.route("/api/proxy/auth/<path:email>", methods=["POST"])
+def proxy_auth_start(email):
+    if not proxy.get_account(email):
+        return jsonify({"ok": False, "message": "Unknown account."}), 404
+    ok, err = proxy.start_auth(email)
+    if not ok:
+        return jsonify({"ok": False, "message": err}), 409
+    return jsonify({"ok": True})
+
+
+@app.route("/api/proxy/auth/<path:email>/status")
+def proxy_auth_status(email):
+    state = proxy.auth_state(email)
+    state["token"] = proxy.token_status(email)
+    return jsonify(state)
+
+
+@app.route("/api/proxy/auth/<path:email>/complete", methods=["POST"])
+def proxy_auth_complete(email):
+    ok, message = proxy.complete_auth(email, request.form.get("url") or "")
+    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
+
+
 # ---------------------------------------------------------------- log
 
 LOG_TMPL = """
@@ -2511,7 +3055,20 @@ def healthz():
 if __name__ == "__main__":
     store.init_db()
     if "--check" in sys.argv:
-        print(json.dumps(engine.connectivity_check(), indent=1))
+        out = engine.connectivity_check()
+        try:
+            out["proxy"] = proxy.manager.status()
+        except Exception as exc:
+            out["proxy"] = {"error": repr(exc)}
+        print(json.dumps(out, indent=1))
+        sys.exit(0)
+    if "--import-proxy" in sys.argv:
+        # one-time migration: import accounts from a standalone emailproxy ui_state.json
+        args = sys.argv[sys.argv.index("--import-proxy") + 1:]
+        if not args:
+            print("usage: python app.py --import-proxy /path/to/ui_state.json")
+            sys.exit(1)
+        print(json.dumps(proxy.import_legacy_state(args[0]), indent=1))
         sys.exit(0)
     if "--index" in sys.argv or "--reindex" in sys.argv:
         if "--reindex" in sys.argv:
@@ -2546,4 +3103,5 @@ if __name__ == "__main__":
     worker.start()
     indexer.start()
     classifier.start()
+    proxy.supervisor.start()  # keeps the embedded emailproxy running (embedded mode only)
     app.run(host=config.UI_HOST, port=config.UI_PORT, threaded=True)

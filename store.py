@@ -62,6 +62,15 @@ DEFAULT_SETTINGS = {
 
     # ---- UI ----
     "display_tz_offset": 8,       # hours from UTC for displayed timestamps (float ok)
+
+    # ---- mail connection / embedded proxy ----
+    "proxy_mode": "embedded",     # embedded = read mail via the in-app emailproxy
+    "proxy_tailnet_host": "",     # e.g. node.tailnet.ts.net, for tailnet-mode redirect URIs
+    "imap_host": "",              # external-mode overrides (blank = container env)
+    "imap_port": "",
+    "imap_user": "",
+    "imap_password": "",
+    "imap_tls": "",               # "", "0"/"1" (blank = env)
 }
 
 _SCHEMA = """
@@ -162,6 +171,27 @@ CREATE TABLE IF NOT EXISTS rule_proposals (
     ts INTEGER, source TEXT NOT NULL DEFAULT '',
     rule TEXT NOT NULL DEFAULT '{}', note TEXT NOT NULL DEFAULT '',
     applied INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS proxy_accounts (
+    email TEXT PRIMARY KEY,
+    provider TEXT NOT NULL DEFAULT 'custom',
+    password TEXT NOT NULL DEFAULT '',
+    client_id TEXT NOT NULL DEFAULT '',
+    client_secret TEXT NOT NULL DEFAULT '',
+    scopes TEXT NOT NULL DEFAULT '',
+    auth_url TEXT NOT NULL DEFAULT '',
+    token_url TEXT NOT NULL DEFAULT '',
+    use_pkce INTEGER NOT NULL DEFAULT 0,
+    redirect_port INTEGER NOT NULL DEFAULT 0,
+    redirect_mode TEXT NOT NULL DEFAULT 'tailnet',
+    imap_host TEXT NOT NULL DEFAULT '',
+    imap_port INTEGER NOT NULL DEFAULT 993,
+    imap_local_port INTEGER NOT NULL DEFAULT 0,
+    smtp_host TEXT NOT NULL DEFAULT '',
+    smtp_port INTEGER NOT NULL DEFAULT 465,
+    smtp_local_port INTEGER NOT NULL DEFAULT 0,
+    smtp_starttls INTEGER NOT NULL DEFAULT 0,
+    created INTEGER, updated INTEGER
 );
 """
 

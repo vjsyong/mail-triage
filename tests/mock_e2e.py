@@ -822,7 +822,8 @@ def main():
     section("T8 web UI smoke (Flask test client)")
     import app as app_mod
     client = app_mod.app.test_client()
-    for path in ("/", "/assistant", "/rules", "/classifiers", "/templates", "/messages", "/settings", "/log", "/healthz"):
+    for path in ("/", "/assistant", "/rules", "/classifiers", "/templates", "/messages",
+                 "/accounts", "/accounts/new", "/settings", "/log", "/proxy/log", "/healthz"):
         r = client.get(path)
         check("GET %s -> 200" % path, r.status_code == 200)
     latest = store.messages(limit=1)[0]
@@ -1688,6 +1689,49 @@ def main():
     r = client.get("/settings")
     check("settings page carries the new endpoint cards",
           b"LLM endpoint" in r.data and b"RAG / semantic search" in r.data)
+
+    section("T27 embedded proxy: account store, config generation, connection resolution")
+    import proxy as proxy_mod
+    store.set_setting("proxy_tailnet_host", "node.example.ts.net")
+    rec, ferr = proxy_mod.account_from_form({
+        "provider": "outlook", "email": "acct@example.com", "password": "local-pw-1",
+        "client_id": "cid-1", "client_secret": "csec-1", "redirect_mode": "loopback"})
+    check("account form builds the preset record",
+          bool(rec) and not ferr and rec["imap_local_port"] == 1993
+          and rec["redirect_port"] == proxy_mod.REDIRECT_POOL_START)
+    proxy_mod.upsert_account(rec)
+    check("account stored",
+          [a["email"] for a in proxy_mod.list_accounts()] == ["acct@example.com"])
+    txt = proxy_mod.config_text()
+    check("config: preset listener section on loopback",
+          "[IMAP-1993]" in txt and "server_address = outlook.office365.com" in txt
+          and "local_address = 127.0.0.1" in txt)
+    check("config: account section with loopback redirect + secret",
+          "[acct@example.com]" in txt
+          and "redirect_uri = https://localhost:41810" in txt
+          and "redirect_listen_address = http://127.0.0.1:41810" in txt
+          and "client_secret = csec-1" in txt)
+    store.set_setting("proxy_mode", "embedded")
+    ic = engine.imap_config()
+    check("embedded mode resolves the account for the app",
+          ic["host"] == "127.0.0.1" and ic["port"] == 1993 and ic["user"] == "acct@example.com"
+          and ic["password"] == "local-pw-1" and not ic["tls"])
+    store.set_setting("proxy_mode", "external")
+    ic = engine.imap_config()
+    check("external mode falls back to the env",
+          ic["host"] == config.IMAP_HOST and ic["port"] == config.IMAP_PORT
+          and ic["user"] == config.IMAP_USER)
+    store.set_setting("proxy_mode", "embedded")
+    check("token status starts unauthenticated",
+          proxy_mod.token_status("acct@example.com")["authorized"] is False)
+    r = client.get("/accounts")
+    check("accounts page renders the account + status",
+          r.status_code == 200 and b"acct@example.com" in r.data
+          and b"not authorised" in r.data)
+    r = client.post("/api/proxy/auth/nobody@example.com")
+    check("auth start rejects unknown accounts", r.status_code == 404)
+    proxy_mod.delete_account("acct@example.com")
+    check("account removed", proxy_mod.list_accounts() == [])
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

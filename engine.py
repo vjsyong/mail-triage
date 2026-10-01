@@ -22,6 +22,7 @@ import requests
 
 import config
 import heuristics
+import proxy
 import store
 
 
@@ -249,6 +250,41 @@ def build_draft_message(msg, body_text, user):
 _FOLDER_LOCK = threading.Lock()  # serialises folder CREATE across worker threads
 
 
+def imap_config():
+    """Effective IMAP connection for the app.
+
+    Embedded mode (default): mail is read through the in-app email-oauth2-proxy on
+    127.0.0.1, with the account record from the Accounts page supplying the user, the
+    local listener port and the local password. Anything else falls back to the
+    external settings / container env (IMAP_HOST etc.), so pointing the app at a
+    proxy (or server) elsewhere still works."""
+    mode = (store.get_setting("proxy_mode") or "embedded").lower()
+    user = (store.get_setting("imap_user") or config.IMAP_USER or "").strip()
+    if mode == "embedded":
+        acct = proxy.get_account(user or None)
+        if acct is None:
+            # single-mailbox app: if the configured user matches no account, use the first one
+            acct = proxy.get_account(None)
+        if acct and acct.get("password"):
+            return {"host": "127.0.0.1", "port": int(acct.get("imap_local_port") or 1993),
+                    "user": acct["email"], "password": acct["password"], "tls": False,
+                    "mode": "embedded"}
+    host = (store.get_setting("imap_host") or config.IMAP_HOST or "").strip()
+    raw_port = store.get_setting("imap_port") or config.IMAP_PORT
+    try:
+        port = int(raw_port or 143)
+    except (TypeError, ValueError):
+        port = 143
+    password = store.get_setting("imap_password") or config.IMAP_PASSWORD
+    tls_setting = store.get_setting("imap_tls")
+    if tls_setting in (None, ""):
+        tls = bool(config.IMAP_TLS)
+    else:
+        tls = str(tls_setting).lower() in ("1", "true", "on", "yes")
+    return {"host": host, "port": port, "user": user, "password": password, "tls": tls,
+            "mode": "external"}
+
+
 class MailClient:
     """Thin IMAP wrapper. Connects to the proxy with a PLAIN connection (the proxy
     performs OAuth 2.0 and secures the far side)."""
@@ -259,12 +295,13 @@ class MailClient:
         self.selected = None
 
     def connect(self):
-        if config.IMAP_TLS:
-            self.M = imaplib.IMAP4_SSL(config.IMAP_HOST, config.IMAP_PORT, timeout=30)
+        cfg = imap_config()
+        if cfg["tls"]:
+            self.M = imaplib.IMAP4_SSL(cfg["host"], cfg["port"], timeout=30)
         else:
-            self.M = imaplib.IMAP4(config.IMAP_HOST, config.IMAP_PORT, timeout=30)
+            self.M = imaplib.IMAP4(cfg["host"], cfg["port"], timeout=30)
         self.selected = None
-        typ, dat = self.M.login(config.IMAP_USER, config.IMAP_PASSWORD)
+        typ, dat = self.M.login(cfg["user"], cfg["password"])
         if typ != "OK":
             raise RuntimeError("IMAP login failed: %s %s" % (typ, dat))
         return self
@@ -748,7 +785,7 @@ class LLMClient:
         my_name = settings.get("my_name", "Sean")
         system = ("You write email replies as %s (%s). Be concise, warm and professional. "
                   "Output ONLY the plain-text reply body (no subject line, no headers, no quotes)."
-                  % (my_name, config.IMAP_USER))
+                  % (my_name, imap_config()["user"]))
         guidance = ""
         if template:
             subject_hint = template.get("subject") or ""
@@ -1019,7 +1056,7 @@ def connectivity_check():
         folders = mc.folders()
         uv = mc.select("INBOX")
         unseen = len(mc.search("UNSEEN"))
-        return {"ok": True, "user": config.IMAP_USER, "folders": len(folders),
+        return {"ok": True, "user": imap_config()["user"], "folders": len(folders),
                 "inbox_uidvalidity": uv, "unseen": unseen}
     finally:
         mc.close()
@@ -1048,7 +1085,7 @@ def save_draft(msg_id, body_text):
     msg = store.get_message(msg_id)
     if not msg:
         raise RuntimeError("message %s not found" % msg_id)
-    raw = build_draft_message(msg, body_text, config.IMAP_USER)
+    raw = build_draft_message(msg, body_text, imap_config()["user"])
     mc = MailClient().connect()
     try:
         folder = store.get_setting("drafts_folder") or mc.find_special_use("\\Drafts") or "Drafts"
@@ -2216,7 +2253,7 @@ class AssistantAgent:
             return
         store.add_assistant_message("user", user_text[:4000])
         today = time.strftime("%Y-%m-%d (%a)", time.gmtime(time.time() + 8 * 3600))
-        system = (ASSISTANT_SYSTEM % {"user": config.IMAP_USER, "today": today,
+        system = (ASSISTANT_SYSTEM % {"user": imap_config()["user"], "today": today,
                                       "max_calls": self.MAX_CALLS_PER_TURN}
                   + "\n\n" + _assistant_context())
         convo = [{"role": m["role"], "content": m["content"]}
