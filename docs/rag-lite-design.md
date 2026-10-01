@@ -89,3 +89,10 @@ Design rules:
 4. Verify with `tests/retrieval_eval.py` + bench set; flip default when quality ≥
    legacy; keep the legacy tables for one release, then drop via a settings button.
 5. Rollback = set `rag_backend=legacy` (instant, index still present).
+
+## Scratch services used for this evaluation (host gpu-vm1)
+- `rag06b` container: TEI Qwen3-Embedding-0.6B on GPU1, port 8043 (built the 0.6B
+  vectors at 98 chunks/s). Relaunch if stopped:
+  `docker start rag06b`  (or the docker run in the bench notes)
+- Prototype venv: `~/mail-triage-rag/.venv-rag` (fastembed 0.8.1, sqlite-vec, numpy)
+- Rebuild everything: `prototype/build.py all` then `prototype/eval.py`
