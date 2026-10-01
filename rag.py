@@ -11,6 +11,7 @@ new mail is folded in incrementally. Embeddings never leave the host.
 """
 import json
 import math
+import os
 import re
 import threading
 import time
@@ -27,11 +28,18 @@ def embed_config():
         v = store.get_setting(name)
         return v if v not in (None, "") else env
 
+    protocol = (store.get_setting("embed_protocol") or "tei").lower()
+    if protocol == "local":
+        # local models are named from the Settings value only; the env default (4B)
+        # does not exist as a FastEmbed/ONNX build
+        model = store.get_setting("embed_model") or ""
+    else:
+        model = pick("embed_model", config.EMBED_MODEL) or ""
     return {
         "base": (pick("embed_base_url", config.EMBED_BASE_URL) or "").rstrip("/"),
-        "model": pick("embed_model", config.EMBED_MODEL) or "",
+        "model": model,
         "key": pick("embed_api_key", "") or "",
-        "protocol": (store.get_setting("embed_protocol") or "tei").lower(),
+        "protocol": protocol,
         "timeout": int(store.get_setting("embed_timeout") or config.EMBED_TIMEOUT),
         "query_prefix": store.get_setting("embed_query_prefix") or "",
     }
@@ -43,11 +51,16 @@ def rerank_config():
         v = store.get_setting(name)
         return v if v not in (None, "") else env
 
+    protocol = (store.get_setting("rerank_protocol") or "tei").lower()
+    if protocol == "local":
+        model = store.get_setting("rerank_model") or ""
+    else:
+        model = pick("rerank_model", config.RERANK_MODEL) or ""
     return {
         "base": (pick("rerank_base_url", config.RERANK_BASE_URL) or "").rstrip("/"),
-        "model": pick("rerank_model", config.RERANK_MODEL) or "",
+        "model": model,
         "key": pick("rerank_api_key", "") or "",
-        "protocol": (store.get_setting("rerank_protocol") or "tei").lower(),
+        "protocol": protocol,
         "timeout": int(store.get_setting("rerank_timeout") or config.RERANK_TIMEOUT),
     }
 
@@ -85,17 +98,111 @@ RERANK_TOP = 30        # what we send to the cross-encoder
 
 # ---------------------------------------------------------------- embed/rerank clients
 
+LOCAL_EMBED_DEFAULT = "Qwen/Qwen3-Embedding-0.6B"
+LOCAL_RERANK_DEFAULT = "jinaai/jina-reranker-v1-turbo-en"
+
+_local_models = {}
+_local_lock = threading.Lock()
+
+
+def _local_cache_dir():
+    d = (store.get_setting("local_models_dir")
+         or os.environ.get("FASTEMBED_CACHE_PATH")
+         or os.path.join(getattr(config, "DATA_DIR", "/data") or "/data", "ragmodels"))
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    os.environ.setdefault("FASTEMBED_CACHE_PATH", d)
+    return d
+
+
+def _fix_onnx_symlinks(cache_dir):
+    """ONNX Runtime >=1.17 refuses external-data weights whose resolved path escapes
+    the model directory; HF snapshots symlink into ../../blobs. Dereference those
+    symlinks (idempotent; a few files, copies only when needed)."""
+    fixed = 0
+    try:
+        for root, dirs, files in os.walk(cache_dir):
+            if os.sep + "blobs" in root or root.endswith("blobs"):
+                continue
+            for f in files + dirs:
+                fp = os.path.join(root, f)
+                if os.path.islink(fp):
+                    target = os.path.realpath(fp)
+                    if "blobs" in target:
+                        try:
+                            data = open(target, "rb").read()
+                            os.unlink(fp)
+                            with open(fp, "wb") as out:
+                                out.write(data)
+                            fixed += 1
+                        except OSError:
+                            pass
+        if fixed:
+            store.log_event("info", "local models: dereferenced %d symlinked file(s) "
+                            "for ONNX Runtime" % fixed)
+    except Exception:
+        pass
+    return fixed
+
+
+def _local_embed(texts, model):
+    name = (model or "").strip() or LOCAL_EMBED_DEFAULT
+    key = "emb:" + name
+    with _local_lock:
+        inst = _local_models.get(key)
+        if inst is None:
+            cache = _local_cache_dir()
+            from fastembed import TextEmbedding
+            threads = int(store.get_setting("local_embed_threads") or 8)
+            try:
+                inst = TextEmbedding(name, threads=threads)
+            except Exception as exc:
+                if "External data path" not in str(exc):
+                    raise
+                _fix_onnx_symlinks(cache)
+                inst = TextEmbedding(name, threads=threads)
+            _local_models[key] = inst
+    out = []
+    for i in range(0, len(texts), EMBED_BATCH):
+        out.extend([list(map(float, v)) for v in inst.embed(list(texts[i:i + EMBED_BATCH]))])
+    return out
+
+
+def _local_rerank(query, texts, model):
+    name = (model or "").strip() or LOCAL_RERANK_DEFAULT
+    key = "ce:" + name
+    with _local_lock:
+        inst = _local_models.get(key)
+        if inst is None:
+            cache = _local_cache_dir()
+            from fastembed.rerank.cross_encoder import TextCrossEncoder
+            threads = int(store.get_setting("local_embed_threads") or 8)
+            try:
+                inst = TextCrossEncoder(name, threads=threads)
+            except Exception as exc:
+                if "External data path" not in str(exc):
+                    raise
+                _fix_onnx_symlinks(cache)
+                inst = TextCrossEncoder(name, threads=threads)
+            _local_models[key] = inst
+    return [float(s) for s in inst.rerank(query, list(texts))]
+
+
 def embed(texts, kind="document"):
-    """Embed texts via the configured endpoint. kind='query' prepends the configured
-    query instruction prefix (documents stay raw). Protocols: 'tei' (POST /embed,
-    {"inputs": [...]}) or 'openai' (POST /embeddings, {"model", "input": [...]})."""
+    """Embed texts via the configured backend. kind='query' prepends the configured
+    query instruction prefix (documents stay raw). Protocols: 'tei' (POST /embed),
+    'openai' (POST /embeddings) or 'local' (FastEmbed/ONNX on CPU, in-process)."""
     cfg = embed_config()
-    if not cfg["base"]:
-        raise RuntimeError("embedding endpoint not configured - set it in Settings -> RAG "
-                           "(or EMBED_BASE_URL in .env)")
     payload_texts = list(texts)
     if kind == "query" and cfg["query_prefix"]:
         payload_texts = [cfg["query_prefix"] + t for t in payload_texts]
+    if cfg["protocol"] == "local":
+        return _local_embed(payload_texts, cfg["model"])
+    if not cfg["base"]:
+        raise RuntimeError("embedding endpoint not configured - set it in Settings -> RAG "
+                           "(or EMBED_BASE_URL in .env)")
     headers = {"Authorization": "Bearer " + cfg["key"]} if cfg["key"] else {}
     out = []
     for i in range(0, len(payload_texts), EMBED_BATCH):
@@ -128,7 +235,16 @@ def rerank(query, texts, top_n=None):
     'cohere' ({"query","documents","top_n"} -> {"results":[{index,relevance_score}]},
     which covers Cohere/Jina/Infinity-style rerank servers)."""
     cfg = rerank_config()
-    if not cfg["base"] or not texts:
+    if not texts:
+        return None
+    if cfg["protocol"] == "local":
+        scores = _local_rerank(query, list(texts), cfg["model"])
+        data = [{"index": i, "score": s} for i, s in enumerate(scores)]
+        data.sort(key=lambda d: d.get("score") or 0.0, reverse=True)
+        if top_n:
+            data = data[:top_n]
+        return data
+    if not cfg["base"]:
         return None
     headers = {"Authorization": "Bearer " + cfg["key"]} if cfg["key"] else {}
     if cfg["protocol"] == "cohere":
@@ -277,6 +393,14 @@ def _repair_vectors(message_id):
 
 
 def index_pass(limit=40):
+    """One indexing pass on the ACTIVE backend (lite | legacy)."""
+    if (store.get_setting("rag_backend") or "lite").lower() == "lite":
+        import rag_lite
+        return rag_lite.index_pass(limit=limit)
+    return index_pass_legacy(limit=limit)
+
+
+def index_pass_legacy(limit=40):
     """Index up to `limit` not-yet-chunked messages, resuming folder by folder."""
     if not store.get_setting("index_enabled", True):
         return {"processed": 0, "folders_done": 0, "folders_total": 0, "remaining": 0,
@@ -335,16 +459,28 @@ def index_pass(limit=40):
 
 
 def rebuild():
-    """Clear the whole index (chunks/vectors/state). Mail itself is untouched."""
+    """Clear the ACTIVE backend's index. Mail itself is untouched."""
+    if (store.get_setting("rag_backend") or "lite").lower() == "lite":
+        store.clear_rag2()
+        store.log_event("info", "index rebuild: cleared the lite index (chunks2, vectors, state)")
+        return
     store.clear_rag()
     store.log_event("info", "index rebuild: cleared chunks, vectors and folder state")
 
 
 def index_stats():
+    if (store.get_setting("rag_backend") or "lite").lower() == "lite":
+        import rag_lite
+        return rag_lite.index_stats()
     with store.db() as conn:
         chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         msgs = conn.execute("SELECT COUNT(DISTINCT message_id) FROM chunks").fetchone()[0]
     return {"chunks": chunks, "messages": msgs}
+
+
+def index_pass_active(limit=40):
+    """Alias for index_pass (kept for callers that read clearer this way)."""
+    return index_pass(limit=limit)
 
 
 class Indexer(threading.Thread):
@@ -387,7 +523,8 @@ class Indexer(threading.Thread):
         self.state["running"] = True
         self.state["started"] = int(time.time())
         try:
-            if not embed_config()["base"]:
+            cfg = embed_config()
+            if cfg["protocol"] != "local" and not cfg["base"]:
                 self.state["progress"] = "embedding endpoint not configured (Settings -> RAG)"
                 return
             if self.rebuild_next:
@@ -398,7 +535,7 @@ class Indexer(threading.Thread):
                 if not store.get_setting("index_enabled", True):
                     self.state["progress"] = "indexing disabled in settings"
                     break
-                res = index_pass(limit=40 if continuous else 60)
+                res = index_pass_active(limit=40 if continuous else 60)
                 self.state["progress"] = res["summary"]
                 self.state["remaining"] = res["remaining"]
                 calls += 1
@@ -428,10 +565,16 @@ def fts_query(q):
 def search(query, k=8, folder=None, since=None, rerank_on=None, mode="hybrid"):
     """Hybrid semantic search -> list of matching messages.
 
+    Dispatches on the `rag_backend` setting: 'lite' (default, rag_lite module) or
+    'legacy' (the original pipeline below). Same result contract either way.
     mode: 'hybrid' (default), 'vector', 'fts' (diagnostics/evals).
     Returns {"ok": True, "results": [{message_id, folder, uid, from_addr, to_addr,
     subject, date, excerpt, score}], "meta": {...}} or {"ok": False, "error": ...}.
     """
+    if (store.get_setting("rag_backend") or "lite").lower() == "lite":
+        import rag_lite
+        return rag_lite.search(query, k=k, folder=folder, since=since,
+                               rerank_on=rerank_on, mode=mode)
     q = (query or "").strip()
     if not q:
         return {"ok": False, "error": "empty query"}

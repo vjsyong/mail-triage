@@ -5,3 +5,5 @@ data/
 gemma/cache/
 .env
 qa/shots/
+data
+/data
