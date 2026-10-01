@@ -246,7 +246,10 @@ class IMAPHandler(socketserver.StreamRequestHandler):
             self.send("* SEARCH %s" % " ".join(str(u) for u in uids))
             self.send("%s OK UID SEARCH completed" % tag)
         elif sub == "FETCH":
-            self.do_fetch(tag, int(arg1), arg2)
+            if ":" in arg1 or "*" in arg1:
+                self.do_fetch_range(tag, arg2)
+            else:
+                self.do_fetch(tag, int(arg1), arg2)
         elif sub == "STORE":
             f = st.get(self.cur)
             uid = int(arg1)
@@ -359,6 +362,31 @@ class IMAPHandler(socketserver.StreamRequestHandler):
             else:
                 i += 1
         return uids
+
+    def do_fetch_range(self, tag, spec):
+        f = self.server.state.get(self.cur)
+        if not f:
+            self.send("%s OK UID FETCH completed" % tag)
+            return
+        su = spec.upper()
+        for uid in list(f["uids"]):
+            msg = f["msgs"].get(uid)
+            if not msg:
+                continue
+            seq = f["uids"].index(uid) + 1
+            raw = msg["raw"]
+            sep = raw.find(b"\r\n\r\n")
+            header = raw[:sep + 4] if sep >= 0 else raw
+            body = raw[sep + 4:] if sep >= 0 else b""
+            if "HEADER.FIELDS" in su:
+                data, label = header, "BODY[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)]"
+            elif "TEXT" in su:
+                data, label = body, "BODY[TEXT]"
+            else:
+                data, label = raw, "RFC822"
+            self.raw_send(b"* %d FETCH (UID %d %s {%d}\r\n" % (seq, uid, label.encode(), len(data))
+                          + data + b")\r\n")
+        self.send("%s OK UID FETCH completed" % tag)
 
     def do_fetch(self, tag, uid, spec):
         f = self.server.state.get(self.cur)
@@ -1384,6 +1412,18 @@ def main():
     check("bulk heal repairs legacy junk snippets",
           hres["fixed"] >= 1 and "healthy heal body text" in (healed["snippet"] or "")
           and hres["remaining"] == 0)
+
+    # bulk heal phase 2: rescue a stale row via the Message-ID folder index
+    mv2_uid = add_msg(state, "mover2@x.com", "Heal moved", "moved heal body text", "healmoved@x")
+    engine.process_mailbox()
+    mv2row = [r for r in store.messages(limit=3000) if r["uid"] == mv2_uid][0]
+    store.update_message(mv2row["id"], snippet=junk_text)
+    state.move("INBOX", mv2_uid, "AgentTests")
+    hres2 = engine.heal_snippets(workers=2)
+    mv2fixed = store.get_message(mv2row["id"])
+    check("bulk heal rescue locates + repairs moved messages",
+          hres2["fixed"] >= 1 and "moved heal body text" in (mv2fixed["snippet"] or "")
+          and mv2fixed["folder"] == "AgentTests")
 
     # collapsed base64 salvage (legacy snippets lost their line breaks)
     collapsed = ("------=_NextPart_9ZZ Content-Type: text/plain; charset=\"utf-8\" "

@@ -984,35 +984,149 @@ def _process_folder(mc, folder, settings, rules):
     return scanned, moved
 
 
-def heal_snippets(workers=6):
+def _header_index(folder):
+    """Message-ID -> uid map for one folder (single ranged header fetch)."""
+    mc = MailClient().connect()
+    try:
+        mc.select(folder)
+        typ, dat = mc.M.uid("FETCH", "1:*", "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+        out = {}
+        for item in dat or []:
+            if not isinstance(item, tuple) or len(item) < 2 or not item[1]:
+                continue
+            pre = item[0].decode("utf-8", "replace") if isinstance(item[0], bytes) else str(item[0])
+            mu = re.search(r"UID (\d+)", pre)
+            mm = re.search(rb"Message-ID:\s*(<[^>]{4,400}>)", item[1], re.I | re.S)
+            if mu and mm:
+                mid = mm.group(1).decode("utf-8", "replace").strip().strip("<>")
+                if mid:
+                    out.setdefault(mid, int(mu.group(1)))
+        return out
+    finally:
+        try:
+            mc.close()
+        except Exception:
+            pass
+
+
+def _run_parallel(items, fn, workers):
+    """Split items into up to `workers` chunks; fn(chunk) runs on one thread each."""
+    n = max(1, min(workers, len(items) or 1))
+    chunks = [[] for _ in range(n)]
+    for i, item in enumerate(items):
+        chunks[i % n].append(item)
+    threads = [threading.Thread(target=fn, args=(c,), daemon=True) for c in chunks if c]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+
+
+def rescue_stale_snippets(rows, workers=6):
+    """Rows whose stored folder/uid went stale: build a Message-ID -> location
+    index (one ranged header fetch per folder, parallel) and refetch the bodies
+    from wherever the messages actually live. Returns {"fixed", "not_found"}."""
+    pend = {}
+    for r in rows:
+        mid = (r.get("msgid") or "").strip().strip("<>").strip()
+        if mid:
+            pend.setdefault(mid, []).append(r)
+    if not pend:
+        return {"fixed": 0, "not_found": len(rows)}
+    mc = MailClient().connect()
+    try:
+        folders = list(mc.folders())
+    finally:
+        try:
+            mc.close()
+        except Exception:
+            pass
+    index, lock = {}, threading.Lock()
+
+    def index_chunk(chunk):
+        for folder in chunk:
+            try:
+                found = _header_index(folder)
+            except Exception:
+                continue
+            with lock:
+                for mid, uid in found.items():
+                    if mid not in index:
+                        index[mid] = (folder, uid)
+
+    _run_parallel(folders, index_chunk, workers)
+
+    jobs, not_found = {}, 0
+    for mid, rs in pend.items():
+        loc = index.get(mid)
+        if not loc:
+            not_found += len(rs)
+            continue
+        jobs.setdefault(loc, []).extend(rs)
+    groups = sorted(jobs.items(), key=lambda kv: (kv[0][0], kv[0][1]))
+    fixed, flock = [0], threading.Lock()
+
+    def fetch_chunk(chunk):
+        cur_folder, conn = None, None
+        for (folder, uid), rs in chunk:
+            if folder != cur_folder:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                conn, cur_folder = None, folder
+                try:
+                    conn = MailClient().connect()
+                    conn.select(folder)
+                except Exception:
+                    conn = None
+                    continue
+            try:
+                text = conn.fetch_body_text(uid, limit=6000)
+            except Exception:
+                text = ""
+            if text and not looks_like_mime_junk(text):
+                for r in rs:
+                    store.update_message(r["id"], snippet=text[:4000], folder=folder, uid=uid)
+                    with flock:
+                        fixed[0] += 1
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    _run_parallel(groups, fetch_chunk, workers)
+    return {"fixed": fixed[0], "not_found": not_found}
+
+
+def heal_snippets(workers=6, rescue=True):
     """One-shot maintenance: refetch + decode raw-MIME snippet rows (legacy data).
-    Work is grouped by folder; each worker owns whole folders so SELECT happens
-    once per folder per worker. Returns {"fixed", "skipped", "remaining"}."""
+    Phase 1 refetches per stored folder/uid (SELECT once per folder per worker);
+    phase 2 re-locates the failures by Message-ID across folders and refetches.
+    Returns {"fixed", "skipped", "remaining", "not_found"}."""
     def junk_rows():
         return [r for r in store.messages(limit=999999)
                 if looks_like_mime_junk(r.get("snippet") or "")]
 
     rows = junk_rows()
     if not rows:
-        return {"fixed": 0, "skipped": 0, "remaining": 0}
+        return {"fixed": 0, "skipped": 0, "remaining": 0, "not_found": 0}
     by_folder = {}
     for r in rows:
         by_folder.setdefault(r["folder"], []).append(r)
-    groups = sorted(by_folder.items(), key=lambda kv: -len(kv[1]))
-    buckets = [[] for _ in range(max(1, min(workers, len(groups))))]
-    for i, g in enumerate(groups):
-        buckets[i % len(buckets)].append(g)
-    fixed, skipped = [0], [0]
-    lock = threading.Lock()
+    fixed, skipped, stuck, lock = [0], [0], [], threading.Lock()
 
-    def run_bucket(bucket):
-        for folder, items in bucket:
+    def heal_chunk(chunk):
+        for folder, items in chunk:
             try:
                 mc = MailClient().connect()
             except Exception as exc:
                 store.log_event("error", "heal: connect failed: %r" % exc)
                 with lock:
                     skipped[0] += len(items)
+                    stuck.extend(items)
                 continue
             try:
                 try:
@@ -1020,6 +1134,7 @@ def heal_snippets(workers=6):
                 except Exception:
                     with lock:
                         skipped[0] += len(items)
+                        stuck.extend(items)
                     continue
                 for r in items:
                     try:
@@ -1033,22 +1148,27 @@ def heal_snippets(workers=6):
                     else:
                         with lock:
                             skipped[0] += 1
+                            stuck.append(r)
             finally:
                 try:
                     mc.close()
                 except Exception:
                     pass
 
-    threads = [threading.Thread(target=run_bucket, args=(b,), daemon=True)
-               for b in buckets if b]
-    for th in threads:
-        th.start()
-    for th in threads:
-        th.join()
+    groups = sorted(by_folder.items(), key=lambda kv: -len(kv[1]))
+    _run_parallel(groups, heal_chunk, workers)
+
+    res_fixed, res_nf = 0, 0
+    if rescue and stuck:
+        store.log_event("info", "heal: %d row(s) going through the Message-ID rescue" % len(stuck))
+        r2 = rescue_stale_snippets(stuck, workers=workers)
+        res_fixed, res_nf = r2["fixed"], r2["not_found"]
     remaining = len(junk_rows())
-    store.log_event("info", "heal: %d snippet(s) repaired, %d skipped, %d remaining"
-                    % (fixed[0], skipped[0], remaining))
-    return {"fixed": fixed[0], "skipped": skipped[0], "remaining": remaining}
+    store.log_event("info", "heal: %d repaired (%d refetch + %d rescue), %d not found, %d remaining"
+                    % (fixed[0] + res_fixed, fixed[0], res_fixed, res_nf, remaining))
+    return {"fixed": fixed[0] + res_fixed, "skipped": max(0, skipped[0] - res_fixed),
+            "remaining": remaining, "not_found": res_nf}
+
 
 
 def classify_and_store(msg, settings, mc=None):
