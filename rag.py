@@ -531,18 +531,32 @@ class Indexer(threading.Thread):
                 self.rebuild_next = False
                 rebuild()
             calls = 0
+            t_run = time.time()
+            store.log_event("debug", "indexer: run start (continuous=%s, backend=%s)"
+                            % ("yes" if continuous else "no", store.get_setting("rag_backend") or "lite"))
             while not self.stop_flag.is_set():
                 if not store.get_setting("index_enabled", True):
                     self.state["progress"] = "indexing disabled in settings"
+                    store.log_event("info", "indexer: run stopped - indexing disabled in settings")
                     break
                 res = index_pass_active(limit=40 if continuous else 60)
                 self.state["progress"] = res["summary"]
                 self.state["remaining"] = res["remaining"]
                 calls += 1
-                if not continuous or res["remaining"] == 0 or res["processed"] == 0:
+                if not continuous:
+                    store.log_event("debug", "indexer: run end (single pass) - %s" % res["summary"])
+                    break
+                if res["remaining"] == 0 or res["processed"] == 0:
+                    store.log_event("debug", "indexer: run end (continuous) after %d pass(es) in %ds - %s "
+                                    "(remaining=%s, processed=%s)"
+                                    % (calls, int(time.time() - t_run), res["summary"],
+                                       res["remaining"], res["processed"]))
                     break
                 if calls > 400:  # safety valve
+                    store.log_event("warn", "indexer: run end - safety valve after %d passes" % calls)
                     break
+            if self.stop_flag.is_set():
+                store.log_event("info", "indexer: run interrupted (stop flag set) after %d pass(es)" % calls)
             self.state["last_ok"] = int(time.time())
             self.state["last_error"] = None
         except Exception as exc:
