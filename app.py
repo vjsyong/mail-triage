@@ -1921,8 +1921,11 @@ def message_save(mid):
 
 ASSISTANT_TMPL = r"""
 <style>
-.chat{height:calc(100vh - 280px);min-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;
-  background:var(--bg);border:1px solid var(--line);padding:18px 16px}
+.assistant-flex{display:flex;flex-direction:column;height:calc(100vh - 330px);min-height:520px}
+.jumpwrap{position:relative;flex:1;min-height:0;display:flex}
+.chat{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:18px;
+  background:var(--bg);border:1px solid var(--line);padding:18px 16px;scroll-behavior:smooth}
+#jump{position:absolute;right:16px;bottom:12px;z-index:5;box-shadow:0 4px 14px rgba(0,0,0,.15)}
 .crow{display:flex;gap:10px;align-items:flex-start}
 .crow.user{flex-direction:row-reverse}
 .avatar{flex:0 0 30px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
@@ -1969,11 +1972,20 @@ ASSISTANT_TMPL = r"""
 .chip:hover{border-color:#000;color:#000;background:var(--card2)}
 @media (max-width:640px){
   .bubble{max-width:86%}
-  .chat{height:calc(100vh - 230px);padding:12px 10px}
+  .assistant-flex{height:calc(100vh - 270px);min-height:420px}
+  .chat{padding:12px 10px}
 }
 </style>
-<h2>Mail assistant <span class="sub">streams tokens + thinking · tools: search mail, read, move, flag, folders, rules</span></h2>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Assistant</h1>
+    <div class="page-desc">Streams its thinking and every tool step live · tools: search mail, read, move, flag, folders, rules</div>
+  </div>
+</div>
 
+<div class="assistant-flex">
+<div class="jumpwrap">
+<button type="button" class="btn small hidden" id="jump">↓ Jump to latest</button>
 <div class="chat" id="convo">
 {% if convo %}
   {% for m in convo %}
@@ -2051,7 +2063,8 @@ ASSISTANT_TMPL = r"""
     </div>
   </div>
 {% endif %}
-<div id="live"></div>
+<div id="live" aria-live="polite" aria-atomic="false"></div>
+</div>
 </div>
 
 <form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
@@ -2063,8 +2076,9 @@ ASSISTANT_TMPL = r"""
       <button class="btn primary" type="submit" id="asend">Send</button>
     </span>
   </div>
-  <div class="hint">runs on {{ cfg.LLM_MODEL }} · actions {{ 'live' if actions_live else 'in dry-run (set it in Settings)' }}{% if convo %} · <a href="#" id="aclear">clear conversation</a>{% endif %}</div>
+  <div class="hint">runs on {{ llm.model }} · actions {{ 'live' if actions_live else 'in dry-run (set it in Settings)' }}{% if convo %} · <a href="#" id="aclear">clear conversation</a>{% endif %}</div>
 </form>
+</div>
 {% if convo %}<form id="clearform" method="post" action="{{ url_for('assistant_clear') }}" onsubmit="return confirm('Clear the conversation?');"></form>{% endif %}
 <script>
 (function(){
@@ -2087,7 +2101,11 @@ document.querySelectorAll('.chip').forEach(function(ch){
 });
 function autosize(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; }
 ta.addEventListener('input', autosize);
-function scrollBottom(){ chat.scrollTop = chat.scrollHeight; }
+var jumpBtn = document.getElementById('jump');
+function nearBottom(){ return (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 120; }
+function scrollBottom(force){ if(force || nearBottom()){ chat.scrollTop = chat.scrollHeight; } if(jumpBtn){ jumpBtn.classList.toggle('hidden', nearBottom()); } }
+chat.addEventListener('scroll', function(){ if(jumpBtn){ jumpBtn.classList.toggle('hidden', nearBottom()); } });
+if(jumpBtn){ jumpBtn.addEventListener('click', function(){ chat.scrollTop = chat.scrollHeight; }); }
 
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function mdRender(src){
@@ -2191,7 +2209,7 @@ function run(text){
   function secs(){ return Math.round((Date.now()-t0)/1000); }
   function setStatus(label){ if(!finished) status.textContent = label + ' · ' + secs() + 's'; }
   setStatus('thinking…');
-  scrollBottom();
+  scrollBottom(true);
   timer = setInterval(function(){ if(!finished && status.dataset.label) status.textContent = status.dataset.label + ' · ' + secs() + 's'; }, 500);
   function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
   var lastLabel='thinking…';
@@ -2395,7 +2413,7 @@ def assistant():
             except (TypeError, ValueError):
                 pass
     return render(render_template_string(
-        ASSISTANT_TMPL, convo=convo, cfg=config,
+        ASSISTANT_TMPL, convo=convo, cfg=config, llm=engine.llm_config(),
         actions_live=bool(store.get_setting("assistant_actions_apply", True))))
 
 
@@ -2971,58 +2989,66 @@ def _proxy_status_view():
 
 
 ACCOUNTS_TMPL = """
-<h2>Accounts <span class="sub">— the embedded email proxy signs in to your providers</span></h2>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Accounts</h1>
+    <div class="page-desc">The embedded email proxy signs in to your providers — everything it needs is managed here.</div>
+  </div>
+  <div class="row">
+    <form class="inline" method="post" action="{{ url_for('proxy_restart') }}"><button class="btn" type="submit">Restart proxy</button></form>
+    <a class="btn" href="{{ url_for('proxy_log') }}">Proxy log</a>
+    <a class="btn primary" href="{{ url_for('account_new') }}">Add account</a>
+  </div>
+</div>
 
 <div class="card">
-  <div class="spread">
-    <div class="sub">
-      Proxy:
+  <div class="card-h"><h3>Proxy</h3>
+    <span class="row">
       {% if not p.installed %}<span class="badge err">emailproxy package missing</span>
       {% elif p.running %}<span class="badge ok">running</span>
       {% else %}<span class="badge warn">stopped</span>{% endif %}
-      {% if p.pid %} · pid {{ p.pid }}{% endif %}
-      {% if p.started_h %} · up since {{ p.started_h }}{% endif %}
-      {% if p.restarts %} · restarts {{ p.restarts }}{% endif %}
-      <br>listeners:
-      {% for l in p.listener_rows %}<span class="mono">127.0.0.1:{{ l.port }}</span> {{ 'up' if l.up else 'down' }}{% if not loop.last %} · {% endif %}{% else %}(none yet — add an account){% endfor %}
-      {% if p.last_error %}<br><span class="mono">{{ p.last_error }}</span>{% endif %}
-    </div>
-    <div class="row">
-      <form class="inline" method="post" action="{{ url_for('proxy_restart') }}"><button class="btn" type="submit">Restart proxy</button></form>
-      <a class="btn" href="{{ url_for('proxy_log') }}">Proxy log</a>
-      <a class="btn primary" href="{{ url_for('account_new') }}">Add account</a>
-    </div>
+      {% if p.restarts %}<span class="badge warn">{{ p.restarts }} restart{{ 's' if p.restarts != 1 else '' }}</span>{% endif %}
+    </span>
   </div>
+  <div class="sub">
+    {% if p.pid %}pid {{ p.pid }} · {% endif %}{% if p.started_h %}up since {{ p.started_h }} · {% endif %}listeners:
+    {% for l in p.listener_rows %}<span class="mono">127.0.0.1:{{ l.port }}</span> <span class="dot {{ 'ok' if l.up else 'err' }}" title="{{ 'up' if l.up else 'down' }}"></span>{% if not loop.last %} · {% endif %}{% else %}(none yet — add an account){% endfor %}
+  </div>
+  {% if p.last_error %}<div class="msg err" style="margin-bottom:0"><span class="mono">{{ p.last_error }}</span></div>{% endif %}
 </div>
 
 {% for a in accounts %}
 <div class="card" data-email="{{ a.email }}">
-  <div class="spread">
+  <div class="card-h">
     <div>
       <h3>{{ a.email }} <span class="sub">· {{ a.provider_label }}</span></h3>
-      <div class="sub">
+      <div class="sub" style="margin-top:3px">
         {% if a.auth.status in ['starting','triggering','triggered','url_ready'] %}<span class="badge acc">authorising…</span>
         {% elif a.token.authorized %}<span class="badge ok">authorised</span>{% if a.token.expires_h %} · token until {{ a.token.expires_h }}{% endif %}
         {% else %}<span class="badge warn">not authorised</span>{% endif %}
-        &nbsp;· {{ a.mode }} mode</div>
+        &nbsp;· {{ a.mode }} mode
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn primary" onclick="startAuth('{{ a.email }}', this)">Authorise</button>
+      <a class="btn" href="{{ url_for('account_edit', email=a.email) }}">Edit</a>
+      <form class="inline" method="post" action="{{ url_for('account_reset_tokens', email=a.email) }}"
+            onsubmit="return confirm('Forget the cached OAuth tokens for {{ a.email }}? You will need to authorise again.');">
+        <button class="btn" type="submit">Reset tokens</button></form>
+      <form class="inline" method="post" action="{{ url_for('account_delete', email=a.email) }}"
+            onsubmit="return confirm('Remove account {{ a.email }}? Its tokens and config entry are deleted.');">
+        <button class="btn danger" type="submit">Remove</button></form>
     </div>
   </div>
-  <div class="kv">
-    <div class="k">Redirect URI</div><div><code>{{ a.redirect_uri }}</code> <span class="sub">— register exactly this at your provider</span></div>
-    <div class="k">Local password</div><div><code>{{ a.password }}</code> <span class="copy" data-copy="{{ a.password }}">copy</span> <span class="sub">— the app signs in with it automatically</span></div>
-    <div class="k">Listener</div><div><code>127.0.0.1:{{ a.imap_local_port }}</code> IMAP{% if a.smtp_local_port %} · <code>127.0.0.1:{{ a.smtp_local_port }}</code> SMTP{% endif %}</div>
-    <div class="k">Mode</div><div class="sub">{{ a.mode_note }}</div>
-  </div>
-  <div class="row">
-    <button class="btn primary" onclick="startAuth('{{ a.email }}', this)">Authorise</button>
-    <a class="btn" href="{{ url_for('account_edit', email=a.email) }}">Edit</a>
-    <form class="inline" method="post" action="{{ url_for('account_reset_tokens', email=a.email) }}"
-          onsubmit="return confirm('Forget the cached OAuth tokens for {{ a.email }}? You will need to authorise again.');">
-      <button class="btn" type="submit">Reset tokens</button></form>
-    <form class="inline" method="post" action="{{ url_for('account_delete', email=a.email) }}"
-          onsubmit="return confirm('Remove account {{ a.email }}? Its tokens and config entry are deleted.');">
-      <button class="btn danger" type="submit">Remove</button></form>
-  </div>
+  <details class="sub" style="margin-top:6px">
+    <summary style="cursor:pointer">Account details</summary>
+    <div class="kv">
+      <div class="k">Redirect URI</div><div><code>{{ a.redirect_uri }}</code> <span class="sub">— register exactly this at your provider</span></div>
+      <div class="k">Local password</div><div><code>{{ a.password }}</code> <span class="copy" data-copy="{{ a.password }}">copy</span> <span class="sub">— the app signs in with it automatically</span></div>
+      <div class="k">Listener</div><div><code>127.0.0.1:{{ a.imap_local_port }}</code> IMAP{% if a.smtp_local_port %} · <code>127.0.0.1:{{ a.smtp_local_port }}</code> SMTP{% endif %}</div>
+      <div class="k">Mode</div><div class="sub">{{ a.mode_note }}</div>
+    </div>
+  </details>
   <div class="auth-panel hidden" id="panel-{{ a.sid }}">
     <div class="auth-msg sub">…</div>
     <div class="auth-url hidden" style="margin-top:8px">
@@ -3045,17 +3071,21 @@ ACCOUNTS_TMPL = """
   </div>
 </div>
 {% else %}
-<div class="card"><p>No accounts yet. <a href="{{ url_for('account_new') }}">Add your first account</a>
-— the mail watcher picks it up automatically.</p></div>
+<div class="card">
+  <div class="empty">
+    <h4>No accounts yet</h4>
+    <p>Add your mail account here and sign in once — the watcher and the assistant pick it up automatically.</p>
+    <a class="btn primary" href="{{ url_for('account_new') }}">Add account</a>
+  </div>
+</div>
 {% endfor %}
 
 <div class="card">
-  <h3>How this works</h3>
+  <div class="card-h"><h3>How this works</h3></div>
   <div class="sub">The embedded <b>email-oauth2-proxy</b> signs in to your provider with OAuth 2.0 and
   exposes a PLAIN local IMAP listener; Mail Triage reads mail through that listener and never stores a
   provider password. OAuth tokens live in <code>{{ p.cache_file }}</code> and the generated config in
-  <code>{{ p.config_file }}</code> (the proxy log is in <code>{{ p.log_file }}</code>). Account changes
-  restart the proxy automatically.</div>
+  <code>{{ p.config_file }}</code> (log: <code>{{ p.log_file }}</code>). Account changes restart the proxy automatically.</div>
 </div>
 
 <script>
@@ -3077,10 +3107,10 @@ function startAuth(email, btn){
   fetch('/api/proxy/auth/' + encodeURIComponent(email), {method:'POST'})
     .then(r => r.json())
     .then(j => {
-      if(!j.ok){ alert(j.message || 'Could not start authorisation'); btn.disabled=false; btn.textContent='Authorise'; return; }
+      if(!j.ok){ toast(j.message || 'Could not start authorisation', 'err'); btn.disabled=false; btn.textContent='Authorise'; return; }
       pollAuth(email, btn);
     })
-    .catch(e => { alert('Request failed: ' + e); btn.disabled=false; btn.textContent='Authorise'; });
+    .catch(e => { toast('Request failed: ' + e, 'err'); btn.disabled=false; btn.textContent='Authorise'; });
 }
 function pollAuth(email, btn){
   const sid = email.replace(/[^A-Za-z0-9]/g, '-');
@@ -3120,23 +3150,31 @@ function submitPaste(email){
   const panel = document.getElementById('panel-' + sid);
   const msg = panel.querySelector('.auth-msg');
   const val = (input.value || '').trim();
-  if(!val){ alert('Paste the URL from the browser first.'); return; }
+  if(!val){ toast('Paste the URL from the browser first.', 'err'); return; }
   const fd = new URLSearchParams(); fd.append('url', val);
   fetch('/api/proxy/auth/' + encodeURIComponent(email) + '/complete', {method:'POST', body: fd})
     .then(r => r.json())
     .then(j => {
       msg.innerHTML = '<span class="badge ' + (j.ok ? 'ok' : 'err') + '">' +
         (j.ok ? 'submitted' : 'error') + '</span> ' + (j.message || '');
-      if(!j.ok){ alert(j.message || 'Could not submit the URL.'); }
+      if(!j.ok){ toast(j.message || 'Could not submit the URL.', 'err'); }
     })
-    .catch(e => alert('Request failed: ' + e));
+    .catch(e => toast('Request failed: ' + e, 'err'));
 }
 </script>
 """
 
 
+
+
 ACCOUNT_NEW_TMPL = """
-<h2>Add account</h2>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Add account</h1>
+    <div class="page-desc">One sign-in per provider — the redirect URI to register is shown on the account card after adding.</div>
+  </div>
+  <div class="row"><a class="btn" href="{{ url_for('accounts') }}">Back</a></div>
+</div>
 <form method="post" class="card">
   <label for="provider">Provider</label>
   <select id="provider" name="provider" required onchange="toggleProvider()">
@@ -3146,8 +3184,8 @@ ACCOUNT_NEW_TMPL = """
   <div class="note" id="note-{{ key }}" style="margin-top:8px;display:none">{{ pr.register_notes }}</div>
   {% endfor %}
   <div id="reuse-row" class="note" style="display:none;margin-top:8px">
-    <label class="row" style="color:var(--fg);margin:0;font-size:.9rem">
-      <input type="checkbox" id="reuse_tb" onchange="applyReuse(this.checked)" style="width:auto;margin-right:8px">
+    <label class="check" style="margin:0">
+      <input type="checkbox" id="reuse_tb" onchange="applyReuse(this.checked)">
       <span>No Entra app of your own? Use <b>Thunderbird's public client ID</b> (personal Outlook/Hotmail,
       and tenants where you cannot register an app). No client secret needed; loopback mode is used and the
       login finishes via the paste box.</span>
@@ -3157,7 +3195,7 @@ ACCOUNT_NEW_TMPL = """
   <div class="grid2">
     <div><label for="email">Email address</label><input type="text" id="email" name="email" placeholder="you@example.com" required></div>
     <div><label for="password">Local password <span class="sub">(between the app and the proxy)</span></label>
-      <div class="row"><input type="text" id="password" name="password" value="{{ default_password }}">
+      <div class="row" style="flex-wrap:nowrap"><input type="text" id="password" name="password" value="{{ default_password }}">
       <span class="copy" onclick="document.getElementById('password').value='{{ default_password }}'">reset</span></div></div>
   </div>
 
@@ -3173,7 +3211,7 @@ ACCOUNT_NEW_TMPL = """
   </select>
 
   <div id="custom-fields" style="display:none">
-    <h3 style="margin-top:18px">Custom provider details</h3>
+    <h4>Custom provider details</h4>
     <div class="grid2">
       <div><label for="permission_url">Permission (authorize) URL</label><input type="text" id="permission_url" name="permission_url"></div>
       <div><label for="token_url">Token URL</label><input type="text" id="token_url" name="token_url"></div>
@@ -3187,12 +3225,13 @@ ACCOUNT_NEW_TMPL = """
       <div><label for="smtp_host">SMTP server <span class="sub">(optional)</span></label><input type="text" id="smtp_host" name="smtp_host" placeholder="smtp.example.com"></div>
       <div><label for="smtp_port">SMTP port</label><input type="number" id="smtp_port" name="smtp_port" value="465"></div>
     </div>
-    <label class="row" style="color:var(--fg)"><input type="checkbox" name="use_pkce" value="1" style="width:auto;margin-right:8px"> Use PKCE (no client secret)</label>
+    <label class="check"><input type="checkbox" name="use_pkce" value="1"> <span>Use PKCE (no client secret)</span></label>
   </div>
 
-  <p style="margin-top:16px"><button class="btn primary" type="submit">Add account</button></p>
-  <div class="sub">After adding: register the redirect URI shown on the account card at your provider
-  (if you use your own OAuth app), then press <b>Authorise</b> and log in from a browser.</div>
+  <div class="savebar">
+    <button class="btn primary" type="submit">Add account</button>
+    <span class="sub">Then register the redirect URI shown on the account card (own OAuth app), press Authorise and log in.</span>
+  </div>
 </form>
 <script>
 var REUSE_CLIENT_ID = "{{ reuse_client_id }}";
@@ -3233,8 +3272,16 @@ toggleProvider();
 """
 
 
+
+
 ACCOUNT_EDIT_TMPL = """
-<h2>Edit {{ a.email }}</h2>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Edit {{ a.email }}</h1>
+    <div class="page-desc">Redirect URI: <code>{{ client_settings.redirect_uri }}</code> · listener 127.0.0.1:{{ a.imap_local_port }} · {{ client_settings.mode_note }}</div>
+  </div>
+  <div class="row"><a class="btn" href="{{ url_for('accounts') }}">Back</a></div>
+</div>
 <form method="post" class="card">
   <div class="grid2">
     <div><label>Email</label><input type="text" value="{{ a.email }}" readonly></div>
@@ -3268,12 +3315,12 @@ ACCOUNT_EDIT_TMPL = """
     <div><label for="smtp_host">SMTP server</label><input type="text" id="smtp_host" name="smtp_host" value="{{ a.smtp_host }}"></div>
     <div><label for="smtp_port">SMTP port</label><input type="number" id="smtp_port" name="smtp_port" value="{{ a.smtp_port }}"></div>
   </div>
-  <label class="row" style="color:var(--fg)"><input type="checkbox" name="use_pkce" value="1" {{ 'checked' if a.use_pkce else '' }} style="width:auto;margin-right:8px"> Use PKCE (no client secret)</label>
-  <p class="sub" style="margin-top:10px">Redirect URI: <code>{{ client_settings.redirect_uri }}</code> ·
-  listener 127.0.0.1:{{ a.imap_local_port }} · {{ client_settings.mode_note }}</p>
-  <p style="margin-top:12px"><button class="btn primary" type="submit">Save account</button></p>
+  <label class="check"><input type="checkbox" name="use_pkce" value="1" {{ 'checked' if a.use_pkce else '' }}> <span>Use PKCE (no client secret)</span></label>
+  <div class="savebar"><button class="btn primary" type="submit">Save account</button><span class="sub">Saving restarts the proxy.</span></div>
 </form>
 """
+
+
 
 
 PROXY_LOG_TMPL = """
