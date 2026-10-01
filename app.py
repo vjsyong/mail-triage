@@ -293,7 +293,14 @@ STATUS_BADGES = {
 
 BASE_TMPL = r"""<!doctype html>
 <html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mail Triage">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/icons/icon-180.png">
+<meta name="theme-color" content="#fafafa">
+<meta name="color-scheme" content="light">
 <title>Mail Triage</title>
 <style>
 @font-face{font-family:'Geist';src:url('/fonts/geist.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
@@ -594,6 +601,48 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .dw-body .chat{border:0;background:#fff;padding:14px 12px}
 .dw-comp{margin:0;border-left:0;border-right:0;border-bottom:0}
 @media (max-width:640px){.drawer{width:100vw}.fab{right:12px;bottom:12px}}
+/* ================= mobile shell (docs/mobile-ui.md) ================= */
+:root{color-scheme:light}
+*{-webkit-tap-highlight-color:transparent}
+html{touch-action:manipulation;overscroll-behavior-y:contain}
+.btn,.nav-item,.iconbtn,.bottom-nav a,.more-row{transition:transform .1s ease,opacity .1s ease}
+.btn:active,.nav-item:active,.iconbtn:active,.bottom-nav a:active,.more-row:active{transform:scale(.97);opacity:.85}
+.bottom-nav{display:none}
+@media (pointer:coarse){
+  .btn{min-height:44px}
+  .btn.small,.iconbtn{min-height:44px;min-width:44px}
+  .menu-item{min-height:44px}
+  input,select,textarea{font-size:16px}
+  input,select{min-height:44px}
+  .nav-item{min-height:48px}
+  .copy{padding:8px 10px}
+}
+@media(max-width:1023px){
+  .topbar{padding-top:calc(env(safe-area-inset-top) + 10px)}
+  .drawer{height:100dvh}
+  .assistant-flex{height:calc(100dvh - 300px)}
+  .assistant-shell{grid-template-columns:1fr}
+  .assistant-rail{position:static;max-height:220px}
+}
+@media(max-width:767px){
+  .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:180;
+    background:#fff;border-top:1px solid var(--line);
+    padding:4px 6px;padding-left:calc(6px + env(safe-area-inset-left));
+    padding-right:calc(6px + env(safe-area-inset-right));
+    padding-bottom:calc(4px + env(safe-area-inset-bottom))}
+  .bottom-nav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    min-height:48px;font-size:.68rem;letter-spacing:.01em;color:var(--dim);text-decoration:none;font-weight:500}
+  .bottom-nav a svg{width:21px;height:21px;stroke-width:1.7;opacity:.8}
+  .bottom-nav a.on{color:#000;font-weight:600}
+  .bottom-nav a.on svg{opacity:1}
+  .content{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
+  .fab{bottom:calc(78px + env(safe-area-inset-bottom));right:12px}
+  .savebar{bottom:calc(72px + env(safe-area-inset-bottom))}
+  .drawer{width:100vw;max-width:none;height:100dvh}
+  .assistant-flex{height:auto;min-height:420px}
+  .jumpwrap{min-height:420px}
+  input,select,textarea{font-size:16px}
+}
 </style>
 </head><body>
 <a class="skip" href="#main">Skip to content</a>
@@ -660,6 +709,21 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
     </main>
   </div>
 </div>
+<nav class="bottom-nav" aria-label="Mobile navigation">
+  <a href="{{ url_for('dashboard') }}" class="{{ 'on' if p == '/' else '' }}" {{ 'aria-current="page"'|safe if p == '/' else '' }}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+    <span>Dashboard</span></a>
+  <a href="{{ url_for('messages') }}" class="{{ 'on' if p.startswith('/messages') else '' }}" {{ 'aria-current="page"'|safe if p.startswith('/messages') else '' }}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>
+    <span>Messages</span></a>
+  <a href="{{ url_for('assistant') }}" class="{{ 'on' if p.startswith('/assistant') else '' }}" {{ 'aria-current="page"'|safe if p.startswith('/assistant') else '' }}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
+    <span>Assistant</span></a>
+  {% set morepaths = ('/more','/rules','/flows','/classifiers','/templates','/accounts','/settings','/log','/proxy') %}
+  <a href="{{ url_for('more') }}" class="{{ 'on' if p.startswith(morepaths) else '' }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+    <span>More</span></a>
+</nav>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <script>
 function toast(msg, kind){
@@ -1147,6 +1211,74 @@ def _header_info():
     except Exception:
         imap_txt = "?"
     return {"imap": imap_txt, "llm": llm_txt}
+
+
+MORE_TMPL = """
+<style>
+.more-list{border:1px solid var(--line);background:#fff}
+.more-row{display:flex;align-items:center;gap:12px;min-height:54px;padding:10px 14px;border-bottom:1px solid var(--line);
+color:var(--fg);text-decoration:none}
+.more-row:last-child{border-bottom:0}
+.more-row:hover{background:var(--hover);text-decoration:none}
+.more-row .grow{flex:1;min-width:0}
+.more-row b{font-size:.92rem;font-weight:600;display:block}
+.more-row .sub{font-size:.78rem}
+</style>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">More</h1>
+    <div class="page-desc">All sections of the app.</div>
+  </div>
+</div>
+<div class="more-list">
+  <a class="more-row" href="{{ url_for('rules') }}"><span class="grow"><b>Rules</b><span class="sub">First-match sorting rules and guards</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('flows') }}"><span class="grow"><b>Flows</b><span class="sub">Multi-step automations</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('classifiers') }}"><span class="grow"><b>Classifiers</b><span class="sub">Trained heuristic classifiers</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('templates') }}"><span class="grow"><b>Templates</b><span class="sub">Reply templates</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('accounts') }}"><span class="grow"><b>Accounts</b><span class="sub">Mail account and sign-in</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('log') }}"><span class="grow"><b>Log</b><span class="sub">Recent events and activity</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('settings') }}"><span class="grow"><b>Settings</b><span class="sub">App, AI, mail and agent permissions</span></span><span aria-hidden="true">&#8250;</span></a>
+</div>
+"""
+
+
+@app.route("/more")
+def more():
+    return render(_render_src(MORE_TMPL))
+
+
+@app.route("/manifest.webmanifest")
+def manifest():
+    import json as _json
+    body = {
+        "id": "/",
+        "name": "Mail Triage",
+        "short_name": "MailTriage",
+        "description": "Smart mail triage - rules, flows and an AI assistant for your mailbox.",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "theme_color": "#fafafa",
+        "background_color": "#fafafa",
+        "icons": [
+            {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            {"src": "/static/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png",
+             "purpose": "maskable"},
+        ],
+        "shortcuts": [
+            {"name": "Messages", "url": "/messages"},
+            {"name": "Assistant", "url": "/assistant"},
+        ],
+    }
+    return Response(_json.dumps(body, ensure_ascii=False), mimetype="application/manifest+json")
+
+
+@app.route("/static/icons/<path:name>")
+def static_icon(name):
+    from flask import send_from_directory
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+    return send_from_directory(base, name, max_age=2592000)
 
 
 # ---------------------------------------------------------------- dashboard

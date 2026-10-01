@@ -2178,6 +2178,28 @@ def main():
           b'id="drawer"' in r.data and b'id="dtoggle"' in r.data
           and b"assistantChat" in r.data and b"I'd" not in r.data[:200])
 
+    section("T30 mobile shell: viewport, PWA manifest, tab bar, More page")
+    rp = client.get("/")
+    check("viewport meta invites edge-to-edge", b"viewport-fit=cover" in rp.data)
+    check("PWA head present (manifest link + apple metas)",
+          b'rel="manifest"' in rp.data and b"apple-mobile-web-app-capable" in rp.data
+          and b"apple-touch-icon" in rp.data)
+    check("bottom tab bar rendered with 4 destinations",
+          rp.data.count(b'class="bottom-nav"') == 1 and b">More</span>" in rp.data
+          and b">Dashboard</span>" in rp.data)
+    rp = client.get("/more")
+    check("More page renders", rp.status_code == 200 and b"more-row" in rp.data)
+    check("More lists every section",
+          all(x in rp.data for x in (b"Rules", b"Flows", b"Classifiers", b"Templates",
+                                     b"Accounts", b"Log", b"Settings")))
+    rp = client.get("/manifest.webmanifest")
+    check("manifest served with the right type",
+          rp.status_code == 200 and "application/manifest+json" in rp.mimetype
+          and b'"display": "standalone"' in rp.data and b"icon-512.png" in rp.data)
+    rp = client.get("/static/icons/icon-192.png")
+    check("icon route serves the png",
+          rp.status_code == 200 and rp.data[:8] == b"\x89PNG\r\n\x1a\n")
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:
