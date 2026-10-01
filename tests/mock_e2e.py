@@ -853,6 +853,7 @@ def main():
     import engine
     import heuristics as heuristics_mod
     import rag
+    import rag_lite
     import learning as learning_mod
 
     store.init_db()
@@ -1292,21 +1293,21 @@ def main():
     config.EMBED_BASE_URL = "http://127.0.0.1:1"
     probe_failed = False
     try:
-        rag._index_one(mc, "INBOX", uid_probe, uv_inbox)
+        rag_lite.index_one(mc, "INBOX", uid_probe, uv_inbox)
     except Exception:
         probe_failed = True
     config.EMBED_BASE_URL = saved_embed
     probe_row = store.get_message_by_uid("INBOX", uid_probe, uv_inbox)
     check("failed embed leaves no partial chunks",
           probe_failed and probe_row is not None
-          and store.message_chunk_count(probe_row["id"]) == 0)
-    nchunks = rag._index_one(mc, "INBOX", uid_probe, uv_inbox)
+          and store.message_chunk2_count(probe_row["id"]) == 0)
+    nchunks = rag_lite.index_one(mc, "INBOX", uid_probe, uv_inbox)
     with store.db(vec=True) as conn:
         vcount = conn.execute(
-            "SELECT COUNT(*) FROM vec_chunks WHERE rowid IN "
-            "(SELECT id FROM chunks WHERE message_id=?)", (probe_row["id"],)).fetchone()[0]
+            "SELECT COUNT(*) FROM vec_chunks2 WHERE rowid IN "
+            "(SELECT id FROM chunks2 WHERE message_id=?)", (probe_row["id"],)).fetchone()[0]
     check("retry after embed recovery indexes cleanly",
-          nchunks >= 1 and store.message_chunk_count(probe_row["id"]) == nchunks)
+          nchunks >= 1 and store.message_chunk2_count(probe_row["id"]) == nchunks)
     check("retry stored vectors too", vcount == nchunks)
     mc.close()
     long_body = "Attendance summary for HMAW1905E. " + "The student roster lists 40 names. " * 100
@@ -1315,7 +1316,7 @@ def main():
             folder="Junk Email")
     res = rag.index_pass(limit=200)
     check("indexer walks all folders", res["remaining"] == 0 and res["processed"] >= 8)
-    total_chunks = store.chunk_count()
+    total_chunks = store.chunk2_count()
     check("chunks created for indexed mail", total_chunks >= 10)
     with store.db() as conn:
         dupes = conn.execute("SELECT msgid, COUNT(*) c FROM messages WHERE msgid != '' "
@@ -1325,21 +1326,21 @@ def main():
                 if r["uid"] == uid_long and r["folder"] == "INBOX"][0]
     with store.db() as conn:
         long_texts = [r["text"] for r in conn.execute(
-            "SELECT text FROM chunks WHERE message_id=? ORDER BY seq", (row_long["id"],))]
+            "SELECT text FROM chunks2 WHERE message_id=? ORDER BY seq", (row_long["id"],))]
     check("long message split into multiple chunks", len(long_texts) >= 2)
     check("every chunk carries the header prefix",
           bool(long_texts) and all(t.startswith("From: ") for t in long_texts))
     row_short = [r for r in store.messages(limit=500) if r["subject"] == "permfail item"][0]
-    check("short message stays one chunk", store.message_chunk_count(row_short["id"]) == 1)
-    check("junk folder excluded", store.index_state_get("Junk Email") is None)
+    check("short message stays one chunk", store.message_chunk2_count(row_short["id"]) == 1)
+    check("junk folder excluded", store.index2_state_get("Junk Email") is None)
     with store.db() as conn:
-        junk_chunks = conn.execute("SELECT COUNT(*) FROM chunks WHERE folder='Junk Email'").fetchone()[0]
+        junk_chunks = conn.execute("SELECT COUNT(*) FROM chunks2 WHERE folder='Junk Email'").fetchone()[0]
     check("no chunks for junk mail", junk_chunks == 0)
     drafts_rows = [r for r in store.messages(limit=500) if r["folder"] == "Drafts"]
     check("unscanned folders got backfilled by the indexer",
-          len(drafts_rows) >= 1 and store.message_chunk_count(drafts_rows[0]["id"]) >= 1)
+          len(drafts_rows) >= 1 and store.message_chunk2_count(drafts_rows[0]["id"]) >= 1)
     with store.db(vec=True) as conn:
-        nvec = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
+        nvec = conn.execute("SELECT COUNT(*) FROM vec_chunks2").fetchone()[0]
     check("vectors stored for every chunk", nvec == total_chunks)
     res2 = rag.index_pass(limit=5)
     check("second pass is a no-op", res2["processed"] == 0 and res2["remaining"] == 0)
@@ -1370,6 +1371,35 @@ def main():
     check("assistant semantic_search tool returns matches",
           r["ok"] and any("Invoice" in (x["subject"] or "") for x in r["result"]["results"]))
     agent.close()
+
+    section("T13b lite backend: quote stripping + backend switching")
+    new_t, quoted_t, method_t = rag_lite.strip_quoted(
+        "Hello team,\n\nHere is the update on the project. It is going well.\n\n"
+        "On Mon, Jan 5, 2026 at 9:00 AM Alice <a@x> wrote:\n"
+        "> previous stuff\n> more stuff\n> even more\n")
+    check("quote stripping cuts the quoted tail",
+          new_t.startswith("Hello team") and "previous stuff" not in new_t
+          and "On Mon" not in new_t and method_t.startswith("marker"))
+    body_t, node_t = rag_lite.clean_body("Thanks!\n\nOn Mon, Jan 5, 2026 at 9:00 AM Bob wrote:\n> x\n> y\n> z\n")
+    check("stub bodies keep the full text (fallback)", node_t == "full")
+    store.set_setting("rag_backend", "legacy")
+    r = rag.search("payment")
+    check("backend=legacy dispatches to the untouched old pipeline",
+          not r["ok"] and "index is empty" in (r.get("error") or ""))
+    store.set_setting("rag_backend", "lite")
+    r = rag.search("payment")
+    check("backend=lite dispatches back", r["ok"])
+    store.index2_state_touch("INBOX", 1, 42)
+    st_t = store.index2_state_get("INBOX") or {}
+    check("lite state touch upserts (resumable mid-folder)",
+          int(st_t.get("last_uid") or 0) == 42 and st_t.get("status") == "working")
+    store.index2_state_put("INBOX", 1, 42, status="done")
+    store.index2_state_touch("INBOX", 1, 43)
+    st_t = store.index2_state_get("INBOX") or {}
+    check("state put/touch keep status semantics",
+          st_t.get("status") == "working" and int(st_t.get("messages_indexed") or 0) >= 1)
+    check("lite stats report the backend",
+          rag.index_stats().get("backend") == "lite" and rag.index_stats()["chunks"] >= 1)
 
     section("T14 RAG: assistant streams a semantic-search turn")
     r = client.post("/assistant/stream",
@@ -2091,12 +2121,12 @@ def main():
                                    "rerank_protocol": "tei"})
     check("protocols flip back to tei",
           rag.embed_config()["protocol"] == "tei" and rag.rerank_config()["protocol"] == "tei")
-    # -- the embed-model change guard reads the settings value
-    dim = store.meta_get("embed_dim")
+    # -- the embed-model change guard reads the settings value (active lite backend)
+    dim = store.meta_get("lite_embed_dim") or 8
     client.post("/settings", data={"section": "rag", "embed_model": "other-embed-9"})
     guard_error = ""
     try:
-        rag._ensure_dim(dim)
+        rag_lite.ensure_dim(dim)
     except Exception as exc:
         guard_error = str(exc)
     check("embedding model change guard fires from the settings value",

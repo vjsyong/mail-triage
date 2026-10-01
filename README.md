@@ -16,8 +16,8 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
   +-------------------------------|--------------------------|----------------------+
                                   |                          |
                     +-------------v------------+   +---------v------------------+
-                    |  gemma-4-26b-a4b         |   |  embed / rerank (TEI)      |
-                    |  local LLM, GPU 0 :8040  |   |  GPU 1 :8041 / :8042       |
+                    |  gemma-4-26b-a4b         |   |  RAG: lite (CPU)           |
+                    |  local LLM, GPU 0 :8040  |   |  legacy TEI :8041/:8042    |
                     |  fallback: DeepSeek API  |   |  semantic search index     |
                     +--------------------------+   +----------------------------+
 ```
@@ -36,7 +36,8 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
   a child process inside this container and exposes a plain local IMAP listener.
 - **Endpoints** (Settings page): the LLM endpoint (any OpenAI-compatible server: base
   URL, model, API key, timeout, thinking mode, optional fallback endpoint) and the RAG
-  endpoints (embeddings + reranker: base URL, model, protocol, optional key, query
+  endpoints (backend: lite | legacy; embeddings + reranker: protocol local/tei/openai,
+  base URL, model, optional key, query
   prefix) are set in the UI and stored in SQLite. Blank fields fall back to the
   container env (`.env`), so environment-based deployments keep working.
 - **Quick filter rules** (Rules page): match on from / to / subject / body snippet
@@ -72,10 +73,12 @@ Tailnet UI:  https://gpu-vm1.bigscale-snapper.ts.net:8097/
   and out-of-set immediately (with a toast), and for LLM-labeled data the correction also
   updates the message's own record. Removals stick across retraining and auto-refine, and
   can be re-included. The assistant trains, retrains and evaluates them on request. Toggle in Settings.
-- **Semantic search (RAG)**: a local embedding index over all indexed folders
-  (Qwen3-Embedding-4B on GPU 1) combined with BM25 keyword search, fused with RRF and
-  reranked with a cross-encoder. The assistant uses it for content questions ("what
-  did the landlord want?"); the dashboard has an index card with Run/Rebuild. All
+- **Semantic search (RAG)**: a local hybrid index over all indexed folders - fielded
+  FTS5 (BM25) + sqlite-vec dense retrieval over quote-stripped chunks, fused with RRF
+  and reranked with a small CPU cross-encoder (Qwen3-Embedding-0.6B + jina-turbo via
+  FastEmbed, no GPU needed; the original 4B GPU stack stays available as a rollback
+  backend). The assistant uses it for content questions ("what did the landlord
+  want?"); the dashboard has an index card with Run/Rebuild. All
   local; nothing leaves the host.
 - **Classify on demand** (Messages page): tick rows and "Classify selected", or run
   "Classify all unclassified" as a background job (newest first, progress + Stop;
@@ -136,39 +139,61 @@ proposed in chat — they go live when you click "Add rule". Each turn is capped
 
 ## Semantic search (RAG)
 
-`embed/` runs two HuggingFace TEI servers on the second 3090 (CDI `nvidia.com/gpu=1`;
-Gemma stays on GPU 0):
+Two backends live behind the same `rag.search` interface; pick one with the "RAG
+backend" setting (default **lite**). Both store into the same `triage.db`.
+
+**lite (default)** - CPU-first, no extra services, no GPU: fielded FTS5
+(subject/sender/body BM25) + sqlite-vec dense KNN over *clean* chunks (quoted history
+stripped before chunking) + RRF fusion + a small CPU cross-encoder, all inside the app:
+
+```
+embed    Qwen/Qwen3-Embedding-0.6B          1024-dim, FastEmbed/ONNX on CPU
+rerank   jinaai/jina-reranker-v1-turbo-en   FastEmbed/ONNX on CPU
+models   ./ragmodels   (mounts to /ragmodels, FASTEMBED_CACHE_PATH)
+```
+
+Queries extract sender/date hints and exact tokens (INV-39281) and push them down as
+SQL pre-filters + quoted FTS terms, so metadata and lexical signals stay first-class.
+Indexing: full body -> strip quoted replies -> sentence-packed chunks (~400 tokens,
+each carrying a From/Date/Subject header) -> chunks2 + FTS + vec tables. Rebuild from
+the dashboard (wipes only the active backend). Measured on this mailbox
+(48 semantic + 34 exact-query sets; full report `docs/rag-lite-report.md`):
+
+```
+                                   R@1     R@5     (48 semantic queries)
+legacy 4B + v2-m3 (GPU)            93.8    97.9
+lite 0.6B + jina-turbo (CPU)       95.8    97.9
+lite 0.6B, no rerank               89.6    95.8
+                                   R@1     R@5     (34 exact/metadata queries)
+legacy 4B + v2-m3 (GPU)            91.2    97.1
+lite 0.6B + v2-m3 (GPU rerank)     88.2    97.1
+lite 0.6B + jina-turbo (CPU)       82.4    94.1
+```
+
+CPU query cost: ~79 ms embed, ~0.3-0.5 s end-to-end, ~1.9 GB RSS. Incremental
+indexing ~4 s/message; for the first full backfill point the embed protocol at a
+scratch GPU TEI running the same 0.6B model (fast, identical vectors), then flip back
+to local. Swap the reranker to bge-reranker-v2-m3 (below) from Settings for maximum
+exact-query quality while the GPU exists.
+
+**legacy (rollback)** - the original GPU stack: two HuggingFace TEI servers on the
+second 3090 (`embed/`, CDI `nvidia.com/gpu=1`):
 
 ```
 mail-triage-embed   :8041  Qwen/Qwen3-Embedding-4B    (dense embeddings)
 mail-triage-rerank  :8042  BAAI/bge-reranker-v2-m3    (cross-encoder rerank)
 ```
 
-The app indexes every message in all folders except junk/deleted/trash/system ones:
-full body -> sentence-packed chunks (~400 tokens, each carrying a From/Date/Subject
-header) -> embeddings -> sqlite-vec (KNN) + FTS5 (BM25) inside the same `triage.db`.
-Queries hit both channels, fuse with reciprocal rank fusion (k=60), then rerank the
-top candidates. Embedding model change requires a `--reindex` (the meta table tracks
-model + dimension).
+Set "RAG backend" to `legacy` in Settings to use it. Each backend keeps its own
+tables + folder state while the other is active, so switching (both ways) is a
+settings flip with no reindex.
 
-- Build/refresh the index: dashboard "Index now" (resumable, folder by folder), or
-  `docker exec mail-triage python app.py --index`; `--reindex` wipes and rebuilds.
-- Scope + rerank toggle: Settings -> "Build the semantic search index".
+- Build/refresh: dashboard "Index now" (resumable, folder by folder), or
+  `docker exec mail-triage python app.py --index`; `--reindex` wipes and rebuilds the
+  active backend. A run/trigger request wakes the indexer immediately.
+- Scope, rerank toggle, backend + protocols + local thread cap: Settings -> RAG.
 - Quality harness: `tests/retrieval_eval.py` + `tests/eval_queries.json`
   (recall@1/5/10 and MRR for fts / vector / hybrid / hybrid+rerank).
-- Measured on this mailbox (48 labelled queries over the full 3,550-message index):
-
-```
-mode                R@1     R@5     R@10     MRR    ms/q
-fts               79.2%   91.7%    95.8%   0.853     13
-vector            89.6%   97.9%   100.0%   0.926     95
-hybrid            93.8%   97.9%    97.9%   0.951    101
-hybrid+rerank     89.6%  100.0%   100.0%   0.941    250
-```
-
-  Hybrid is the best single configuration; with rerank, every query's target
-  lands in the top 5 (what the assistant actually reads). Rerank can be turned
-  off in Settings for lower latency.
 
 ## Safety model
 

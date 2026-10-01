@@ -1866,16 +1866,18 @@ def static_turbo():
 # ---------------------------------------------------------------- dashboard
 DASH_TMPL = """
 <style>
-.sys{display:flex;flex-wrap:wrap;gap:12px 30px;align-items:flex-start}
-.sysitem{display:flex;gap:8px;align-items:flex-start;min-width:190px}
+.sys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 30px;align-items:flex-start}
+@media(max-width:1239px){.sys{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sysitem{display:flex;gap:8px;align-items:flex-start;min-width:0}
 .sysitem .dot{margin-top:6px}
 .sysitem b{display:block;font-size:.84rem;font-weight:600}
 .sysitem .sub{font-size:.78rem;line-height:1.4}
 .sysitem .syserr{color:var(--err);word-break:break-word}
 .sysline{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
-.metrics{display:flex;flex-wrap:wrap}
-.metric{padding:4px 24px;border-left:1px solid var(--line);min-width:150px;flex:1 1 auto}
-.metric:first-child{border-left:0;padding-left:0}
+/* hero metric strip: CSS grid so numbers sit in aligned columns at every width
+   (flex-wrap stretched each row to its own widths and orphaned the last item) */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px 26px;align-items:start}
+.metric{padding:0;min-width:0}
 .metric b{display:block;font-size:1.4rem;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .metric.primary b{font-size:1.85rem}
 .metric .lbl{display:block;font-size:.76rem;color:var(--dim);margin-top:2px}
@@ -1917,8 +1919,10 @@ DASH_TMPL = """
   .sys-chev{margin-left:auto}
   .sys-chev::after{content:'▸'}
   .syswrap[open] .sys-chev::after{content:'▾'}
+  .metrics{grid-template-columns:1fr}
   .metrics .metric:not(.primary){display:none}
-  .metric.primary{flex:1 1 100%;padding:6px 0}
+  .metric.primary{padding:6px 0}
+  .sys{grid-template-columns:1fr}
   .metric.primary b{font-size:2.2rem}
   .dstat{display:block;margin-top:14px}
   .dsc{display:grid;grid-template-columns:1fr 1fr;gap:6px}
@@ -5386,10 +5390,14 @@ def _save_rag_settings():
     for k in ("embed_base_url", "embed_model", "rerank_base_url", "rerank_model"):
         if k in f:
             store.set_setting(k, (f.get(k) or "").strip())
-    if "embed_protocol" in f and f.get("embed_protocol") in ("tei", "openai"):
+    if "embed_protocol" in f and f.get("embed_protocol") in ("tei", "openai", "local"):
         store.set_setting("embed_protocol", f.get("embed_protocol"))
-    if "rerank_protocol" in f and f.get("rerank_protocol") in ("tei", "cohere"):
+    if "rerank_protocol" in f and f.get("rerank_protocol") in ("tei", "cohere", "local"):
         store.set_setting("rerank_protocol", f.get("rerank_protocol"))
+    if "rag_backend" in f and f.get("rag_backend") in ("lite", "legacy"):
+        store.set_setting("rag_backend", f.get("rag_backend"))
+    if "local_embed_threads" in f:
+        store.set_setting("local_embed_threads", _form_int("local_embed_threads", 8, lo=1))
     if "embed_timeout" in f:
         store.set_setting("embed_timeout", _form_int("embed_timeout", 0, lo=0))
     if "rerank_timeout" in f:
@@ -5573,15 +5581,25 @@ SETTINGS_TMPL = """
     <form method="post">
       <input type="hidden" name="section" value="rag">
       <input type="hidden" name="scope" value="Embeddings &amp; reranker">
+      <h4>Search architecture</h4>
+      <div class="setrow"><div class="st-l"><b>Backend</b><span class="sub">lite = hybrid FTS5 + sqlite-vec + optional local CPU models (recommended). legacy = the original chunks/_fts/vec_chunks pipeline. Both indexes coexist; switching is instant and reversible.</span></div>
+        <div class="st-c"><select name="rag_backend" aria-label="RAG backend">
+          <option value="lite" {{ 'selected' if s.rag_backend != 'legacy' else '' }}>lite — hybrid + local models</option>
+          <option value="legacy" {{ 'selected' if s.rag_backend == 'legacy' else '' }}>legacy — original pipeline</option>
+        </select></div></div>
+      <div class="setrow"><div class="st-l"><b>Local model threads</b><span class="sub">ONNX Runtime threads for the local (CPU) embedder/reranker. 8 keeps a busy host responsive; raise for faster backfills.</span></div>
+        <div class="st-c"><input type="number" name="local_embed_threads" min="1" value="{{ s.local_embed_threads or '' }}" placeholder="8" aria-label="Local model threads"></div></div>
+      <div class="hr"></div>
       <h4>Embeddings</h4>
       <div class="setrow"><div class="st-l"><b>Base URL</b></div>
         <div class="st-c"><input type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}" aria-label="Embed base URL"></div></div>
-      <div class="setrow"><div class="st-l"><b>Model</b></div>
-        <div class="st-c"><input type="text" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model }}" aria-label="Embed model"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Local protocol takes a FastEmbed id, e.g. Qwen/Qwen3-Embedding-0.6B.</span></div>
+        <div class="st-c"><input type="text" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model or 'Qwen/Qwen3-Embedding-0.6B' }}" aria-label="Embed model"></div></div>
       <div class="setrow"><div class="st-l"><b>Protocol</b><span class="sub">TEI /embed vs OpenAI /embeddings (OpenAI, Ollama, LM Studio, TEI /v1).</span></div>
         <div class="st-c"><select name="embed_protocol" aria-label="Embed protocol">
-          <option value="tei" {{ 'selected' if s.embed_protocol != 'openai' else '' }}>TEI — POST /embed</option>
+          <option value="tei" {{ 'selected' if s.embed_protocol not in ('openai', 'local') else '' }}>TEI — POST /embed</option>
           <option value="openai" {{ 'selected' if s.embed_protocol == 'openai' else '' }}>OpenAI — POST /embeddings</option>
+          <option value="local" {{ 'selected' if s.embed_protocol == 'local' else '' }}>Local — CPU (ONNX, no server)</option>
         </select></div></div>
       <div class="setrow"><div class="st-l"><b>API key</b><span class="sub">Blank keeps the stored key; only for gated endpoints.</span></div>
         <div class="st-c"><input type="password" name="embed_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if ecfg.key else 'not set' }}" aria-label="Embed API key"></div></div>
@@ -5595,12 +5613,13 @@ SETTINGS_TMPL = """
       <h4>Reranker</h4>
       <div class="setrow"><div class="st-l"><b>Base URL</b></div>
         <div class="st-c"><input type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}" aria-label="Rerank base URL"></div></div>
-      <div class="setrow"><div class="st-l"><b>Model</b></div>
-        <div class="st-c"><input type="text" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model }}" aria-label="Rerank model"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Local protocol takes a FastEmbed cross-encoder, e.g. jinaai/jina-reranker-v1-turbo-en.</span></div>
+        <div class="st-c"><input type="text" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model or 'jinaai/jina-reranker-v1-turbo-en' }}" aria-label="Rerank model"></div></div>
       <div class="setrow"><div class="st-l"><b>Protocol</b></div>
         <div class="st-c"><select name="rerank_protocol" aria-label="Rerank protocol">
-          <option value="tei" {{ 'selected' if s.rerank_protocol != 'cohere' else '' }}>TEI — {"query", "texts"}</option>
+          <option value="tei" {{ 'selected' if s.rerank_protocol not in ('cohere', 'local') else '' }}>TEI — {"query", "texts"}</option>
           <option value="cohere" {{ 'selected' if s.rerank_protocol == 'cohere' else '' }}>Cohere-style — {"query", "documents"}</option>
+          <option value="local" {{ 'selected' if s.rerank_protocol == 'local' else '' }}>Local — CPU (ONNX, no server)</option>
         </select></div></div>
       <div class="setrow"><div class="st-l"><b>API key</b><span class="sub">Blank keeps the stored key.</span></div>
         <div class="st-c"><input type="password" name="rerank_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if rcfg.key else 'not set' }}" aria-label="Rerank API key"></div></div>
@@ -6990,7 +7009,7 @@ if __name__ == "__main__":
         tries, last_remaining, stall = 0, None, 0
         while True:
             try:
-                res = rag.index_pass(limit=40)
+                res = rag.index_pass_active(limit=40)
             except Exception as exc:
                 tries += 1
                 print("index pass error (%d): %r" % (tries, exc), flush=True)
