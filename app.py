@@ -2215,6 +2215,22 @@ def check_now():
     return redirect(url_for("dashboard"))
 
 
+@app.route("/messages/<int:mid>/sweep", methods=["POST"])
+def message_sweep(mid):
+    m = store.get_message(mid)
+    if not m:
+        flash("No such message.", "err")
+        return redirect(url_for("messages"))
+    n = engine.sweep_msg_events(msg_id=mid)
+    if n:
+        store.log_msg_event(mid, "backfill", "%d event%s reconstructed from stored state"
+                            % (n, "" if n == 1 else "s"))
+        flash("Backfilled %d event%s from stored state." % (n, "" if n == 1 else "s"), "ok")
+    else:
+        flash("Nothing to backfill — no stored signals for this message.", "err")
+    return redirect(url_for("message_detail", mid=mid))
+
+
 @app.route("/messages/<int:mid>/snooze", methods=["POST"])
 def message_snooze(mid):
     m = store.get_message(mid)
@@ -3996,10 +4012,10 @@ MESSAGE_TMPL = """
       <div class="arow2">
         <div class="ahead">
           <span class="mono atime">{{ ev.when }}</span>
-          <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','wake':'ok','tag':'warn','draft':'acc'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
+          <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','wake':'ok','tag':'warn','draft':'acc','backfill':'warn'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
           {% if ev.meta %}
           {% if ev.meta.needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
-          <span class="sub">{% if ev.meta.confidence is not none %}{{ '%.0f' % (ev.meta.confidence * 100) }}% · {% endif %}{{ ev.meta.by }}</span>
+          <span class="sub">{% if ev.meta.confidence is not none %}{{ '%.0f' % (ev.meta.confidence * 100) }}% · {% endif %}{{ ev.meta.by }}{% if ev.meta._backfilled %} · reconstructed{% endif %}</span>
           {% endif %}
         </div>
         <div class="adetail">
@@ -4010,7 +4026,8 @@ MESSAGE_TMPL = """
           {% else %}{{ ev.detail }}{% endif %}
         </div>
       </div>
-      {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>{% endfor %}
+      {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>
+      <form class="inline" method="post" action="{{ url_for('message_sweep', mid=m.id) }}" style="margin-top:8px"><button class="btn small" type="submit">Backfill from stored state</button></form>{% endfor %}
     </div>
     <div class="card">
       <div class="card-h"><h3>Actions</h3></div>

@@ -2842,6 +2842,39 @@ def main():
           b"Simulate a draft that tests it" in r.data
           and ("/simulate?flow=%d" % fctx_id).encode() in r.data)
 
+    section("T44 audit backfill sweep (retroactive)")
+    add_msg(state, "oldmail@x.com", "Old canvas notice", "old body", "old@x")
+    engine.process_mailbox()
+    orow = [r for r in store.messages(limit=3000) if r["subject"] == "Old canvas notice"][0]
+    oid = orow["id"]
+    with store.db() as conn:
+        conn.execute("DELETE FROM msg_events WHERE msg_id=?", (oid,))
+        conn.commit()
+    store.update_message(oid, status="llm-moved", action_taken="move:Archive",
+                         llm_category="Notification", llm_confidence=0.9,
+                         llm_reason="because reasons", llm_summary="short sum",
+                         classified_by="llm", llm_needs_reply=1)
+    n1 = engine.sweep_msg_events(msg_id=oid)
+    kinds = [e["kind"] for e in store.get_msg_events(oid)]
+    check("sweep reconstructs classify + move events",
+          n1 >= 2 and "classify" in kinds and "move" in kinds)
+    ev_c = [e for e in store.get_msg_events(oid) if e["kind"] == "classify"][0]
+    import json as _j2
+    check("backfilled classify carries the stored verdict + flag",
+          _j2.loads(ev_c["detail"]).get("_backfilled") is True
+          and _j2.loads(ev_c["detail"]).get("category") == "Notification")
+    n2 = engine.sweep_msg_events(msg_id=oid)
+    check("sweep is idempotent", n2 == 0 and len(store.get_msg_events(oid)) == len(kinds))
+    d = client.get("/messages/%d" % oid).data
+    check("viewer marks reconstructed events", b"reconstructed" in d)
+    # a fresh message with real events must not be duplicated by the sweep
+    before = len(store.get_msg_events(aid))
+    engine.sweep_msg_events(msg_id=aid)
+    check("messages with existing events are left alone",
+          len(store.get_msg_events(aid)) == before)
+    r = client.post("/messages/%d/sweep" % oid)
+    check("per-message backfill route responds", r.status_code == 302)
+
     section("T44 learning loop: decisions, labels, needs_reply specialist")
 
     ts0 = int(time.time())

@@ -986,13 +986,25 @@ def record_move(msg, to_folder, source, from_folder=None):
         conn.commit()
 
 
-def log_msg_event(msg_id, kind, detail):
+def log_msg_event(msg_id, kind, detail, ts=None):
     if not msg_id:
         return
     with db() as conn:
         conn.execute("INSERT INTO msg_events (msg_id, ts, kind, detail) VALUES (?,?,?,?)",
-                     (int(msg_id), int(time.time()), str(kind or "")[:24], str(detail or "")[:8000]))
+                     (int(msg_id), int(ts or time.time()), str(kind or "")[:24], str(detail or "")[:8000]))
         conn.commit()
+
+
+def log_msg_events_bulk(items):
+    """items = [(msg_id, kind, detail, ts), ...] - one transaction (audit sweep)."""
+    if not items:
+        return 0
+    with db() as conn:
+        conn.executemany("INSERT INTO msg_events (msg_id, ts, kind, detail) VALUES (?,?,?,?)",
+                         [(int(i), int(ts or time.time()), str(k or "")[:24], str(d or "")[:8000])
+                          for (i, k, d, ts) in items])
+        conn.commit()
+    return len(items)
 
 
 def get_msg_events(msg_id, limit=200):

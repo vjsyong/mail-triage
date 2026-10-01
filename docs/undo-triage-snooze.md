@@ -54,3 +54,20 @@ plus log search/window/pause and a favicon.
 
 Suite: 436 checks green. Commits: favicon 87e0a8e, undo 1b84fe5, triage d1f08e9,
 snooze ced8fe3, log e9d50ae (+ reorder follow-up).
+
+
+## Retroactive audit sweep (2026-10-01, evening)
+`engine.sweep_msg_events(msg_id=None)` reconstructs audit trails from stored state for
+messages that predate the msg_events feature - never invents anything beyond what the
+message row and flow_runs already know. Sources: llm_* fields + classified_by ->
+`classify` (meta flagged `_backfilled`, shown as "· reconstructed"); rule_id ->
+`rule`; `action_taken` flow:/move: -> `flow`/`move` (source label from rule_id /
+status: assistant-moved -> assistant, llm-moved -> auto-file); user_tag -> `tag`;
+snoozed_until -> `snooze`. Real flow_runs timestamps are used when present.
+- Idempotent: only inserts kinds that are absent for that message; includes a cleanup
+  pass that relabels assistant moves from an earlier sweep pass.
+- Triggers: once automatically at Worker startup (logs "audit backfill: N events"),
+  plus a per-message `POST /messages/<id>/sweep` ("Backfill from stored state" button
+  in the empty audit card). A `backfill` marker event records what the sweep did.
+- Live result: 6,037 events reconstructed across ~3,590 messages (3,554 classify +
+  2,480 move + rule/flow few); 34 messages have no stored signals and stay empty.

@@ -1285,6 +1285,14 @@ class Worker(threading.Thread):
                 proxy.wait_ready(20)
         except Exception:
             pass
+        try:
+            # one-time (idempotent) audit backfill for messages that predate the
+            # msg_events feature; cheap to re-run, inserts only missing kinds
+            n = sweep_msg_events()
+            if n:
+                store.log_event("info", "audit backfill: %d event(s) reconstructed from stored state" % n)
+        except Exception as exc:
+            store.log_event("warn", "audit backfill failed: %r" % exc)
         while not self.stop_flag.is_set():
             settings = store.all_settings()
             interval = max(15, int(settings.get("poll_interval", 90) or 90))
@@ -1459,6 +1467,85 @@ def undo_filing(log_id):
                         % entry["from_folder"])
     learning.observe(msg["id"], "undo", entry["to_folder"], source="ui")
     return True, "Moved back to %s — automation will not re-file it." % entry["from_folder"]
+
+
+def sweep_msg_events(msg_id=None):
+    """Backfill audit trails from stored state for messages that predate the
+    msg_events feature (or miss some event kinds). Reconstructs from what the
+    message row and flow_runs already know - never invents beyond that; entries
+    are marked reconstructed. Idempotent: only inserts kinds that are absent.
+    Returns the number of events inserted."""
+    inserted = []
+    with store.db() as conn:
+        kinds = {}
+        for r in conn.execute("SELECT msg_id, kind FROM msg_events"):
+            kinds.setdefault(r["msg_id"], set()).add(r["kind"])
+        if msg_id:
+            rows = conn.execute("SELECT * FROM messages WHERE id=?", (int(msg_id),)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM messages").fetchall()
+        flow_ts = {}
+        for r in conn.execute("SELECT message_id, MAX(ran_at) AS t FROM flow_runs"
+                              " WHERE message_id > 0 GROUP BY message_id"):
+            flow_ts[r["message_id"]] = r["t"]
+    rules = {r["id"]: (r.get("name") or ("rule %s" % r["id"])) for r in store.list_rules()}
+    for m in rows:
+        have = kinds.get(m["id"], set())
+        base = int(m["processed_at"] or m["date_ts"] or time.time())
+        at = (m["action_taken"] or "")
+        status = (m["status"] or "")
+        if m["rule_id"] and "rule" not in have:
+            nm = rules.get(m["rule_id"]) or ("rule %s" % m["rule_id"])
+            if at.startswith("move"):
+                res = at
+            elif status == "kept" or at.startswith("kept"):
+                res = "kept (undo)"
+            elif at:
+                res = at
+            else:
+                res = "suggest (dry-run)" if status.startswith("matched") else "matched"
+            inserted.append((m["id"], "rule",
+                             "rule \u201c%s\u201d \u2192 %s \u00b7 reconstructed" % (nm, res), base + 1))
+        if at.startswith("flow:") and "flow" not in have:
+            nm = at.split(":", 1)[1]
+            inserted.append((m["id"], "flow",
+                             "flow \u201c%s\u201d ran \u00b7 %s \u00b7 reconstructed"
+                             % (nm, time.strftime("%Y-%m-%d %H:%M", time.localtime(base))),
+                             int(flow_ts.get(m["id"]) or (base + 2))))
+        if m["llm_category"] and "classify" not in have:
+            try:
+                conf = round(float(m["llm_confidence"]), 3) if m["llm_confidence"] is not None else 0
+            except (TypeError, ValueError):
+                conf = 0
+            inserted.append((m["id"], "classify", json.dumps({
+                "category": m["llm_category"], "confidence": conf,
+                "by": m["classified_by"] or "llm", "reason": m["llm_reason"] or "",
+                "summary": m["llm_summary"] or "", "needs_reply": bool(m["llm_needs_reply"]),
+                "thinking": m["llm_thinking"] or "", "_backfilled": True}, ensure_ascii=False),
+                base + 3))
+        if at.startswith("move:") and "move" not in have:
+            dest = at.split(":", 1)[1]
+            src = ("rule" if m["rule_id"] else
+                   ("flow" if status.startswith("flow") else
+                    ("assistant" if status == "assistant-moved" else "auto-file")))
+            inserted.append((m["id"], "move",
+                             "filed to \u201c%s\u201d \u00b7 %s \u00b7 reconstructed" % (dest, src),
+                             base + 4))
+        if (m["user_tag"] or "").strip() and "tag" not in have:
+            inserted.append((m["id"], "tag", "tagged \u201c%s\u201d" % m["user_tag"].strip(), base + 5))
+        if (m["snoozed_until"] or 0) > 0 and "snooze" not in have:
+            inserted.append((m["id"], "snooze",
+                             "snoozed until %s" % time.strftime("%Y-%m-%d %H:%M",
+                                                                time.localtime(m["snoozed_until"])),
+                             base + 6))
+    # cleanup: an earlier sweep pass labeled assistant moves as auto-file
+    with store.db() as conn:
+        conn.execute("UPDATE msg_events SET detail = replace(detail,"
+                     " '\u00b7 auto-file \u00b7 reconstructed', '\u00b7 assistant \u00b7 reconstructed')"
+                     " WHERE kind = 'move' AND detail LIKE '%auto-file%'"
+                     " AND msg_id IN (SELECT id FROM messages WHERE status = 'assistant-moved')")
+        conn.commit()
+    return store.log_msg_events_bulk(inserted)
 
 
 def _sim_flow_steps(flow, settings):
