@@ -112,3 +112,18 @@ Accounts regrouped around status: compact proxy strip (badges + listener dots + 
 Re-authorise), Edit, and a More menu (copy password/redirect URI, reset tokens, remove —
 destructive last), a "reading" badge on the account the app actually uses, an external-mode
 notice, Setup details kept behind a disclosure, and the explainer collapsed.
+
+## Third pass: every remaining page, small items (2026-10, same day)
+
+Page-by-page sweep of the pages that had only one pass:
+- Message view: status-driven action cluster (Classify when unclassified; File primary
+  once a folder is suggested; Re-classify secondary), sticky right rail on desktop,
+  cleaner reply card with its own hint, wrapping long sender lines.
+- Rule editor: sectioned cards (Basics / Conditions / Actions), whole-word matching hint,
+  enabled toggle promoted to Basics, save bar; rules list move-buttons grouped as a
+  segmented control. `.savebar`/`.seg` promoted to the base stylesheet.
+- Account add/edit: sectioned cards (Account / OAuth app / Login flow / Custom details /
+  Server), helper text, Cancel affordances; all field names + toggle JS unchanged.
+- Templates editor: Template card + Body card with placeholder legend.
+- Log: level filter chips (All/Errors/Warnings/Info) with counts, debug toggle preserved;
+  proxy log n-buttons get proper active states.

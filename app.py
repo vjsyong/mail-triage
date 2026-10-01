@@ -459,6 +459,10 @@ font:inherit;font-size:.86rem;color:var(--fg);cursor:pointer}
 .menu-item:hover{background:var(--hover)}
 .menu-item.danger{color:var(--err)}
 .menu-item.danger:hover{background:var(--tint-err)}
+.savebar{position:sticky;bottom:10px;background:rgba(250,250,250,.94);backdrop-filter:blur(4px);
+border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;gap:10px;margin-top:14px;z-index:4;flex-wrap:wrap}
+.seg{display:inline-flex}
+.seg .btn+.btn{border-left:0}
 .copy{cursor:pointer;user-select:none;color:var(--dim);border:1px solid var(--line);padding:1px 7px;font-size:.76rem;
 margin-left:6px;display:inline-block;background:#fff}
 .copy:hover{color:var(--acc);border-color:var(--acc)}
@@ -837,9 +841,11 @@ RULES_TMPL = """
       <td class="mono" style="font-size:.79rem">{{ r.summary }}</td>
       <td class="sub">{{ r.actions }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
+        <span class="seg" role="group" aria-label="Reorder">
         <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="top"><button class="btn small" type="submit" title="move to top" aria-label="Move rule to top">⤒</button></form>
         <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" title="move up" aria-label="Move rule up">↑</button></form>
         <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" title="move down" aria-label="Move rule down">↓</button></form>
+        </span>
         <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}"><button class="btn small" type="submit">{{ 'disable' if r.enabled else 'enable' }}</button></form>
         <a class="btn small" href="{{ url_for('rule_edit', rule_id=r.id) }}">edit</a>
         <form class="inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
@@ -1154,60 +1160,67 @@ def rules():
 def rules_test():
     return redirect(url_for("rules", tested="1"))
 
-
 RULE_EDIT_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">{{ 'Edit rule' if rule else 'New rule' }}</h1>
-    <div class="page-desc">Conditions match against from / to / subject / body. Empty condition rows are ignored.</div>
+    <div class="page-desc">Rules run before classifiers and the LLM, in list order — first match wins.</div>
   </div>
   <div class="row"><a class="btn" href="{{ url_for('rules') }}">Back</a></div>
 </div>
-<form method="post" class="card">
-  <div class="grid2">
-    <div><label for="r-name">Name</label><input id="r-name" type="text" name="name" value="{{ rule.name if rule else '' }}" placeholder="e.g. Boss → Work"></div>
-    <div><label for="r-mode">Match mode</label>
-      <select id="r-mode" name="match_mode">
-        <option value="all" {{ 'selected' if (rule.match_mode if rule else 'all')=='all' else '' }}>ALL conditions must match</option>
-        <option value="any" {{ 'selected' if rule and rule.match_mode=='any' else '' }}>ANY condition matches</option>
-      </select></div>
-  </div>
-  <label>Conditions</label>
-  <div id="conds">
-    <div class="grid3 sub" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
-    {% for i in range(5) %}
-    {% set c = conditions[i] if conditions|length > i else {} %}
-    <div class="grid3" style="margin-bottom:6px">
-      <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field">
-        {% for f in ['from','to','subject','body'] %}
-        <option value="{{ f }}" {{ 'selected' if c.get('field')==f else '' }}>{{ f }}</option>{% endfor %}
-      </select>
-      <select name="cond_op_{{ i }}" aria-label="Condition {{ i+1 }} operator">
-        {% for o in ['contains','equals','regex'] %}
-        <option value="{{ o }}" {{ 'selected' if c.get('op')==o else '' }}>{{ o }}</option>{% endfor %}
-      </select>
-      <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" aria-label="Condition {{ i+1 }} value">
+<form method="post">
+  <div class="card">
+    <div class="card-h"><h3>Basics</h3></div>
+    <div class="grid2">
+      <div><label for="r-name">Name</label><input id="r-name" type="text" name="name" value="{{ rule.name if rule else '' }}" placeholder="e.g. Boss → Work"></div>
+      <div><label for="r-mode">Match mode</label>
+        <select id="r-mode" name="match_mode">
+          <option value="all" {{ 'selected' if (rule.match_mode if rule else 'all')=='all' else '' }}>ALL conditions must match</option>
+          <option value="any" {{ 'selected' if rule and rule.match_mode=='any' else '' }}>ANY condition matches</option>
+        </select>
+        <div class="sub" style="margin-top:4px">ALL requires every filled row to match; ANY needs just one.</div>
+      </div>
     </div>
-    {% endfor %}
+    <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if (rule.enabled if rule else True) else '' }}> <span>Enabled — evaluated on every check</span></label>
   </div>
-  <h4>Actions</h4>
-  <div class="sub" style="margin-bottom:6px">Leave all blank to keep matching mail in place (a guard rule: no later rule or LLM filing can move it).</div>
-  <div class="grid2">
-    <div><label for="r-move">Move to folder <span class="sub">(blank = don't move; created if missing)</span></label>
-      <input id="r-move" type="text" name="move_to" value="{{ actions.get('move_to','') }}" placeholder="e.g. Work"></div>
-    <div>
-      <label class="check"><input type="checkbox" name="mark_read" value="1"
-        {{ 'checked' if actions.get('mark_read') else '' }}> <span>Mark as read</span></label>
-      <label class="check"><input type="checkbox" name="flag" value="1"
-        {{ 'checked' if actions.get('flag') else '' }}> <span>Flag / star</span></label>
-      <label class="check"><input type="checkbox" name="enabled" value="1"
-        {{ 'checked' if (rule.enabled if rule else True) else '' }}> <span>Enabled</span></label>
+  <div class="card">
+    <div class="card-h"><h3>Conditions</h3><span class="sub">empty rows are ignored</span></div>
+    <div id="conds">
+      <div class="grid3 sub" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
+      {% for i in range(5) %}
+      {% set c = conditions[i] if conditions|length > i else {} %}
+      <div class="grid3" style="margin-bottom:6px">
+        <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field">
+          {% for f in ['from','to','subject','body'] %}
+          <option value="{{ f }}" {{ 'selected' if c.get('field')==f else '' }}>{{ f }}</option>{% endfor %}
+        </select>
+        <select name="cond_op_{{ i }}" aria-label="Condition {{ i+1 }} operator">
+          {% for o in ['contains','equals','regex'] %}
+          <option value="{{ o }}" {{ 'selected' if c.get('op')==o else '' }}>{{ o }}</option>{% endfor %}
+        </select>
+        <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Condition {{ i+1 }} value">
+      </div>
+      {% endfor %}
+    </div>
+    <div class="sub" style="margin-top:6px">Values of 3 characters or fewer match whole words only — “PO” will not fire on “support”.</div>
+  </div>
+  <div class="card">
+    <div class="card-h"><h3>Actions</h3></div>
+    <div class="sub" style="margin-bottom:6px">Leave all blank to keep matching mail in place (a guard rule: no later rule or LLM filing can move it).</div>
+    <div class="grid2">
+      <div><label for="r-move">Move to folder <span class="sub">(blank = don't move; created if missing)</span></label>
+        <input id="r-move" type="text" name="move_to" value="{{ actions.get('move_to','') }}" placeholder="e.g. Work"></div>
+      <div>
+        <label class="check"><input type="checkbox" name="mark_read" value="1" {{ 'checked' if actions.get('mark_read') else '' }}> <span>Mark as read</span></label>
+        <label class="check"><input type="checkbox" name="flag" value="1" {{ 'checked' if actions.get('flag') else '' }}> <span>Flag / star</span></label>
+      </div>
     </div>
   </div>
-  <p style="margin-top:14px"><button class="btn primary" type="submit">Save rule</button>
-  <a class="btn" href="{{ url_for('rules') }}">Back</a></p>
+  <div class="savebar"><button class="btn primary" type="submit">Save rule</button><a class="btn" href="{{ url_for('rules') }}">Back</a><span class="sub">Test the whole list (dry run) from the Rules page.</span></div>
 </form>
 """
+
+
 
 
 
@@ -1343,25 +1356,32 @@ TEMPLATES_TMPL = """
 """
 
 
-
 TEMPLATE_EDIT_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">{{ 'Edit template' if template else 'New template' }}</h1>
-    <div class="page-desc">Keep templates short — the LLM adapts them to the actual email.</div>
+    <div class="page-desc">Used as guidance when the LLM drafts a reply.</div>
   </div>
   <div class="row"><a class="btn" href="{{ url_for('templates') }}">Back</a></div>
 </div>
-<form method="post" class="card">
-  <div class="grid2">
-    <div><label for="t-name">Name</label><input id="t-name" type="text" name="name" value="{{ template.name if template else '' }}" placeholder="e.g. Meeting ack"></div>
-    <div><label for="t-subj">Subject <span class="sub">(optional; {subject} works)</span></label><input id="t-subj" type="text" name="subject" value="{{ template.subject if template else '' }}" placeholder="Re: {subject}"></div>
+<form method="post">
+  <div class="card">
+    <div class="card-h"><h3>Template</h3></div>
+    <div class="grid2">
+      <div><label for="t-name">Name</label><input id="t-name" type="text" name="name" value="{{ template.name if template else '' }}" placeholder="e.g. Meeting ack"></div>
+      <div><label for="t-subj">Subject <span class="sub">(optional)</span></label><input id="t-subj" type="text" name="subject" value="{{ template.subject if template else '' }}" placeholder="Re: {subject}"></div>
+    </div>
   </div>
-  <label for="t-body">Body</label>
-  <textarea id="t-body" name="body" rows="10">{{ template.body if template else '' }}</textarea>
-  <p style="margin-top:14px"><button class="btn primary" type="submit">Save template</button></p>
+  <div class="card">
+    <div class="card-h"><h3>Body</h3><span class="sub">keep it short — the LLM adapts it to the actual email</span></div>
+    <textarea id="t-body" name="body" rows="10">{{ template.body if template else '' }}</textarea>
+    <div class="sub" style="margin-top:6px">Placeholders: <span class="mono">{sender}</span> <span class="mono">{subject}</span> <span class="mono">{date}</span> <span class="mono">{my_name}</span> are filled in from the message.</div>
+  </div>
+  <div class="savebar"><button class="btn primary" type="submit">Save template</button><a class="btn" href="{{ url_for('templates') }}">Cancel</a></div>
 </form>
 """
+
+
 
 
 
@@ -1713,19 +1733,20 @@ def proposal_dismiss(pid):
     store.mark_rule_proposal_applied(pid)
     return redirect(url_for("messages"))
 
-
 MESSAGE_TMPL = """
 <style>
 .msgrid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;align-items:start}
-@media(max-width:1023px){.msgrid{grid-template-columns:1fr}}
+.msgrid .stickycol{position:sticky;top:14px;display:flex;flex-direction:column;gap:14px}
 .msgrid .card{margin-top:0}
-.msgbody{white-space:pre-wrap;margin:12px 0 2px;font-size:.92rem;line-height:1.55}
+@media(max-width:1023px){.msgrid{grid-template-columns:1fr}.msgrid .stickycol{position:static}}
+.msgbody{white-space:pre-wrap;margin:12px 0 2px;font-size:.92rem;line-height:1.55;overflow-wrap:anywhere}
+.msgfrom{overflow-wrap:anywhere}
 </style>
 <div class="page-head">
   <div style="min-width:0">
     <div class="sub" style="margin-bottom:4px"><a href="{{ url_for('messages') }}">← Messages</a></div>
     <h1 class="page-title" style="font-size:1.12rem">{{ m.subject[:100] or '(no subject)' }}</h1>
-    <div class="page-desc">{{ m.from_addr }} · {{ m.date }} · {{ m.folder }}</div>
+    <div class="page-desc msgfrom">{{ m.from_addr }} · {{ m.date }} · {{ m.folder }}</div>
   </div>
   <div class="row">
     <span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>
@@ -1733,6 +1754,7 @@ MESSAGE_TMPL = """
   </div>
 </div>
 
+{% set can_file = m.llm_suggested_folder and not (m.action_taken or '').startswith('move') %}
 <div class="msgrid">
   <div class="stack">
     <div class="card">
@@ -1750,10 +1772,10 @@ MESSAGE_TMPL = """
     </div>
 
     <div class="card">
-      <div class="card-h"><h3>Reply</h3><span class="sub">Saved to your Drafts folder — nothing is sent automatically.</span></div>
+      <div class="card-h"><h3>Reply</h3><span class="sub">Drafts land in your Drafts folder — nothing is sent automatically.</span></div>
       <div class="row">
         <form class="inline" method="post" action="{{ url_for('message_draft', mid=m.id) }}">
-          <select name="template_id" style="width:auto;min-width:220px">
+          <select name="template_id" style="width:auto;min-width:220px" aria-label="Reply template">
             <option value="">(no template — freeform)</option>
             {% for t in templates %}<option value="{{ t.id }}" {{ 'selected' if draft_template_id==t.id else '' }}>{{ t.name }}</option>{% endfor %}
           </select>
@@ -1763,10 +1785,11 @@ MESSAGE_TMPL = """
       </div>
       {% if draft %}
       <form method="post" action="{{ url_for('message_save', mid=m.id) }}" style="margin-top:10px">
-        <textarea name="body" rows="12">{{ draft }}</textarea>
+        <textarea name="body" rows="12" aria-label="Draft body">{{ draft }}</textarea>
         <p class="row" style="margin-top:8px">
           <button class="btn primary" type="submit">Save to Drafts</button>
           <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.querySelector('textarea[name=body]').value);this.textContent='copied'">Copy</button>
+          <span class="sub">Review and send from your mail client.</span>
         </p>
       </form>
       {% elif draft_error %}
@@ -1775,21 +1798,27 @@ MESSAGE_TMPL = """
     </div>
   </div>
 
-  <div class="stack">
+  <div class="stickycol">
     <div class="card">
       <div class="card-h"><h3>Actions</h3></div>
       <div class="row">
-        <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
-          <button class="btn small primary" type="submit">{{ 'Re-classify with LLM' if m.llm_category else 'Classify with LLM' }}</button></form>
-        {% if m.llm_suggested_folder %}
+        {% if can_file %}
         <form class="inline" method="post" action="{{ url_for('message_file', mid=m.id) }}">
-          <button class="btn small" type="submit">File to {{ m.llm_suggested_folder }}</button></form>
+          <button class="btn primary" type="submit">File to {{ m.llm_suggested_folder }}</button></form>
+        <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
+          <button class="btn small" type="submit">Re-classify with LLM</button></form>
+        {% elif m.llm_category %}
+        <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
+          <button class="btn small" type="submit">Re-classify with LLM</button></form>
+        {% else %}
+        <form class="inline" method="post" action="{{ url_for('message_classify', mid=m.id) }}">
+          <button class="btn primary" type="submit">Classify with LLM</button></form>
         {% endif %}
       </div>
-      <form method="post" action="{{ url_for('message_tag', mid=m.id) }}" style="margin-top:10px">
-        <label>Tag this message</label>
+      <form method="post" action="{{ url_for('message_tag', mid=m.id) }}" style="margin-top:12px">
+        <label for="m-tag">Tag this message</label>
         <div class="row" style="flex-wrap:nowrap">
-          <input type="text" name="tag" value="{{ m.user_tag }}" placeholder="e.g. Receipt">
+          <input id="m-tag" type="text" name="tag" value="{{ m.user_tag }}" placeholder="e.g. Receipt">
           <button class="btn small" type="submit">Save</button>
         </div>
       </form>
@@ -1797,8 +1826,8 @@ MESSAGE_TMPL = """
     <div class="card">
       <div class="card-h"><h3>Details</h3></div>
       <div class="kv">
-        <div class="k">From</div><div>{{ m.from_addr or '—' }}</div>
-        <div class="k">To</div><div>{{ m.to_addr or '—' }}</div>
+        <div class="k">From</div><div class="msgfrom">{{ m.from_addr or '—' }}</div>
+        <div class="k">To</div><div class="msgfrom">{{ m.to_addr or '—' }}</div>
         <div class="k">Date</div><div>{{ m.date or '—' }}</div>
         <div class="k">Folder</div><div>{{ m.folder }} <span class="sub">uid {{ m.uid }}</span></div>
         <div class="k">Message-ID</div><div class="mono" style="font-size:.77rem">{{ m.msgid or '—' }}</div>
@@ -1807,6 +1836,8 @@ MESSAGE_TMPL = """
   </div>
 </div>
 """
+
+
 
 
 
@@ -2537,10 +2568,6 @@ def assistant_clear():
 
 # ---------------------------------------------------------------- settings
 SETTINGS_TMPL = """
-<style>
-.savebar{position:sticky;bottom:10px;background:rgba(250,250,250,.94);backdrop-filter:blur(4px);
-border:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;gap:10px;margin-top:14px;z-index:4}
-</style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Settings</h1>
@@ -3325,72 +3352,79 @@ function submitPaste(email){
 
 
 
-
 ACCOUNT_NEW_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Add account</h1>
-    <div class="page-desc">One sign-in per provider — the redirect URI to register is shown on the account card after adding.</div>
+    <div class="page-desc">One sign-in per provider. After adding, register the redirect URI shown on the account card, then press Authorise.</div>
   </div>
   <div class="row"><a class="btn" href="{{ url_for('accounts') }}">Back</a></div>
 </div>
-<form method="post" class="card">
-  <label for="provider">Provider</label>
-  <select id="provider" name="provider" required onchange="toggleProvider()">
-    {% for key, pr in presets.items() %}<option value="{{ key }}" {{ 'selected' if key=='gmail' else '' }}>{{ pr.label }}</option>{% endfor %}
-  </select>
-  {% for key, pr in presets.items() %}
-  <div class="note" id="note-{{ key }}" style="margin-top:8px;display:none">{{ pr.register_notes }}</div>
-  {% endfor %}
-  <div id="reuse-row" class="note" style="display:none;margin-top:8px">
-    <label class="check" style="margin:0">
-      <input type="checkbox" id="reuse_tb" onchange="applyReuse(this.checked)">
-      <span>No Entra app of your own? Use <b>Thunderbird's public client ID</b> (personal Outlook/Hotmail,
-      and tenants where you cannot register an app). No client secret needed; loopback mode is used and the
-      login finishes via the paste box.</span>
-    </label>
+<form method="post">
+  <div class="card">
+    <div class="card-h"><h3>Account</h3></div>
+    <label for="provider">Provider</label>
+    <select id="provider" name="provider" required onchange="toggleProvider()">
+      {% for key, pr in presets.items() %}<option value="{{ key }}" {{ 'selected' if key=='gmail' else '' }}>{{ pr.label }}</option>{% endfor %}
+    </select>
+    {% for key, pr in presets.items() %}
+    <div class="note" id="note-{{ key }}" style="margin-top:8px;display:none">{{ pr.register_notes }}</div>
+    {% endfor %}
+    <div class="grid2" style="margin-top:4px">
+      <div><label for="email">Email address</label><input type="text" id="email" name="email" placeholder="you@example.com" required></div>
+      <div><label for="password">Local password <span class="sub">(between the app and the proxy)</span></label>
+        <div class="row" style="flex-wrap:nowrap"><input type="text" id="password" name="password" value="{{ default_password }}">
+        <span class="copy" onclick="document.getElementById('password').value='{{ default_password }}'">reset</span></div></div>
+    </div>
   </div>
 
-  <div class="grid2">
-    <div><label for="email">Email address</label><input type="text" id="email" name="email" placeholder="you@example.com" required></div>
-    <div><label for="password">Local password <span class="sub">(between the app and the proxy)</span></label>
-      <div class="row" style="flex-wrap:nowrap"><input type="text" id="password" name="password" value="{{ default_password }}">
-      <span class="copy" onclick="document.getElementById('password').value='{{ default_password }}'">reset</span></div></div>
+  <div class="card">
+    <div class="card-h"><h3>OAuth app</h3><span class="sub">your own app, or a reused public client ID</span></div>
+    <div id="reuse-row" class="note" style="display:none">
+      <label class="check" style="margin:0">
+        <input type="checkbox" id="reuse_tb" onchange="applyReuse(this.checked)">
+        <span>No Entra app of your own? Use <b>Thunderbird's public client ID</b> (personal Outlook/Hotmail,
+        and tenants where you cannot register an app). No client secret needed; loopback mode is used and the
+        login finishes via the paste box.</span>
+      </label>
+    </div>
+    <div class="grid2">
+      <div><label for="client_id">Client ID</label><input type="text" id="client_id" name="client_id"></div>
+      <div><label for="client_secret">Client secret <span class="sub">(if required)</span></label><input type="text" id="client_secret" name="client_secret"></div>
+    </div>
   </div>
 
-  <div class="grid2">
-    <div><label for="client_id">OAuth client ID</label><input type="text" id="client_id" name="client_id"></div>
-    <div><label for="client_secret">OAuth client secret <span class="sub">(if required)</span></label><input type="text" id="client_secret" name="client_secret"></div>
+  <div class="card">
+    <div class="card-h"><h3>Login flow</h3></div>
+    <label for="redirect_mode">How will you open the login page?</label>
+    <select id="redirect_mode" name="redirect_mode">
+      <option value="tailnet" selected>From any tailnet device (recommended — needs your own OAuth app with the redirect URI registered)</option>
+      <option value="loopback">Loopback + paste-back (needed with reused client IDs, e.g. Thunderbird's)</option>
+    </select>
+    <div class="sub" style="margin-top:4px">The redirect URI to register at your provider appears on the account card after adding.</div>
   </div>
-
-  <label for="redirect_mode">How will you open the login page?</label>
-  <select id="redirect_mode" name="redirect_mode">
-    <option value="tailnet" selected>From any tailnet device (recommended — needs your own OAuth app with the redirect URI registered)</option>
-    <option value="loopback">Loopback + paste-back (needed with reused client IDs, e.g. Thunderbird's)</option>
-  </select>
 
   <div id="custom-fields" style="display:none">
-    <h4>Custom provider details</h4>
-    <div class="grid2">
-      <div><label for="permission_url">Permission (authorize) URL</label><input type="text" id="permission_url" name="permission_url"></div>
-      <div><label for="token_url">Token URL</label><input type="text" id="token_url" name="token_url"></div>
+    <div class="card">
+      <div class="card-h"><h3>Custom provider details</h3></div>
+      <div class="grid2">
+        <div><label for="permission_url">Permission (authorize) URL</label><input type="text" id="permission_url" name="permission_url"></div>
+        <div><label for="token_url">Token URL</label><input type="text" id="token_url" name="token_url"></div>
+      </div>
+      <label for="scope">Scope</label><input type="text" id="scope" name="scope">
+      <div class="grid2">
+        <div><label for="imap_host">IMAP server</label><input type="text" id="imap_host" name="imap_host" placeholder="imap.example.com"></div>
+        <div><label for="imap_port">IMAP port</label><input type="number" id="imap_port" name="imap_port" value="993"></div>
+      </div>
+      <div class="grid2">
+        <div><label for="smtp_host">SMTP server <span class="sub">(optional)</span></label><input type="text" id="smtp_host" name="smtp_host" placeholder="smtp.example.com"></div>
+        <div><label for="smtp_port">SMTP port</label><input type="number" id="smtp_port" name="smtp_port" value="465"></div>
+      </div>
+      <label class="check"><input type="checkbox" name="use_pkce" value="1"> <span>Use PKCE (no client secret)</span></label>
     </div>
-    <label for="scope">Scope</label><input type="text" id="scope" name="scope">
-    <div class="grid2">
-      <div><label for="imap_host">IMAP server</label><input type="text" id="imap_host" name="imap_host" placeholder="imap.example.com"></div>
-      <div><label for="imap_port">IMAP port</label><input type="number" id="imap_port" name="imap_port" value="993"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="smtp_host">SMTP server <span class="sub">(optional)</span></label><input type="text" id="smtp_host" name="smtp_host" placeholder="smtp.example.com"></div>
-      <div><label for="smtp_port">SMTP port</label><input type="number" id="smtp_port" name="smtp_port" value="465"></div>
-    </div>
-    <label class="check"><input type="checkbox" name="use_pkce" value="1"> <span>Use PKCE (no client secret)</span></label>
   </div>
 
-  <div class="savebar">
-    <button class="btn primary" type="submit">Add account</button>
-    <span class="sub">Then register the redirect URI shown on the account card (own OAuth app), press Authorise and log in.</span>
-  </div>
+  <div class="savebar"><button class="btn primary" type="submit">Add account</button><a class="btn" href="{{ url_for('accounts') }}">Cancel</a></div>
 </form>
 <script>
 var REUSE_CLIENT_ID = "{{ reuse_client_id }}";
@@ -3433,51 +3467,64 @@ toggleProvider();
 
 
 
+
 ACCOUNT_EDIT_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Edit {{ a.email }}</h1>
-    <div class="page-desc">Redirect URI: <code>{{ client_settings.redirect_uri }}</code> · listener 127.0.0.1:{{ a.imap_local_port }} · {{ client_settings.mode_note }}</div>
+    <div class="page-desc">Saving restarts the proxy. Redirect URI: <code>{{ client_settings.redirect_uri }}</code></div>
   </div>
   <div class="row"><a class="btn" href="{{ url_for('accounts') }}">Back</a></div>
 </div>
-<form method="post" class="card">
-  <div class="grid2">
-    <div><label>Email</label><input type="text" value="{{ a.email }}" readonly></div>
-    <div><label for="provider">Provider</label>
-      <select id="provider" name="provider">
-        {% for key, pr in presets.items() %}<option value="{{ key }}" {{ 'selected' if key==a.provider else '' }}>{{ pr.label }}</option>{% endfor %}
-      </select></div>
+<form method="post">
+  <div class="card">
+    <div class="card-h"><h3>Account</h3></div>
+    <div class="grid2">
+      <div><label>Email</label><input type="text" value="{{ a.email }}" readonly></div>
+      <div><label for="provider">Provider</label>
+        <select id="provider" name="provider">
+          {% for key, pr in presets.items() %}<option value="{{ key }}" {{ 'selected' if key==a.provider else '' }}>{{ pr.label }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div class="grid2">
+      <div><label for="password">Local password</label><input type="text" id="password" name="password" value="{{ a.password }}"></div>
+      <div><label for="redirect_mode">Login mode</label>
+        <select id="redirect_mode" name="redirect_mode">
+          <option value="tailnet" {{ 'selected' if a.redirect_mode != 'loopback' else '' }}>Tailnet (browser on any tailnet device)</option>
+          <option value="loopback" {{ 'selected' if a.redirect_mode == 'loopback' else '' }}>Loopback + paste-back</option>
+        </select>
+        <div class="sub" style="margin-top:4px">{{ client_settings.mode_note }}</div></div>
+    </div>
   </div>
-  <div class="grid2">
-    <div><label for="password">Local password</label><input type="text" id="password" name="password" value="{{ a.password }}"></div>
-    <div><label for="redirect_mode">Login mode</label>
-      <select id="redirect_mode" name="redirect_mode">
-        <option value="tailnet" {{ 'selected' if a.redirect_mode != 'loopback' else '' }}>Tailnet (browser on any tailnet device)</option>
-        <option value="loopback" {{ 'selected' if a.redirect_mode == 'loopback' else '' }}>Loopback + paste-back</option>
-      </select></div>
+  <div class="card">
+    <div class="card-h"><h3>OAuth app</h3></div>
+    <div class="grid2">
+      <div><label for="client_id">Client ID</label><input type="text" id="client_id" name="client_id" value="{{ a.client_id }}"></div>
+      <div><label for="client_secret">Client secret <span class="sub">(blank = keep current)</span></label><input type="text" id="client_secret" name="client_secret" placeholder="{{ 'set' if a.client_secret else 'none' }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label for="permission_url">Permission URL</label><input type="text" id="permission_url" name="permission_url" value="{{ a.auth_url }}"></div>
+      <div><label for="token_url">Token URL</label><input type="text" id="token_url" name="token_url" value="{{ a.token_url }}"></div>
+    </div>
+    <label for="scope">Scope</label><input type="text" id="scope" name="scope" value="{{ a.scopes }}">
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="use_pkce" value="1" {{ 'checked' if a.use_pkce else '' }}> <span>Use PKCE (no client secret)</span></label>
   </div>
-  <div class="grid2">
-    <div><label for="client_id">OAuth client ID</label><input type="text" id="client_id" name="client_id" value="{{ a.client_id }}"></div>
-    <div><label for="client_secret">OAuth client secret <span class="sub">(blank = keep current)</span></label><input type="text" id="client_secret" name="client_secret" placeholder="{{ 'set' if a.client_secret else 'none' }}"></div>
+  <div class="card">
+    <div class="card-h"><h3>Server</h3><span class="sub">proxied upstream servers</span></div>
+    <div class="grid2">
+      <div><label for="imap_host">IMAP server</label><input type="text" id="imap_host" name="imap_host" value="{{ a.imap_host }}"></div>
+      <div><label for="imap_port">IMAP port</label><input type="number" id="imap_port" name="imap_port" value="{{ a.imap_port }}"></div>
+    </div>
+    <div class="grid2">
+      <div><label for="smtp_host">SMTP server</label><input type="text" id="smtp_host" name="smtp_host" value="{{ a.smtp_host }}"></div>
+      <div><label for="smtp_port">SMTP port</label><input type="number" id="smtp_port" name="smtp_port" value="{{ a.smtp_port }}"></div>
+    </div>
   </div>
-  <div class="grid2">
-    <div><label for="permission_url">Permission URL</label><input type="text" id="permission_url" name="permission_url" value="{{ a.auth_url }}"></div>
-    <div><label for="token_url">Token URL</label><input type="text" id="token_url" name="token_url" value="{{ a.token_url }}"></div>
-  </div>
-  <label for="scope">Scope</label><input type="text" id="scope" name="scope" value="{{ a.scopes }}">
-  <div class="grid2">
-    <div><label for="imap_host">IMAP server</label><input type="text" id="imap_host" name="imap_host" value="{{ a.imap_host }}"></div>
-    <div><label for="imap_port">IMAP port</label><input type="number" id="imap_port" name="imap_port" value="{{ a.imap_port }}"></div>
-  </div>
-  <div class="grid2">
-    <div><label for="smtp_host">SMTP server</label><input type="text" id="smtp_host" name="smtp_host" value="{{ a.smtp_host }}"></div>
-    <div><label for="smtp_port">SMTP port</label><input type="number" id="smtp_port" name="smtp_port" value="{{ a.smtp_port }}"></div>
-  </div>
-  <label class="check"><input type="checkbox" name="use_pkce" value="1" {{ 'checked' if a.use_pkce else '' }}> <span>Use PKCE (no client secret)</span></label>
-  <div class="savebar"><button class="btn primary" type="submit">Save account</button><span class="sub">Saving restarts the proxy.</span></div>
+  <div class="savebar"><button class="btn primary" type="submit">Save account</button><a class="btn" href="{{ url_for('accounts') }}">Cancel</a><span class="sub">Listener: 127.0.0.1:{{ a.imap_local_port }}</span></div>
 </form>
 """
+
+
 
 
 
@@ -3489,9 +3536,9 @@ PROXY_LOG_TMPL = """
     <div class="page-desc">The embedded email-oauth2-proxy — log file <span class="mono">{{ log_file }}</span></div>
   </div>
   <div class="row">
-    <a class="chip" href="{{ url_for('proxy_log') }}?n=200">200</a>
+    <a class="chip{{ ' active' if n == 200 else '' }}" href="{{ url_for('proxy_log') }}?n=200">200</a>
     <a class="chip{{ ' active' if n == 500 else '' }}" href="{{ url_for('proxy_log') }}?n=500">500</a>
-    <a class="chip" href="{{ url_for('proxy_log') }}?n=2000">2000</a>
+    <a class="chip{{ ' active' if n == 2000 else '' }}" href="{{ url_for('proxy_log') }}?n=2000">2000</a>
     <a class="btn small" href="{{ url_for('accounts') }}">Accounts</a>
   </div>
 </div>
@@ -3631,34 +3678,44 @@ LOG_TMPL = """
     <div class="page-desc">Everything Mail Triage did, newest first{% if not show_debug %} (debug lines hidden){% endif %}.</div>
   </div>
   <div class="row">
-    <span class="badge {{ 'err' if errors else '' }}">{{ errors }} error{{ 's' if errors != 1 else '' }}</span>
-    {% if show_debug %}<a class="chip" href="{{ url_for('log') }}">hide debug lines</a>
-    {% else %}<a class="chip" href="{{ url_for('log', debug='1') }}">show debug lines</a>{% endif %}
-    <a class="btn small" href="{{ url_for('log') }}">Refresh</a>
+    <a class="chip{{ ' active' if lvl == 'all' else '' }}" href="{{ url_for('log', debug=('1' if show_debug else none)) }}">All</a>
+    <a class="chip{{ ' active' if lvl == 'error' else '' }}" href="{{ url_for('log', lvl='error', debug=('1' if show_debug else none)) }}">Errors{% if errors %} <span class="n">{{ errors }}</span>{% endif %}</a>
+    <a class="chip{{ ' active' if lvl == 'warn' else '' }}" href="{{ url_for('log', lvl='warn', debug=('1' if show_debug else none)) }}">Warnings{% if warns %} <span class="n">{{ warns }}</span>{% endif %}</a>
+    <a class="chip{{ ' active' if lvl == 'info' else '' }}" href="{{ url_for('log', lvl='info', debug=('1' if show_debug else none)) }}">Info</a>
+    {% if show_debug %}<a class="chip" href="{{ url_for('log', lvl=lvl) }}">hide debug lines</a>
+    {% else %}<a class="chip" href="{{ url_for('log', lvl=lvl, debug='1') }}">show debug lines</a>{% endif %}
+    <a class="btn small" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none)) }}">Refresh</a>
   </div>
 </div>
 <div class="card logpanel">
   {% for e in events %}
   <div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span class="lmsg">{{ e.message }}</span></div>
-  {% else %}<div class="sub">No events yet.</div>{% endfor %}
+  {% else %}<div class="sub">Nothing logged at this level yet.</div>{% endfor %}
 </div>
 """
+
 
 
 
 @app.route("/log")
 def log():
     show_debug = request.args.get("debug") == "1"
+    lvl = request.args.get("lvl", "all")
+    if lvl not in ("all", "error", "warn", "info"):
+        lvl = "all"
     events = store.recent_events(1000)
     if not show_debug:
         events = [e for e in events if e.get("level") != "debug"]
     errors = sum(1 for e in events if e.get("level") == "error")
+    warns = sum(1 for e in events if e.get("level") == "warn")
+    if lvl != "all":
+        events = [e for e in events if e.get("level") == lvl]
     events = events[:300]
     for e in events:
         e["when"] = fmt_ts(e["ts"])
         e["cls"] = {"error": "err", "info": "ok", "warn": "warn", "debug": ""}.get(e.get("level"), "")
     return render(render_template_string(LOG_TMPL, events=events, show_debug=show_debug,
-                                         errors=errors))
+                                         errors=errors, warns=warns, lvl=lvl))
 
 
 @app.route("/fonts/<name>")
