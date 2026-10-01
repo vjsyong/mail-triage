@@ -122,23 +122,29 @@ models   ./ragmodels   (mounts to /ragmodels, FASTEMBED_CACHE_PATH)
 
 Queries extract sender/date hints and exact tokens (INV-39281) and push them down
 as SQL pre-filters + quoted FTS terms, so metadata and lexical signals stay
-first-class. Measured on this mailbox (48 semantic + 34 exact-query sets; full
-report `docs/rag-lite-report.md` on the rag-lite-eval branch):
+first-class. The reranker sees the first 1,200 chars of each candidate (jina-turbo's
+window is ~512 tokens; measured 97.9 R@1 at 1,200 chars vs 95.8 at 2,000, and ~350 ms
+faster). Switched live 2026-10-01 (full backfill: 3,556 messages / 6,642 chunks,
+18/18 folders). Live numbers (`tests/retrieval_eval.py`, 48 labelled queries):
 
 ```
-                                   R@1     R@5     (48 semantic queries)
-legacy 4B + v2-m3 (GPU)            93.8    97.9
-lite 0.6B + jina-turbo (CPU)       95.8    97.9
-lite 0.6B, no rerank               89.6    95.8
-                                   R@1     R@5     (34 exact/metadata queries)
-legacy 4B + v2-m3 (GPU)            91.2    97.1
-lite 0.6B + v2-m3 (GPU rerank)     88.2    97.1
-lite 0.6B + jina-turbo (CPU)       82.4    94.1
+mode                R@1     R@5     R@10     MRR    ms/q
+fts               85.4%   91.7%    95.8%   0.884     16
+vector            81.2%   97.9%   100.0%   0.885    233
+hybrid            91.7%   97.9%   100.0%   0.942    175
+hybrid+rerank     97.9%  100.0%   100.0%   0.990   1188
 ```
 
-CPU query cost: ~79 ms embed, ~0.3-0.5 s end-to-end, ~1.9 GB RSS. For the first
-full backfill, point the embed protocol at a scratch GPU TEI running the same 0.6B
-model (fast, identical vectors), then flip back to local. Swap the reranker to
+The legacy stack scored hybrid+rerank R@1 89.6 / MRR 0.941 on the same set (its
+index never exceeded ~60% coverage). Prototype evaluation (0.6B parity with the 4B,
+small-reranker comparison incl. the 34 exact-query set) - `docs/rag-lite-report.md`
+on branch `rag-lite-eval` in `~/mail-triage-rag`.
+
+CPU query cost (live): ~150 ms query embed, ~0.2 s end-to-end without rerank,
+~1.2 s with; ~1.9 GB RSS, zero VRAM. For a first full backfill, point the embed
+protocol at a scratch GPU TEI running the same 0.6B model (fast, identical
+vectors), then flip back to local; during backfills drop `index_refresh_minutes`
+to 1 so a restarted run resumes within a minute. Swap the reranker to
 bge-reranker-v2-m3 from Settings for maximum exact-query quality while the GPU
 exists.
 
