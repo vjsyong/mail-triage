@@ -1903,7 +1903,7 @@ def main():
     check("timezone back to +8", app_mod.fmt_ts(3600) == "01-01 09:00")
     r = client.get("/settings")
     check("settings page carries the new endpoint cards",
-          b"LLM endpoint" in r.data and b"RAG / semantic search" in r.data)
+          b"LLM endpoint" in r.data and b"Embeddings" in r.data and b"Reranker" in r.data)
 
     section("T27 embedded proxy: account store, config generation, connection resolution")
     import proxy as proxy_mod

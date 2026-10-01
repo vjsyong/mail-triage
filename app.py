@@ -3045,320 +3045,337 @@ def assistant_clear():
 
 # ---------------------------------------------------------------- settings
 SETTINGS_TMPL = """
+<style>
+.settings-grid{display:grid;grid-template-columns:216px minmax(0,1fr);gap:26px;align-items:start;margin-top:14px}
+.setnav{position:sticky;top:14px;display:flex;flex-direction:column;gap:1px}
+.setnav a{padding:6px 10px;color:var(--dim);font-size:.86rem;font-weight:500;display:block}
+.setnav a:hover{background:var(--hover);color:var(--ink)}
+.setnav a.sn-sub{padding-left:24px;font-size:.79rem}
+.setnav .sn-h{font-size:.72rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);padding:0 10px 6px}
+.setbody{min-width:0}
+.setbody section{margin-bottom:28px;scroll-margin-top:14px}
+.setbody section:last-child{margin-bottom:0}
+.setrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,300px);gap:8px 18px;padding:11px 0;border-top:1px solid var(--line);align-items:start}
+.setrow:first-of-type{border-top:0;padding-top:2px}
+.setrow .st-l b{display:block;font-size:.87rem;font-weight:600}
+.setrow .st-l .sub{display:block;margin-top:2px;font-size:.78rem}
+.setrow .st-c input[type=text],.setrow .st-c input[type=password],.setrow .st-c input[type=number],.setrow .st-c select{width:100%}
+.setrow .st-c textarea{width:100%}
+.setrow .st-c .check{margin:2px 0 0}
+@media(max-width:900px){.settings-grid{grid-template-columns:1fr}.setnav{flex-direction:row;flex-wrap:wrap;position:static;gap:4px;margin-bottom:6px}.setnav .sn-h{display:none}.setrow{grid-template-columns:1fr}}
+</style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Settings</h1>
-    <div class="page-desc">Grouped by what you come here to do — everything is stored in SQLite.</div>
-  </div>
-  <div class="row">
-    <a class="chip" href="#mailbox">Mailbox</a>
-    <a class="chip" href="#sorting">Sorting</a>
-    <a class="chip" href="#filing">Filing</a>
-    <a class="chip" href="#search">Search</a>
-    <a class="chip" href="#general">General</a>
-    <a class="chip" href="#status">Status</a>
+    <div class="page-desc">Everything is stored in SQLite; blank fields fall back to the container env file.</div>
   </div>
 </div>
 
-<section id="mailbox">
-<h2 class="sec-h">Mailbox</h2>
-<div class="sec-desc">Where mail comes from and how often it is checked.</div>
+<div class="settings-grid">
+<nav class="setnav" aria-label="Settings sections">
+  <span class="sn-h">Settings</span>
+  <a href="#general">General</a>
+  <a href="#ai">AI Settings</a>
+  <a class="sn-sub" href="#ai-model">Language model</a>
+  <a class="sn-sub" href="#ai-classify">Classification</a>
+  <a class="sn-sub" href="#ai-classifiers">Classifiers</a>
+  <a class="sn-sub" href="#ai-search">Embeddings &amp; reranker</a>
+  <a class="sn-sub" href="#ai-assistant">Assistant</a>
+  <a href="#mail">Mail &amp; connection</a>
+  <a class="sn-sub" href="#mail-src">Mail source</a>
+  <a class="sn-sub" href="#mail-check">Checking</a>
+  <a href="#sorting">Sorting &amp; filing</a>
+  <a class="sn-sub" href="#sort-rules">Rules</a>
+  <a class="sn-sub" href="#sort-filing">Filing &amp; drafts</a>
+  <a href="#searchidx">Search index</a>
+  <a href="#status">System status</a>
+</nav>
+<div class="setbody">
 
-<div class="card">
-  <div class="card-h"><h3>Mail source</h3>
-    <span class="badge {{ 'acc' if s.proxy_mode != 'external' else 'warn' }}">{{ 'embedded proxy' if s.proxy_mode != 'external' else 'external server' }}</span>
+<section id="general">
+  <h2 class="sec-h">General</h2>
+  <div class="sec-desc">About you and how the interface reads for you.</div>
+  <div class="card">
+    <div class="card-h"><h3>Profile &amp; display</h3></div>
+    <form method="post">
+      <input type="hidden" name="section" value="behavior">
+      <input type="hidden" name="scope" value="General">
+      <div class="setrow"><div class="st-l"><b>Your name</b><span class="sub">Used when drafting replies and filling template placeholders.</span></div>
+        <div class="st-c"><input type="text" name="my_name" value="{{ s.my_name }}" aria-label="Your name"></div></div>
+      <div class="setrow"><div class="st-l"><b>Time display offset</b><span class="sub">Hours from UTC; timestamps show as {{ tz }}.</span></div>
+        <div class="st-c"><input type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14" aria-label="Time display offset"></div></div>
+      <div class="setrow"><div class="st-l"><b>Remote images in the viewer</b><span class="sub">When off, every message keeps a &ldquo;Load images&rdquo; button instead.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="render_images" value="1" {{ 'checked' if s.render_images else '' }}><input type="hidden" name="render_images" value="0"> <span>Always load</span></label></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save general</button></div>
+    </form>
   </div>
-  <form method="post">
-    <input type="hidden" name="section" value="connection">
-    <input type="hidden" name="scope" value="Mail source">
-    <div class="grid2">
-      <div><label for="c-mode">Mode</label>
-        <select id="c-mode" name="proxy_mode">
+</section>
+
+<section id="ai">
+  <h2 class="sec-h">AI Settings</h2>
+  <div class="sec-desc">Endpoints, models and the classification pipeline. Anything OpenAI-compatible plugs in.</div>
+
+  <div class="card" id="ai-model">
+    <div class="card-h"><h3>LLM endpoint</h3><span class="sub">any OpenAI-compatible /chat/completions server</span></div>
+    <form method="post">
+      <input type="hidden" name="section" value="llm">
+      <input type="hidden" name="scope" value="LLM endpoint">
+      <div class="setrow"><div class="st-l"><b>Base URL</b><span class="sub">e.g. http://host:8000/v1</span></div>
+        <div class="st-c"><input type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}" aria-label="LLM base URL"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b></div>
+        <div class="st-c"><input type="text" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model }}" aria-label="LLM model"></div></div>
+      <div class="setrow"><div class="st-l"><b>API key</b><span class="sub">Blank keeps the stored key.</span></div>
+        <div class="st-c"><input type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}" aria-label="LLM API key"></div></div>
+      <div class="setrow"><div class="st-l"><b>Timeout</b><span class="sub">Seconds; blank = default.</span></div>
+        <div class="st-c"><input type="number" name="llm_timeout" min="0" value="{{ s.llm_timeout or '' }}" placeholder="90" aria-label="LLM timeout"></div></div>
+      <div class="setrow"><div class="st-l"><b>Thinking / reasoning channel</b><span class="sub">auto sends it and drops it if the endpoint rejects it; off never sends it.</span></div>
+        <div class="st-c"><select name="llm_thinking" aria-label="Thinking mode">
+          <option value="auto" {{ 'selected' if s.llm_thinking != 'off' else '' }}>auto</option>
+          <option value="off" {{ 'selected' if s.llm_thinking == 'off' else '' }}>off (strict OpenAI servers)</option>
+        </select></div></div>
+      <div class="setrow"><div class="st-l"><b>Clear the stored API key</b></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="llm_api_key_clear" value="1"> <span>Clear key</span></label></div></div>
+      <div class="hr"></div>
+      <h4>Fallback endpoint <span class="sub">(optional; used automatically when the primary fails)</span></h4>
+      <div class="setrow"><div class="st-l"><b>Base URL</b></div>
+        <div class="st-c"><input type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}" aria-label="Fallback base URL"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Blank = same as primary.</span></div>
+        <div class="st-c"><input type="text" name="llm_fallback_model" value="{{ s.llm_fallback_model }}" placeholder="{{ (llm.fallback.model if llm.fallback else '') or '' }}" aria-label="Fallback model"></div></div>
+      <div class="setrow"><div class="st-l"><b>API key</b><span class="sub">Blank keeps the stored key.</span></div>
+        <div class="st-c"><input type="password" name="llm_fallback_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if (llm.fallback and llm.fallback.key) else 'not set' }}" aria-label="Fallback API key"></div></div>
+      <div class="setrow"><div class="st-l"><b>Clear the stored fallback key</b></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="llm_fallback_api_key_clear" value="1"> <span>Clear fallback key</span></label></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save LLM endpoint</button><span class="sub">Blank fields fall back to the env file.</span></div>
+    </form>
+    <div class="row" style="margin-top:10px">
+      <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit">Test primary</button></form>
+      <form class="inline" method="post" action="{{ url_for('settings_test_llm', which='fallback') }}"><button class="btn" type="submit">Test fallback</button></form>
+      <span class="sub">tests the saved settings — save first if you just edited them</span>
+    </div>
+  </div>
+
+  <div class="card" id="ai-classify">
+    <div class="card-h"><h3>Classification</h3><span class="sub">rules first, then classifiers, then the LLM</span></div>
+    <form method="post">
+      <input type="hidden" name="section" value="behavior">
+      <input type="hidden" name="scope" value="Classification">
+      <div class="setrow"><div class="st-l"><b>Classify unmatched mail with the LLM</b><span class="sub">Anything no rule or classifier claimed gets a category, summary and confidence.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="llm_suggest" value="1" {{ 'checked' if s.llm_suggest else '' }}><input type="hidden" name="llm_suggest" value="0"> <span>Enabled</span></label></div></div>
+      <div class="setrow"><div class="st-l"><b>Auto-file by LLM category</b><span class="sub">Uses the folder map under Sorting &amp; filing. Off = suggest only.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="llm_apply" value="1" {{ 'checked' if s.llm_apply else '' }}><input type="hidden" name="llm_apply" value="0"> <span>Enabled</span></label></div></div>
+      <div class="setrow"><div class="st-l"><b>Max automatic calls per hour</b><span class="sub">Hourly cap for background classification.</span></div>
+        <div class="st-c"><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0" aria-label="Max LLM calls per hour"></div></div>
+      <div class="setrow"><div class="st-l"><b>Classifications per check</b><span class="sub">How many queued messages each cycle picks up.</span></div>
+        <div class="st-c"><input type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1" aria-label="Batch size"></div></div>
+      <div class="setrow"><div class="st-l"><b>Classify concurrency</b><span class="sub">Parallel requests for &ldquo;Classify all&rdquo; (1&ndash;16; 16 measured best on this GPU).</span></div>
+        <div class="st-c"><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16" aria-label="Concurrency"></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save classification</button></div>
+    </form>
+  </div>
+
+  <div class="card" id="ai-classifiers">
+    <div class="card-h"><h3>Classifiers</h3><a class="sub" href="{{ url_for('classifiers') }}">Manage classifiers →</a></div>
+    <form method="post">
+      <input type="hidden" name="section" value="behavior">
+      <input type="hidden" name="scope" value="Classifiers">
+      <div class="setrow"><div class="st-l"><b>Run trained classifiers before the LLM</b><span class="sub">Deterministic verdicts from your own labels — faster and immune to prompt injection.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="heuristics_enabled" value="1" {{ 'checked' if s.heuristics_enabled else '' }}><input type="hidden" name="heuristics_enabled" value="0"> <span>Enabled</span></label></div></div>
+      <div class="setrow"><div class="st-l"><b>Auto-retrain classifiers</b><span class="sub">Retrains tag-sourced classifiers as new labels arrive.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="heuristic_autorefine" value="1" {{ 'checked' if s.heuristic_autorefine else '' }}><input type="hidden" name="heuristic_autorefine" value="0"> <span>Enabled</span></label></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save classifiers</button></div>
+    </form>
+  </div>
+
+  <div class="card" id="ai-search">
+    <div class="card-h"><h3>Embeddings &amp; reranker</h3><span class="sub">the semantic search stack</span></div>
+    <form method="post">
+      <input type="hidden" name="section" value="rag">
+      <input type="hidden" name="scope" value="Embeddings &amp; reranker">
+      <h4>Embeddings</h4>
+      <div class="setrow"><div class="st-l"><b>Base URL</b></div>
+        <div class="st-c"><input type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}" aria-label="Embed base URL"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b></div>
+        <div class="st-c"><input type="text" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model }}" aria-label="Embed model"></div></div>
+      <div class="setrow"><div class="st-l"><b>Protocol</b><span class="sub">TEI /embed vs OpenAI /embeddings (OpenAI, Ollama, LM Studio, TEI /v1).</span></div>
+        <div class="st-c"><select name="embed_protocol" aria-label="Embed protocol">
+          <option value="tei" {{ 'selected' if s.embed_protocol != 'openai' else '' }}>TEI — POST /embed</option>
+          <option value="openai" {{ 'selected' if s.embed_protocol == 'openai' else '' }}>OpenAI — POST /embeddings</option>
+        </select></div></div>
+      <div class="setrow"><div class="st-l"><b>API key</b><span class="sub">Blank keeps the stored key; only for gated endpoints.</span></div>
+        <div class="st-c"><input type="password" name="embed_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if ecfg.key else 'not set' }}" aria-label="Embed API key"></div></div>
+      <div class="setrow"><div class="st-l"><b>Timeout</b><span class="sub">Seconds; blank = default.</span></div>
+        <div class="st-c"><input type="number" name="embed_timeout" min="0" value="{{ s.embed_timeout or '' }}" placeholder="180" aria-label="Embed timeout"></div></div>
+      <div class="setrow"><div class="st-l"><b>Clear the stored key</b></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="embed_api_key_clear" value="1"> <span>Clear key</span></label></div></div>
+      <div class="setrow"><div class="st-l"><b>Query instruction prefix</b><span class="sub">Prepended to search queries only, never to documents. Qwen3-Embedding needs one; most models want it blank.</span></div>
+        <div class="st-c"><textarea name="embed_query_prefix" rows="3" aria-label="Query prefix">{{ s.embed_query_prefix }}</textarea></div></div>
+      <div class="hr"></div>
+      <h4>Reranker</h4>
+      <div class="setrow"><div class="st-l"><b>Base URL</b></div>
+        <div class="st-c"><input type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}" aria-label="Rerank base URL"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b></div>
+        <div class="st-c"><input type="text" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model }}" aria-label="Rerank model"></div></div>
+      <div class="setrow"><div class="st-l"><b>Protocol</b></div>
+        <div class="st-c"><select name="rerank_protocol" aria-label="Rerank protocol">
+          <option value="tei" {{ 'selected' if s.rerank_protocol != 'cohere' else '' }}>TEI — {"query", "texts"}</option>
+          <option value="cohere" {{ 'selected' if s.rerank_protocol == 'cohere' else '' }}>Cohere-style — {"query", "documents"}</option>
+        </select></div></div>
+      <div class="setrow"><div class="st-l"><b>API key</b><span class="sub">Blank keeps the stored key.</span></div>
+        <div class="st-c"><input type="password" name="rerank_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if rcfg.key else 'not set' }}" aria-label="Rerank API key"></div></div>
+      <div class="setrow"><div class="st-l"><b>Timeout</b><span class="sub">Seconds; blank = default.</span></div>
+        <div class="st-c"><input type="number" name="rerank_timeout" min="0" value="{{ s.rerank_timeout or '' }}" placeholder="90" aria-label="Rerank timeout"></div></div>
+      <div class="setrow"><div class="st-l"><b>Clear the stored key</b></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="rerank_api_key_clear" value="1"> <span>Clear key</span></label></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save endpoints</button><span class="sub">Changing the embedding model or dimension needs an index rebuild (Dashboard).</span></div>
+    </form>
+    <div class="row" style="margin-top:10px">
+      <form class="inline" method="post" action="{{ url_for('settings_test_embed') }}"><button class="btn" type="submit">Test embeddings</button></form>
+      <form class="inline" method="post" action="{{ url_for('settings_test_rerank') }}"><button class="btn" type="submit">Test reranker</button></form>
+      <span class="sub">tests the saved settings</span>
+    </div>
+  </div>
+
+  <div class="card" id="ai-assistant">
+    <div class="card-h"><h3>Assistant</h3><a class="sub" href="{{ url_for('assistant') }}">Open assistant →</a></div>
+    <form method="post">
+      <input type="hidden" name="section" value="behavior">
+      <input type="hidden" name="scope" value="Assistant">
+      <div class="setrow"><div class="st-l"><b>Assistant may act on mail</b><span class="sub">Create folders, move and flag. Unchecked = dry-run: the chat shows what it would have done.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="assistant_actions_apply" value="1" {{ 'checked' if s.assistant_actions_apply else '' }}><input type="hidden" name="assistant_actions_apply" value="0"> <span>Allow actions</span></label></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save assistant</button></div>
+    </form>
+  </div>
+</section>
+
+<section id="mail">
+  <h2 class="sec-h">Mail &amp; connection</h2>
+  <div class="sec-desc">Where mail comes from, how often it is checked, and the account behind it.</div>
+
+  <div class="card" id="mail-src">
+    <div class="card-h"><h3>Mail source</h3>
+      <span class="badge {{ 'acc' if s.proxy_mode != 'external' else 'warn' }}">{{ 'embedded proxy' if s.proxy_mode != 'external' else 'external server' }}</span>
+    </div>
+    <form method="post">
+      <input type="hidden" name="section" value="connection">
+      <input type="hidden" name="scope" value="Mail source">
+      <div class="setrow"><div class="st-l"><b>Mode</b><span class="sub">Embedded keeps OAuth sign-in and tokens inside this app (Accounts page). External points the app at another IMAP server below.</span></div>
+        <div class="st-c"><select id="c-mode" name="proxy_mode" aria-label="Mail source mode">
           <option value="embedded" {{ 'selected' if s.proxy_mode != 'external' else '' }}>Embedded proxy (recommended)</option>
           <option value="external" {{ 'selected' if s.proxy_mode == 'external' else '' }}>External server</option>
-        </select>
-        <div class="sub" style="margin-top:4px">Embedded keeps OAuth sign-in and tokens inside this app (Accounts page). External points the app at another IMAP server below.</div>
-      </div>
-      <div><label for="c-tailnet">Tailnet host <span class="sub">(for tailnet-mode OAuth redirect URIs)</span></label>
-        <input id="c-tailnet" type="text" name="proxy_tailnet_host" value="{{ s.proxy_tailnet_host }}" placeholder="node.tailnet.ts.net">
-        <div class="sub" style="margin-top:4px">Builds redirect URIs like <span class="mono">https://node.tailnet.ts.net:41810</span> for accounts in tailnet mode.</div>
-      </div>
-    </div>
-    <div id="extf"{% if s.proxy_mode != 'external' %} class="hidden"{% endif %}>
-      <div class="hr"></div>
-      <h4>External server</h4>
-      <div class="sub" style="margin-bottom:6px">Only used in external mode. Blank fields fall back to the container env file.</div>
-      <div class="grid2">
-        <div><label for="c-host">IMAP host</label><input id="c-host" type="text" name="imap_host" value="{{ s.imap_host }}" placeholder="{{ cfg.IMAP_HOST }}"></div>
-        <div><label for="c-port">Port</label><input id="c-port" type="text" name="imap_port" value="{{ s.imap_port }}" placeholder="{{ cfg.IMAP_PORT }}"></div>
-      </div>
-      <div class="grid2">
-        <div><label for="c-user">Username</label><input id="c-user" type="text" name="imap_user" value="{{ s.imap_user }}" placeholder="{{ cfg.IMAP_USER }}"></div>
-        <div><label for="c-pass">Password <span class="sub">(blank keeps the stored value)</span></label><input id="c-pass" type="password" name="imap_password" value="" autocomplete="new-password" placeholder="{{ 'set' if icfg.password else 'not set' }}"></div>
-      </div>
-      <div class="grid2">
-        <div><label for="c-tls">TLS</label>
-          <select id="c-tls" name="imap_tls">
+        </select></div></div>
+      <div class="setrow"><div class="st-l"><b>Tailnet host</b><span class="sub">Builds redirect URIs like <span class="mono">https://node.tailnet.ts.net:41810</span> for accounts in tailnet mode.</span></div>
+        <div class="st-c"><input type="text" name="proxy_tailnet_host" value="{{ s.proxy_tailnet_host }}" placeholder="node.tailnet.ts.net" aria-label="Tailnet host"></div></div>
+      <div id="extf"{% if s.proxy_mode != 'external' %} class="hidden"{% endif %}>
+        <div class="hr"></div>
+        <h4>External server <span class="sub">(only used in external mode; blank fields fall back to the env file)</span></h4>
+        <div class="setrow"><div class="st-l"><b>IMAP host</b></div>
+          <div class="st-c"><input type="text" name="imap_host" value="{{ s.imap_host }}" placeholder="{{ cfg.IMAP_HOST }}" aria-label="IMAP host"></div></div>
+        <div class="setrow"><div class="st-l"><b>Port</b></div>
+          <div class="st-c"><input type="text" name="imap_port" value="{{ s.imap_port }}" placeholder="{{ cfg.IMAP_PORT }}" aria-label="IMAP port"></div></div>
+        <div class="setrow"><div class="st-l"><b>Username</b></div>
+          <div class="st-c"><input type="text" name="imap_user" value="{{ s.imap_user }}" placeholder="{{ cfg.IMAP_USER }}" aria-label="IMAP user"></div></div>
+        <div class="setrow"><div class="st-l"><b>Password</b><span class="sub">Blank keeps the stored value.</span></div>
+          <div class="st-c"><input type="password" name="imap_password" value="" autocomplete="new-password" placeholder="{{ 'set' if icfg.password else 'not set' }}" aria-label="IMAP password"></div></div>
+        <div class="setrow"><div class="st-l"><b>TLS</b></div>
+          <div class="st-c"><select name="imap_tls" aria-label="IMAP TLS">
             <option value="" {{ 'selected' if s.imap_tls in ('', none) else '' }}>(env)</option>
             <option value="0" {{ 'selected' if s.imap_tls == '0' else '' }}>0 — plain (proxy)</option>
             <option value="1" {{ 'selected' if s.imap_tls == '1' else '' }}>1 — TLS</option>
-          </select></div>
-        <div><label class="check" style="margin-top:26px"><input type="checkbox" name="imap_password_clear" value="1"> <span>Clear the stored password</span></label></div>
+          </select></div></div>
+        <div class="setrow"><div class="st-l"><b>Clear the stored password</b></div>
+          <div class="st-c"><label class="check"><input type="checkbox" name="imap_password_clear" value="1"> <span>Clear password</span></label></div></div>
       </div>
-    </div>
-    <div class="savebar"><button class="btn primary" type="submit">Save mail source</button><span class="sub">Switching mode stops or starts the embedded proxy automatically.</span></div>
-  </form>
-</div>
+      <div class="savebar"><button class="btn primary" type="submit">Save mail source</button><span class="sub">Switching mode stops or starts the embedded proxy automatically.</span></div>
+    </form>
+  </div>
 
-<div class="card">
-  <div class="card-h"><h3>Checking</h3></div>
-  <form method="post">
-    <input type="hidden" name="section" value="behavior">
-    <input type="hidden" name="scope" value="Checking">
-    <div class="grid2">
-      <div><label for="p-int">Check every (seconds)</label><input id="p-int" type="number" name="poll_interval" value="{{ s.poll_interval }}" min="15">
-        <div class="sub" style="margin-top:4px">How often the watcher looks for new mail.</div></div>
-      <div><label for="p-look">First-run lookback (hours)</label><input id="p-look" type="number" name="lookback_hours" value="{{ s.lookback_hours }}" min="1">
-        <div class="sub" style="margin-top:4px">How far back the first scan (and re-scans) reach.</div></div>
-    </div>
-    <label for="p-watch">Watched folders <span class="sub">(comma separated)</span></label>
-    <input id="p-watch" type="text" name="watch_folders" value="{{ s.watch_folders|join(', ') }}">
-    <div class="sub" style="margin-top:4px">Folders scanned for new mail — usually just INBOX.</div>
-    <div class="savebar"><button class="btn primary" type="submit">Save checking</button></div>
-  </form>
-</div>
+  <div class="card" id="mail-check">
+    <div class="card-h"><h3>Checking</h3></div>
+    <form method="post">
+      <input type="hidden" name="section" value="behavior">
+      <input type="hidden" name="scope" value="Checking">
+      <div class="setrow"><div class="st-l"><b>Check every</b><span class="sub">Seconds between mailbox checks.</span></div>
+        <div class="st-c"><input type="number" name="poll_interval" value="{{ s.poll_interval }}" min="15" aria-label="Poll interval"></div></div>
+      <div class="setrow"><div class="st-l"><b>First-run lookback</b><span class="sub">Hours; how far back the first scan (and re-scans) reach.</span></div>
+        <div class="st-c"><input type="number" name="lookback_hours" value="{{ s.lookback_hours }}" min="1" aria-label="Lookback hours"></div></div>
+      <div class="setrow"><div class="st-l"><b>Watched folders</b><span class="sub">Comma separated; folders scanned for new mail — usually just INBOX.</span></div>
+        <div class="st-c"><input type="text" name="watch_folders" value="{{ s.watch_folders|join(', ') }}" aria-label="Watched folders"></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save checking</button></div>
+    </form>
+  </div>
 </section>
 
 <section id="sorting">
-<h2 class="sec-h">Sorting &amp; classification</h2>
-<div class="sec-desc">What happens to arriving mail, top to bottom: rules first, then trained classifiers, then the LLM.</div>
+  <h2 class="sec-h">Sorting &amp; filing</h2>
+  <div class="sec-desc">What happens to arriving mail and where it ends up.</div>
 
-<div class="card">
-  <div class="card-h"><h3>Rules &amp; classifiers</h3><a class="sub" href="{{ url_for('rules') }}">Manage rules →</a></div>
-  <form method="post">
-    <input type="hidden" name="section" value="behavior">
-    <input type="hidden" name="scope" value="Rules &amp; classifiers">
-    <h4>Rules</h4>
-    <label class="check"><input type="checkbox" name="rules_apply" value="1" {{ 'checked' if s.rules_apply else '' }}><input type="hidden" name="rules_apply" value="0"> <span>Apply rule actions for real — uncheck for dry-run (suggest only)</span></label>
-    <div class="sub" style="margin-top:2px">Rules match on from / to / subject / body and can move, read or flag mail.</div>
-    <div class="hr"></div>
-    <h4>Classifiers <a class="sub" href="{{ url_for('classifiers') }}" style="font-weight:400">manage →</a></h4>
-    <label class="check"><input type="checkbox" name="heuristics_enabled" value="1" {{ 'checked' if s.heuristics_enabled else '' }}><input type="hidden" name="heuristics_enabled" value="0"> <span>Run trained classifiers before the LLM</span></label>
-    <div class="sub" style="margin-top:2px">Deterministic verdicts from your own labels — faster and immune to prompt injection.</div>
-    <label class="check" style="margin-top:8px"><input type="checkbox" name="heuristic_autorefine" value="1" {{ 'checked' if s.heuristic_autorefine else '' }}><input type="hidden" name="heuristic_autorefine" value="0"> <span>Auto-retrain classifiers as new tags arrive</span></label>
-    <div class="savebar"><button class="btn primary" type="submit">Save rules &amp; classifiers</button></div>
-  </form>
-</div>
-
-<div class="card">
-  <div class="card-h"><h3>LLM classification</h3></div>
-  <form method="post">
-    <input type="hidden" name="section" value="behavior">
-    <input type="hidden" name="scope" value="LLM classification">
-    <label class="check"><input type="checkbox" name="llm_suggest" value="1" {{ 'checked' if s.llm_suggest else '' }}><input type="hidden" name="llm_suggest" value="0"> <span>Classify unmatched mail with the LLM</span></label>
-    <div class="sub" style="margin-top:2px">Anything no rule or classifier claimed gets a category, summary and confidence.</div>
-    <label class="check" style="margin-top:8px"><input type="checkbox" name="llm_apply" value="1" {{ 'checked' if s.llm_apply else '' }}><input type="hidden" name="llm_apply" value="0"> <span>Auto-file by LLM category (uses the folder map in Filing)</span></label>
-    <div class="sub" style="margin-top:2px">Off = the LLM suggests only; you decide what to file.</div>
-    <div class="hr"></div>
-    <div class="grid2">
-      <div><label for="p-max">Max automatic calls per hour</label><input id="p-max" type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0">
-        <div class="sub" style="margin-top:4px">Hourly cap for background classification.</div></div>
-      <div><label for="p-batch">Classifications per check</label><input id="p-batch" type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1">
-        <div class="sub" style="margin-top:4px">How many queued messages each cycle picks up.</div></div>
-    </div>
-    <div class="grid2">
-      <div><label for="p-conc">Classify concurrency</label><input id="p-conc" type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16">
-        <div class="sub" style="margin-top:4px">Parallel requests for “Classify all” (1–16; 16 measured best on this GPU).</div></div>
-    </div>
-    <div class="savebar"><button class="btn primary" type="submit">Save classification</button></div>
-  </form>
-</div>
-
-<div class="card" id="llm">
-  <div class="card-h"><h3>LLM endpoint</h3><span class="sub">any OpenAI-compatible /chat/completions server</span></div>
-  <form method="post">
-    <input type="hidden" name="section" value="llm">
-    <input type="hidden" name="scope" value="LLM endpoint">
-    <div class="grid2">
-      <div><label for="l-base">Base URL</label><input id="l-base" type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}"></div>
-      <div><label for="l-model">Model</label><input id="l-model" type="text" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model }}"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="l-key">API key <span class="sub">(blank keeps the stored key)</span></label><input id="l-key" type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}"></div>
-      <div><label for="l-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="l-timeout" type="number" name="llm_timeout" min="0" value="{{ s.llm_timeout or '' }}" placeholder="90"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="l-think">Thinking / reasoning channel</label>
-        <select id="l-think" name="llm_thinking">
-          <option value="auto" {{ 'selected' if s.llm_thinking != 'off' else '' }}>auto — send it, drop it if the endpoint rejects it</option>
-          <option value="off" {{ 'selected' if s.llm_thinking == 'off' else '' }}>off — never send it (strict OpenAI-compatible servers)</option>
-        </select></div>
-      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="llm_api_key_clear" value="1"> <span>Clear the stored API key</span></label></div>
-    </div>
-    <div class="hr"></div>
-    <h4>Fallback endpoint <span class="sub">(optional; used automatically when the primary fails)</span></h4>
-    <div class="grid2">
-      <div><label for="l-fbase">Base URL</label><input id="l-fbase" type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}"></div>
-      <div><label for="l-fmodel">Model <span class="sub">(blank = same as primary)</span></label><input id="l-fmodel" type="text" name="llm_fallback_model" value="{{ s.llm_fallback_model }}" placeholder="{{ (llm.fallback.model if llm.fallback else '') or '' }}"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="l-fkey">API key <span class="sub">(blank keeps the stored key)</span></label><input id="l-fkey" type="password" name="llm_fallback_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if (llm.fallback and llm.fallback.key) else 'not set' }}"></div>
-      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="llm_fallback_api_key_clear" value="1"> <span>Clear the stored fallback key</span></label></div>
-    </div>
-    <div class="savebar"><button class="btn primary" type="submit">Save LLM endpoint</button><span class="sub">Blank fields fall back to the env file.</span></div>
-  </form>
-  <div class="row" style="margin-top:10px">
-    <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit">Test primary</button></form>
-    <form class="inline" method="post" action="{{ url_for('settings_test_llm', which='fallback') }}"><button class="btn" type="submit">Test fallback</button></form>
-    <span class="sub">tests the saved settings — save first if you just edited them</span>
+  <div class="card" id="sort-rules">
+    <div class="card-h"><h3>Rules</h3><a class="sub" href="{{ url_for('rules') }}">Manage rules →</a></div>
+    <form method="post">
+      <input type="hidden" name="section" value="behavior">
+      <input type="hidden" name="scope" value="Rules">
+      <div class="setrow"><div class="st-l"><b>Apply rule actions for real</b><span class="sub">Uncheck for dry-run (suggest only). Rules match on from / to / subject / body.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="rules_apply" value="1" {{ 'checked' if s.rules_apply else '' }}><input type="hidden" name="rules_apply" value="0"> <span>Enabled</span></label></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save rules</button></div>
+    </form>
   </div>
-</div>
 
-<div class="card">
-  <div class="card-h"><h3>Assistant</h3><a class="sub" href="{{ url_for('assistant') }}">Open assistant →</a></div>
-  <form method="post">
-    <input type="hidden" name="section" value="behavior">
-    <input type="hidden" name="scope" value="Assistant">
-    <label class="check"><input type="checkbox" name="assistant_actions_apply" value="1" {{ 'checked' if s.assistant_actions_apply else '' }}><input type="hidden" name="assistant_actions_apply" value="0"> <span>Assistant may act on mail (create folders, move, flag) — uncheck = dry-run</span></label>
-    <div class="sub" style="margin-top:2px">Dry-run keeps every tool call read-only; the chat shows what it would have done.</div>
-    <div class="savebar"><button class="btn primary" type="submit">Save assistant</button></div>
-  </form>
-</div>
-</section>
-
-<section id="filing">
-<h2 class="sec-h">Filing &amp; drafts</h2>
-<div class="sec-desc">How mail is labelled, where LLM categories file to, and where reply drafts are saved.</div>
-
-<div class="card">
-  <div class="card-h"><h3>Categories, folders &amp; drafts</h3></div>
-  <form method="post">
-    <input type="hidden" name="section" value="behavior">
-    <input type="hidden" name="scope" value="Filing &amp; drafts">
-    <label for="p-cats">Categories <span class="sub">(comma separated)</span></label>
-    <input id="p-cats" type="text" name="categories" value="{{ s.categories|join(', ') }}">
-    <div class="sub" style="margin-top:4px">The set the LLM may classify into — used by classifiers, tags and the folder map below.</div>
-    <label for="p-cmap">Category → folder map <span class="sub">(one per line, "Category = Folder"; blank folder = keep in inbox)</span></label>
-    <textarea id="p-cmap" name="category_folders" rows="6" style="min-height:100px">{% for k, v in s.category_folders.items() %}{{ k }} = {{ v }}
-{% endfor %}</textarea>
-    <div class="sub" style="margin-top:4px">Only used when “Auto-file by LLM category” is on.</div>
-    <div class="grid2">
-      <div><label for="p-drafts">Drafts folder <span class="sub">(blank = auto-detect)</span></label><input id="p-drafts" type="text" name="drafts_folder" value="{{ s.drafts_folder }}"></div>
-    </div>
-    <div class="savebar"><button class="btn primary" type="submit">Save filing &amp; drafts</button></div>
-  </form>
-</div>
-</section>
-
-<section id="search">
-<h2 class="sec-h">Search (RAG / semantic search)</h2>
-<div class="sec-desc">A local embedding index over the whole archive, fused with keyword search.</div>
-
-<div class="card">
-  <div class="card-h"><h3>Index</h3><a class="sub" href="{{ url_for('dashboard') }}">Run or rebuild from the Dashboard →</a></div>
-  <form method="post">
-    <input type="hidden" name="section" value="behavior">
-    <input type="hidden" name="scope" value="Search index">
-    <label class="check"><input type="checkbox" name="index_enabled" value="1" {{ 'checked' if s.index_enabled else '' }}><input type="hidden" name="index_enabled" value="0"> <span>Build and maintain the search index</span></label>
-    <label class="check" style="margin-top:8px"><input type="checkbox" name="rerank_enabled" value="1" {{ 'checked' if s.rerank_enabled else '' }}><input type="hidden" name="rerank_enabled" value="0"> <span>Rerank results with the cross-encoder (better precision, slightly slower)</span></label>
-    <div class="hr"></div>
-    <label for="p-ifolders">Indexed folders <span class="sub">(comma separated; blank = all except the excluded list below)</span></label>
-    <input id="p-ifolders" type="text" name="index_folders" value="{{ s.index_folders|join(', ') }}">
-    <div class="grid2" style="margin-top:10px">
-      <div><label for="i-refresh">Idle refresh interval (minutes)</label><input id="i-refresh" type="number" name="index_refresh_minutes" value="{{ s.index_refresh_minutes }}" min="1">
-        <div class="sub" style="margin-top:4px">How often the index picks up newly arrived mail.</div></div>
-      <div><label for="i-excl">Excluded folders <span class="sub">(substrings, comma separated)</span></label><input id="i-excl" type="text" name="rag_exclude_folders" value="{{ s.rag_exclude_folders|join(', ') }}">
-        <div class="sub" style="margin-top:4px">Folders skipped when indexing everything.</div></div>
-    </div>
-    <div class="savebar"><button class="btn primary" type="submit">Save index</button></div>
-  </form>
-</div>
-
-<div class="card" id="rag">
-  <div class="card-h"><h3>Endpoints</h3><span class="sub">embeddings + reranker</span></div>
-  <form method="post">
-    <input type="hidden" name="section" value="rag">
-    <input type="hidden" name="scope" value="Search endpoints">
-    <h4>Embeddings</h4>
-    <div class="grid2">
-      <div><label for="e-base">Base URL</label><input id="e-base" type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}"></div>
-      <div><label for="e-model">Model</label><input id="e-model" type="text" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model }}"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="e-proto">Protocol</label>
-        <select id="e-proto" name="embed_protocol">
-          <option value="tei" {{ 'selected' if s.embed_protocol != 'openai' else '' }}>TEI — POST /embed {"inputs": [...]}</option>
-          <option value="openai" {{ 'selected' if s.embed_protocol == 'openai' else '' }}>OpenAI — POST /embeddings {"input": [...]} (OpenAI, Ollama, LM Studio, TEI /v1)</option>
-        </select></div>
-      <div><label for="e-key">API key <span class="sub">(blank keeps the stored key; only for gated endpoints)</span></label><input id="e-key" type="password" name="embed_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if ecfg.key else 'not set' }}"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="e-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="e-timeout" type="number" name="embed_timeout" min="0" value="{{ s.embed_timeout or '' }}" placeholder="180"></div>
-      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="embed_api_key_clear" value="1"> <span>Clear the stored key</span></label></div>
-    </div>
-    <label for="e-prefix">Query instruction prefix <span class="sub">(prepended to search queries only, never to documents)</span></label>
-    <textarea id="e-prefix" name="embed_query_prefix" rows="2" style="min-height:60px">{{ s.embed_query_prefix }}</textarea>
-    <div class="sub" style="margin-top:4px">Qwen3-Embedding needs one; most other models want this blank.</div>
-    <div class="hr"></div>
-    <h4>Reranker</h4>
-    <div class="grid2">
-      <div><label for="r-base">Base URL</label><input id="r-base" type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}"></div>
-      <div><label for="r-model">Model</label><input id="r-model" type="text" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model }}"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="r-proto">Protocol</label>
-        <select id="r-proto" name="rerank_protocol">
-          <option value="tei" {{ 'selected' if s.rerank_protocol != 'cohere' else '' }}>TEI — {"query", "texts"}</option>
-          <option value="cohere" {{ 'selected' if s.rerank_protocol == 'cohere' else '' }}>Cohere-style — {"query", "documents"} (Cohere, Jina, Infinity)</option>
-        </select></div>
-      <div><label for="r-key">API key <span class="sub">(blank keeps the stored key)</span></label><input id="r-key" type="password" name="rerank_api_key" value="" autocomplete="new-password" placeholder="{{ 'set' if rcfg.key else 'not set' }}"></div>
-    </div>
-    <div class="grid2">
-      <div><label for="r-timeout">Timeout (seconds) <span class="sub">(blank = default)</span></label><input id="r-timeout" type="number" name="rerank_timeout" min="0" value="{{ s.rerank_timeout or '' }}" placeholder="90"></div>
-      <div><label class="check" style="margin-top:26px"><input type="checkbox" name="rerank_api_key_clear" value="1"> <span>Clear the stored key</span></label></div>
-    </div>
-    <div class="savebar"><button class="btn primary" type="submit">Save endpoints</button><span class="sub">Changing the embedding model or dimension needs an index rebuild (Dashboard).</span></div>
-  </form>
-  <div class="row" style="margin-top:10px">
-    <form class="inline" method="post" action="{{ url_for('settings_test_embed') }}"><button class="btn" type="submit">Test embeddings</button></form>
-    <form class="inline" method="post" action="{{ url_for('settings_test_rerank') }}"><button class="btn" type="submit">Test reranker</button></form>
-    <span class="sub">tests the saved settings</span>
+  <div class="card" id="sort-filing">
+    <div class="card-h"><h3>Filing &amp; drafts</h3></div>
+    <form method="post">
+      <input type="hidden" name="section" value="behavior">
+      <input type="hidden" name="scope" value="Filing &amp; drafts">
+      <div class="setrow"><div class="st-l"><b>Categories</b><span class="sub">Comma separated. The set the LLM may classify into — used by classifiers, tags and the folder map.</span></div>
+        <div class="st-c"><input type="text" name="categories" value="{{ s.categories|join(', ') }}" aria-label="Categories"></div></div>
+      <div class="setrow"><div class="st-l"><b>Category &rarr; folder map</b><span class="sub">One per line, &ldquo;Category = Folder&rdquo;; blank folder = keep in inbox. Only used when auto-filing is on.</span></div>
+        <div class="st-c"><textarea name="category_folders" rows="7" aria-label="Category folder map">{% for k, v in s.category_folders.items() %}{{ k }} = {{ v }}
+{% endfor %}</textarea></div></div>
+      <div class="setrow"><div class="st-l"><b>Drafts folder</b><span class="sub">Blank = auto-detect.</span></div>
+        <div class="st-c"><input type="text" name="drafts_folder" value="{{ s.drafts_folder }}" aria-label="Drafts folder"></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save filing &amp; drafts</button></div>
+    </form>
   </div>
-</div>
 </section>
 
-<section id="general">
-<h2 class="sec-h">General</h2>
-<div class="sec-desc">About you and how the interface reads for you.</div>
-
-<div class="card">
-  <form method="post">
-    <input type="hidden" name="section" value="behavior">
-    <input type="hidden" name="scope" value="General">
-    <div class="grid2">
-      <div><label for="p-name">Your name <span class="sub">(used when drafting replies)</span></label><input id="p-name" type="text" name="my_name" value="{{ s.my_name }}"></div>
-      <div><label for="p-tz">Time display offset <span class="sub">(hours from UTC; timestamps show as {{ tz }})</span></label><input id="p-tz" type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14"></div>
-    </div>
-    <label class="check" style="margin-top:14px"><input type="checkbox" name="render_images" value="1" {{ 'checked' if s.render_images else '' }}><input type="hidden" name="render_images" value="0"> <span>Always load remote images in the message viewer <span class="sub">(unchecked: each message keeps a "Load images" button)</span></span></label>
-    <div class="savebar"><button class="btn primary" type="submit">Save general</button></div>
-  </form>
-</div>
+<section id="searchidx">
+  <h2 class="sec-h">Search index</h2>
+  <div class="sec-desc">A local embedding index over the whole archive, fused with keyword search.</div>
+  <div class="card">
+    <div class="card-h"><h3>Index</h3><a class="sub" href="{{ url_for('dashboard') }}">Run or rebuild from the Dashboard →</a></div>
+    <form method="post">
+      <input type="hidden" name="section" value="behavior">
+      <input type="hidden" name="scope" value="Search index">
+      <div class="setrow"><div class="st-l"><b>Build and maintain the search index</b></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="index_enabled" value="1" {{ 'checked' if s.index_enabled else '' }}><input type="hidden" name="index_enabled" value="0"> <span>Enabled</span></label></div></div>
+      <div class="setrow"><div class="st-l"><b>Rerank results</b><span class="sub">Cross-encoder rerank — better precision, slightly slower.</span></div>
+        <div class="st-c"><label class="check"><input type="checkbox" name="rerank_enabled" value="1" {{ 'checked' if s.rerank_enabled else '' }}><input type="hidden" name="rerank_enabled" value="0"> <span>Enabled</span></label></div></div>
+      <div class="setrow"><div class="st-l"><b>Indexed folders</b><span class="sub">Comma separated; blank = all except the excluded list.</span></div>
+        <div class="st-c"><input type="text" name="index_folders" value="{{ s.index_folders|join(', ') }}" aria-label="Indexed folders"></div></div>
+      <div class="setrow"><div class="st-l"><b>Idle refresh interval</b><span class="sub">Minutes between index passes for newly arrived mail.</span></div>
+        <div class="st-c"><input type="number" name="index_refresh_minutes" value="{{ s.index_refresh_minutes }}" min="1" aria-label="Refresh minutes"></div></div>
+      <div class="setrow"><div class="st-l"><b>Excluded folders</b><span class="sub">Substrings, comma separated.</span></div>
+        <div class="st-c"><input type="text" name="rag_exclude_folders" value="{{ s.rag_exclude_folders|join(', ') }}" aria-label="Excluded folders"></div></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save index</button></div>
+    </form>
+  </div>
 </section>
 
 <section id="status">
-<h2 class="sec-h">Status</h2>
-<div class="sec-desc">Effective values right now.</div>
-<div class="card">
-  <div class="sub mono" style="line-height:1.9">
-    IMAP: {{ icfg.user or '?' }} @ {{ icfg.host }}:{{ icfg.port }} ({{ icfg.mode }})<br>
-    LLM: {{ llm.base }} · model {{ llm.model }} · key {{ 'set' if llm.key else 'MISSING' }}{% if llm.fallback %} · fallback: {{ llm.fallback.model }}{% endif %}<br>
-    Embed: {{ ecfg.base or '— not configured —' }} · {{ ecfg.model }} · Rerank: {{ rcfg.base or '— not configured —' }} · {{ rcfg.model }}<br>
-    state: {{ engine_state }} · db: {{ cfg.DB_PATH }}
+  <h2 class="sec-h">System status</h2>
+  <div class="sec-desc">Effective values right now.</div>
+  <div class="card">
+    <div class="sub mono" style="line-height:1.9">
+      IMAP: {{ icfg.user or '?' }} @ {{ icfg.host }}:{{ icfg.port }} ({{ icfg.mode }})<br>
+      LLM: {{ llm.base }} · model {{ llm.model }} · key {{ 'set' if llm.key else 'MISSING' }}{% if llm.fallback %} · fallback: {{ llm.fallback.model }}{% endif %}<br>
+      Embed: {{ ecfg.base or '— not configured —' }} · {{ ecfg.model }} · Rerank: {{ rcfg.base or '— not configured —' }} · {{ rcfg.model }}<br>
+      state: {{ engine_state }} · db: {{ cfg.DB_PATH }}
+    </div>
+    <p class="sub" style="margin-bottom:0">Keys are stored in SQLite and shown masked only; blank fields fall back to the container env file, so an existing .env keeps working.</p>
   </div>
-  <p class="sub" style="margin-bottom:0">Endpoints and keys set on this page are stored in SQLite (keys are shown masked only);
-  blank fields fall back to the container env file, so an existing .env keeps working.</p>
-</div>
 </section>
+
+</div>
+</div>
 
 <script>
 (function(){
