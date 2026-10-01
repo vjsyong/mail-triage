@@ -257,7 +257,8 @@ def index_status():
         s = rag.index_stats()
         st["messages"] = s["messages"]
         st["chunks"] = s["chunks"]
-        ov = store.index_overview()
+        st["backend"] = s.get("backend", "legacy")
+        ov = store.index2_overview() if s.get("backend") == "lite" else store.index_overview()
         st["folders_done"] = sum(1 for r in ov if r.get("status") == "done")
         st["folders_total"] = len(ov)
     except Exception:

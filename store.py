@@ -1645,7 +1645,7 @@ def index2_state_touch(folder, uidvalidity, last_uid):
         conn.commit()
 
 
-def index2_overview(folders):
+def index2_overview(folders=None):
     with db() as conn:
         have = {r["folder"]: dict(r) for r in conn.execute("SELECT * FROM index2_state")}
     return [have.get(f, {"folder": f, "status": "new", "messages_indexed": 0}) for f in folders]
