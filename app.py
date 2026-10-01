@@ -2506,15 +2506,23 @@ function render(){
     } else if(st.type === 'draft'){
       f.appendChild(el('label', null, 'How'));
       var m = el('select');
-      [['template','Fill a template'],['llm','Draft with the LLM']].forEach(function(t){ var o = el('option', null, t[1]); o.value = t[0]; if((st.mode || 'template') === t[0]) o.selected = true; m.appendChild(o); });
+      [['fixed','Fixed message'],['template','Fill a template'],['llm','Draft with the LLM']].forEach(function(t){ var o = el('option', null, t[1]); o.value = t[0]; if((st.mode || 'template') === t[0]) o.selected = true; m.appendChild(o); });
       m.onchange = function(){ st.mode = m.value; render(); };
       f.appendChild(m);
+      if((st.mode || 'template') === 'fixed'){
+        f.appendChild(el('label', null, 'Message'));
+        var ta = document.createElement('textarea'); ta.rows = 3; ta.value = st.body || '';
+        ta.placeholder = 'Thank you for your email, I will get back to you shortly';
+        ta.oninput = function(){ st.body = ta.value; sync(); };
+        f.appendChild(ta);
+      } else {
       f.appendChild(el('label', null, (st.mode === 'llm') ? 'Template (guidance, optional)' : 'Template'));
       var tSel = el('select');
       var none = el('option', null, '(none)'); none.value = ''; tSel.appendChild(none);
       TEMPLATES.forEach(function(t){ var o = el('option', null, t.name); o.value = String(t.id); if(String(st.template_id || '') === String(t.id)) o.selected = true; tSel.appendChild(o); });
       tSel.onchange = function(){ st.template_id = tSel.value; sync(); };
       f.appendChild(tSel);
+      }
     } else if(st.type === 'tag'){
       f.appendChild(el('label', null, 'Tag'));
       var tin = el('input'); tin.type = 'text'; tin.value = st.tag || ''; tin.placeholder = 'e.g. Follow up';
@@ -2575,11 +2583,17 @@ def _flow_summary(flow, tpl_names):
         elif t == "tag":
             acts.append("tag ‘%s’" % st.get("tag"))
         elif t == "draft":
-            name = tpl_names.get(int(st.get("template_id") or 0), "")
-            if (st.get("mode") or "template") == "llm":
+            dmode = (st.get("mode") or "template").lower()
+            if dmode == "llm":
+                name = tpl_names.get(int(st.get("template_id") or 0), "")
                 acts.append("draft with the LLM%s and save to Drafts"
                             % ((" using ‘%s’" % name) if name else ""))
+            elif dmode == "fixed":
+                body = (st.get("body") or "").strip()
+                acts.append("draft ‘%s%s’ and save to Drafts"
+                            % (body[:50], "…" if len(body) > 50 else ""))
             else:
+                name = tpl_names.get(int(st.get("template_id") or 0), "")
                 acts.append("draft from ‘%s’ and save to Drafts" % name if name else "draft (no template)")
     return "IF %s → %s" % (when, ", then ".join(acts) or "—")
 
@@ -2607,14 +2621,20 @@ def _flow_from_form():
         if t == "move" and (st.get("folder") or "").strip():
             steps.append({"type": "move", "folder": st["folder"].strip()[:80]})
         elif t == "draft":
+            dmode = (st.get("mode") or "template").lower()
             tid = st.get("template_id") or None
             try:
                 tid = int(tid) if tid not in (None, "", "0") else None
             except (TypeError, ValueError):
                 tid = None
-            mode = "llm" if (st.get("mode") or "template") == "llm" else "template"
-            if tid or mode == "llm":
-                steps.append({"type": "draft", "mode": mode, "template_id": tid})
+            if dmode == "fixed":
+                body = (st.get("body") or "").strip()
+                if body:
+                    steps.append({"type": "draft", "mode": "fixed", "body": body[:4000]})
+            elif dmode == "llm":
+                steps.append({"type": "draft", "mode": "llm", "template_id": tid})
+            elif tid:
+                steps.append({"type": "draft", "mode": "template", "template_id": tid})
         elif t == "tag" and (st.get("tag") or "").strip():
             steps.append({"type": "tag", "tag": st["tag"].strip()[:40]})
         elif t in ("mark_read", "flag"):
@@ -3745,14 +3765,14 @@ CONVO_TMPL = r"""
                 <input type="hidden" name="mode" value="update">
                 <input type="hidden" name="rule_id" value="{{ tgt.id }}">
                 <input type="hidden" name="session" value="{{ sid }}">
-                <button class="btn small primary" type="submit">Update rule #{{ tgt.id }}</button>
+                <button class="btn small primary" type="submit">{{ 'Update flow #%d' % tgt.id if p.kind == 'flow' else 'Update rule #%d' % tgt.id }}</button>
               </form>
               {% endif %}
               <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
                 <input type="hidden" name="idx" value="{{ loop.index0 }}">
                 <input type="hidden" name="session" value="{{ sid }}">
-                <button class="btn small{{ '' if tgt else ' primary' }}" type="submit">Add rule</button>
+                <button class="btn small{{ '' if tgt else ' primary' }}" type="submit">{{ 'Add flow' if p.kind == 'flow' else 'Add rule' }}</button>
               </form>
               <form class="inline" method="post" action="{{ url_for('assistant_apply') }}">
                 <input type="hidden" name="msg_id" value="{{ m.id }}">
@@ -3764,7 +3784,7 @@ CONVO_TMPL = r"""
             </div>
           </div>
           {% if p.updates %}
-          <div class="note" style="border-color:var(--warn);color:var(--warn)">Updates rule #{{ p.updates.id }} "{{ p.updates.name }}" — currently {{ p.updates_actions }}.</div>
+          <div class="note" style="border-color:var(--warn);color:var(--warn)">Updates {{ 'flow' if p.kind == 'flow' else 'rule' }} #{{ p.updates.id }} "{{ p.updates.name }}" — currently {{ p.updates_actions }}.</div>
           {% elif p.similar %}
           <div class="note" style="border-color:var(--warn);color:var(--warn)">⚠ Similar rule exists: #{{ p.similar.id }} "{{ p.similar.name }}"{% if not p.similar.enabled %} (disabled){% endif %} — {{ p.similar_actions }}. Updating it avoids a duplicate.</div>
           {% endif %}
@@ -3892,6 +3912,22 @@ ASSISTANT_TMPL = r"""
 
 
 def _proposal_view(p):
+    if (p.get("kind") or "rule") == "flow":
+        upd = p.get("updates_flow") or None
+        return {
+            "kind": "flow",
+            "name": p.get("name", ""),
+            "match_mode": p.get("match_mode", "all"),
+            "placement": "",
+            "summary": summarize_conditions({"conditions": json.dumps(p.get("conditions", [])),
+                                             "match_mode": p.get("match_mode", "all")}),
+            "actions_summary": engine._flow_steps_text(p.get("steps", [])),
+            "rationale": p.get("rationale", ""),
+            "similar": None,
+            "similar_actions": "",
+            "updates": upd,
+            "updates_actions": engine._flow_steps_text((upd or {}).get("steps", [])) if upd else "",
+        }
     sim = p.get("similar_rule") or None
     upd = p.get("updates_rule") or None
     return {
@@ -4080,8 +4116,34 @@ def assistant_apply():
     if not (0 <= idx < len(proposals)):
         flash("That proposal is no longer available.", "err")
         return redirect(back)
-    norm = engine.normalize_rule(proposals[idx]) or proposals[idx]
+    prop = proposals[idx]
     mode = (request.form.get("mode") or "add").strip()
+    if (prop.get("kind") or "rule") == "flow":
+        norm = engine.normalize_flow(prop) or prop
+        if mode == "update":
+            try:
+                fid = int(request.form.get("rule_id") or 0)
+            except ValueError:
+                fid = 0
+            target = store.get_flow(fid) if fid else None
+            if target is None:
+                flash("That flow no longer exists - nothing updated.", "err")
+                return redirect(back)
+            store.update_flow(fid, name=norm.get("name") or target["name"],
+                              match_mode=norm.get("match_mode", "all"),
+                              conditions=json.dumps(norm.get("conditions", [])),
+                              actions=json.dumps(norm.get("steps", [])))
+            store.log_event("info", "assistant updated flow #%d '%s'" % (fid, target["name"]))
+            flash("Flow #%d '%s' updated." % (fid, target["name"]), "ok")
+            return redirect(back)
+        store.add_flow(norm.get("name", "Assistant flow"), norm.get("match_mode", "all"),
+                       norm.get("conditions", []), norm.get("steps", []), enabled=not disabled)
+        store.log_event("info", "assistant flow '%s' added (%s)"
+                        % (norm.get("name"), "disabled" if disabled else "enabled"))
+        flash("Flow '%s' added%s - see it on the Flows page; the dry-run toggle lives in Settings."
+              % (norm.get("name"), " (disabled)" if disabled else ""), "ok")
+        return redirect(back)
+    norm = engine.normalize_rule(prop) or prop
     if mode == "update":
         try:
             rid = int(request.form.get("rule_id") or 0)

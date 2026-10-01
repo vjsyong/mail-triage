@@ -620,6 +620,28 @@ class LLMHandler(BaseHTTPRequestHandler):
         messages = payload["messages"]
         step = sum(1 for m in messages
                    if m.get("role") == "assistant" and m.get("tool_calls"))
+        if "multi-step" in (user or "").lower():
+            self.sse_start()
+            self.delta(role="assistant")
+            if step == 0:
+                self.delta(reasoning="Move AND then draft: that is a flow, not a rule.")
+                self.tool_delta(0, "propose_flow", {
+                    "name": "Hotmail -> Personal + ack",
+                    "match_mode": "all",
+                    "conditions": [{"field": "from", "op": "contains",
+                                    "value": "seanyong97@hotmail.com"}],
+                    "steps": [{"type": "move", "folder": "Personal"},
+                              {"type": "draft", "mode": "fixed",
+                               "body": "Thank you for your email, I will get back to you shortly"}],
+                    "rationale": "move first, then acknowledge"}, "call_%d_0" % step)
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            else:
+                self.delta(content="Proposed a flow: move to Personal, then draft the acknowledgement.")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.sse({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 5,
+                                               "total_tokens": 10}})
+            self.sse_done()
+            return
         if "semantic search" in (user or "").lower():
             self.sse_start()
             self.delta(role="assistant")
@@ -2239,6 +2261,60 @@ def main():
     ag3.close()
     store.set_setting("perm_rules", "auto")
     store.delete_rule(rid_pend)
+
+    section("T32 flows from the assistant: propose -> approve -> execute (fixed draft)")
+    r = client.post("/assistant/stream", data={"message": "Build this multi-step flow for me please"})
+    body = r.data.decode()
+    check("proposal turn ran propose_flow",
+          '"name": "propose_flow"' in body and "event: proposals" in body)
+    prop_rows = [m for m in store.assistant_messages(limit=10)
+                 if m.get("role") == "assistant" and "propose_flow" in (m.get("meta") or "")]
+    check("flow proposal persisted on the message", bool(prop_rows))
+    pm = prop_rows[-1]
+    sid32 = pm["session_id"]
+    page = client.get("/assistant/s/%d" % sid32).data
+    check("card renders as a flow proposal",
+          b"Add flow" in page and b"move to Personal" in page
+          and b"Thank you for your email" in page)
+    r = client.post("/assistant/apply", data={"msg_id": pm["id"], "idx": 0, "session": str(sid32)})
+    flows32 = [f for f in store.list_flows() if "Hotmail" in (f["name"] or "")]
+    check("one-click apply created the flow",
+          r.status_code == 302 and len(flows32) == 1
+          and "seanyong97@hotmail.com" in flows32[0]["conditions"]
+          and "fixed" in flows32[0]["actions"])
+    check("flow builder offers fixed drafts",
+          b"Fixed message" in client.get("/flows/new").data)
+    before_a = len(state.appended)
+    add_msg(state, "seanyong97@hotmail.com", "Hello from hotmail", "hey there", "hm1@x")
+    engine.process_mailbox()
+    hrow32 = [r for r in store.messages(limit=3000) if r["msgid"] == "hm1@x"][0]
+    check("flow moved the hotmail message to Personal", hrow32["folder"] == "Personal")
+    check("flow saved the fixed-text draft",
+          len(state.appended) == before_a + 1
+          and b"Thank you for your email, I will get back to you shortly" in state.appended[-1]["raw"])
+    ag = engine.AssistantAgent()
+    r = ag.call_tool("list_flows", {})
+    check("list_flows tool works",
+          r["ok"] and any("Hotmail" in f["name"] for f in r["result"]["flows"]))
+    fid32 = flows32[0]["id"]
+    r = ag.call_tool("set_flow_enabled", {"flow_id": fid32, "enabled": False})
+    check("set_flow_enabled pauses the flow", r["ok"] and store.get_flow(fid32)["enabled"] == 0)
+    store.set_setting("perm_rules", "off")
+    ag2 = engine.AssistantAgent()
+    r = ag2.call_tool("delete_flow", {"flow_id": fid32})
+    check("flows are gated by the rules capability",
+          not r["ok"] and r.get("permission_denied") == "rules")
+    ag2.close()
+    store.set_setting("perm_rules", "auto")
+    r = ag.call_tool("delete_flow", {"flow_id": fid32})
+    check("delete_flow removes it", r["ok"] and store.get_flow(fid32) is None)
+    ag.close()
+    r = engine.AssistantAgent()
+    bad = r.call_tool("propose_flow", {"name": "bad flow",
+                                       "conditions": [{"field": "from", "op": "contains", "value": "x"}],
+                                       "steps": [{"type": "move"}]})
+    check("propose_flow rejects invalid steps", not bad["ok"] and "move step needs a folder" in bad["summary"])
+    r.close()
 
     section("T30 mobile shell: viewport, PWA manifest, tab bar, More page")
     rp = client.get("/")

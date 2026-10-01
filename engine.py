@@ -805,6 +805,8 @@ def _apply_flow(mc, flow, row, settings, live):
                     body = ""
                     if mode == "llm":
                         body = generate_draft(row_now["id"], tpl_id)
+                    elif mode == "fixed":
+                        body = render_template_text(st.get("body") or "", row_now)
                     else:
                         tpl = store.get_template(tpl_id) if tpl_id else None
                         if tpl:
@@ -1859,9 +1861,11 @@ def propose_rules_from_tags():
                      % (i, t["user_tag"], (t["from_addr"] or "")[:70],
                         (t["subject"] or "")[:90]))
     context = ("EXISTING RULES (do not duplicate):\n%s\n\n"
+               "EXISTING FLOWS (multi-step; do not duplicate):\n%s\n\n"
                "CATEGORIES: %s\n\n"
                "TAGGED EXAMPLES (the user's manual labels):\n%s"
                % (_rules_to_text(store.list_rules()),
+                  _flows_to_text(store.list_flows()),
                   ", ".join(store.get_setting("categories") or []),
                   "\n".join(lines)))
     content = LLMClient()._chat(LEARN_SYSTEM + "\n\n" + context,
@@ -1911,7 +1915,8 @@ How to work
 - BEFORE proposing a rule, call list_rules (or mailbox_overview) and check what already exists. If a similar rule exists (same sender/domain/subject), propose an UPDATE instead of a near-duplicate: pass updates_rule_id with the rule as it should look afterwards (name/conditions/actions). If you propose something that overlaps an existing rule without updates_rule_id, the app flags it to the user, so handle it yourself first.
 - Heuristic classifiers (train_classifier / list_classifiers / manage_classifier / evaluate_classifier): deterministic trained models that run BEFORE the LLM in triage. Suggest them when the user wants less LLM dependence, when a category has regular labelled mail (tags), or when classification feels inconsistent. decision_list suits sender/keyword patterns, naive_bayes fuzzier ones; retrain via retrain_id as labels grow; evaluate before claiming quality. After a tagging session, suggest training one when a category has around 8+ tagged examples.
 - Only tell the user a rule was proposed once propose_rule has returned ok:true in this turn; never claim a proposal you did not actually make.
-- Rule housekeeping: call list_rules for the exact ids. If the user asks to REMOVE/DELETE a rule (for example an exact duplicate), call delete_rule with that id - delete one of a duplicate pair and keep the other. If they only want it paused ("turn it off for now"), call set_rule_enabled. Only touch rules the user asked about; if it is unclear which rule, ask one short question first.
+- MULTI-STEP AUTOMATIONS ARE FLOWS: when a request has an ordered sequence ("move it AND then draft/tag/star it", "prepare a draft that says ..."), call propose_flow with the steps in order - NOT propose_rule. A fixed draft body is fully supported (step {type:"draft", mode:"fixed", body:"..."}). Plain single-action requests stay rules. Check list_flows and list_rules first; flows run after rules, first matching flow wins.
+- Rule housekeeping: call list_rules (or list_flows) for the exact ids. If the user asks to REMOVE/DELETE a rule (for example an exact duplicate), call delete_rule with that id - delete one of a duplicate pair and keep the other. If they only want it paused ("turn it off for now"), call set_rule_enabled. Only touch rules and flows the user asked about; if it is unclear which one, ask one short question first. delete_flow and set_flow_enabled do the same for flows.
 - Decide once, then act. State one short plan in your thinking, call the tools, then answer. Never repeat the same reasoning paragraph; if a task needs a capability you do not have, say so in ONE sentence and offer the closest alternative instead of re-reading your tool list.
 - Condition values of 3 characters or fewer (letters/digits) match whole words: a value "PO" will not match "support" or "report".
 - At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.
@@ -1997,6 +2002,40 @@ ASSISTANT_TOOLS = [
         {"rule_id": {"type": "integer"},
          "enabled": {"type": "boolean", "description": "false pauses the rule, true resumes it"}},
         required=("rule_id", "enabled")),
+    _fn("list_flows",
+        "List the multi-step flow automations (id, enabled, WHEN conditions, THEN steps). Flows run AFTER rules; first matching flow wins. Check this before proposing a flow so you update instead of duplicating.",
+        {}),
+    _fn("propose_flow",
+        "Propose a multi-step FLOW for the user to approve with one click. Use when a request needs an ordered sequence - e.g. 'move it to X AND then draft a reply', 'tag it, then star it'. Steps run in order: move / draft / tag / mark_read / flag. A draft step with mode \"fixed\" saves a literal message body (placeholders {sender} {subject} {date} {my_name} allowed); mode \"template\" fills a saved template; mode \"llm\" lets the LLM write it (template optional as guidance). Nothing is ever sent - drafts land in the Drafts folder. Single-action requests should stay plain rules (propose_rule).",
+        {"name": {"type": "string", "description": "short flow name"},
+         "match_mode": {"type": "string", "enum": ["all", "any"]},
+         "conditions": {"type": "array", "description": "1-4 WHEN conditions", "items": {
+             "type": "object",
+             "properties": {
+                 "field": {"type": "string", "enum": ["from", "to", "subject", "body"]},
+                 "op": {"type": "string", "enum": ["contains", "equals", "regex"]},
+                 "value": {"type": "string"}}}},
+         "steps": {"type": "array", "description": "THEN steps, in order (1-10)", "items": {
+             "type": "object",
+             "properties": {
+                 "type": {"type": "string", "enum": ["move", "draft", "tag", "mark_read", "flag"]},
+                 "folder": {"type": "string", "description": "for move steps"},
+                 "mode": {"type": "string", "enum": ["fixed", "template", "llm"], "description": "for draft steps"},
+                 "body": {"type": "string", "description": "literal message for a fixed draft"},
+                 "template_id": {"type": "integer", "description": "for template/llm drafts"},
+                 "tag": {"type": "string", "description": "for tag steps"}}}},
+         "rationale": {"type": "string", "description": "one short sentence why"},
+         "updates_flow_id": {"type": "integer",
+                             "description": "id of an EXISTING flow this proposal changes (from list_flows); the proposal then replaces that flow's name/conditions/steps"}}),
+    _fn("delete_flow",
+        "Permanently delete one flow automation (flow_id from list_flows). Use only when the user explicitly asks to remove/delete that flow; to just pause it use set_flow_enabled.",
+        {"flow_id": {"type": "integer"}},
+        required=("flow_id",)),
+    _fn("set_flow_enabled",
+        "Enable or disable one flow automation without deleting it.",
+        {"flow_id": {"type": "integer"},
+         "enabled": {"type": "boolean", "description": "false pauses the flow, true resumes it"}},
+        required=("flow_id", "enabled")),
     _fn("propose_rule",
         "Propose a filter rule for the user to approve with one click. Approved rules sort matching mail automatically (top to bottom, first match wins). A rule with NO actions is a GUARD: matching mail stays put and nothing else (later rules, LLM filing) can move it.",
         {"name": {"type": "string", "description": "short rule name"},
@@ -2103,8 +2142,9 @@ AGENT_CAPS = [
      "Create new (empty) folders."),
     ("classifiers", "Manage classifiers", "caution", ["train_classifier", "manage_classifier"],
      "Train, enable or delete heuristic classifiers."),
-    ("rules", "Manage rules", "caution", ["delete_rule", "set_rule_enabled"],
-     "Delete a filter rule, or pause/resume one without deleting (proposals stay one-click)."),
+    ("rules", "Manage rules & flows", "caution",
+     ["delete_rule", "set_rule_enabled", "delete_flow", "set_flow_enabled"],
+     "Delete a rule/flow, or pause/resume one without deleting (proposals stay one-click)."),
     ("draft", "Draft replies", "safe", ["draft_reply"],
      "Write a reply and save it to Drafts for review."),
     ("delete", "Delete messages", "dangerous", ["delete_message"],
@@ -2290,6 +2330,55 @@ ALLOWED_FIELDS = ("from", "to", "subject", "body")
 ALLOWED_OPS = ("contains", "equals", "regex")
 
 
+def _flow_steps_text(steps):
+    """Human line for a list of flow steps (list of dicts)."""
+    parts = []
+    for st in (steps or []):
+        t = (st.get("type") or "").lower()
+        if t == "move":
+            parts.append("move to %s" % st.get("folder"))
+        elif t == "mark_read":
+            parts.append("mark read")
+        elif t == "flag":
+            parts.append("star")
+        elif t == "tag":
+            parts.append('tag "%s"' % st.get("tag"))
+        elif t == "draft":
+            mode = (st.get("mode") or "template").lower()
+            if mode == "fixed":
+                body = (st.get("body") or "").strip()
+                parts.append('draft a fixed reply ("%s%s") and save to Drafts'
+                             % (body[:40], "..." if len(body) > 40 else ""))
+            elif mode == "llm":
+                parts.append("draft with the LLM and save to Drafts")
+            else:
+                parts.append("draft from template #%s and save to Drafts" % st.get("template_id"))
+    return ", then ".join(parts) or "(no steps)"
+
+
+def _flow_brief(f):
+    """UI/prompt-friendly snapshot of a flow."""
+    return {"id": f.get("id"), "name": f.get("name") or ("flow %s" % f.get("id")),
+            "enabled": bool(f.get("enabled")), "match_mode": f.get("match_mode") or "all",
+            "conditions": _safe_json(f.get("conditions"), []),
+            "steps": _safe_json(f.get("actions"), [])}
+
+
+def _flows_to_text(flows):
+    if not flows:
+        return "(none yet)"
+    lines = []
+    for i, f in enumerate(flows, 1):
+        conds = _safe_json(f.get("conditions"), [])
+        steps = _safe_json(f.get("actions"), [])
+        joiner = " AND " if (f.get("match_mode") or "all") == "all" else " OR "
+        cs = joiner.join('%s %s "%s"' % (c.get("field"), c.get("op"), c.get("value")) for c in conds)
+        lines.append("%d. %s%s: IF %s -> %s"
+                     % (i, "" if f.get("enabled") else "[disabled] ",
+                        f.get("name") or ("flow %d" % f.get("id")), cs, _flow_steps_text(steps)))
+    return "\n".join(lines)
+
+
 def _validate_rule(proposal):
     """Validate a proposed rule. Returns (normalized | None, [errors])."""
     errors = []
@@ -2357,6 +2446,94 @@ def normalize_rule(proposal):
     return _validate_rule(proposal)[0]
 
 
+def normalize_flow(proposal):
+    """Validate an LLM-proposed flow; returns a clean dict or None."""
+    return _validate_flow(proposal)[0]
+
+
+def _validate_flow(proposal):
+    """Validate a proposed multi-step flow. Returns (normalized | None, [errors])."""
+    errors = []
+    if not isinstance(proposal, dict):
+        return None, ["proposal must be an object"]
+    name = str(proposal.get("name") or "").strip()[:80] or "Assistant flow"
+    mode = "any" if str(proposal.get("match_mode") or "").lower() == "any" else "all"
+    conditions = []
+    for c in proposal.get("conditions") or []:
+        if not isinstance(c, dict):
+            errors.append("each condition must be an object")
+            continue
+        field = str(c.get("field") or "").lower()
+        op = str(c.get("op") or "contains").lower()
+        value = str(c.get("value") or "").strip()
+        if field not in ALLOWED_FIELDS:
+            errors.append("bad field %r (use %s)" % (field, "/".join(ALLOWED_FIELDS)))
+            continue
+        if op not in ALLOWED_OPS:
+            errors.append("bad op %r (use %s)" % (op, "/".join(ALLOWED_OPS)))
+            continue
+        if not value:
+            errors.append("empty value for %s %s" % (field, op))
+            continue
+        conditions.append({"field": field, "op": op, "value": value[:300]})
+    steps = []
+    for st in proposal.get("steps") or []:
+        if not isinstance(st, dict):
+            errors.append("each step must be an object")
+            continue
+        kind = str(st.get("type") or "").lower()
+        if kind == "move":
+            folder = str(st.get("folder") or "").strip()
+            if folder:
+                steps.append({"type": "move", "folder": folder[:80]})
+            else:
+                errors.append("move step needs a folder")
+        elif kind == "draft":
+            dmode = (str(st.get("mode") or "fixed").lower())
+            if dmode == "fixed":
+                body = str(st.get("body") or "").strip()
+                if body:
+                    steps.append({"type": "draft", "mode": "fixed", "body": body[:4000]})
+                else:
+                    errors.append("fixed draft needs a body")
+            elif dmode == "template":
+                try:
+                    tid = int(st.get("template_id") or 0)
+                except (TypeError, ValueError):
+                    tid = 0
+                if tid and store.get_template(tid):
+                    steps.append({"type": "draft", "mode": "template", "template_id": tid})
+                else:
+                    errors.append("template draft needs a valid template_id "
+                                  "(see the templates page; or use mode \"fixed\" with a body)")
+            elif dmode == "llm":
+                tid = st.get("template_id") or None
+                try:
+                    tid = int(tid) if tid else None
+                except (TypeError, ValueError):
+                    tid = None
+                steps.append({"type": "draft", "mode": "llm", "template_id": tid})
+            else:
+                errors.append("bad draft mode %r (use fixed/template/llm)" % dmode)
+        elif kind == "tag":
+            tag = str(st.get("tag") or "").strip()
+            if tag:
+                steps.append({"type": "tag", "tag": tag[:40]})
+            else:
+                errors.append("tag step needs a tag")
+        elif kind in ("mark_read", "flag"):
+            steps.append({"type": kind})
+        else:
+            errors.append("unknown step type %r (use move/draft/tag/mark_read/flag)" % kind)
+    if len(steps) > 10:
+        steps = steps[:10]
+        errors.append("only the first 10 steps are kept")
+    norm = {"kind": "flow", "name": name, "match_mode": mode,
+            "conditions": conditions, "steps": steps,
+            "rationale": str(proposal.get("rationale") or "")[:300]}
+    return norm, errors
+
+
 def _assistant_context():
     settings = store.all_settings()
     with store.db() as conn:
@@ -2364,11 +2541,13 @@ def _assistant_context():
     return (
         "CURRENT STATE\n"
         "Rules (top to bottom, first match wins):\n%s\n\n"
+        "Flows (multi-step automations; run after rules, first matching flow wins):\n%s\n\n"
         "LLM classifier categories: %s\n"
         "Category → folder map: %s\n"
         "Watched folders: %s | check interval: %ss\n"
         "Indexed messages: %d | assistant permissions: %s\n"
         % (_rules_to_text(store.list_rules()),
+           _flows_to_text(store.list_flows()),
            ", ".join(settings.get("categories") or []),
            ", ".join("%s=%s" % (k, v) for k, v in (settings.get("category_folders") or {}).items()) or "(none)",
            ", ".join(settings.get("watch_folders") or ["INBOX"]),
@@ -2511,6 +2690,19 @@ class AssistantAgent:
                     return None, "to is required"
                 return ("SEND new mail to %s: '%s'"
                         % (to, _truncate(args.get("subject") or "(no subject)", 60)), dict(args))
+        if name in ("delete_flow", "set_flow_enabled"):
+            try:
+                fid = int(args.get("flow_id") or 0)
+            except (TypeError, ValueError):
+                fid = 0
+            flow = store.get_flow(fid) if fid else None
+            if not flow:
+                return None, "flow %s not found (use list_flows)" % args.get("flow_id")
+            if name == "delete_flow":
+                return "Delete flow #%d '%s'" % (fid, flow["name"]), {"flow_id": fid}
+            en = _as_bool(args.get("enabled"))
+            return ("%s flow #%d '%s'" % ("Enable" if en else "Disable", fid, flow["name"]),
+                    {"flow_id": fid, "enabled": bool(en)})
         if name in ("delete_rule", "set_rule_enabled"):
             try:
                 rid = int(args.get("rule_id") or 0)
@@ -2982,6 +3174,96 @@ class AssistantAgent:
         return {"ok": True,
                 "summary": "%d rule(s) (top to bottom, first match wins)" % len(items),
                 "result": {"rules": items, "text": _rules_to_text(rules)}}
+
+    def _tool_list_flows(self, a):
+        flows = store.list_flows()
+        items = []
+        for f in flows:
+            b = _flow_brief(f)
+            b["position"] = f.get("position")
+            b["steps_text"] = _flow_steps_text(b["steps"])
+            items.append(b)
+        return {"ok": True, "summary": "%d flow(s)" % len(items),
+                "result": {"flows": items, "text": _flows_to_text(flows)}}
+
+    def _tool_propose_flow(self, a):
+        norm, errors = _validate_flow(a)
+        if not norm or not norm["conditions"] or not norm["steps"]:
+            if norm and not norm["conditions"]:
+                errors.append("at least one WHEN condition with a value is required")
+            if norm and not norm["steps"]:
+                errors.append("at least one THEN step is required")
+            return {"ok": False, "summary": "flow invalid: " + "; ".join(errors[:3]),
+                    "result": {"errors": errors,
+                               "hint": ("A flow needs 1-4 conditions and 1-10 ordered steps "
+                                        "(move/draft/tag/mark_read/flag). Example: conditions "
+                                        "[{field:\"from\", op:\"contains\", value:\"x@y.com\"}], steps "
+                                        "[{type:\"move\", folder:\"Personal\"}, {type:\"draft\", "
+                                        "mode:\"fixed\", body:\"Thank you for your email...\"}]. Fix and "
+                                        "propose again.")}}
+        target_id = a.get("updates_flow_id")
+        if target_id not in (None, "", 0):
+            try:
+                target_id = int(target_id)
+            except (TypeError, ValueError):
+                target_id = None
+        if target_id:
+            target = store.get_flow(target_id)
+            if target is None:
+                return {"ok": False, "summary": "no flow #%s to update" % target_id,
+                        "result": {"errors": ["updates_flow_id %s does not exist" % target_id],
+                                   "hint": "Call list_flows to see the current flow ids."}}
+            norm["updates_flow_id"] = target_id
+            norm["updates_flow"] = _flow_brief(target)
+        self.proposals = [p for p in self.proposals
+                          if (p.get("name") or "").lower() != (norm.get("name") or "").lower()
+                          or (p.get("kind") or "rule") != "flow"]
+        self.proposals.append(norm)
+        result = {"status": "queued for the user's one-click approval",
+                  "proposal_index": len(self.proposals) - 1, "flow": norm,
+                  "steps_text": _flow_steps_text(norm["steps"])}
+        if norm.get("updates_flow"):
+            summary = ("flow proposed as an UPDATE of #%s '%s'"
+                       % (target_id, norm["updates_flow"]["name"]))
+        else:
+            summary = "flow proposed: %s (%s)" % (norm["name"], _flow_steps_text(norm["steps"]))
+        return {"ok": True, "summary": summary, "result": result}
+
+    def _tool_delete_flow(self, a):
+        try:
+            fid = int(a.get("flow_id") or 0)
+        except (TypeError, ValueError):
+            fid = 0
+        flow = store.get_flow(fid) if fid else None
+        if not flow:
+            return {"ok": False,
+                    "summary": "no flow with id %s (call list_flows)" % a.get("flow_id"),
+                    "result": {"error": "flow_not_found"}}
+        store.delete_flow(fid)
+        store.log_event("info", "assistant deleted flow #%d '%s'" % (fid, flow["name"]))
+        return {"ok": True, "summary": "deleted flow #%d '%s'" % (fid, flow["name"]),
+                "result": {"deleted": {"id": fid, "name": flow["name"]}}}
+
+    def _tool_set_flow_enabled(self, a):
+        try:
+            fid = int(a.get("flow_id") or 0)
+        except (TypeError, ValueError):
+            fid = 0
+        flow = store.get_flow(fid) if fid else None
+        if not flow:
+            return {"ok": False,
+                    "summary": "no flow with id %s (call list_flows)" % a.get("flow_id"),
+                    "result": {"error": "flow_not_found"}}
+        en = _as_bool(a.get("enabled"))
+        if en is None:
+            return {"ok": False, "summary": "enabled (true/false) is required",
+                    "result": {"error": "enabled is required"}}
+        store.update_flow(fid, enabled=1 if en else 0)
+        store.log_event("info", "assistant %s flow #%d '%s'"
+                        % ("enabled" if en else "disabled", fid, flow["name"]))
+        return {"ok": True,
+                "summary": "%s flow #%d '%s'" % ("enabled" if en else "disabled", fid, flow["name"]),
+                "result": {"flow": {"id": fid, "name": flow["name"], "enabled": bool(en)}}}
 
     def _tool_train_classifier(self, a):
         kind = str(a.get("kind") or "").strip()
