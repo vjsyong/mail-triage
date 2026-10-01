@@ -978,6 +978,18 @@ def main():
     check("settings test-llm triggers", r.status_code == 302)
     check("connectivity-test prompt reached the LLM",
           any("connectivity test" in c["system"] for c in llm_server.calls))
+    # phantom empty rows (subject/from/msgid all blank) are IMAP sync artifacts
+    # and must stay invisible in every user-facing count
+    total_before = app_mod.stats()["total"]
+    with store.db() as conn:
+        cur = conn.execute("INSERT INTO messages (folder, uid, status) VALUES ('Tasks', 999999, 'new')")
+        pid = cur.lastrowid
+        conn.commit()
+    check("stats total ignores empty phantom row", app_mod.stats()["total"] == total_before)
+    check("message list count ignores empty phantom row", store.count_messages() == total_before)
+    with store.db() as conn:
+        conn.execute("DELETE FROM messages WHERE id=?", (pid,))
+        conn.commit()
 
     section("T9a assistant tools (direct executor tests)")
     agent = engine.AssistantAgent()

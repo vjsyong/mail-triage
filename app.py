@@ -234,13 +234,14 @@ def stats():
     with store.db() as conn:
         def one(q, *args):
             return conn.execute(q, args).fetchone()[0]
+        G = " WHERE " + store.REAL_MSG
         return {
-            "total": one("SELECT COUNT(*) FROM messages"),
-            "queued": one("SELECT COUNT(*) FROM messages WHERE status='queued'"),
-            "classified": one("SELECT COUNT(*) FROM messages WHERE status IN ('classified','llm-moved')"),
-            "moved": one("SELECT COUNT(*) FROM messages WHERE action_taken LIKE 'move%'"),
-            "needs_reply": one("SELECT COUNT(*) FROM messages WHERE llm_needs_reply=1"),
-            "errors": one("SELECT COUNT(*) FROM messages WHERE status='error'"),
+            "total": one("SELECT COUNT(*) FROM messages" + G),
+            "queued": one("SELECT COUNT(*) FROM messages" + G + " AND status='queued'"),
+            "classified": one("SELECT COUNT(*) FROM messages" + G + " AND status IN ('classified','llm-moved')"),
+            "moved": one("SELECT COUNT(*) FROM messages" + G + " AND action_taken LIKE 'move%'"),
+            "needs_reply": one("SELECT COUNT(*) FROM messages" + G + " AND llm_needs_reply=1"),
+            "errors": one("SELECT COUNT(*) FROM messages" + G + " AND status='error'"),
             "rules": one("SELECT COUNT(*) FROM rules WHERE enabled=1"),
         }
 

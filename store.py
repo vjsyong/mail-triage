@@ -647,8 +647,13 @@ def find_message_by_msgid(msgid):
     return dict(row) if row else None
 
 
+# rows with no subject, sender or Message-ID at all are IMAP sync artifacts,
+# never real mail - excluded from every user-facing count and list
+REAL_MSG = "NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coalesce(msgid,'')='')"
+
+
 def _messages_filter_where(filt):
-    where = ["NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coalesce(msgid,'')='')"]
+    where = [REAL_MSG]
     if filt == "queued":
         where.append("status='queued'")
     elif filt == "unmatched":
@@ -1119,13 +1124,13 @@ def unclassified_count():
     with db() as conn:
         return conn.execute(
             "SELECT COUNT(*) FROM messages WHERE status IN ('new','queued') "
-            "AND NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coalesce(msgid,'')='')"
+            "AND " + REAL_MSG
         ).fetchone()[0]
 
 
 def unclassified_next(skip=None):
     q = ("SELECT * FROM messages WHERE status IN ('new','queued') "
-         "AND NOT (coalesce(subject,'')='' AND coalesce(from_addr,'')='' AND coalesce(msgid,'')='')")
+         "AND " + REAL_MSG)
     params = []
     if skip:
         q += " AND id NOT IN (%s)" % ",".join("?" * len(skip))
