@@ -1327,17 +1327,22 @@ def index2_state_put(folder, uidvalidity, last_uid, status=None):
         cur = conn.execute(
             "INSERT INTO index2_state (folder, uidvalidity, last_uid, messages_indexed, status, updated) "
             "VALUES (?,?,?,0,?,?) ON CONFLICT(folder) DO UPDATE SET uidvalidity=excluded.uidvalidity, "
-            "last_uid=excluded.last_uid, status=excluded.status, updated=excluded.updated",
-            (folder, int(uidvalidity), int(last_uid), status or "working", now))
+            "last_uid=excluded.last_uid, status=COALESCE(?, index2_state.status), updated=excluded.updated",
+            (folder, int(uidvalidity), int(last_uid), status or "working", now, status))
         conn.commit()
         return cur
 
 
 def index2_state_touch(folder, uidvalidity, last_uid):
+    now = int(time.time())
     with db() as conn:
-        conn.execute("UPDATE index2_state SET last_uid=?, uidvalidity=?, "
-                     "messages_indexed=messages_indexed+1, status='working', updated=? "
-                     "WHERE folder=?", (int(last_uid), int(uidvalidity), int(time.time()), folder))
+        conn.execute(
+            "INSERT INTO index2_state (folder, uidvalidity, last_uid, messages_indexed, status, updated) "
+            "VALUES (?,?,?,1,'working',?) ON CONFLICT(folder) DO UPDATE SET "
+            "uidvalidity=excluded.uidvalidity, last_uid=excluded.last_uid, "
+            "messages_indexed=index2_state.messages_indexed+1, status='working', updated=excluded.updated",
+            (folder, int(uidvalidity), int(last_uid), now))
+        conn.commit()
 
 
 def index2_overview(folders):

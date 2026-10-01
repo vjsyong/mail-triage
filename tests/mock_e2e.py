@@ -1388,6 +1388,15 @@ def main():
     store.set_setting("rag_backend", "lite")
     r = rag.search("payment")
     check("backend=lite dispatches back", r["ok"])
+    store.index2_state_touch("INBOX", 1, 42)
+    st_t = store.index2_state_get("INBOX") or {}
+    check("lite state touch upserts (resumable mid-folder)",
+          int(st_t.get("last_uid") or 0) == 42 and st_t.get("status") == "working")
+    store.index2_state_put("INBOX", 1, 42, status="done")
+    store.index2_state_touch("INBOX", 1, 43)
+    st_t = store.index2_state_get("INBOX") or {}
+    check("state put/touch keep status semantics",
+          st_t.get("status") == "working" and int(st_t.get("messages_indexed") or 0) >= 1)
     check("lite stats report the backend",
           rag.index_stats().get("backend") == "lite" and rag.index_stats()["chunks"] >= 1)
 
