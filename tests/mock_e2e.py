@@ -2618,6 +2618,30 @@ def main():
           and und_uid not in arch.get("uids", []))
     store.update_rule(keeper_rid, enabled=0)
 
+    section("T37 viewer triage queue: newer/older + file & next")
+    add_msg(state, "queue.a@x.com", "Queue A", "a", "qa@x")
+    add_msg(state, "queue.b@x.com", "Queue B", "b", "qb@x")
+    add_msg(state, "queue.c@x.com", "Queue C", "c", "qc@x")
+    engine.process_mailbox()
+    qrows = {r["subject"]: r for r in store.messages(limit=3000)
+             if r["subject"] in ("Queue A", "Queue B", "Queue C")}
+    idA, idB, idC = qrows["Queue A"]["id"], qrows["Queue B"]["id"], qrows["Queue C"]["id"]
+    prev_id, next_id = store.neighbors(idB, "all")
+    check("neighbors follow list order (newer=C, older=A)", prev_id == idC and next_id == idA)
+    r = client.get("/messages/%d?f=all" % idB)
+    check("viewer renders the queue bar with both arrows",
+          b"Newer" in r.data and b"Older" in r.data
+          and ("/messages/%d?f=all" % idC).encode() in r.data
+          and ("/messages/%d?f=all" % idA).encode() in r.data)
+    store.update_message(idB, llm_suggested_folder="Archive")
+    r = client.get("/messages/%d?f=all" % idB)
+    check("File & next offered when fileable", b"File &amp; next" in r.data)
+    r = client.post("/messages/%d/file" % idB, data={"next": "1", "f": "all"})
+    loc = r.headers.get("Location", "")
+    check("File & next lands on the next message in the queue", ("/messages/%d" % idA) in loc)
+    qb2 = store.get_message(idB)
+    check("the filed message really moved", qb2["folder"] == "Archive")
+
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

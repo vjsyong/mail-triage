@@ -783,6 +783,26 @@ def messages(limit=50, filt="all", order="date", offset=0):
         return [dict(r) for r in conn.execute(q, (limit, offset))]
 
 
+def neighbors(mid, filt="all"):
+    """Adjacent ids in list order (sort_ts DESC, id DESC) for the viewer queue.
+    Returns (newer_id, older_id) - i.e. (prev, next) as shown in the list."""
+    cur = get_message(mid)
+    if not cur:
+        return None, None
+    where = _messages_filter_where(filt)
+    s, i = cur.get("sort_ts") or 0, cur["id"]
+    with db() as conn:
+        newer = conn.execute(
+            "SELECT id FROM messages" + where +
+            " AND (sort_ts > ? OR (sort_ts = ? AND id > ?)) ORDER BY sort_ts ASC, id ASC LIMIT 1",
+            (s, s, i)).fetchone()
+        older = conn.execute(
+            "SELECT id FROM messages" + where +
+            " AND (sort_ts < ? OR (sort_ts = ? AND id < ?)) ORDER BY sort_ts DESC, id DESC LIMIT 1",
+            (s, s, i)).fetchone()
+    return (newer[0] if newer else None), (older[0] if older else None)
+
+
 def count_messages(filt="all"):
     q = "SELECT COUNT(*) FROM messages" + _messages_filter_where(filt)
     with db() as conn:

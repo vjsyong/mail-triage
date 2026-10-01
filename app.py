@@ -340,6 +340,9 @@ a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 .skip{position:absolute;left:-9999px;top:0;background:#000;color:#fff;padding:8px 12px;z-index:200}
 .vh{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .backlink{margin:0 0 4px;font-size:.84rem}
+.qbar{display:flex;align-items:center;gap:8px;margin:0 0 12px;flex-wrap:wrap}
+.qbar .qoff{opacity:.45;pointer-events:none}
+.qbar .sp{flex:1}
 #rules th:nth-child(1),#rules td:nth-child(1){white-space:nowrap}
 #rules .tbl th:nth-child(3),#rules .tbl td:nth-child(3){min-width:140px}
 #bulk .tbl th:nth-child(2),#bulk .tbl td:nth-child(2){white-space:nowrap}
@@ -3525,7 +3528,7 @@ MESSAGES_TMPL = """
         <td class="sel"><input type="checkbox" name="ids" value="{{ m.id }}" aria-label="Select message"></td>
         <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
         <td class="sub" title="{{ m.from_addr }}">{{ m.from_addr|clip(34) }}</td>
-        <td><a href="{{ url_for('message_detail', mid=m.id) }}" title="{{ m.subject }}">{{ m.subject|clip(84) or '(no subject)' }}</a>
+        <td><a href="{{ url_for('message_detail', mid=m.id, f=filt) }}" title="{{ m.subject }}">{{ m.subject|clip(84) or '(no subject)' }}</a>
           {% if m.llm_summary %}<div class="sub" style="font-size:.78rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(150) }}</div>{% endif %}</td>
         <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
         <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
@@ -3780,7 +3783,7 @@ MESSAGE_TMPL = """
 </style>
 <div class="page-head">
   <div style="min-width:0">
-    <div class="backlink"><a href="{{ url_for('messages') }}">← Messages</a></div>
+    <div class="backlink"><a href="{{ url_for('messages', f=filt) if filt != 'all' else url_for('messages') }}">← Messages{{ ' (' + filt.replace('_', ' ') + ')' if filt != 'all' else '' }}</a></div>
     <h1 class="page-title" style="font-size:1.12rem">{{ m.subject[:100] or '(no subject)' }}</h1>
     <div class="page-desc msgfrom">{{ m.from_addr }} · <span title="{{ m.date }}">{{ m.date_disp or m.date }}</span> · {{ m.folder }}</div>
   </div>
@@ -3791,6 +3794,14 @@ MESSAGE_TMPL = """
 </div>
 
 {% set can_file = m.llm_suggested_folder and not (m.action_taken or '').startswith('move') %}
+<div class="qbar">
+  {% if prev_id %}<a class="btn small" href="{{ url_for('message_detail', mid=prev_id, f=filt) }}">← Newer</a>
+  {% else %}<span class="btn small qoff">← Newer</span>{% endif %}
+  {% if next_id %}<a class="btn small" href="{{ url_for('message_detail', mid=next_id, f=filt) }}">Older →</a>
+  {% else %}<span class="btn small qoff">Older →</span>{% endif %}
+  <span class="sp"></span>
+  {% if can_file %}<form class="inline" method="post" action="{{ url_for('message_file', mid=m.id) }}"><input type="hidden" name="next" value="1"><input type="hidden" name="f" value="{{ filt }}"><button class="btn primary small" type="submit">File &amp; next</button></form>{% endif %}
+</div>
 <div class="msgrid">
   <div class="stack">
     <div class="card">
@@ -4093,7 +4104,7 @@ def _email_body_html(m, show_images):
 
 
 def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0,
-                    show_images=False, plain=False):
+                    show_images=False, plain=False, filt="all", prev_id=None, next_id=None):
     if "body" not in m:
         payload = _message_body_payload(m)
         m["body"] = payload["text"]
@@ -4114,7 +4125,8 @@ def _render_message(m, classify_result=None, draft=None, draft_error=None, draft
     return render(_render_src(
         MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
         draft_error=draft_error, draft_template_id=draft_template_id,
-        classify_result=classify_result, llm_configured=bool(config.LLM_API_KEY)))
+        classify_result=classify_result, llm_configured=bool(config.LLM_API_KEY),
+        filt=filt, prev_id=prev_id, next_id=next_id))
 
 
 @app.route("/messages/<int:mid>")
@@ -4126,7 +4138,10 @@ def message_detail(mid):
     m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
     show_images = request.args.get("imgs") == "1" or bool(store.get_setting("render_images"))
     plain = request.args.get("view") == "plain"
-    return _render_message(m, show_images=show_images, plain=plain)
+    filt = request.args.get("f") or "all"
+    prev_id, next_id = store.neighbors(mid, filt)
+    return _render_message(m, show_images=show_images, plain=plain, filt=filt,
+                           prev_id=prev_id, next_id=next_id)
 
 
 def _data_dir():
@@ -4291,6 +4306,11 @@ def message_tag(mid):
 def message_file(mid):
     m = store.get_message(mid)
     target = (m or {}).get("llm_suggested_folder") or ""
+    want_next = request.form.get("next") == "1"
+    filt = request.form.get("f") or "all"
+    next_id = None
+    if want_next and m:
+        _p, next_id = store.neighbors(mid, filt)
     if not m or not target:
         flash("No suggested folder for this message — classify it first.", "err")
     else:
@@ -4310,9 +4330,13 @@ def message_file(mid):
             store.clear_keep(m.get("msgid"))
             store.log_event("info", "filed message %d ('%s') → %s"
                             % (mid, (m.get("subject") or "")[:50], target))
-            flash("Filed to '%s'." % target, "ok")
+            flash("Filed to '%s'%s" % (target, " — next up." if want_next else "."), "ok")
         except Exception as exc:
             flash("File failed: %r" % exc, "err")
+    if want_next and next_id and next_id != mid:
+        return redirect(url_for("message_detail", mid=next_id, f=filt))
+    if want_next:
+        return redirect(url_for("messages", f=filt))
     return redirect(url_for("message_detail", mid=mid))
 
 
