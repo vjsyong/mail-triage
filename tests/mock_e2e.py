@@ -2543,6 +2543,9 @@ def main():
           and b'class="dstat"' in d and b"Sorted by rules" in d)
     check("automation status renders as chips with a settings link",
           b'class="dsc"' in d and b"Auto-filing" in d and b"Settings" in d)
+    check("hero counts flows + classifiers, drops parked errors",
+          b"Flows active" in d and b"Classifiers active" in d and b"parked errors" not in d
+          and b"flows active" in d and b"classifiers active" in d)
     check("actions live in the hero card", b'dashactions' in d and b"Open messages" in d)
     check("page-head actions tagged for mobile hiding", b'dh-actions' in d)
     check("activity collapses on phones",

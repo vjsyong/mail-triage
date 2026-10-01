@@ -244,6 +244,8 @@ def stats():
                                " AND coalesce(snoozed_until,0) <= %d" % int(time.time())),
             "errors": one("SELECT COUNT(*) FROM messages" + G + " AND status='error'"),
             "rules": one("SELECT COUNT(*) FROM rules WHERE enabled=1"),
+            "flows": one("SELECT COUNT(*) FROM flows WHERE enabled=1"),
+            "classifiers": one("SELECT COUNT(*) FROM heuristics WHERE enabled=1"),
         }
 
 
@@ -1997,11 +1999,6 @@ DASH_TMPL = """
       <span class="ctx">flagged by the LLM · <a href="{{ url_for('messages', f='needs_reply') }}">view →</a></span>
     </div>
     <div class="metric">
-      <b{% if st.errors %} class="hot"{% endif %}>{{ st.errors }}</b>
-      <span class="lbl">parked errors</span>
-      <span class="ctx">{% if st.errors %}needs attention{% else %}all clear{% endif %}</span>
-    </div>
-    <div class="metric">
       <b>{{ st.queued }}</b>
       <span class="lbl">waiting for LLM</span>
       <span class="ctx">queue length</span>
@@ -2018,14 +2015,26 @@ DASH_TMPL = """
     </div>
     <div class="metric">
       <b><a href="{{ url_for('rules') }}">{{ st.rules }}</a></b>
-      <span class="lbl">rules enabled</span>
+      <span class="lbl">rules active</span>
       <span class="ctx">checked top to bottom</span>
+    </div>
+    <div class="metric">
+      <b><a href="{{ url_for('flows') }}">{{ st.flows }}</a></b>
+      <span class="lbl">flows active</span>
+      <span class="ctx">multi-step automations</span>
+    </div>
+    <div class="metric">
+      <b><a href="{{ url_for('classifiers') }}">{{ st.classifiers }}</a></b>
+      <span class="lbl">classifiers active</span>
+      <span class="ctx">trained heuristics</span>
     </div>
   </div>
   <div class="dstat">
     <div class="dsrow"><span class="dsk">Sorted by rules</span><span class="dsv">{{ "{:,}".format(st.moved) }}</span></div>
     <div class="dsrow"><span class="dsk">LLM classified</span><span class="dsv">{{ "{:,}".format(st.classified) }}<span class="dsp">{{ '%.0f' % (st.classified * 100.0 / st.total) if st.total else 0 }}% of {{ "{:,}".format(st.total) }}</span></span></div>
     <div class="dsrow"><span class="dsk">Rules active</span><span class="dsv"><a href="{{ url_for('rules') }}">{{ st.rules }}</a></span></div>
+    <div class="dsrow"><span class="dsk">Flows active</span><span class="dsv"><a href="{{ url_for('flows') }}">{{ st.flows }}</a></span></div>
+    <div class="dsrow"><span class="dsk">Classifiers active</span><span class="dsv"><a href="{{ url_for('classifiers') }}">{{ st.classifiers }}</a></span></div>
   </div>
   <div class="dsc">
     <span class="dschip{{ ' off' if not settings.rules_apply else '' }}" title="{{ 'Rules act live' if settings.rules_apply else 'Rules act in dry-run (suggest only)' }}">Rules {{ 'live' if settings.rules_apply else 'dry-run' }}</span>
