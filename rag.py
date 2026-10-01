@@ -513,7 +513,7 @@ class Indexer(threading.Thread):
                 idle_min = max(1, int(store.get_setting("index_refresh_minutes") or 10))
             except (TypeError, ValueError):
                 idle_min = 10
-            self.stop_flag.wait(idle_min * 60)
+            self.force.wait(idle_min * 60)  # a trigger wakes the idle wait immediately
             if self.force.is_set() or self.stop_flag.is_set():
                 continue
             if store.get_setting("index_enabled", True):
