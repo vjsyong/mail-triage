@@ -2670,6 +2670,27 @@ def main():
     check("wake clears the snooze", srow3["snoozed_until"] == 0
           and sid_ in [x["id"] for x in store.messages(limit=3000)])
 
+    section("T39 log tools: search, time window, pause")
+    store.log_event("warn", "needle-alpha warning for search")
+    store.log_event("info", "ordinary line without the token")
+    with store.db() as conn:
+        conn.execute("INSERT INTO events (ts, level, message) VALUES (?,?,?)",
+                     (int(time.time()) - 7200, "info", "ancient-token line"))
+        conn.commit()
+    r = client.get("/log?q=needle-alpha")
+    check("log search filters lines",
+          b"needle-alpha" in r.data and b"ordinary line without the token" not in r.data)
+    r = client.get("/log")
+    check("log page offers search + window + pause controls",
+          b'name="q"' in r.data and b"logpause" in r.data and b">24h<" in r.data)
+    r = client.get("/log?mins=15")
+    check("time window hides old lines, keeps fresh ones",
+          b"ancient-token line" not in r.data and b"needle-alpha" in r.data)
+    r = client.get("/log")
+    check("all-time view still shows old lines", b"ancient-token line" in r.data)
+    r = client.get("/log?mins=15&q=needle-alpha&lvl=warn")
+    check("combined filters compose", b"needle-alpha" in r.data)
+
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

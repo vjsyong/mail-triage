@@ -6263,13 +6263,24 @@ LOG_TMPL = """
     <div class="page-desc logdesc">Everything Mail Triage did, newest first · times in {{ tz }}{% if not show_debug %} (debug lines hidden){% endif %}.</div>
   </div>
   <div class="row chiprow">
-    <a class="chip{{ ' active' if lvl == 'all' else '' }}" href="{{ url_for('log', debug=('1' if show_debug else none)) }}">All</a>
-    <a class="chip{{ ' active' if lvl == 'error' else '' }}" href="{{ url_for('log', lvl='error', debug=('1' if show_debug else none)) }}">Errors{% if errors %} <span class="n">{{ errors }}</span>{% endif %}</a>
-    <a class="chip{{ ' active' if lvl == 'warn' else '' }}" href="{{ url_for('log', lvl='warn', debug=('1' if show_debug else none)) }}">Warnings{% if warns %} <span class="n">{{ warns }}</span>{% endif %}</a>
-    <a class="chip{{ ' active' if lvl == 'info' else '' }}" href="{{ url_for('log', lvl='info', debug=('1' if show_debug else none)) }}">Info</a>
-    {% if show_debug %}<a class="chip" href="{{ url_for('log', lvl=lvl) }}">hide debug lines</a>
-    {% else %}<a class="chip" href="{{ url_for('log', lvl=lvl, debug='1') }}">show debug lines</a>{% endif %}
-    <a class="btn small" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none)) }}">Refresh</a>
+    <a class="chip{{ ' active' if lvl == 'all' and not mins else '' }}" href="{{ url_for('log', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">All</a>
+    <a class="chip{{ ' active' if lvl == 'error' else '' }}" href="{{ url_for('log', lvl='error', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Errors{% if errors %} <span class="n">{{ errors }}</span>{% endif %}</a>
+    <a class="chip{{ ' active' if lvl == 'warn' else '' }}" href="{{ url_for('log', lvl='warn', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Warnings{% if warns %} <span class="n">{{ warns }}</span>{% endif %}</a>
+    <a class="chip{{ ' active' if lvl == 'info' else '' }}" href="{{ url_for('log', lvl='info', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Info</a>
+    {% if show_debug %}<a class="chip" href="{{ url_for('log', lvl=lvl, q=(q or none), mins=(mins or none)) }}">hide debug lines</a>
+    {% else %}<a class="chip" href="{{ url_for('log', lvl=lvl, debug='1', q=(q or none), mins=(mins or none)) }}">show debug lines</a>{% endif %}
+    <form class="inline" method="get" action="{{ url_for('log') }}">
+      {% if lvl != 'all' %}<input type="hidden" name="lvl" value="{{ lvl }}">{% endif %}
+      {% if show_debug %}<input type="hidden" name="debug" value="1">{% endif %}
+      {% if mins %}<input type="hidden" name="mins" value="{{ mins }}">{% endif %}
+      <input type="search" name="q" value="{{ q }}" placeholder="Filter lines&hellip;" aria-label="Filter log lines" style="width:180px">
+      <button class="btn small" type="submit">Find</button>
+    </form>
+    <a class="chip{{ ' active' if mins == '15' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='15') }}">15m</a>
+    <a class="chip{{ ' active' if mins == '60' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='60') }}">1h</a>
+    <a class="chip{{ ' active' if mins == '1440' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='1440') }}">24h</a>
+    <button class="btn small" id="logpause" type="button">Pause</button>
+    <a class="btn small" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Refresh</a>
   </div>
 </div>
 <div class="card logpanel">
@@ -6277,6 +6288,38 @@ LOG_TMPL = """
   <div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span class="lmsg">{{ e.message }}</span></div>
   {% else %}<div class="sub">Nothing logged at this level yet.</div>{% endfor %}
 </div>
+<script>
+/* log live mode: refreshes every 10s unless paused (localStorage) or the user
+   is typing; re-arms itself and no-ops when the page was swapped away. */
+(function(){
+  var btn = document.getElementById('logpause');
+  if(!btn) return;
+  var KEY = 'logPaused';
+  var paused = false;
+  try { paused = localStorage.getItem(KEY) === '1'; } catch(e) {}
+  function paint(){
+    btn.textContent = paused ? 'Resume' : 'Pause';
+    btn.title = paused ? 'Auto-refresh is paused' : 'Pauses the 10s auto-refresh';
+  }
+  paint();
+  btn.addEventListener('click', function(){
+    paused = !paused;
+    try { localStorage.setItem(KEY, paused ? '1' : '0'); } catch(e) {}
+    paint(); arm();
+  });
+  function arm(){
+    if(window.__logTimer) clearTimeout(window.__logTimer);
+    if(paused) return;
+    window.__logTimer = setTimeout(function(){
+      if(document.getElementById('logpause') !== btn) return;
+      if(document.hidden || (document.activeElement && document.activeElement.tagName === 'INPUT')) { arm(); return; }
+      location.reload();
+    }, 10000);
+  }
+  arm();
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) arm(); });
+})();
+</script>
 """
 
 
@@ -6288,6 +6331,10 @@ def log():
     lvl = request.args.get("lvl", "all")
     if lvl not in ("all", "error", "warn", "info"):
         lvl = "all"
+    q = (request.args.get("q") or "").strip()[:80]
+    mins = request.args.get("mins") or ""
+    if mins not in ("15", "60", "1440"):
+        mins = ""
     events = store.recent_events(1000)
     if not show_debug:
         events = [e for e in events if e.get("level") != "debug"]
@@ -6295,12 +6342,19 @@ def log():
     warns = sum(1 for e in events if e.get("level") == "warn")
     if lvl != "all":
         events = [e for e in events if e.get("level") == lvl]
+    if q:
+        ql = q.lower()
+        events = [e for e in events if ql in (e.get("message") or "").lower()]
+    if mins:
+        since = time.time() - int(mins) * 60
+        events = [e for e in events if (e.get("ts") or 0) >= since]
     events = events[:300]
     for e in events:
         e["when"] = fmt_ts(e["ts"])
         e["cls"] = {"error": "err", "info": "ok", "warn": "warn", "debug": ""}.get(e.get("level"), "")
     return render(_render_src(LOG_TMPL, events=events, show_debug=show_debug,
-                                         errors=errors, warns=warns, lvl=lvl, tz=tz_label()))
+                                         errors=errors, warns=warns, lvl=lvl, q=q, mins=mins,
+                                         tz=tz_label()))
 
 
 @app.route("/fonts/<name>")
