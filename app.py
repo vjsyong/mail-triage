@@ -648,6 +648,17 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .assistant-flex{height:calc(100vh - 470px);height:calc(100dvh - 470px);min-height:280px}
   .composer .hint{display:none}
   .composer .comp-row .sub{display:none}
+  body.kb-open .bottom-nav{display:none}
+  .page-desc.msgfrom{display:block;font-size:.8rem;overflow-wrap:anywhere}
+  .cond-head{display:none}
+  .row{flex-wrap:wrap}
+  .msgrid>*{min-width:0}
+  .emailbody{overflow-wrap:anywhere}
+  .emailbody table{width:auto !important;max-width:100% !important}
+  .emailbody img{max-width:100% !important;height:auto !important}
+  .note{overflow-wrap:anywhere}
+  .msgrid form.inline select{min-width:0 !important;width:100% !important}
+  .grid3 input[type=text]{grid-column:1/-1}
   .jumpwrap{min-height:420px}
   .setrow input:not([type=checkbox]):not([type=radio]),
   input[type=text],input[type=number],input[type=password],input[type=search],
@@ -1177,6 +1188,25 @@ window.assistantChat = function(opts){
   var pref=null; try{ pref=localStorage.getItem('assistant_open'); }catch(e){}
   if(pref==='1'){ setOpen(true); ensure(); }
 })();
+})();
+</script>
+<script>
+/* keyboard-follow: lift composers + savebars above the on-screen keyboard, hide the tab bar while typing */
+(function(){
+  if(!window.visualViewport || !window.matchMedia || !matchMedia('(pointer:coarse)').matches) return;
+  var vv = window.visualViewport;
+  function fit(){
+    var kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    var open = kb > 40;
+    document.body.classList.toggle('kb-open', open);
+    document.querySelectorAll('#aform,#dform,.savebar').forEach(function(el){
+      el.style.transform = open ? ('translateY(-' + Math.round(kb) + 'px)') : '';
+    });
+  }
+  vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit);
+  document.addEventListener('focusin', function(){ setTimeout(fit, 250); });
+  document.addEventListener('focusout', function(){ setTimeout(fit, 80); });
+  fit();
 })();
 </script>
 </body></html>
@@ -1937,7 +1967,7 @@ RULE_EDIT_TMPL = """
   <div class="card">
     <div class="card-h"><h3>Conditions</h3><span class="sub">empty rows are ignored</span></div>
     <div id="conds">
-      <div class="grid3 sub" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
+      <div class="grid3 sub cond-head" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
       {% for i in range(5) %}
       {% set c = conditions[i] if conditions|length > i else {} %}
       <div class="grid3" style="margin-bottom:6px">
@@ -2141,7 +2171,7 @@ FLOW_EDIT_TMPL = """
     </select>
   </div>
   <div id="conds">
-    <div class="grid3 sub" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
+    <div class="grid3 sub cond-head" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
     {% for i in range(5) %}
     {% set c = conditions[i] if conditions|length > i else {} %}
     <div class="grid3" style="margin-bottom:6px">
