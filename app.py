@@ -1376,7 +1376,6 @@ window.guardApply = function(f){
   if(expanded() && window.matchMedia && window.matchMedia('(min-width:1024px)').matches) ensure();
 })();
 })();
-})();
 </script>
 <script>
 /* keyboard-follow: lift composers + savebars above the on-screen keyboard, hide the tab bar while typing */

@@ -18,6 +18,7 @@ import re
 import shutil
 import socket
 import socketserver
+import subprocess
 import sys
 import tempfile
 import threading
@@ -2431,6 +2432,26 @@ def main():
     check("one-click apply stored the fuzzy flow",
           r.status_code == 302 and len(af) == 1
           and '"kind": "topic"' in af[0]["conditions"] and '"instructions"' in af[0]["actions"])
+
+    section("T35 served page scripts parse (node --check)")
+    import shutil as _sh, re as _re, tempfile as _tf
+    node = _sh.which("node")
+    if node:
+        page = client.get("/messages").data.decode("utf-8", "replace")
+        blocks = _re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", page, _re.S)
+        bad = []
+        for bi, blk in enumerate(blocks):
+            if not blk.strip():
+                continue
+            fn = _tf.mktemp(suffix=".js")
+            open(fn, "w", encoding="utf-8").write(blk)
+            pr = subprocess.run([node, "--check", fn], capture_output=True, text=True)
+            if pr.returncode != 0:
+                bad.append((bi, pr.stderr.strip().splitlines()[-1] if pr.stderr else "?"))
+        check("every inline script on a rendered page parses (%d blocks)" % len(blocks),
+              not bad)
+    else:
+        check("node available for script syntax check (skipped otherwise)", True)
 
     section("T34 flow builder v2: canvas = trigger -> filters -> step chain")
     np = client.get("/flows/new").data
