@@ -5,3 +5,4 @@ data/
 gemma/cache/
 .env
 qa/shots/
+.codegraph/

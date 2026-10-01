@@ -23,6 +23,7 @@ from flask import Flask, Response, flash, jsonify, redirect, render_template_str
 import config
 import engine
 import heuristics
+import learning
 import proxy
 import rag
 import store
@@ -731,6 +732,12 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .audit-pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.78rem;color:var(--dim);margin:6px 0 0;max-height:280px;overflow:auto}
 .simul{margin:4px 0 0;padding-left:18px;font-size:.88rem}
 .simul li{margin:3px 0}
+/* key -> value stat rows (dashboard + learning page) - shared on purpose */
+.dsrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:.88rem}
+.dsrow:last-child{border-bottom:1px solid var(--line)}
+.dsk{color:var(--dim)}
+.dsv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.dsv .dsp{font-weight:400;color:var(--dim);font-size:.78rem;margin-left:3px}
 .tools{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
 .tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-chip.ok{color:var(--ok);border-color:var(--ok)}
@@ -921,6 +928,8 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/>') }}
       {{ navitem(url_for('classifiers'), 'Classifiers', p.startswith('/classifiers'), '
         <path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/>') }}
+      {{ navitem(url_for('learning_page'), 'Learning', p.startswith('/learning'), '
+        <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>') }}
       {{ navitem(url_for('templates'), 'Templates', p.startswith('/templates'), '
         <path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/>') }}
       <div class="nav-label">System</div>
@@ -1170,6 +1179,7 @@ if(!window.__mtVt){
     ['/rules/', 0, 31], ['/rules', 1, 30],
     ['/simulate', 0, 35],
     ['/classifiers/', 0, 41], ['/classifiers', 1, 40],
+    ['/learning', 0, 42],
     ['/flows/', 0, 51], ['/flows', 1, 50],
     ['/templates/', 0, 61], ['/templates', 1, 60],
     ['/accounts/', 0, 71], ['/accounts', 1, 70],
@@ -1875,11 +1885,6 @@ DASH_TMPL = """
 /* dashboard hero: stat rows (phones) + automation status chips - one fact per
    line, right-aligned tabular numbers, chips are atomic (never wrap mid-phrase) */
 .dstat{display:none}
-.dsrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:.88rem}
-.dsrow:last-child{border-bottom:1px solid var(--line)}
-.dsk{color:var(--dim)}
-.dsv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
-.dsv .dsp{font-weight:400;color:var(--dim);font-size:.78rem;margin-left:3px}
 .dsc{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
 .dschip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 10px;font-size:.74rem;line-height:1.2;color:var(--fg);white-space:nowrap;background:var(--card)}
 .dschip::before{content:'';width:6px;height:6px;background:var(--ok);flex:0 0 auto}
@@ -2222,12 +2227,14 @@ def message_snooze(mid):
         store.log_event("info", "snoozed message %d ('%s') until %s"
                         % (mid, (m.get("subject") or "")[:50], fmt_ts(until)))
         store.log_msg_event(mid, "snooze", "snoozed until %s" % fmt_ts(until))
+        learning.observe(mid, "snooze", "%.0fh" % hours, source="ui")
         flash("Snoozed until %s." % fmt_ts(until), "ok")
     else:
         store.snooze_message(mid, 0)
         store.log_event("info", "woke message %d ('%s')"
                         % (mid, (m.get("subject") or "")[:50]))
         store.log_msg_event(mid, "wake", "back in the lists")
+        learning.observe(mid, "wake", "", source="ui")
         flash("Back in your lists.", "ok")
     return redirect(request.referrer or url_for("message_detail", mid=mid))
 
@@ -2559,6 +2566,9 @@ def classifier_dataset_relabel(hid):
                                      llm_confidence=1.0)
             store.log_event("info", "dataset: message %d relabelled to '%s' (classifier '%s', by ui)"
                             % (mid, cat, row.get("name") or hid))
+            learning.observe(mid, "relabel", cat, source="ui")
+            store.record_label(mid, "category", json.dumps(cat), 1.0,
+                               "explicit_user_correction", "dataset relabel")
             in_set = cat.strip().lower() == (row.get("category") or "").strip().lower()
             return redirect(url_for("classifier_dataset", hid=hid,
                                     toast="in" if in_set else "out",
@@ -4454,6 +4464,7 @@ def message_classify(mid):
         return redirect(url_for("messages"))
     try:
         res = engine.classify_and_store(m, store.all_settings())
+        learning.observe(mid, "reclassify", str(res.get("category") or ""), source="ui")
         store.add_llm_log(mid, True)
         m = store.get_message(mid) or m
         m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
@@ -4474,6 +4485,11 @@ def message_tag(mid):
     tag = (request.form.get("tag") or "").strip()[:40]
     store.tag_messages([mid], tag)
     store.log_msg_event(mid, "tag", ("tagged \u201c%s\u201d" % tag) if tag else "tag cleared")
+    if tag:
+        learning.observe(mid, "tag", tag, source="ui")
+        store.record_label(mid, "category", tag.lower(), 1.0, "explicit_user_label", "user_tag")
+    else:
+        learning.observe(mid, "untag", "", source="ui")
     flash(("Tag saved: " + tag) if tag else "Tag cleared.", "ok")
     return redirect(url_for("message_detail", mid=mid))
 
@@ -4502,6 +4518,7 @@ def message_file(mid):
             if new_uid:
                 mv["uid"] = new_uid
             store.record_move(m, target, "manual")
+            learning.observe(mid, "move", target, source="ui")
             store.update_message(mid, **mv)
             store.clear_keep(m.get("msgid"))
             store.log_event("info", "filed message %d ('%s') → %s"
@@ -6762,6 +6779,120 @@ def simulate():
                   for r in store.list_rules()])
     return render(_render_src(SIMULATE_TMPL, form=form, result=result,
                               prefill_note=prefill_note, targets=targets))
+
+
+LEARN_TMPL = """
+<style>
+.ltbl td,.ltbl th{vertical-align:top}
+@media(max-width:767px){.ltbl .hide-m{display:none}}
+</style>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Learning</h1>
+    <div class="page-desc">Repeated LLM reasoning becomes cheap deterministic decisions here —
+      discovered, validated, and shadowed before anything ever acts. In shadow mode nothing on this page
+      changes how mail is handled.</div>
+  </div>
+  <form method="post" action="{{ url_for('learning_train') }}">
+    <button class="btn primary" type="submit">Train needs_reply specialist</button>
+  </form>
+</div>
+<div class="grid2" style="align-items:start">
+  <div class="card">
+    <div class="card-h"><h3>Routing</h3><span class="sub">{{ 'shadow mode: specialists record only' if rep.route_mode == 'shadow' else 'enforce mode' }}</span></div>
+    <div class="dsrow"><span class="dsk">LLM escalation rate</span><span class="dsv">{{ '%.0f' % (rep.routing.escalation_rate * 100) if rep.routing.escalation_rate is not none else '—' }}%<span class="dsp"> of last {{ rep.routing.n }}</span></span></div>
+    <div class="dsrow"><span class="dsk">Would skip the LLM (coverage)</span><span class="dsv">{{ '%.0f' % (rep.routing.would_skip_rate * 100) if rep.routing.would_skip_rate is not none else '—' }}%</span></div>
+    <div class="dsrow"><span class="dsk">Verify queue (moderate confidence)</span><span class="dsv">{{ rep.routing.counts['verify'] }}</span></div>
+    <div class="sub" style="margin-top:8px">Escalation falls as specialists cover more of the tasks a call answers
+      (today: needs_reply by specialist, category by rules / heuristics / LLM).</div>
+  </div>
+  <div class="card">
+    <div class="card-h"><h3>Library</h3><span class="sub">feature schema v{{ rep.feature_schema_version }}</span></div>
+    <div class="dsrow"><span class="dsk">Decisions recorded</span><span class="dsv">{{ "{:,}".format(rep.library.decisions) }}</span></div>
+    <div class="dsrow"><span class="dsk">Observations (user behavior)</span><span class="dsv">{{ "{:,}".format(rep.library.observations) }}</span></div>
+    <div class="dsrow"><span class="dsk">Labels</span><span class="dsv">{{ "{:,}".format(rep.library.labels) }}</span></div>
+    <div class="sub" style="margin-top:8px">{% for src, n in rep.library.labels_by_source.items() %}{{ src }}: {{ n }}{{ ' · ' if not loop.last }}{% endfor %}{% if not rep.library.labels_by_source %}No labels yet — LLM verdicts act as weak labels until corrections arrive.{% endif %}</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-h"><h3>Specialists</h3><span class="sub">one per task · versioned · rollback = revert the active version</span></div>
+  {% if rep.specialists %}
+  <div class="tablewrap"><table class="tbl ltbl">
+    <tr><th>Model</th><th>Status</th><th>Validation</th><th class="hide-m">Live agreement</th><th></th></tr>
+    {% for s in rep.specialists %}
+    <tr>
+      <td><b>{{ s.name }}</b> <span class="sub">v{{ s.version }} · {{ s.kind }} · #{{ s.id }}</span>
+        <div class="sub">{{ s.task }}{% set n = (s.stats_parsed.dataset or {}).get('n') %}{% if n %} · {{ n }} samples{% if s.stats_parsed.weak_labels %} ({{ s.stats_parsed.weak_labels }} weak){% endif %}{% endif %}</div></td>
+      <td><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ s.status }}</span></td>
+      <td class="sub">{% set m = s.metrics_parsed.val or {} %}P {{ m.precision or '—' }} · R {{ m.recall or '—' }} · F1 {{ m.f1 or '—' }} <span class="sub">n={{ m.n or 0 }}</span></td>
+      <td class="sub hide-m">{% if s.live.n %}{{ '%.0f' % (s.live.agreement * 100) }}% <span class="sub">of {{ s.live.n }}</span>{% else %}—{% endif %}</td>
+      <td class="r">
+        {% if s.status == 'validated' %}
+        <form class="inline" method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Deploy to shadow</button></form>
+        {% elif s.status == 'shadow' %}
+        <form class="inline" method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="active"><button class="btn small primary" type="submit">Promote to active</button></form>
+        <form class="inline" method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+        {% elif s.status == 'active' %}
+        <form class="inline" method="post" action="{{ url_for('learning_transition', sid=s.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}
+  <div class="empty"><h4>No specialists yet</h4>
+  <p>Train the first candidate from the mail already classified: the model learns from the LLM's past
+  verdicts (weak labels), gets validated on a held-out, newer slice, and then waits — deployment to shadow
+  is a separate, explicit step.</p></div>
+  {% endif %}
+</div>
+<div class="card">
+  <div class="card-h"><h3>Recent shadow disagreements</h3><span class="sub">specialist vs the decision that actually ran</span></div>
+  {% if rep.disagreements %}
+  <div class="tablewrap"><table class="tbl ltbl">
+    <tr><th>Message</th><th>Specialist</th><th>System</th><th class="hide-m">When</th></tr>
+    {% for d in rep.disagreements %}
+    <tr>
+      <td><a href="{{ url_for('message_detail', mid=d.msg_id) }}">#{{ d.msg_id }}</a></td>
+      <td><span class="badge warn">{{ 'reply' if d.specialist else 'no reply' }}</span> <span class="sub">{{ '%.2f' % d.specialist_conf }}</span></td>
+      <td><span class="badge">{{ 'reply' if d.system else 'no reply' }}</span> <span class="sub">{{ d.system_source }}</span></td>
+      <td class="sub hide-m">{{ fmt_ts(d.ts) }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<div class="sub">No disagreements recorded yet — they appear once a deployed specialist audits new mail.</div>{% endif %}
+</div>
+"""
+
+
+@app.route("/learning")
+def learning_page():
+    rep = learning.status_report()
+    return render(_render_src(LEARN_TMPL, rep=rep, fmt_ts=fmt_ts))
+
+
+@app.route("/learning/train", methods=["POST"])
+def learning_train():
+    try:
+        res = learning.train_specialist("needs_reply", created_by="ui")
+        v = res["val"]
+        flash("Trained %s v%d - validation F1 %s on %d held-out sample(s) of %d. "
+              "Deploy to shadow when ready." % (res["name"], res["version"], v.get("f1"),
+                                                v.get("n") or 0, res["dataset"]["n"]), "ok")
+    except Exception as exc:
+        flash("Training failed: %s" % exc, "err")
+    return redirect(url_for("learning_page"))
+
+
+@app.route("/learning/specialists/<int:sid>/transition", methods=["POST"])
+def learning_transition(sid):
+    to = (request.form.get("to") or "").strip()
+    try:
+        learning.transition(sid, to, reason="by ui", by="ui")
+        flash("Specialist #%d is now %s." % (sid, to.upper()), "ok")
+    except Exception as exc:
+        flash("Transition failed: %s" % exc, "err")
+    return redirect(url_for("learning_page"))
 
 
 @app.route("/fonts/<name>")

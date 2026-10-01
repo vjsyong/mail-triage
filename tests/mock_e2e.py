@@ -853,6 +853,7 @@ def main():
     import engine
     import heuristics as heuristics_mod
     import rag
+    import learning as learning_mod
 
     store.init_db()
     store.set_setting("max_llm_per_hour", 200)
@@ -2807,6 +2808,123 @@ def main():
     check("flows page shows the 'test it' banner after saving",
           b"Simulate a draft that tests it" in r.data
           and ("/simulate?flow=%d" % fctx_id).encode() in r.data)
+
+    section("T44 learning loop: decisions, labels, needs_reply specialist")
+
+    ts0 = int(time.time())
+    feats = learning_mod.extract_features({
+        "from_addr": "rev@acme.com", "to_addr": "seanyong@ust.hk",
+        "subject": "Please confirm the invoice",
+        "snippet": "Could you review the attached invoice for HKD 1,200? Deadline is Friday.",
+        "date_ts": ts0, "sort_ts": ts0})
+    check("feature schema is versioned + complete",
+          learning_mod.FEATURE_SCHEMA_VERSION == 1 and set(feats) == set(learning_mod.FEATURE_ORDER))
+    check("features detect request / deadline / money / direct recipient",
+          feats["f_contains_request"] == 1 and feats["f_deadline_lang"] == 1
+          and feats["f_contains_money"] == 1 and feats["f_direct_recipient"] == 1
+          and feats["f_question_marks"] >= 1)
+
+    ex = []
+    for _i in range(30):
+        ex.append((1, 1.0, {"f_contains_request": 1.0, "f_question_marks": 1.0}))
+        ex.append((0, 1.0, {"f_contains_request": 0.0, "f_question_marks": 0.0}))
+    model, _mstats = learning_mod.train("logreg", ex, {})
+    out_pos = learning_mod.predict("logreg", model, {"f_contains_request": 1.0, "f_question_marks": 1.0})
+    out_neg = learning_mod.predict("logreg", json.loads(json.dumps(model)),
+                                   {"f_contains_request": 0.0, "f_question_marks": 0.0})
+    check("logreg learns a separable pattern (JSON round-trip safe)",
+          out_pos["prediction"] is True and out_pos["confidence"] > 0.9
+          and out_neg["prediction"] is False and out_pos["contributions"])
+
+    # enough weak labels to train: craft a batch with and without the mock's signal words
+    for i in range(12):
+        add_msg(state, "bulk%d@x.com" % i, "Budget review %d" % i,
+                "could you review the budget plan %d? please confirm" % i, "bulkA%d@1" % i)
+        add_msg(state, "bulk%d@x.com" % (i + 100), "Monthly summary %d" % (i + 100),
+                "attached is the monthly summary for your records.", "bulkB%d@1" % i)
+    for _i in range(4):
+        engine.process_mailbox()
+    n_labelled = len([r for r in store.messages(limit=5000)
+                      if r.get("llm_category") and r.get("llm_needs_reply") in (0, 1)])
+    check("enough weak labels collected for training (>= 40)", n_labelled >= 40)
+
+    # --- observations + labels from real UI actions ---
+    add_msg(state, "learn.vendor@x.com", "Learning invoice request",
+            "please confirm the invoice - thanks", "lrn@1")
+    engine.process_mailbox()
+    lrow = [r for r in store.messages(limit=5000) if r["subject"] == "Learning invoice request"][0]
+    client.post("/messages/%d/tag" % lrow["id"], data={"tag": "Receipt"}, follow_redirects=True)
+    check("tag action records an explicit label",
+          bool(store.list_labels(msg_id=lrow["id"], source="explicit_user_label")))
+    check("tag action records an observation", store.count_observations("tag") >= 1)
+    client.post("/messages/%d/snooze" % lrow["id"], data={"hours": "4"}, follow_redirects=True)
+    check("snooze records an observation", store.count_observations("snooze") >= 1)
+    store.update_message(lrow["id"], llm_category="Receipt", classified_by="user")
+    rec = learning_mod.reconcile()
+    check("reconcile materializes corrections as labels",
+          rec["corrected"] >= 1 and store.count_labels(source="explicit_user_correction") >= 1)
+    check("labels are idempotent (insert-or-ignore)",
+          store.record_label(lrow["id"], "category", "receipt", 1.0, "explicit_user_label", "again") is None)
+
+    # --- train + validate + shadow ---
+    spec_res = learning_mod.train_specialist("needs_reply", created_by="test")
+    sid = spec_res["specialist_id"]
+    srow = store.get_specialist(sid)
+    check("specialist trained: validated, not enabled, versioned",
+          srow["status"] == "validated" and not srow["enabled"]
+          and store.next_specialist_version(spec_res["name"]) == spec_res["version"] + 1)
+    check("validation metrics on a temporal holdout",
+          (spec_res["val"].get("n") or 0) >= 1 and spec_res["val"].get("accuracy") is not None
+          and spec_res["dataset"]["by_source"].get("llm_annotation"))
+    st = json.loads(store.get_specialist(sid)["stats"])
+    check("training provenance: weak vs confirmed label split",
+          st.get("weak_labels", 0) >= 1 and "confirmed_labels" in st)
+    illegal = False
+    try:
+        learning_mod.transition(sid, "active", reason="test")
+    except RuntimeError:
+        illegal = True
+    check("validated cannot jump straight to active", illegal)
+    learning_mod.transition(sid, "shadow", reason="test")
+    check("shadow deployment enables the runner",
+          store.get_specialist(sid)["status"] == "shadow" and store.get_specialist(sid)["enabled"])
+
+    add_msg(state, "shadow.audit@x.com", "Shadow audit question",
+            "could you confirm the numbers? meeting on Friday", "shd@1")
+    engine.process_mailbox()
+    ar = [r for r in store.messages(limit=5000) if r["subject"] == "Shadow audit question"][0]
+    sdecs = store.list_decisions(msg_id=ar["id"], source_type="specialist")
+    sysdecs = [d for d in store.list_decisions(msg_id=ar["id"])
+               if d["source_type"] in ("llm", "heuristic")]
+    rtdecs = store.list_decisions(msg_id=ar["id"], task="route")
+    check("shadow decision stored with provenance + version",
+          bool(sdecs) and sdecs[0]["shadow"] == 1 and sdecs[0]["model_version"] == "1"
+          and sdecs[0]["feature_version"] == 1 and sdecs[0]["source_id"].startswith("needs_reply_"))
+    check("decision evidence table wired", isinstance(store.decision_evidence(sdecs[0]["id"]), list))
+    check("system decision recorded alongside (agreement source)",
+          bool(sysdecs) and sysdecs[0]["predicted_value"] in ("true", "false"))
+    check("router intent recorded (shadow = what WOULD happen)",
+          bool(rtdecs) and rtdecs[0]["source_type"] == "router"
+          and rtdecs[0]["predicted_value"] == chr(34) + "llm" + chr(34))
+    check("predictions never mint labels", store.count_labels(source="llm_annotation") == 0)
+
+    rep = learning_mod.status_report()
+    live = learning_mod.specialist_live_stats(spec_res["name"])
+    check("status report carries routing + library + specialists",
+          rep["routing"]["n"] >= 1 and rep["library"]["decisions"] >= 3
+          and len(rep["specialists"]) >= 1 and rep["feature_schema_version"] == 1)
+    check("live shadow agreement computes against system decisions",
+          live["n"] >= 1 and live["agreement"] is not None)
+    r = client.get("/learning")
+    check("learning page renders specialists + routing",
+          r.status_code == 200 and b"Specialists" in r.data and b"Routing" in r.data
+          and b"Train needs_reply specialist" in r.data)
+    r = client.post("/learning/specialists/%d/transition" % sid, data={"to": "retired"},
+                    follow_redirects=True)
+    check("retire transition works from the page route",
+          store.get_specialist(sid)["status"] == "retired"
+          and not store.get_specialist(sid)["enabled"])
+
 
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
