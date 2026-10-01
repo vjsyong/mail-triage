@@ -434,6 +434,7 @@ white-space:nowrap;background:#fbfbfb;position:sticky;top:0;z-index:2}
 .tbl td.sel,.tbl th.sel{width:34px;padding-right:2px}
 .tbl input[type=checkbox]{width:15px;height:15px;display:block}
 .rowacts{display:inline-flex;gap:6px;opacity:0;transition:opacity .12s}
+.rowacts .ra-menu{display:none}
 tr:hover .rowacts,tr:focus-within .rowacts{opacity:1}
 @media(hover:none){.rowacts{opacity:1}}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
@@ -554,6 +555,38 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   #bulk .tbl.mcards td:nth-child(5),#bulk .tbl.mcards td:nth-child(6),#bulk .tbl.mcards td:nth-child(7){order:4;margin-top:7px}
   #bulk .tbl.mcards td:nth-child(7){margin-left:auto;text-align:right}
   #bulk .tbl.mcards td:empty{display:none}
+  .r-head{flex-direction:column;align-items:stretch}
+  .r-head .row{display:flex;gap:8px}
+  .r-head .row .btn{flex:1;justify-content:center;text-align:center}
+  .ra-inline{display:none}
+  .rowacts .ra-menu{display:inline-block}
+  #rules .tbl.mcards tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
+  #rules .tbl.mcards td{display:block;padding:1px 0}
+  #rules .tbl.mcards td:nth-child(1)::after{content:'·';margin-left:7px;color:var(--dim)}
+  #rules .tbl.mcards td:nth-child(2){order:2;flex:1;min-width:0}
+  #rules .tbl.mcards td:nth-child(3){order:3;flex:1 1 100%;white-space:normal}
+  #rules .tbl.mcards td:nth-child(4){order:4;flex:1 1 100%}
+  #rules .tbl.mcards td:nth-child(5){order:5;flex:1 1 100%;margin-top:6px}
+  #rules .tbl.mcards .rowacts{flex-wrap:wrap;justify-content:flex-start !important;gap:8px;min-height:44px}
+  #classifiers .tbl.mcards tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
+  #classifiers .tbl.mcards td{display:block;padding:1px 0}
+  #classifiers .tbl.mcards td:nth-child(1){order:1;flex:1 1 100%;min-width:0}
+  #classifiers .tbl.mcards td:nth-child(2),#classifiers .tbl.mcards td:nth-child(3),#classifiers .tbl.mcards td:nth-child(4),#classifiers .tbl.mcards td:nth-child(5){font-size:.75rem}
+  #classifiers .tbl.mcards td:nth-child(2){order:2}
+  #classifiers .tbl.mcards td:nth-child(3){order:3}
+  #classifiers .tbl.mcards td:nth-child(4){order:4}
+  #classifiers .tbl.mcards td:nth-child(5){order:5}
+  #classifiers .tbl.mcards td:nth-child(6){display:none}
+  #classifiers .tbl.mcards td:nth-child(7){order:6;flex:1 1 100%;font-size:.72rem}
+  #classifiers .tbl.mcards td:nth-child(8){order:7;flex:1 1 100%;margin-top:6px}
+  #classifiers .tbl.mcards .rowacts{flex-wrap:wrap;justify-content:flex-start !important;gap:8px;min-height:44px}
+  #templates .tbl.mcards tr{display:flex;flex-wrap:wrap;gap:2px 8px}
+  #templates .tbl.mcards td{display:block;padding:1px 0}
+  #templates .tbl.mcards td:nth-child(1){order:1;flex:1 1 100%}
+  #templates .tbl.mcards td:nth-child(2){order:2;flex:1 1 100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  #templates .tbl.mcards td:nth-child(3){order:3;flex:1 1 100%;margin-top:6px}
+  #templates .tbl.mcards .rowacts{justify-content:flex-start !important;gap:8px;min-height:44px}
+  #rules .tbl.mcards .rowacts .btn,#classifiers .tbl.mcards .rowacts .btn,#templates .tbl.mcards .rowacts .btn{min-height:40px}
   .toolbar{display:block;padding:10px 0 10px 12px}
   .tchips{display:flex;gap:6px;overflow-x:auto;padding-right:12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
   .tchips::-webkit-scrollbar{display:none}
@@ -1703,7 +1736,7 @@ def index_rebuild():
 # ---------------------------------------------------------------- rules
 
 RULES_TMPL = """
-<div class="page-head">
+<div class="page-head r-head">
   <div>
     <h1 class="page-title">Rules</h1>
     <div class="page-desc">Evaluated top to bottom — first match wins. Rules act {{ 'live' if settings.rules_apply else 'in dry-run (suggest only)' }}. A rule with no actions is a guard: matching mail stays put.</div>
@@ -1716,7 +1749,7 @@ RULES_TMPL = """
 </div>
 {% if test_results %}
 <div class="card">
-  <div class="card-h"><h3>Dry-run test <span class="sub">(nothing was changed)</span></h3></div>
+  <div class="card-h"><h3>Dry-run test <span class="sub">(nothing was changed) — of the last {{ test_limit }} messages</span></h3></div>
   <div class="tablewrap"><table class="tbl" style="max-width:560px">
     <thead><tr><th>rule</th><th class="r">matches</th></tr></thead>
     <tbody>
@@ -1725,7 +1758,7 @@ RULES_TMPL = """
     </tbody></table></div>
 </div>
 {% endif %}
-<div class="card flush">
+<div class="card flush" id="rules">
   {% if rules %}
   <div class="tablewrap"><table class="tbl mcards">
     <thead><tr><th style="width:34px">#</th><th>rule</th><th>matches</th><th>actions</th><th class="r"></th></tr></thead>
@@ -1743,9 +1776,18 @@ RULES_TMPL = """
         <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" title="move down" aria-label="Move rule down">↓</button></form>
         </span>
         <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}"><button class="btn small" type="submit">{{ 'disable' if r.enabled else 'enable' }}</button></form>
-        <a class="btn small" href="{{ url_for('rule_edit', rule_id=r.id) }}">edit</a>
-        <form class="inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
+        <a class="btn small ra-inline" href="{{ url_for('rule_edit', rule_id=r.id) }}">edit</a>
+        <form class="inline ra-inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
               onsubmit="return confirm('Delete rule {{ r.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
+        <details class="menu ra-menu">
+          <summary class="btn small" aria-haspopup="menu" aria-label="More actions">⋯</summary>
+          <div class="menu-pop" role="menu">
+            <a class="menu-item" href="{{ url_for('rule_edit', rule_id=r.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
+                  onsubmit="return confirm('Delete rule {{ r.name }}?')">
+              <button class="menu-item danger" type="submit">Delete…</button></form>
+          </div>
+        </details>
       </span></td>
     </tr>
     {% endfor %}
@@ -1773,7 +1815,7 @@ CLASSIFIERS_TMPL = """
     (“train a classifier for Receipts”, “evaluate classifier 2”).</div>
   </div>
 </div>
-<div class="card flush">
+<div class="card flush" id="classifiers">
   {% if hx %}
   <div class="tablewrap"><table class="tbl mcards">
     <thead><tr><th>name</th><th>kind</th><th>category</th><th>samples</th><th>labels</th><th>matches on</th><th>updated</th><th class="r"></th></tr></thead>
@@ -1789,9 +1831,14 @@ CLASSIFIERS_TMPL = """
       <td class="sub">{{ h.when }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
         <a class="btn small" href="{{ url_for('classifier_dataset', hid=h.id) }}">dataset</a>
-        <form class="inline" method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}"><button class="btn small" type="submit">{{ 'disable' if h.enabled else 'enable' }}</button></form>
-        <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn small" type="submit">retrain</button></form>
-        <form class="inline" method="post" action="{{ url_for('classifier_delete', hid=h.id) }}" onsubmit="return confirm('Delete this classifier?');"><button class="btn small danger" type="submit">delete</button></form>
+        <details class="menu">
+          <summary class="btn small" aria-haspopup="menu" aria-label="More actions">⋯</summary>
+          <div class="menu-pop" role="menu">
+            <form method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}"><button class="menu-item" type="submit">{{ 'Disable' if h.enabled else 'Enable' }}</button></form>
+            <form method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="menu-item" type="submit">Retrain</button></form>
+            <form method="post" action="{{ url_for('classifier_delete', hid=h.id) }}" onsubmit="return confirm('Delete this classifier?');"><button class="menu-item danger" type="submit">Delete…</button></form>
+          </div>
+        </details>
       </span></td>
     </tr>
     {% endfor %}
@@ -2231,11 +2278,19 @@ FLOWS_TMPL = """
     <div class="card-h" style="flex-wrap:wrap">
       <h3 style="min-width:0">{{ f.name }}{% if not f.enabled %} <span class="badge">disabled</span>{% endif %}</h3>
       <div class="row">
-        <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" aria-label="Move up">&#8593;</button></form>
-        <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" aria-label="Move down">&#8595;</button></form>
+        <span class="seg" role="group" aria-label="Reorder">
+        <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" aria-label="Move up" {{ 'disabled' if loop.first else '' }}>&#8593;</button></form>
+        <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" aria-label="Move down" {{ 'disabled' if loop.last else '' }}>&#8595;</button></form>
+        </span>
         <form class="inline" method="post" action="{{ url_for('flow_toggle', flow_id=f.id) }}"><button class="btn small" type="submit">{{ 'Disable' if f.enabled else 'Enable' }}</button></form>
-        <a class="btn small" href="{{ url_for('flow_edit', flow_id=f.id) }}">Edit</a>
-        <form class="inline" method="post" action="{{ url_for('flow_delete', flow_id=f.id) }}" onsubmit="return confirm('Delete this flow?');"><button class="btn small" type="submit">Delete</button></form>
+        <details class="menu">
+          <summary class="btn small" aria-haspopup="menu" aria-label="More actions">⋯</summary>
+          <div class="menu-pop" role="menu">
+            <a class="menu-item" href="{{ url_for('flow_edit', flow_id=f.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('flow_delete', flow_id=f.id) }}" onsubmit="return confirm('Delete this flow?');">
+              <button class="menu-item danger" type="submit">Delete…</button></form>
+          </div>
+        </details>
       </div>
     </div>
     <div class="sub" style="margin-top:4px">{{ f.summary }}</div>
@@ -2562,7 +2617,7 @@ TEMPLATES_TMPL = """
   </div>
   <div class="row"><a class="btn primary" href="{{ url_for('template_new') }}">New template</a></div>
 </div>
-<div class="card flush">
+<div class="card flush" id="templates">
   {% if templates %}
   <div class="tablewrap"><table class="tbl mcards">
     <thead><tr><th>name</th><th>preview</th><th class="r"></th></tr></thead>
