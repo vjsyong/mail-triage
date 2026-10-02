@@ -1481,6 +1481,13 @@ def main():
           _rpo.data.count(b'class="regen"') == 1
           and (b'data-mid="%d"' % _nmid) in _rpo.data
           and (b'data-mid="%d"' % _omid) not in _rpo.data)
+    _rem = store.find_or_create_session()
+    _rem_page = client.get("/assistant/s/%d" % _rem)
+    check("empty chats still show the suggestions",
+          b'class="chat-empty"' in _rem_page.data)
+    _rem_page2 = client.get("/assistant/s/%d" % _ro)
+    check("started chats render without the suggestions",
+          b'class="chat-empty"' not in _rem_page2.data)
 
     section("T9d assistant failure is visible, not silent")
     r = client.post("/assistant/stream", data={"message": "streamfail please"})
@@ -4203,6 +4210,8 @@ def main():
     check("live stream rows keep the chat's vertical rhythm",
           b".chatlive{display:flex;flex-direction:column;gap:18px}" in _d
           and b"live.className='chatlive'" in _d)
+    check("live turns clear the empty-state suggestions",
+          b"root.querySelector('.chat-empty')" in _d and b"if(ce) ce.remove()" in _d)
 
     section("T53 plugin scheduling + commitments/subscription-watch dogfood")
     import plugin_rt as _rt53

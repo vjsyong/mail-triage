@@ -1372,6 +1372,7 @@ window.assistantChat = function(opts){
     if(regen && regen.row && regen.row.parentNode) regen.row.remove();
     if(currentAbort) currentAbort.abort();
     currentAbort=new AbortController();
+    var ce=root.querySelector('.chat-empty'); if(ce) ce.remove();
     if(btn) btn.disabled=true; if(stopBtn) stopBtn.style.display='';
     if(!regen){ ta.value=''; ta.style.height='auto'; }
     if(!regen){
