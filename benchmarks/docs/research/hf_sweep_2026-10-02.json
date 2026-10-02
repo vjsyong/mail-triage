@@ -1,0 +1,3090 @@
+[
+ {
+  "org": "Qwen",
+  "id": "Qwen/Qwen3.8-2.4T-A95B",
+  "created": "2026-08-08",
+  "downloads": 40212,
+  "likes": 1277,
+  "tags": []
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/Qwen3.8-2.4T-A95B-FP8",
+  "created": "2026-08-08",
+  "downloads": 8233,
+  "likes": 245,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/Qwen-AgentWorld-35B-A3B",
+  "created": "2026-06-22",
+  "downloads": 9450,
+  "likes": 727,
+  "tags": []
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/WebWorld-32B",
+  "created": "2026-02-13",
+  "downloads": 1016,
+  "likes": 84,
+  "tags": []
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/WebWorld-14B",
+  "created": "2026-02-13",
+  "downloads": 631,
+  "likes": 34,
+  "tags": []
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/WebWorld-8B",
+  "created": "2026-02-13",
+  "downloads": 969,
+  "likes": 73,
+  "tags": []
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/Qwen3-Coder-Next-GGUF",
+  "created": "2026-02-02",
+  "downloads": 22758,
+  "likes": 285,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/Qwen3-Coder-Next-Base",
+  "created": "2026-02-01",
+  "downloads": 2417,
+  "likes": 73,
+  "tags": []
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/Qwen3-Coder-Next-FP8",
+  "created": "2026-02-01",
+  "downloads": 1090215,
+  "likes": 191,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "Qwen",
+  "id": "Qwen/Qwen3-Coder-Next",
+  "created": "2026-01-30",
+  "downloads": 598500,
+  "likes": 1669,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-12B-it-qat-q4_0-unquantized-assistant",
+  "created": "2026-06-04",
+  "downloads": 2676,
+  "likes": 24,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-31B-it-qat-q4_0-unquantized-assistant",
+  "created": "2026-05-29",
+  "downloads": 35803,
+  "likes": 26,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-26B-A4B-it-qat-q4_0-unquantized-assistant",
+  "created": "2026-05-29",
+  "downloads": 1433,
+  "likes": 18,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-E4B-it-qat-q4_0-unquantized-assistant",
+  "created": "2026-05-29",
+  "downloads": 1239,
+  "likes": 15,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-E2B-it-qat-q4_0-unquantized-assistant",
+  "created": "2026-05-29",
+  "downloads": 594,
+  "likes": 21,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-12B-it-assistant",
+  "created": "2026-05-23",
+  "downloads": 21185,
+  "likes": 129,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-26B-A4B-it-assistant",
+  "created": "2026-04-23",
+  "downloads": 121951,
+  "likes": 186,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-31B-it-assistant",
+  "created": "2026-04-23",
+  "downloads": 225191,
+  "likes": 327,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-E4B-it-assistant",
+  "created": "2026-04-23",
+  "downloads": 18312,
+  "likes": 123,
+  "tags": []
+ },
+ {
+  "org": "google",
+  "id": "google/gemma-4-E2B-it-assistant",
+  "created": "2026-04-23",
+  "downloads": 6265,
+  "likes": 75,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-8b-nvfp4",
+  "created": "2026-08-13",
+  "downloads": 1704,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-8b-mxfp4",
+  "created": "2026-08-13",
+  "downloads": 1120,
+  "likes": 1,
+  "tags": [
+   "mxfp4"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-8b-fp8",
+  "created": "2026-08-13",
+  "downloads": 2249,
+  "likes": 1,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-3b-nvfp4",
+  "created": "2026-08-13",
+  "downloads": 1477,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-3b-mxfp4",
+  "created": "2026-08-13",
+  "downloads": 984,
+  "likes": 2,
+  "tags": [
+   "mxfp4"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-3b-fp8",
+  "created": "2026-08-13",
+  "downloads": 1248,
+  "likes": 3,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-30b-nvfp4",
+  "created": "2026-08-13",
+  "downloads": 2507,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-30b-mxfp4",
+  "created": "2026-08-13",
+  "downloads": 993,
+  "likes": 3,
+  "tags": [
+   "mxfp4"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-30b-fp8",
+  "created": "2026-08-13",
+  "downloads": 2059,
+  "likes": 3,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-30b",
+  "created": "2026-08-07",
+  "downloads": 33348,
+  "likes": 126,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-8b",
+  "created": "2026-08-07",
+  "downloads": 127502,
+  "likes": 92,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.2-3b",
+  "created": "2026-08-07",
+  "downloads": 50741,
+  "likes": 105,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-swash-3b-a600m",
+  "created": "2026-07-01",
+  "downloads": 21729,
+  "likes": 16,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-swash-2b",
+  "created": "2026-07-01",
+  "downloads": 23313,
+  "likes": 5,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-guardian-4.1-8b-GGUF",
+  "created": "2026-05-26",
+  "downloads": 2711,
+  "likes": 5,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-switch-4.1-30b-preview",
+  "created": "2026-05-01",
+  "downloads": 570,
+  "likes": 29,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-switch-4.1-8b-preview",
+  "created": "2026-05-01",
+  "downloads": 594,
+  "likes": 31,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-switch-4.1-3b-preview",
+  "created": "2026-05-01",
+  "downloads": 1620,
+  "likes": 36,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-30b-fp8",
+  "created": "2026-04-20",
+  "downloads": 1515,
+  "likes": 7,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-8b-fp8",
+  "created": "2026-04-20",
+  "downloads": 30784,
+  "likes": 14,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-3b-fp8",
+  "created": "2026-04-20",
+  "downloads": 1041,
+  "likes": 8,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-30b-GGUF",
+  "created": "2026-04-17",
+  "downloads": 4765,
+  "likes": 8,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-8b-GGUF",
+  "created": "2026-04-16",
+  "downloads": 3885,
+  "likes": 12,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-3b-GGUF",
+  "created": "2026-04-16",
+  "downloads": 5725,
+  "likes": 14,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-guardian-4.1-8b",
+  "created": "2026-04-16",
+  "downloads": 54138,
+  "likes": 48,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-30b-base",
+  "created": "2026-04-06",
+  "downloads": 2778,
+  "likes": 29,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-30b",
+  "created": "2026-04-06",
+  "downloads": 355892,
+  "likes": 147,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-8b-base",
+  "created": "2026-04-06",
+  "downloads": 3998,
+  "likes": 26,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-8b",
+  "created": "2026-04-06",
+  "downloads": 182859,
+  "likes": 256,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-3b-base",
+  "created": "2026-04-06",
+  "downloads": 14396,
+  "likes": 25,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-4.1-3b",
+  "created": "2026-04-06",
+  "downloads": 502456,
+  "likes": 112,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-guardian-4.0-3b-toxicity-ja",
+  "created": "2026-04-06",
+  "downloads": 398,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granitelib-guardian-r1.0",
+  "created": "2026-02-02",
+  "downloads": 658,
+  "likes": 36,
+  "tags": []
+ },
+ {
+  "org": "ibm-granite",
+  "id": "ibm-granite/granite-3.3-8b-math-prm-v2",
+  "created": "2026-01-07",
+  "downloads": 514,
+  "likes": 14,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/HARC-Qwen2.5-7B-Instruct",
+  "created": "2026-07-02",
+  "downloads": 566,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/HARC-Llama-3.1-8B-Instruct",
+  "created": "2026-07-02",
+  "downloads": 538,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/HARC",
+  "created": "2026-06-02",
+  "downloads": 0,
+  "likes": 10,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/MagenticBrain",
+  "created": "2026-05-12",
+  "downloads": 746,
+  "likes": 32,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-UR90-30000",
+  "created": "2026-04-14",
+  "downloads": 337,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-UR90-20350",
+  "created": "2026-04-14",
+  "downloads": 337,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-UR90-10000",
+  "created": "2026-04-14",
+  "downloads": 332,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-UR90-10",
+  "created": "2026-04-14",
+  "downloads": 338,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-134000",
+  "created": "2026-04-03",
+  "downloads": 299,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-122000",
+  "created": "2026-04-03",
+  "downloads": 303,
+  "likes": 3,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-110000",
+  "created": "2026-04-03",
+  "downloads": 270,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-98000",
+  "created": "2026-04-03",
+  "downloads": 253,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-86000",
+  "created": "2026-04-03",
+  "downloads": 260,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-74000",
+  "created": "2026-04-03",
+  "downloads": 265,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-62000",
+  "created": "2026-04-03",
+  "downloads": 262,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-50000",
+  "created": "2026-04-03",
+  "downloads": 270,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-38000",
+  "created": "2026-04-03",
+  "downloads": 274,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-26000",
+  "created": "2026-04-03",
+  "downloads": 269,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-SS-14000",
+  "created": "2026-04-03",
+  "downloads": 257,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-48000",
+  "created": "2026-04-02",
+  "downloads": 272,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-46000",
+  "created": "2026-04-02",
+  "downloads": 258,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-44000",
+  "created": "2026-04-02",
+  "downloads": 264,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-42000",
+  "created": "2026-04-02",
+  "downloads": 270,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-40000",
+  "created": "2026-04-02",
+  "downloads": 265,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-38000",
+  "created": "2026-04-02",
+  "downloads": 260,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-36000",
+  "created": "2026-04-02",
+  "downloads": 271,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-34000",
+  "created": "2026-04-02",
+  "downloads": 266,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-32000",
+  "created": "2026-04-02",
+  "downloads": 287,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-30000",
+  "created": "2026-04-02",
+  "downloads": 234,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-28000",
+  "created": "2026-04-02",
+  "downloads": 227,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-26000",
+  "created": "2026-04-02",
+  "downloads": 219,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-24000",
+  "created": "2026-04-02",
+  "downloads": 230,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-22000",
+  "created": "2026-04-02",
+  "downloads": 227,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-20000",
+  "created": "2026-04-02",
+  "downloads": 237,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-18000",
+  "created": "2026-04-02",
+  "downloads": 215,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-16000",
+  "created": "2026-04-02",
+  "downloads": 235,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-14000",
+  "created": "2026-04-02",
+  "downloads": 235,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-12000",
+  "created": "2026-04-02",
+  "downloads": 212,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-10000",
+  "created": "2026-04-02",
+  "downloads": 233,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-8000",
+  "created": "2026-04-02",
+  "downloads": 216,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-6000",
+  "created": "2026-04-02",
+  "downloads": 222,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-4000",
+  "created": "2026-04-02",
+  "downloads": 219,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-HL-2000",
+  "created": "2026-04-02",
+  "downloads": 227,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-76000",
+  "created": "2026-02-24",
+  "downloads": 226,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-50000",
+  "created": "2026-02-24",
+  "downloads": 225,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-26000",
+  "created": "2026-02-24",
+  "downloads": 230,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-112000",
+  "created": "2026-02-24",
+  "downloads": 245,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GRS-2000",
+  "created": "2026-02-24",
+  "downloads": 224,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-GR-HM-1000",
+  "created": "2026-02-04",
+  "downloads": 222,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GR-1000",
+  "created": "2026-02-04",
+  "downloads": 220,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-1000",
+  "created": "2026-02-04",
+  "downloads": 210,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GR-61000",
+  "created": "2026-01-24",
+  "downloads": 217,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GR-46000",
+  "created": "2026-01-24",
+  "downloads": 224,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GR-31000",
+  "created": "2026-01-24",
+  "downloads": 248,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-GR-16000",
+  "created": "2026-01-24",
+  "downloads": 209,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-GR-HM-41000",
+  "created": "2026-01-24",
+  "downloads": 223,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-GR-HM-31000",
+  "created": "2026-01-24",
+  "downloads": 219,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-GR-HM-21000",
+  "created": "2026-01-24",
+  "downloads": 229,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-3b-GR-HM-11000",
+  "created": "2026-01-24",
+  "downloads": 230,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "microsoft",
+  "id": "microsoft/Dayhoff-170M-UR90-61000",
+  "created": "2026-01-24",
+  "downloads": 250,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "HuggingFaceTB",
+  "id": "HuggingFaceTB/nanowhale-100m-base",
+  "created": "2026-04-24",
+  "downloads": 915,
+  "likes": 24,
+  "tags": []
+ },
+ {
+  "org": "HuggingFaceTB",
+  "id": "HuggingFaceTB/nanowhale-100m",
+  "created": "2026-04-24",
+  "downloads": 646,
+  "likes": 68,
+  "tags": []
+ },
+ {
+  "org": "HuggingFaceTB",
+  "id": "HuggingFaceTB/SmolLM3-3B-GSM8K-SFT",
+  "created": "2026-04-03",
+  "downloads": 350,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "HuggingFaceTB",
+  "id": "HuggingFaceTB/qwen3-1.7b-gsm8k-sft",
+  "created": "2026-03-25",
+  "downloads": 4429,
+  "likes": 4,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-DSpark-GGUF",
+  "created": "2026-08-19",
+  "downloads": 100068,
+  "likes": 27,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-DSpark-GGUF",
+  "created": "2026-08-19",
+  "downloads": 148185,
+  "likes": 53,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-Instruct-DSpark-GGUF",
+  "created": "2026-08-19",
+  "downloads": 1845,
+  "likes": 29,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-DSpark",
+  "created": "2026-08-10",
+  "downloads": 8953,
+  "likes": 36,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-DSpark",
+  "created": "2026-08-10",
+  "downloads": 1985,
+  "likes": 39,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-Instruct-DSpark",
+  "created": "2026-08-10",
+  "downloads": 1021,
+  "likes": 33,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX-nvfp4",
+  "created": "2026-08-06",
+  "downloads": 348,
+  "likes": 3,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX-mxfp4",
+  "created": "2026-08-06",
+  "downloads": 354,
+  "likes": 3,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX-mxfp8",
+  "created": "2026-08-06",
+  "downloads": 290,
+  "likes": 2,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX-4bit",
+  "created": "2026-08-06",
+  "downloads": 2095,
+  "likes": 4,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX-5bit",
+  "created": "2026-08-06",
+  "downloads": 264,
+  "likes": 2,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX-6bit",
+  "created": "2026-08-06",
+  "downloads": 338,
+  "likes": 3,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX-8bit",
+  "created": "2026-08-06",
+  "downloads": 1180,
+  "likes": 2,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX-bf16",
+  "created": "2026-08-06",
+  "downloads": 629,
+  "likes": 6,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-MLX",
+  "created": "2026-08-03",
+  "downloads": 0,
+  "likes": 27,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-ONNX",
+  "created": "2026-08-01",
+  "downloads": 1985,
+  "likes": 22,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-GGUF",
+  "created": "2026-08-01",
+  "downloads": 1089642,
+  "likes": 360,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B-Base",
+  "created": "2026-08-01",
+  "downloads": 15128,
+  "likes": 50,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-2.6B",
+  "created": "2026-07-28",
+  "downloads": 91504,
+  "likes": 792,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-Encoder-350M-Diffusion",
+  "created": "2026-07-10",
+  "downloads": 1327,
+  "likes": 25,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M",
+  "created": "2026-06-24",
+  "downloads": 87237,
+  "likes": 301,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M-Base",
+  "created": "2026-06-16",
+  "downloads": 12650,
+  "likes": 22,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M-ONNX",
+  "created": "2026-06-15",
+  "downloads": 2214,
+  "likes": 21,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M-MLX-4bit",
+  "created": "2026-06-15",
+  "downloads": 1935,
+  "likes": 5,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M-MLX-5bit",
+  "created": "2026-06-15",
+  "downloads": 193,
+  "likes": 5,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M-MLX-6bit",
+  "created": "2026-06-15",
+  "downloads": 229,
+  "likes": 5,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M-MLX-8bit",
+  "created": "2026-06-15",
+  "downloads": 591,
+  "likes": 8,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M-MLX-bf16",
+  "created": "2026-06-15",
+  "downloads": 276,
+  "likes": 6,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-230M-GGUF",
+  "created": "2026-06-11",
+  "downloads": 546967,
+  "likes": 109,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-JP-202606-ONNX",
+  "created": "2026-06-03",
+  "downloads": 7408,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-JP-202606-MLX-5bit",
+  "created": "2026-06-03",
+  "downloads": 196,
+  "likes": 8,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-JP-202606-MLX-4bit",
+  "created": "2026-06-03",
+  "downloads": 314,
+  "likes": 9,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-JP-202606-MLX-6bit",
+  "created": "2026-06-03",
+  "downloads": 203,
+  "likes": 7,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-JP-202606-MLX-8bit",
+  "created": "2026-06-03",
+  "downloads": 299,
+  "likes": 8,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-Base",
+  "created": "2026-05-28",
+  "downloads": 3020,
+  "likes": 46,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B",
+  "created": "2026-05-28",
+  "downloads": 34148,
+  "likes": 778,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-MLX-8bit",
+  "created": "2026-05-27",
+  "downloads": 1889,
+  "likes": 34,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-MLX-bf16",
+  "created": "2026-05-27",
+  "downloads": 363,
+  "likes": 9,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-MLX-5bit",
+  "created": "2026-05-27",
+  "downloads": 316,
+  "likes": 9,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-MLX-6bit",
+  "created": "2026-05-27",
+  "downloads": 458,
+  "likes": 9,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-MLX-4bit",
+  "created": "2026-05-27",
+  "downloads": 3207,
+  "likes": 20,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-ONNX",
+  "created": "2026-05-27",
+  "downloads": 203,
+  "likes": 11,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-JP-202606-GGUF",
+  "created": "2026-05-26",
+  "downloads": 1682,
+  "likes": 27,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-1.2B-JP-202606",
+  "created": "2026-05-26",
+  "downloads": 10686,
+  "likes": 78,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2-2.6B-Longevity",
+  "created": "2026-05-25",
+  "downloads": 3983,
+  "likes": 50,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-8B-A1B-GGUF",
+  "created": "2026-05-24",
+  "downloads": 529071,
+  "likes": 309,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M-Base",
+  "created": "2026-03-31",
+  "downloads": 15740,
+  "likes": 34,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M",
+  "created": "2026-03-31",
+  "downloads": 75393,
+  "likes": 430,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M-MLX-4bit",
+  "created": "2026-03-25",
+  "downloads": 970,
+  "likes": 12,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M-MLX-5bit",
+  "created": "2026-03-25",
+  "downloads": 200,
+  "likes": 8,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M-MLX-6bit",
+  "created": "2026-03-25",
+  "downloads": 237,
+  "likes": 10,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M-MLX-8bit",
+  "created": "2026-03-25",
+  "downloads": 1002,
+  "likes": 13,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M-MLX-bf16",
+  "created": "2026-03-25",
+  "downloads": 269,
+  "likes": 7,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M-ONNX",
+  "created": "2026-03-25",
+  "downloads": 964,
+  "likes": 20,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2.5-350M-GGUF",
+  "created": "2026-03-25",
+  "downloads": 74815,
+  "likes": 102,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2-24B-A2B",
+  "created": "2026-02-24",
+  "downloads": 3480,
+  "likes": 351,
+  "tags": []
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2-24B-A2B-MLX-4bit",
+  "created": "2026-02-18",
+  "downloads": 405,
+  "likes": 11,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2-24B-A2B-MLX-5bit",
+  "created": "2026-02-18",
+  "downloads": 179,
+  "likes": 6,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2-24B-A2B-MLX-6bit",
+  "created": "2026-02-18",
+  "downloads": 175,
+  "likes": 8,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "LiquidAI",
+  "id": "LiquidAI/LFM2-24B-A2B-MLX-8bit",
+  "created": "2026-02-18",
+  "downloads": 266,
+  "likes": 18,
+  "tags": [
+   "mlx"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/GLM-5.3-NVFP4",
+  "created": "2026-09-14",
+  "downloads": 19787,
+  "likes": 25,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/DeepSeek-V4-Pro-0813-nvfp4-DSpark",
+  "created": "2026-09-09",
+  "downloads": 1760,
+  "likes": 4,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Qwen3.8-27B-NVFP4",
+  "created": "2026-09-04",
+  "downloads": 471004,
+  "likes": 159,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-3-Competitive-Coding-550B-A55B-NVFP4",
+  "created": "2026-09-04",
+  "downloads": 124,
+  "likes": 8,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Nemotron-3-Labs-Ultra-Math-RL",
+  "created": "2026-09-02",
+  "downloads": 1244,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Nemotron-3-Labs-Ultra-Math-SFT",
+  "created": "2026-09-02",
+  "downloads": 2459,
+  "likes": 9,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/DeepSeek-V4-Pro-0813-NVFP4",
+  "created": "2026-08-27",
+  "downloads": 3231,
+  "likes": 15,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Qwen3.8-2.4T-A95B-NVFP4",
+  "created": "2026-08-25",
+  "downloads": 2465,
+  "likes": 17,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/DeepSeek-V4-Flash-0731-NVFP4",
+  "created": "2026-08-19",
+  "downloads": 44423,
+  "likes": 49,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-Teacher-Chat",
+  "created": "2026-08-14",
+  "downloads": 490,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-Teacher-Competition-Coding",
+  "created": "2026-08-14",
+  "downloads": 598,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-Teacher-Instruction-Following",
+  "created": "2026-08-14",
+  "downloads": 854,
+  "likes": 4,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-Teacher-General-Reasoning",
+  "created": "2026-08-14",
+  "downloads": 625,
+  "likes": 14,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-Teacher-STEM",
+  "created": "2026-08-14",
+  "downloads": 507,
+  "likes": 7,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Kimi-K3-NVFP4",
+  "created": "2026-08-13",
+  "downloads": 22463,
+  "likes": 32,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Base-BF16",
+  "created": "2026-08-05",
+  "downloads": 184371,
+  "likes": 22,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4-DSpark",
+  "created": "2026-08-05",
+  "downloads": 168321,
+  "likes": 33,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4-DFlash",
+  "created": "2026-08-05",
+  "downloads": 1596,
+  "likes": 19,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
+  "created": "2026-08-04",
+  "downloads": 759480,
+  "likes": 445,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+  "created": "2026-08-01",
+  "downloads": 453809,
+  "likes": 224,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/DeepSeek-V4-Pro-nvfp4-DSpark",
+  "created": "2026-07-22",
+  "downloads": 1147,
+  "likes": 3,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/DeepSeek-V4-Flash-nvfp4-DSpark",
+  "created": "2026-07-22",
+  "downloads": 3200,
+  "likes": 30,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/MiniMax-M3-DSpark",
+  "created": "2026-07-15",
+  "downloads": 4296,
+  "likes": 15,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Kimi-K2.7-Code-DFlash",
+  "created": "2026-07-08",
+  "downloads": 669,
+  "likes": 12,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Kimi-K2.7-Code-NVFP4",
+  "created": "2026-07-06",
+  "downloads": 4633,
+  "likes": 10,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Nemotron-Labs-Audex-2B",
+  "created": "2026-07-06",
+  "downloads": 939,
+  "likes": 90,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Nemotron-Labs-Audex-30B-A3B",
+  "created": "2026-07-06",
+  "downloads": 407,
+  "likes": 177,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/SDLLM-EsoLM-1.7B-Base",
+  "created": "2026-07-02",
+  "downloads": 26,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/SDLLM-Duo-1.7B-Base",
+  "created": "2026-07-02",
+  "downloads": 39,
+  "likes": 3,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/SDLLM-AR-1.7B-Base",
+  "created": "2026-07-02",
+  "downloads": 23,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/SDLLM-MDLM-1.7B-Base",
+  "created": "2026-07-02",
+  "downloads": 39,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Mistral-Medium-3.5-128B-NVFP4",
+  "created": "2026-06-30",
+  "downloads": 3007,
+  "likes": 32,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Qwen3.5-397B-A17B-NVFP4-V2",
+  "created": "2026-06-29",
+  "downloads": 41852,
+  "likes": 16,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-3-Puzzle-75B-A9B-FP8",
+  "created": "2026-06-24",
+  "downloads": 271,
+  "likes": 17,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-3-Puzzle-75B-A9B-BF16",
+  "created": "2026-06-24",
+  "downloads": 879,
+  "likes": 70,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-Labs-3-Puzzle-75B-A9B-NVFP4",
+  "created": "2026-06-24",
+  "downloads": 10018,
+  "likes": 130,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/MiniMax-M3-NVFP4",
+  "created": "2026-06-23",
+  "downloads": 74423,
+  "likes": 84,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Kimi-K2.6-DFlash",
+  "created": "2026-06-23",
+  "downloads": 337,
+  "likes": 25,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/GLM-5.2-NVFP4",
+  "created": "2026-06-22",
+  "downloads": 556124,
+  "likes": 323,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Qwen3.6-27B-NVFP4",
+  "created": "2026-06-22",
+  "downloads": 445774,
+  "likes": 436,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/MiniMax-M2.7-DFlash",
+  "created": "2026-06-16",
+  "downloads": 524,
+  "likes": 12,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/diffusiongemma-26B-A4B-it-NVFP4",
+  "created": "2026-06-10",
+  "downloads": 67940,
+  "likes": 142,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Privasis-Cleaner-0.6B",
+  "created": "2026-06-08",
+  "downloads": 433,
+  "likes": 19,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Privasis-Cleaner-4B",
+  "created": "2026-06-08",
+  "downloads": 1490,
+  "likes": 11,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
+  "created": "2026-06-03",
+  "downloads": 185023,
+  "likes": 348,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16",
+  "created": "2026-06-03",
+  "downloads": 293955,
+  "likes": 358,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-Base-BF16",
+  "created": "2026-06-03",
+  "downloads": 877,
+  "likes": 33,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Qwen3.6-35B-A3B-NVFP4",
+  "created": "2026-05-27",
+  "downloads": 6515955,
+  "likes": 638,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-GenRM",
+  "created": "2026-05-26",
+  "downloads": 702,
+  "likes": 13,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Nemotron-3-Super-120B-A12B-BF16-MTPv2",
+  "created": "2026-05-24",
+  "downloads": 3629,
+  "likes": 8,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/CUDA-Autocomplete",
+  "created": "2026-05-19",
+  "downloads": 363,
+  "likes": 17,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/DeepSeek-V4-Flash-NVFP4",
+  "created": "2026-05-18",
+  "downloads": 21054,
+  "likes": 113,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/DeepSeek-V4-Pro-NVFP4",
+  "created": "2026-05-14",
+  "downloads": 28491,
+  "likes": 78,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Qwen3.5-122B-A10B-NVFP4",
+  "created": "2026-05-13",
+  "downloads": 1308982,
+  "likes": 54,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Kimi-K2.6-NVFP4",
+  "created": "2026-05-11",
+  "downloads": 57588,
+  "likes": 43,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/GLM-5.1-NVFP4",
+  "created": "2026-05-09",
+  "downloads": 4582,
+  "likes": 43,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Kimi-K2.6-Eagle3",
+  "created": "2026-05-08",
+  "downloads": 847,
+  "likes": 12,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Gemma-4-26B-A4B-NVFP4",
+  "created": "2026-05-01",
+  "downloads": 1290650,
+  "likes": 153,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Nemotron-Labs-Diffusion-14B-Base",
+  "created": "2026-04-23",
+  "downloads": 467,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "nvidia",
+  "id": "nvidia/Nemotron-Labs-Diffusion-14B",
+  "created": "2026-04-22",
+  "downloads": 14587,
+  "likes": 155,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B-DSpark-GGUF",
+  "created": "2026-09-09",
+  "downloads": 7439,
+  "likes": 27,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B-GPTQ",
+  "created": "2026-09-07",
+  "downloads": 4809,
+  "likes": 22,
+  "tags": [
+   "awq"
+  ]
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/JustRL-II-base-model",
+  "created": "2026-09-07",
+  "downloads": 386,
+  "likes": 8,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B-DSpark",
+  "created": "2026-09-06",
+  "downloads": 713409,
+  "likes": 42,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B",
+  "created": "2026-09-06",
+  "downloads": 942924,
+  "likes": 1705,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B-GGUF",
+  "created": "2026-09-05",
+  "downloads": 254351,
+  "likes": 346,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B-MLX",
+  "created": "2026-09-05",
+  "downloads": 268138,
+  "likes": 53,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B-Midtrain",
+  "created": "2026-09-01",
+  "downloads": 4951,
+  "likes": 22,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B-SFT",
+  "created": "2026-08-27",
+  "downloads": 6305,
+  "likes": 29,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-2B-Base",
+  "created": "2026-08-27",
+  "downloads": 12557,
+  "likes": 29,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MathForm-8B",
+  "created": "2026-08-14",
+  "downloads": 529,
+  "likes": 8,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/UltraX-0.6B-Preview",
+  "created": "2026-06-10",
+  "downloads": 0,
+  "likes": 15,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-1B-GGUF",
+  "created": "2026-05-24",
+  "downloads": 36043,
+  "likes": 257,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-1B-MLX",
+  "created": "2026-05-24",
+  "downloads": 79592,
+  "likes": 35,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-1B",
+  "created": "2026-05-21",
+  "downloads": 482666,
+  "likes": 1148,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-1B-SFT",
+  "created": "2026-05-21",
+  "downloads": 5765,
+  "likes": 46,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM5-1B-Base",
+  "created": "2026-05-21",
+  "downloads": 7875,
+  "likes": 22,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-8B-unquantized",
+  "created": "2026-05-18",
+  "downloads": 2737,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-3B-unquantized",
+  "created": "2026-05-18",
+  "downloads": 2596,
+  "likes": 4,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-1B-unquantized",
+  "created": "2026-05-18",
+  "downloads": 2487,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-0.5B-unquantized",
+  "created": "2026-05-18",
+  "downloads": 2628,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-8B-gguf",
+  "created": "2026-05-16",
+  "downloads": 550,
+  "likes": 59,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-3B-gguf",
+  "created": "2026-05-16",
+  "downloads": 359,
+  "likes": 7,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-1B-gguf",
+  "created": "2026-05-16",
+  "downloads": 247,
+  "likes": 7,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-0.5B-gguf",
+  "created": "2026-05-16",
+  "downloads": 202,
+  "likes": 17,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-8B",
+  "created": "2026-05-15",
+  "downloads": 2986,
+  "likes": 105,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-3B",
+  "created": "2026-05-15",
+  "downloads": 2647,
+  "likes": 10,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-1B",
+  "created": "2026-05-15",
+  "downloads": 2442,
+  "likes": 8,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/BitCPM-CANN-0.5B",
+  "created": "2026-05-15",
+  "downloads": 2504,
+  "likes": 10,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/SciCore-Mol",
+  "created": "2026-04-29",
+  "downloads": 145,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/MiniCPM-SALA",
+  "created": "2026-02-11",
+  "downloads": 3813,
+  "likes": 685,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/NOSA-1B",
+  "created": "2026-01-21",
+  "downloads": 193,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/AgentCPM-Report",
+  "created": "2026-01-19",
+  "downloads": 266,
+  "likes": 305,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/AgentCPM-Explore",
+  "created": "2026-01-11",
+  "downloads": 525,
+  "likes": 418,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/NOSA-3B",
+  "created": "2026-01-06",
+  "downloads": 195,
+  "likes": 4,
+  "tags": []
+ },
+ {
+  "org": "openbmb",
+  "id": "openbmb/NOSA-8B",
+  "created": "2026-01-04",
+  "downloads": 301,
+  "likes": 11,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/EMO",
+  "created": "2026-05-08",
+  "downloads": 325,
+  "likes": 5,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/StdMoE_1b14b_1T_EmoAnnealed",
+  "created": "2026-05-05",
+  "downloads": 325,
+  "likes": 5,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/StdMoE_1b14b_1T_Preanneal",
+  "created": "2026-05-05",
+  "downloads": 321,
+  "likes": 5,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/StdMoE_1b14b_1T",
+  "created": "2026-04-29",
+  "downloads": 402,
+  "likes": 5,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/StdMoE_1b14b_130B",
+  "created": "2026-04-29",
+  "downloads": 381,
+  "likes": 5,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/StdMoE_1b4b_130B",
+  "created": "2026-04-29",
+  "downloads": 398,
+  "likes": 5,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/Emo_1b14b_130B",
+  "created": "2026-04-29",
+  "downloads": 374,
+  "likes": 7,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/Emo_1b14b_1T",
+  "created": "2026-04-29",
+  "downloads": 655,
+  "likes": 29,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/Dense_1b_130B",
+  "created": "2026-04-29",
+  "downloads": 367,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-2x7B-Tool-Use",
+  "created": "2026-04-19",
+  "downloads": 267,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-2x7B-Code",
+  "created": "2026-04-19",
+  "downloads": 285,
+  "likes": 3,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-2x7B-Code-SFT",
+  "created": "2026-04-19",
+  "downloads": 229,
+  "likes": 3,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-2x7B-Safety",
+  "created": "2026-04-19",
+  "downloads": 232,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-2x7B-Math-SFT",
+  "created": "2026-04-19",
+  "downloads": 226,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-2x7B-Base",
+  "created": "2026-04-19",
+  "downloads": 273,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-2x7B-Math",
+  "created": "2026-04-19",
+  "downloads": 283,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-5x7B",
+  "created": "2026-04-19",
+  "downloads": 272,
+  "likes": 5,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/BAR-7B",
+  "created": "2026-04-19",
+  "downloads": 260,
+  "likes": 3,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-llama3-8b-intent-explicit",
+  "created": "2026-04-13",
+  "downloads": 178,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-llama3-8b-intent-implicit",
+  "created": "2026-04-13",
+  "downloads": 176,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-llama3-8b-baseline",
+  "created": "2026-04-13",
+  "downloads": 149,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-llama3-8b-multiview",
+  "created": "2026-04-13",
+  "downloads": 151,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-qwen3-8b-intent-implicit",
+  "created": "2026-04-13",
+  "downloads": 157,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-qwen3-8b-baseline",
+  "created": "2026-04-13",
+  "downloads": 153,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-qwen3-8b-multiview",
+  "created": "2026-04-13",
+  "downloads": 146,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-qwen3-8b-intent-explicit",
+  "created": "2026-04-13",
+  "downloads": 150,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-qwen3-4b-intent-implicit",
+  "created": "2026-04-13",
+  "downloads": 143,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-qwen3-4b-baseline",
+  "created": "2026-04-13",
+  "downloads": 157,
+  "likes": 1,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-qwen3-4b-intent-explicit",
+  "created": "2026-04-13",
+  "downloads": 157,
+  "likes": 2,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/intent-aware-lfqa-qwen3-4b-multiview",
+  "created": "2026-04-13",
+  "downloads": 152,
+  "likes": 0,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/Olmo-Hybrid-Think-SFT-7B",
+  "created": "2026-02-28",
+  "downloads": 669,
+  "likes": 19,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/Olmo-Hybrid-Instruct-DPO-7B",
+  "created": "2026-02-20",
+  "downloads": 744,
+  "likes": 21,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/Olmo-Hybrid-Instruct-SFT-7B",
+  "created": "2026-02-19",
+  "downloads": 7657,
+  "likes": 17,
+  "tags": []
+ },
+ {
+  "org": "allenai",
+  "id": "allenai/Olmo-Hybrid-7B",
+  "created": "2026-01-28",
+  "downloads": 15936,
+  "likes": 67,
+  "tags": []
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-5.3-BF16",
+  "created": "2026-08-25",
+  "downloads": 32914,
+  "likes": 45,
+  "tags": []
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-5.3",
+  "created": "2026-08-25",
+  "downloads": 1375795,
+  "likes": 2041,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-5.2",
+  "created": "2026-06-16",
+  "downloads": 731093,
+  "likes": 5141,
+  "tags": []
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-5.2-FP8",
+  "created": "2026-06-16",
+  "downloads": 531354,
+  "likes": 267,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-5.1-FP8",
+  "created": "2026-04-03",
+  "downloads": 30970,
+  "likes": 121,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-5.1",
+  "created": "2026-04-03",
+  "downloads": 191068,
+  "likes": 1840,
+  "tags": []
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-5",
+  "created": "2026-02-11",
+  "downloads": 243623,
+  "likes": 2122,
+  "tags": []
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-5-FP8",
+  "created": "2026-02-11",
+  "downloads": 21252,
+  "likes": 182,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "zai-org",
+  "id": "zai-org/GLM-4.7-Flash",
+  "created": "2026-01-19",
+  "downloads": 1809855,
+  "likes": 1858,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Simple-Attention-Sparsification",
+  "created": "2026-09-14",
+  "downloads": 0,
+  "likes": 10,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy4-preview-FP8",
+  "created": "2026-08-27",
+  "downloads": 4525,
+  "likes": 25,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy4-preview",
+  "created": "2026-08-27",
+  "downloads": 25068,
+  "likes": 498,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/ContextPilot-E4B",
+  "created": "2026-08-27",
+  "downloads": 962,
+  "likes": 8,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/ContextPilot-14B",
+  "created": "2026-08-27",
+  "downloads": 1023,
+  "likes": 23,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/ContextPilot-8B",
+  "created": "2026-08-27",
+  "downloads": 788,
+  "likes": 11,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/HiLS-Attention-7B",
+  "created": "2026-07-09",
+  "downloads": 569,
+  "likes": 24,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy3-FP8",
+  "created": "2026-07-04",
+  "downloads": 55330,
+  "likes": 70,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy3",
+  "created": "2026-07-02",
+  "downloads": 191636,
+  "likes": 972,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy-MT2-7B",
+  "created": "2026-05-11",
+  "downloads": 15135,
+  "likes": 213,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy-MT2-1.8B",
+  "created": "2026-05-11",
+  "downloads": 29859,
+  "likes": 1225,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy-MT2-30B-A3B",
+  "created": "2026-05-11",
+  "downloads": 10923,
+  "likes": 504,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy3-preview",
+  "created": "2026-04-13",
+  "downloads": 101544,
+  "likes": 312,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Hy3-preview-Base",
+  "created": "2026-04-13",
+  "downloads": 434,
+  "likes": 24,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Sequential-Hidden-Decoding-8B-n8-Instruct",
+  "created": "2026-03-31",
+  "downloads": 217,
+  "likes": 8,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/POINTS-Seeker",
+  "created": "2026-03-24",
+  "downloads": 191,
+  "likes": 8,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Penguin-VL-2B",
+  "created": "2026-03-05",
+  "downloads": 428,
+  "likes": 43,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Penguin-VL-8B",
+  "created": "2026-03-05",
+  "downloads": 365,
+  "likes": 80,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/POINTS-GUI-G",
+  "created": "2026-02-03",
+  "downloads": 309,
+  "likes": 22,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Youtu-VL-4B-Instruct",
+  "created": "2026-01-23",
+  "downloads": 1751,
+  "likes": 162,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Youtu-Parsing",
+  "created": "2026-01-23",
+  "downloads": 419,
+  "likes": 43,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/TCAndon-Router",
+  "created": "2026-01-07",
+  "downloads": 146,
+  "likes": 12,
+  "tags": []
+ },
+ {
+  "org": "tencent",
+  "id": "tencent/Youtu-LLM-2B-GGUF",
+  "created": "2026-01-05",
+  "downloads": 742,
+  "likes": 30,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "LGAI-EXAONE",
+  "id": "LGAI-EXAONE/K-EXAONE-2.0-750B-A37B-DSpark",
+  "created": "2026-07-30",
+  "downloads": 372,
+  "likes": 35,
+  "tags": []
+ },
+ {
+  "org": "LGAI-EXAONE",
+  "id": "LGAI-EXAONE/K-EXAONE-2.0-750B-A37B-NVFP4",
+  "created": "2026-07-30",
+  "downloads": 503,
+  "likes": 36,
+  "tags": []
+ },
+ {
+  "org": "LGAI-EXAONE",
+  "id": "LGAI-EXAONE/K-EXAONE-2.0-750B-A37B-FP8",
+  "created": "2026-07-30",
+  "downloads": 1231,
+  "likes": 40,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "LGAI-EXAONE",
+  "id": "LGAI-EXAONE/K-EXAONE-2.0-750B-A37B",
+  "created": "2026-07-29",
+  "downloads": 3356,
+  "likes": 156,
+  "tags": []
+ },
+ {
+  "org": "LGAI-EXAONE",
+  "id": "LGAI-EXAONE/K-EXAONE-236B-A23B-FP8",
+  "created": "2026-01-03",
+  "downloads": 1539,
+  "likes": 16,
+  "tags": []
+ },
+ {
+  "org": "LGAI-EXAONE",
+  "id": "LGAI-EXAONE/K-EXAONE-236B-A23B-GGUF",
+  "created": "2026-01-02",
+  "downloads": 403,
+  "likes": 19,
+  "tags": [
+   "gguf"
+  ]
+ },
+ {
+  "org": "ByteDance-Seed",
+  "id": "ByteDance-Seed/Cola-DLM",
+  "created": "2026-05-15",
+  "downloads": 109,
+  "likes": 46,
+  "tags": []
+ },
+ {
+  "org": "ByteDance-Seed",
+  "id": "ByteDance-Seed/Stable-DiffCoder-8B-Instruct",
+  "created": "2026-01-15",
+  "downloads": 540,
+  "likes": 143,
+  "tags": []
+ },
+ {
+  "org": "ByteDance-Seed",
+  "id": "ByteDance-Seed/Stable-DiffCoder-8B-Base",
+  "created": "2026-01-15",
+  "downloads": 350,
+  "likes": 21,
+  "tags": []
+ },
+ {
+  "org": "MiniMaxAI",
+  "id": "MiniMaxAI/MiniMax-M2.7",
+  "created": "2026-04-09",
+  "downloads": 1139911,
+  "likes": 1248,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "MiniMaxAI",
+  "id": "MiniMaxAI/MiniMax-M2.5",
+  "created": "2026-02-12",
+  "downloads": 370896,
+  "likes": 1507,
+  "tags": [
+   "fp8"
+  ]
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/tiny-aya-base-32K",
+  "created": "2026-09-08",
+  "downloads": 8,
+  "likes": 4,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/tiny-aya-en-thinker",
+  "created": "2026-09-02",
+  "downloads": 46,
+  "likes": 11,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/tiny-aya-l2-thinker",
+  "created": "2026-09-02",
+  "downloads": 1354,
+  "likes": 15,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/North-Small-Translate-1.0-w4a16",
+  "created": "2026-08-14",
+  "downloads": 35,
+  "likes": 9,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/North-Small-Translate-1.0",
+  "created": "2026-08-14",
+  "downloads": 148,
+  "likes": 57,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/North-Small-Translate-1.0-fp8",
+  "created": "2026-08-14",
+  "downloads": 23,
+  "likes": 6,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/North-Mini-Code-1.0-w4a16",
+  "created": "2026-06-16",
+  "downloads": 799,
+  "likes": 59,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/North-Mini-Code-1.0-fp8",
+  "created": "2026-06-08",
+  "downloads": 983,
+  "likes": 32,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/North-Mini-Code-1.0",
+  "created": "2026-06-05",
+  "downloads": 9752,
+  "likes": 573,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/tiny-aya-fire",
+  "created": "2026-02-13",
+  "downloads": 730,
+  "likes": 28,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/tiny-aya-earth",
+  "created": "2026-02-13",
+  "downloads": 2181,
+  "likes": 29,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/tiny-aya-water",
+  "created": "2026-02-13",
+  "downloads": 441,
+  "likes": 46,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/tiny-aya-global",
+  "created": "2026-02-13",
+  "downloads": 10083,
+  "likes": 172,
+  "tags": []
+ },
+ {
+  "org": "CohereLabs",
+  "id": "CohereLabs/tiny-aya-base",
+  "created": "2026-02-13",
+  "downloads": 8170,
+  "likes": 67,
+  "tags": []
+ }
+]
