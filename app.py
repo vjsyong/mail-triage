@@ -6726,6 +6726,9 @@ SETTINGS_TMPL = """
 .setrow .st-c input[type=text],.setrow .st-c input[type=password],.setrow .st-c input[type=number],.setrow .st-c select{width:100%}
 .setrow .st-c textarea{width:100%}
 .setrow .st-c .check{margin:2px 0 0}
+.model-picker{display:flex;flex-direction:column;gap:5px}
+.model-picker .model-custom[hidden]{display:none}
+.model-picker .model-status{font-size:.74rem;color:var(--dim)}
 @media(max-width:900px){.settings-grid{grid-template-columns:1fr}.setnav{flex-direction:row;flex-wrap:wrap;position:static;gap:4px;margin-bottom:6px}.setnav .sn-h{display:none}.setrow{grid-template-columns:1fr}}
 @media(max-width:767px){.setnav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}.setnav::-webkit-scrollbar{display:none}.setnav a{flex:none;border:1px solid var(--line);white-space:nowrap;padding:5px 10px}}
 </style>
@@ -6786,9 +6789,18 @@ SETTINGS_TMPL = """
       <input type="hidden" name="section" value="llm">
       <input type="hidden" name="scope" value="LLM endpoint">
       <div class="setrow"><div class="st-l"><b>Base URL</b><span class="sub">e.g. http://host:8000/v1</span></div>
-        <div class="st-c"><input type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}" aria-label="LLM base URL"></div></div>
-      <div class="setrow"><div class="st-l"><b>Model</b></div>
-        <div class="st-c"><input type="text" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model }}" aria-label="LLM model"></div></div>
+        <div class="st-c"><input id="llm-base-url" type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}" aria-label="LLM base URL"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Choices come from the endpoint; Custom lets you type one.</span></div>
+        <div class="st-c">
+          <div class="model-picker" data-which="primary" data-base="llm_base_url" data-effective="{{ llm.model }}">
+            <select class="model-select" aria-label="LLM model">
+              {% if s.llm_model %}<option value="{{ s.llm_model }}" selected>{{ s.llm_model }}</option>{% endif %}
+              <option value="__custom__">Custom&hellip;</option>
+            </select>
+            <input type="text" class="model-custom" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model or 'model name' }}" aria-label="LLM model"{% if s.llm_model %} hidden{% endif %}>
+            <span class="model-status sub"></span>
+          </div>
+        </div></div>
       <div class="setrow"><div class="st-l"><b>API key</b><span class="sub">Blank keeps the stored key.</span></div>
         <div class="st-c"><input type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}" aria-label="LLM API key"></div></div>
       <div class="setrow"><div class="st-l"><b>Timeout</b><span class="sub">Seconds; blank = default.</span></div>
@@ -6805,9 +6817,18 @@ SETTINGS_TMPL = """
         <summary style="cursor:pointer;font-weight:600;list-style:none">Fallback endpoint <span class="sub">(optional; used automatically when the primary fails)</span></summary>
         <div style="margin-top:6px">
       <div class="setrow"><div class="st-l"><b>Base URL</b></div>
-        <div class="st-c"><input type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}" aria-label="Fallback base URL"></div></div>
+        <div class="st-c"><input id="llm-fallback-base-url" type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}" aria-label="Fallback base URL"></div></div>
       <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Blank = same as primary.</span></div>
-        <div class="st-c"><input type="text" name="llm_fallback_model" value="{{ s.llm_fallback_model }}" placeholder="{{ (llm.fallback.model if llm.fallback else '') or '' }}" aria-label="Fallback model"></div></div>
+        <div class="st-c">
+          <div class="model-picker" data-which="fallback" data-base="llm_fallback_base_url" data-effective="{{ (llm.fallback.model if llm.fallback else '') or '' }}">
+            <select class="model-select" aria-label="Fallback model">
+              {% if s.llm_fallback_model %}<option value="{{ s.llm_fallback_model }}" selected>{{ s.llm_fallback_model }}</option>{% endif %}
+              <option value="__custom__">Custom&hellip;</option>
+            </select>
+            <input type="text" class="model-custom" name="llm_fallback_model" value="{{ s.llm_fallback_model }}" placeholder="{{ (llm.fallback.model if llm.fallback else '') or 'same as primary' }}" aria-label="Fallback model"{% if s.llm_fallback_model %} hidden{% endif %}>
+            <span class="model-status sub"></span>
+          </div>
+        </div></div>
       <div class="setrow"><div class="st-l"><b>API key</b><span class="sub">Blank keeps the stored key.</span></div>
         <div class="st-c"><input type="password" name="llm_fallback_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if (llm.fallback and llm.fallback.key) else 'not set' }}" aria-label="Fallback API key"></div></div>
       <div class="setrow"><div class="st-l"><b>Clear the stored fallback key</b></div>
@@ -7115,6 +7136,59 @@ SETTINGS_TMPL = """
   },{rootMargin:'-25% 0px -60% 0px'});
   secs.forEach(function(s){ io.observe(s); });
 })();
+</script>
+
+<script>
+(function(){
+  function load(picker){
+    var select = picker.querySelector('.model-select');
+    var input = picker.querySelector('.model-custom');
+    var status = picker.querySelector('.model-status');
+    var which = picker.getAttribute('data-which') || 'primary';
+    var baseName = picker.getAttribute('data-base');
+    var baseInput = baseName ? document.querySelector('input[name="' + baseName + '"]') : null;
+    var effective = picker.getAttribute('data-effective') || '';
+    var url = '{{ url_for("settings_llm_models") }}?which=' + encodeURIComponent(which);
+    if(baseInput && baseInput.value.trim()){
+      url += '&base_url=' + encodeURIComponent(baseInput.value.trim());
+    }
+    function custom(focus){
+      select.value = '__custom__';
+      input.hidden = false;
+      if(focus){ input.focus(); }
+    }
+    fetch(url, {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var models = (d && d.ok && d.models) ? d.models : [];
+        if(!models.length){
+          if(d && d.error){ status.textContent = 'Could not list models - type below.'; custom(false); }
+          return;
+        }
+        var customOpt = select.querySelector('option[value="__custom__"]');
+        var have = {};
+        Array.prototype.forEach.call(select.options, function(o){ have[o.value] = true; });
+        models.forEach(function(m){
+          if(have[m]){ return; }
+          have[m] = true;
+          var o = document.createElement('option');
+          o.value = m; o.textContent = m;
+          select.insertBefore(o, customOpt);
+        });
+        var current = input.value || effective;
+        if(models.indexOf(current) >= 0){ select.value = current; input.hidden = true; }
+        else { custom(false); }
+        status.textContent = models.length + ' models';
+      })
+      .catch(function(){ status.textContent = 'Could not list models - type below.'; });
+    select.addEventListener('change', function(){
+      if(select.value === '__custom__'){ input.hidden = false; input.focus(); }
+      else { input.value = select.value; input.hidden = true; }
+    });
+    if(baseInput){ baseInput.addEventListener('change', function(){ load(picker); }); }
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.model-picker'), load);
+})();
 </script>"""
 
 
@@ -7171,6 +7245,28 @@ def settings():
         tz=tz_label(), agcaps=engine.AGENT_CAPS,
         llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config(),
         icfg=engine.imap_config()))
+
+
+@app.route("/settings/llm-models")
+def settings_llm_models():
+    """Model ids reported by the configured endpoint, for the Settings dropdowns.
+    An empty/failed list is not an error: the UI keeps the Custom text field."""
+    which = request.args.get("which") or "primary"
+    client = engine.LLMClient()
+    if which == "fallback":
+        base, key = (client.fallback[0], client.fallback[1]) if client.fallback else ("", "")
+    else:
+        base, key = client.base, client.key
+    override = (request.args.get("base_url") or "").strip()
+    if override:
+        base = override.rstrip("/")
+    if not base:
+        return jsonify({"ok": False, "error": "no endpoint configured", "models": []})
+    try:
+        models = client.list_models(base, key)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc), "models": []})
+    return jsonify({"ok": True, "models": models})
 
 
 @app.route("/settings/test-llm", methods=["POST"])

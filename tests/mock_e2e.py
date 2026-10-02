@@ -468,6 +468,20 @@ class IMAPHandler(socketserver.StreamRequestHandler):
 # ---------------------------------------------------------------- mock LLM
 
 class LLMHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.endswith("/models"):
+            body = json.dumps({"object": "list",
+                               "data": [{"id": "settings-model-x"},
+                                        {"id": "mock-llm-7b"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self):
         if not self.path.endswith("/chat/completions"):
             self.send_response(404)
@@ -2412,6 +2426,21 @@ def main():
     r = client.get("/settings")
     check("settings page carries the new endpoint cards",
           b"LLM endpoint" in r.data and b"Embeddings" in r.data and b"Reranker" in r.data)
+    # -- the Settings model dropdown is fed by the endpoint's /models list
+    client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
+                                   "llm_model": "settings-model-x"})
+    r = client.get("/settings/llm-models?which=primary")
+    spec = r.get_json() or {}
+    check("settings model list comes from the endpoint",
+          r.status_code == 200 and spec.get("ok")
+          and "settings-model-x" in spec.get("models", []))
+    r = client.get("/settings/llm-models?base_url=%s" % llm_base_mock)
+    check("settings model list honours a base_url override",
+          "mock-llm-7b" in (r.get_json() or {}).get("models", []))
+    r = client.get("/settings")
+    check("settings page renders the auto-populated model picker",
+          b'class="model-picker"' in r.data and b'data-which="primary"' in r.data)
+    client.post("/settings", data={"section": "llm", "llm_base_url": "", "llm_model": ""})
 
     section("T27 embedded proxy: account store, config generation, connection resolution")
     import proxy as proxy_mod
