@@ -402,6 +402,23 @@ def has_grant(plugin_id, grant):
     return bool(row and row["enabled"] and grant in row["grants"])
 
 
+def default_agent_level(row):
+    """Default assistant permission level for a plugin's tools, from the
+    declared side effects: none -> auto, local_write/external -> ask,
+    mailbox_write -> off (not offered in v1)."""
+    rank = {"none": 0, "local_write": 1, "external": 2, "mailbox_write": 3}
+    worst = "none"
+    for t in (row["manifest"].get("tools") or []):
+        se = str(t.get("side_effects") or "none")
+        if rank.get(se, 0) > rank.get(worst, 0):
+            worst = se
+    if worst == "mailbox_write":
+        return "off"
+    if worst in ("local_write", "external"):
+        return "ask"
+    return "auto"
+
+
 def set_last_error(plugin_id, message):
     with store.db() as conn:
         conn.execute("UPDATE plugins SET last_error=?, updated_ts=? WHERE id=?",

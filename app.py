@@ -2443,6 +2443,78 @@ RULES_TMPL = """
 
 
 
+PLUGINS_TMPL = """
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Plugins</h1>
+    <div class="page-desc">Sandboxed extensions: classifiers, tools and integrations that run in their own
+    worker process. Plugins never touch mail directly — every host call (mailbox reads, the LLM, network) is
+    permission-gated and audited, and the assistant reaches them as
+    <span class="mono">plugin__&lt;id&gt;__&lt;tool&gt;</span> tools under the usual off / ask / auto gate.
+    SDK {{ sdk }} · user plugins: <span class="mono">{{ proots.user }}</span> · built-ins:
+    <span class="mono">{{ proots.builtin }}</span>. To write one, see <span class="mono">sdk/README.md</span>
+    and <span class="mono">docs/plugin-architecture.md</span>.</div>
+  </div>
+  <form method="post" action="{{ url_for('plugins_rescan') }}"><button class="btn">Rescan now</button></form>
+</div>
+
+{% if not px %}
+<div class="card"><div class="sub">No plugins installed yet. Drop a folder with a
+<span class="mono">manifest.json</span> and a JS bundle into the user plugins dir, then Rescan.</div></div>
+{% endif %}
+
+{% for p in px %}
+<div class="card">
+  <div class="card-h">
+    <h3>{{ p.name }} <span class="badge">{{ p.version }}</span>
+      {% if p.root == 'builtin' %}<span class="badge">built-in</span>{% endif %}
+      {% if not p.enabled %}<span class="badge warn">disabled</span>{% endif %}
+      {% if p.needs_regrant %}<span class="badge warn">re-grant needed</span>{% endif %}</h3>
+    <span class="sub mono">{{ p.id }}{% if p.kinds %} · {{ p.kinds }}{% endif %}</span>
+  </div>
+  <div class="sub" style="margin:2px 0 8px">{{ p.description }}{% if p.tools %}
+    <span class="mono">Tools: {{ p.tools|join(', ') }}</span>{% endif %}</div>
+  <div class="setrow">
+    <div class="st-l"><b>{{ 'Enabled' if p.enabled else 'Disabled' }}</b>
+      <span class="sub">{% if p.enabled %}In use; the assistant can call it subject to the gate below.{% else %}Inert until enabled.{% endif %}</span></div>
+    <div class="st-c">
+      <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline">
+        <input type="hidden" name="action" value="{{ 'disable' if p.enabled else 'enable' }}">
+        <button class="btn small">{{ 'Disable' if p.enabled else 'Enable' }}</button>
+      </form>
+    </div>
+  </div>
+  {% if p.enabled %}
+  <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}">
+    <input type="hidden" name="action" value="save">
+    <div class="setrow">
+      <div class="st-l"><b>Capabilities granted</b>
+        <span class="sub">Declared reach; unchecking revokes it at the host-function level — the sandbox cannot call it at all.</span></div>
+      <div class="st-c" style="flex-wrap:wrap;justify-content:flex-end">
+        {% for g in p.permissions %}
+        <label class="check" style="margin-left:10px"><input type="checkbox" name="grant_{{ g }}" value="1" {{ 'checked' if g in p.grants else '' }}> <span class="mono">{{ g }}</span></label>
+        {% endfor %}
+        {% if not p.permissions %}<span class="sub">no host capabilities — pure compute</span>{% endif %}
+      </div>
+    </div>
+    <div class="setrow">
+      <div class="st-l"><b>Assistant permission</b>
+        <span class="sub">Off = refused; Ask = the assistant queues a card you click; Auto = it runs directly (still audited).</span></div>
+      <div class="st-c"><select name="agent_level" aria-label="Assistant permission for {{ p.name }}">
+        {% for lvl in ('off', 'ask', 'auto') %}
+        <option value="{{ lvl }}" {{ 'selected' if p.agent_level == lvl else '' }}>{{ lvl }}</option>
+        {% endfor %}
+      </select></div>
+    </div>
+    <div class="savebar"><button class="btn small" type="submit">Save plugin</button></div>
+  </form>
+  {% endif %}
+  {% if p.last_error %}<div class="sub" style="margin-top:6px">last note: <span class="badge warn">{{ p.last_error }}</span></div>{% endif %}
+</div>
+{% endfor %}
+"""
+
+
 CLASSIFIERS_TMPL = """
 <div class="page-head">
   <div>
@@ -2494,6 +2566,68 @@ CLASSIFIERS_TMPL = """
 """
 
 
+
+
+@app.route("/plugins")
+def plugins_page():
+    data = []
+    try:
+        perms = engine.agent_permissions()
+    except Exception:
+        perms = {}
+    for r in plugins.list_rows():
+        m = r["manifest"]
+        data.append({
+            "id": r["id"], "name": m.get("name") or r["id"], "version": r["version"],
+            "description": m.get("description") or "", "root": r["root"],
+            "kinds": ", ".join(m.get("kind") or []),
+            "enabled": bool(r["enabled"]),
+            "permissions": m.get("permissions") or [], "grants": r["grants"],
+            "tools": [t.get("name") for t in (m.get("tools") or [])],
+            "agent_level": perms.get("plugin:" + r["id"], "auto"),
+            "needs_regrant": "re-grant" in (r["last_error"] or ""),
+            "last_error": r["last_error"] or "",
+        })
+    plugins.ensure_user_root()
+    return render(_render_src(PLUGINS_TMPL, px=data, sdk=plugins.HOST_SDK_VERSION,
+                              proots={"user": plugins.user_root(),
+                                      "builtin": plugins.builtin_root()}))
+
+
+@app.route("/plugins/rescan", methods=["POST"])
+def plugins_rescan():
+    rep = plugins.scan()
+    flash("Plugins rescanned: %d found, %d error(s)."
+          % (len(rep["found"]), len(rep["errors"])),
+          "warn" if rep["errors"] else "info")
+    return redirect(url_for("plugins_page"))
+
+
+@app.route("/plugins/<pid>", methods=["POST"])
+def plugins_update(pid):
+    action = (request.form.get("action") or "").strip()
+    if action == "enable":
+        res = plugins.set_enabled(pid, True)
+    elif action == "disable":
+        res = plugins.set_enabled(pid, False)
+    elif action == "save":
+        row = plugins.get(pid)
+        if row:
+            declared = row["manifest"].get("permissions") or []
+            grants = [g for g in declared if request.form.get("grant_" + g)]
+            res = plugins.set_grants(pid, grants)
+            lvl = (request.form.get("agent_level") or "").strip().lower()
+            if lvl in ("off", "ask", "auto"):
+                store.set_setting("perm_plugin:" + pid, lvl)
+        else:
+            res = {"ok": False, "error": "unknown plugin '%s'" % pid}
+    else:
+        res = {"ok": False, "error": "unknown action"}
+    if res.get("ok") is False:
+        flash(res.get("error") or "Plugin action failed.", "warn")
+    else:
+        flash("Saved.", "info")
+    return redirect(url_for("plugins_page"))
 
 
 @app.route("/classifiers")
@@ -5747,6 +5881,11 @@ SETTINGS_TMPL = """
         <div class="st-c"><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16" aria-label="Concurrency"></div></div>
       <div class="savebar"><button class="btn primary" type="submit">Save classification</button></div>
     </form>
+  </div>
+
+  <div class="card" id="ai-plugins">
+    <div class="card-h"><h3>Plugins</h3><a class="sub" href="{{ url_for('plugins_page') }}">Manage plugins →</a></div>
+    <div class="setrow"><div class="st-l"><b>Plugin tools for the assistant</b><span class="sub">Enabled plugins can contribute assistant tools — each gated by its own off / ask / auto permission on the Plugins page. Budget: {{ s.plugin_tools_budget }} plugin tool schemas per turn.</span></div></div>
   </div>
 
   <div class="card" id="ai-classifiers">

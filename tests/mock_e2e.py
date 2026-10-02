@@ -628,6 +628,20 @@ class LLMHandler(BaseHTTPRequestHandler):
         messages = payload["messages"]
         step = sum(1 for m in messages
                    if m.get("role") == "assistant" and m.get("tool_calls"))
+        if "invoice probe" in (user or "").lower():
+            self.sse_start()
+            self.delta(role="assistant")
+            if step == 0:
+                self.delta(reasoning="Checking the invoice pipeline...")
+                self.tool_delta(0, "plugin__mt-invoice-finder__find_invoices", {}, "call_p_0")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            else:
+                self.delta(content="The invoice finder plugin ran through the sandbox.")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.sse({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 5,
+                                               "total_tokens": 10}})
+            self.sse_done()
+            return
         if "multi-step" in (user or "").lower():
             self.sse_start()
             self.delta(role="assistant")
@@ -3513,6 +3527,95 @@ def main():
     check("invoice finder returns an action card",
           (inv.get("card") or {}).get("title") == "Invoices found"
           and bool(inv["card"].get("fields")))
+
+    section("T46 assistant integration + Plugins page")
+    import engine as eng_mod
+    perms = eng_mod.agent_permissions()
+    check("enabled plugin tools get an assistant capability entry",
+          perms.get("plugin:good-demo") == "auto"
+          and "plugin:mt-promo-fastpath" in perms
+          and "plugin:mt-invoice-finder" in perms)
+    tschemas = plugins_mod.tool_schemas(query_text="ping")
+    check("plugin tool schemas reach the assistant tool inventory",
+          any(s["function"]["name"] == "plugin__good-demo__ping" for s in tschemas))
+    n_before = 0
+    with store.db() as conn:
+        n_before = conn.execute("SELECT COUNT(*) AS n FROM events "
+                                "WHERE message LIKE '%mt-invoice-finder%'").fetchone()["n"]
+    r = client.post("/assistant/stream", data={"message": "invoice probe please"})
+    # CRITICAL: the test client hands back a streamed response LAZILY - the
+    # generator (and every DB write it makes) only runs when the body is
+    # consumed. Read .data FIRST, then inspect the side effects.
+    stream_body = r.data.decode()
+    dm = re.search(r"event: done\ndata: (.*)", stream_body)
+    done_data = json.loads(dm.group(1)) if dm else {}
+    mid_done = done_data.get("message_id")
+    done_rows = [m for m in store.assistant_messages(limit=200) if m["id"] == mid_done]
+    try:
+        meta = json.loads((done_rows[0].get("meta") if done_rows else "") or "{}")
+    except (TypeError, ValueError):
+        meta = {}
+    tool_names = [str(t.get("name") or "") for t in (meta.get("tools") or [])]
+    with store.db() as conn:
+        n_after = conn.execute("SELECT COUNT(*) AS n FROM events "
+                               "WHERE message LIKE '%mt-invoice-finder%'").fetchone()["n"]
+    stream_ok = (r.status_code == 200
+                 and any(nm.startswith("plugin__mt-invoice-finder") for nm in tool_names)
+                 and n_after > n_before
+                 and "plugin__mt-invoice-finder__find_invoices" in stream_body)
+    check("the assistant stream calls a plugin tool end-to-end", stream_ok)
+    if not stream_ok:
+        print("    DEBUG stream: status=%s tools=%r events %d->%d done_mid=%r"
+              % (r.status_code, tool_names, n_before, n_after, mid_done))
+    agent = eng_mod.AssistantAgent(session_id=0)
+    try:
+        out = agent.call_tool("plugin__good-demo__ping", {"note": "gate"})
+    finally:
+        agent.close()
+    check("auto-level plugin tools execute through the assistant choke point",
+          out.get("ok") and (out.get("result") or {}).get("note") == "gate")
+    store.set_setting("perm_plugin:good-demo", "off")
+    agent = eng_mod.AssistantAgent(session_id=0)
+    try:
+        out = agent.call_tool("plugin__good-demo__ping", {"note": "x"})
+    finally:
+        agent.close()
+    check("off-level plugin tools are refused with the capability named",
+          (not out.get("ok")) and out.get("permission_denied") == "plugin:good-demo")
+    store.set_setting("perm_plugin:good-demo", "ask")
+    agent = eng_mod.AssistantAgent(session_id=0)
+    try:
+        out = agent.call_tool("plugin__good-demo__ping", {"note": "y"})
+    finally:
+        agent.close()
+    check("ask-level plugin tools queue a pending approval card",
+          out.get("ok") and out.get("pending_approval") and out.get("action_id"))
+    aid = out.get("action_id")
+    client.post("/agent/actions/%d/apply" % aid, follow_redirects=True)
+    arow = store.get_agent_action(aid)
+    check("apply on the card executes the plugin tool (approved path)",
+          bool(arow) and arow.get("status") == "applied")
+    store.set_setting("perm_plugin:good-demo", "auto")
+    r = client.get("/plugins")
+    check("plugins page renders installed plugins with controls",
+          r.status_code == 200 and b"mt-promo-fastpath" in r.data
+          and b"good-demo" in r.data and b"Rescan now" in r.data
+          and b"Assistant permission" in r.data)
+    r = client.post("/plugins/rescan", follow_redirects=True)
+    check("rescan button re-syncs the registry",
+          r.status_code == 200 and b"Plugins rescanned" in r.data)
+    client.post("/plugins/good-demo", data={"action": "disable"}, follow_redirects=True)
+    check("the page can disable a plugin", not plugins_mod.get("good-demo")["enabled"])
+    client.post("/plugins/good-demo", data={"action": "enable"}, follow_redirects=True)
+    client.post("/plugins/good-demo", data={"action": "save", "agent_level": "ask"},
+                follow_redirects=True)
+    check("saving grants + agent level persists",
+          plugins_mod.get("good-demo")["enabled"]
+          and store.get_setting("perm_plugin:good-demo") == "ask")
+    store.set_setting("perm_plugin:good-demo", "auto")
+    r = client.get("/settings")
+    check("settings page links to the Plugins page",
+          r.status_code == 200 and b"Manage plugins" in r.data)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

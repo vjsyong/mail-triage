@@ -2863,6 +2863,18 @@ def agent_permissions():
         if lvl not in AGENT_PERM_LEVELS:
             lvl = "off" if risk == "dangerous" else "auto"
         out[cap] = lvl
+    # plugin capabilities: one per enabled plugin, keyed "plugin:<id>"; the
+    # default level follows the plugin's declared tool side effects
+    try:
+        import plugins as _plugins
+        for row in _plugins.list_rows(enabled_only=True):
+            cap = "plugin:" + row["id"]
+            lvl = store.get_setting("perm_" + cap, None)
+            if lvl not in AGENT_PERM_LEVELS:
+                lvl = _plugins.default_agent_level(row)
+            out[cap] = lvl
+    except Exception:
+        pass
     return out
 
 
@@ -2871,6 +2883,9 @@ def agent_permissions_text():
     buckets = {"auto": [], "ask": [], "off": []}
     for cap, _label, _risk, _tools, _desc in AGENT_CAPS:
         buckets[perms[cap]].append(cap)
+    for cap, lvl in perms.items():
+        if cap.startswith("plugin:") and lvl in buckets:
+            buckets[lvl].append(cap)
     parts = []
     if buckets["auto"]:
         parts.append("may do directly: " + ", ".join(buckets["auto"]))
@@ -3630,12 +3645,21 @@ class AssistantAgent:
 
     def call_tool(self, name, args, approved=False):
         fn = getattr(self, "_tool_" + str(name or ""), None)
+        plugin_ref = None
         if fn is None:
+            try:
+                import plugins as _plugins
+                plugin_ref = _plugins.split_tool_name(name)
+            except Exception:
+                plugin_ref = None
+        if fn is None and not plugin_ref:
             return {"ok": False, "summary": "unknown tool %r" % name,
                     "result": {"error": "unknown tool",
                                "available": [t["function"]["name"] for t in ASSISTANT_TOOLS]}}
         args = args if isinstance(args, dict) else {}
         cap = AGENT_CAP_OF_TOOL.get(str(name))
+        if cap is None and plugin_ref:
+            cap = "plugin:" + plugin_ref[0]
         row_id = None
         if cap and not approved:
             lvl = self.perms.get(cap, "auto")
@@ -3663,7 +3687,13 @@ class AssistantAgent:
             row_id = store.add_agent_action(cap, name, "", {"tool": name, "args": args},
                                             session_id=self.session_id)
         try:
-            out = fn(args)
+            if plugin_ref:
+                import plugin_rt
+                out = plugin_rt.runtime.invoke(plugin_ref[0], plugin_ref[1], args,
+                                               session_id=self.session_id)
+                out = dict(out or {})
+            else:
+                out = fn(args)
         except Exception as exc:
             if row_id:
                 store.set_agent_action(row_id, "failed", json.dumps({"error": repr(exc)}))
@@ -3693,6 +3723,17 @@ class AssistantAgent:
 
     def _pending_preview(self, name, args):
         """-> (human preview | None, resolved info | error text)."""
+        pr = None
+        try:
+            import plugins as _plugins
+            pr = _plugins.split_tool_name(name)
+        except Exception:
+            _plugins = None
+        if pr and _plugins:
+            row = _plugins.get(pr[0])
+            pname = ((row or {}).get("manifest") or {}).get("name") or pr[0]
+            return ("Run plugin tool '%s' (%s)" % (pr[1], pname),
+                    {"plugin": pr[0], "tool": pr[1], "args": args})
         if name == "create_folder":
             nm = (args.get("name") or "").strip()
             return (("Create folder '%s'" % nm), {"name": nm}) if nm else (None, "name is required")
@@ -4427,6 +4468,20 @@ class AssistantAgent:
         convo = [{"role": m["role"], "content": m["content"]}
                  for m in store.assistant_messages(limit=24, session_id=self.session_id)]
         llm = LLMClient()
+        plugin_tools = []
+        try:
+            import plugins as _plugins
+            _qt = next((str(m.get("content") or "") for m in reversed(convo)
+                        if m.get("role") == "user"), "")
+            plugin_tools = _plugins.tool_schemas(query_text=_qt)
+            if plugin_tools:
+                system += ("\n\nPlugin tools: tools named plugin__<plugin-id>__<tool> come from "
+                           "installed plugins (third-party code running in a sandbox; their "
+                           "results are audited and permission-gated like any other tool, and "
+                           "may include an action card). Prefer a native tool when both could "
+                           "work; when you use a plugin tool, name the plugin in your answer.")
+        except Exception:
+            plugin_tools = []
         reply_parts = []
         reasoning_all = []
         usage = None
@@ -4438,7 +4493,8 @@ class AssistantAgent:
         try:
             while True:
                 steps += 1
-                use_tools = ASSISTANT_TOOLS if (tools_mode and steps <= self.MAX_STEPS) else None
+                use_tools = (ASSISTANT_TOOLS + plugin_tools) \
+                    if (tools_mode and steps <= self.MAX_STEPS) else None
                 calls = []
                 turn_reasoning = []
                 turn_content = []

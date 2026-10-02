@@ -764,3 +764,73 @@ Mock adapter for the suite), host functions, limits, audit.
 
 *Verify library versions and APIs at Phase 2 spike time; this document fixes the
 contract, not the vendors.*
+
+---
+
+# Implementation notes (as built, 2026-10-02)
+
+All four phases are implemented; where reality diverged from the plan above, this
+section is the record of what shipped.
+
+## Runtime: supervised worker process, not in-process Wasm
+
+The python-quickjs binding (1.19.4, the pragmatic embed) refuses host callbacks
+while its time-limit watchdog is active ("Can not call into Python with a time
+limit set", verified 2026-10-02). Instead of giving up either host functions or
+timeouts, the runtime moved to **one persistent worker process per plugin**
+(`plugin_worker.py`), driven over newline-delimited JSON:
+
+- the interpreter enforces MEMORY (`set_memory_limit`, hard),
+- the parent enforces WALL CLOCK by killing the worker at the deadline,
+- the parent runs EVERY host call (grants, quotas, audit) - the worker has no
+  I/O of its own,
+- crashes are contained by the process boundary; success resets the strike
+  counter, three consecutive failures auto-disable the plugin.
+
+This is a strictly harder enforcement story than the in-process variant, at the
+cost of ~1 MB/worker and a lazy spawn (~0.3 s) per plugin. The `PluginRuntime`
+class keeps the swap to a Wasm-packaged QuickJS adapter behind the same
+interface if we ever want it.
+
+## SDK v0.1 is synchronous
+
+`execute`/`classify`/`onLoad` must be synchronous (the bridge is blocking
+JSON-RPC); async throws a clear error. TypeScript authors bundle with esbuild to
+a single IIFE assigning `globalThis.__mt_plugin`.
+
+## Classifier kind (Phase 3 as built)
+
+`heuristics.classify()` falls back to opted-in classifier plugins after native
+heuristics abstain. The host feeds `{kind, model, feats}` - a native heuristic's
+model, usually parked disabled - and the plugin returns label/confidence. The
+shipped `mt-promo-fastpath` mirrors `decision_list` and `naive_bayes` predictions
+bit-exactly (suite checks float equality to 1e-9). Opt in via the
+`plugin_classifiers` setting: `[{"plugin": "mt-promo-fastpath", "heuristic_id": N}]`.
+
+## Registry / CLI / settings as built
+
+- Tables: `plugins`, `plugin_kv`. New settings: `plugins_enabled`,
+  `plugin_tools_budget` (default 8), `plugin_classifiers` (opt-in list),
+  `perm_plugin:<id>` (assistant gate per plugin: off/ask/auto).
+- Assistant reach: plugin tools appear as `plugin__<id>__<tool>` in the tool
+  inventory (token-budgeted, keyword-ranked), execute through
+  `AssistantAgent.call_tool` under a `plugin:<id>` capability entry, and can
+  return Action Cards (rendered via the existing pending-action surface).
+- CLI: `python app.py --plugins list | validate <dir> | rescan |
+  enable|disable <id> | grant <id> <perm...> | invoke <id> <tool> [json]`.
+- UI: `/plugins` page (enable, grants, assistant level, rescan) linked from
+  Settings; the agent permission prompt text includes plugin capabilities.
+
+## Files
+
+`plugins.py` (kernel: scan/validate/registry/schemas/CLI) ·
+`plugin_rt.py` (supervisor + host calls) · `plugin_worker.py` (sandbox worker) ·
+`schemas/plugin-manifest.schema.json` · `sdk/` (d.ts, runtime.js, README) ·
+`plugins/mt-promo-fastpath`, `plugins/mt-invoice-finder` (built-ins) ·
+tests: suite sections T43-T46 + `tests/plugins_fixture/`.
+
+## Deferred (explicit)
+
+Node dev-tier adapter (`--plugins dev`), plugin code signing, per-plugin config
+forms on the Plugins page (values are honored from `plugin_config:<id>` already),
+Wasm adapter swap, retire-the-native-heuristic automation for mirrored fast-paths.

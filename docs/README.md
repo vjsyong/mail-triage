@@ -31,6 +31,8 @@ How this folder is organised: by what you need, not by when it was written.
 - [plugin-architecture.md](plugin-architecture.md) - microkernel / plugin system
   blueprint: core vs plugin split, SDK contract (manifest schema + plugin-sdk.d.ts),
   Wasm sandbox strategy, 4-phase rollout (draft, 2026-10-02)
+- [plugins-authoring.md](plugins-authoring.md) - how to write, install and test a
+  plugin (manifest, bundle contract, ctx API, grants, classifier kind)
 - [flows-builder-v2.md](flows-builder-v2.md) - flow canvas (trigger -> filters -> steps)
 - [flows-fuzzy-classifier.md](flows-fuzzy-classifier.md) - AI category + about-topic
   conditions for flows
