@@ -4023,6 +4023,11 @@ def main():
     check("permission wall collapses behind a details disclosure",
           b'class="aspec"' in r.data and b"assistant details" in r.data
           and b"Can do directly" in r.data and b"agent permissions:" not in r.data)
+    check("plugin chips show their declared action with a plugin tint",
+          b"chip sm plug" in r.data and b">Find invoices</span>" in r.data)
+    check("plugin action labels fall back to the plugin id",
+          plugins_mod.action_label(plugins_mod.get("good-demo")) == "Ping demo"
+          and plugins_mod.action_label({"id": "plain-demo", "manifest": {}}) == "plain-demo")
     check("rail ships a filter box", b'id="chatfilter"' in r.data)
     check("rail groups sessions by day",
           b'class="rgroup"' in r.data or b"No chats yet" in r.data)

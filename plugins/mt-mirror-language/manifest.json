@@ -1,4 +1,7 @@
 {
+  "id": "mt-mirror-language",
+  "name": "Mirror-language drafts",
+  "action": "Reply in their language",
   "engines": {
     "sdk": ">=0.1 <1.0"
   },
@@ -6,9 +9,7 @@
   "entrypoint": "dist/plugin.js",
   "author": "Mail Triage",
   "license": "MIT",
-  "id": "mt-mirror-language",
-  "name": "Mirror-language drafts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Flow draft step (mode \"plugin\"): writes the reply in the SAME language as the incoming mail (English or Traditional Chinese, detected by script), in a brief professional style you can configure.",
   "kind": [
     "draft-provider"

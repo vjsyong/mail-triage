@@ -1,7 +1,8 @@
 {
   "id": "mt-promo-fastpath",
   "name": "Promo fast-path",
-  "version": "0.1.0",
+  "action": "Sort promos fast",
+  "version": "0.2.0",
   "description": "Mirrors a trained promo heuristic inside the sandbox: given its model + a featurized message it returns the same label and confidence as the native decision_list / naive_bayes prediction.",
   "author": "Mail Triage",
   "license": "MIT",

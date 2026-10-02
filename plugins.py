@@ -248,6 +248,15 @@ def _row_to_dict(row):
     return d
 
 
+def action_label(row):
+    """Short action label for UI chips; falls back to the plugin id."""
+    if not row:
+        return ""
+    m = row.get("manifest") or {}
+    act = m.get("action") if isinstance(m, dict) else ""
+    return (act or "").strip() or (row.get("id") or "")
+
+
 def get(plugin_id):
     with store.db() as conn:
         row = conn.execute("SELECT * FROM plugins WHERE id=?", (plugin_id,)).fetchone()

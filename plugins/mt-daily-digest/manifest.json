@@ -1,4 +1,7 @@
 {
+  "id": "mt-daily-digest",
+  "name": "Daily digest",
+  "action": "Catch me up",
   "engines": {
     "sdk": ">=0.1 <1.0"
   },
@@ -6,9 +9,7 @@
   "entrypoint": "dist/plugin.js",
   "author": "Mail Triage",
   "license": "MIT",
-  "id": "mt-daily-digest",
-  "name": "Daily digest",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Assistant tool: catch-me-up summary of recent mail - counts, categories, what needs a reply, and a short written digest.",
   "kind": [
     "tool"

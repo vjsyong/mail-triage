@@ -1,4 +1,7 @@
 {
+  "id": "mt-webhook-notify",
+  "name": "Webhook notifications",
+  "action": "Notify by webhook",
   "engines": {
     "sdk": ">=0.1 <1.0"
   },
@@ -6,9 +9,7 @@
   "entrypoint": "dist/plugin.js",
   "author": "Mail Triage",
   "license": "MIT",
-  "id": "mt-webhook-notify",
-  "name": "Webhook notifications",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Posts a JSON event to a webhook URL (ntfy, Home Assistant, your own endpoint) when mail is filed by a rule/flow or classified. Set the URL and allowed host in the plugin's settings.",
   "kind": [
     "integration"

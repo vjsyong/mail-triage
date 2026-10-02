@@ -10,6 +10,8 @@
     "id":          { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,40}$",
                      "description": "unique across roots; the 'mt-' prefix is reserved for built-ins" },
     "name":        { "type": "string", "maxLength": 64 },
+    "action":      { "type": "string", "maxLength": 48,
+                     "description": "short action label for assistant chips, e.g. 'Find invoices'; falls back to the plugin id" },
     "version":     { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$",
                      "description": "semver; a bump that adds permissions forces re-grant" },
     "description": { "type": "string", "maxLength": 280 },

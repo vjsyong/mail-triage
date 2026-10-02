@@ -1,4 +1,7 @@
 {
+  "id": "mt-priority-first",
+  "name": "Priority-first ranking",
+  "action": "Surface priority mail",
   "engines": {
     "sdk": ">=0.1 <1.0"
   },
@@ -6,9 +9,7 @@
   "entrypoint": "dist/plugin.js",
   "author": "Mail Triage",
   "license": "MIT",
-  "id": "mt-priority-first",
-  "name": "Priority-first ranking",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Search re-ranker: floats candidates that need a reply or carry one of your tags above raw similarity order, then keeps the original order for the rest.",
   "kind": [
     "retriever"

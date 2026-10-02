@@ -1,4 +1,7 @@
 {
+  "id": "mt-model-bench",
+  "name": "Model bench",
+  "action": "Benchmark the model",
   "engines": {
     "sdk": ">=0.1 <1.0"
   },
@@ -6,9 +9,7 @@
   "entrypoint": "dist/plugin.js",
   "author": "Mail Triage",
   "license": "MIT",
-  "id": "mt-model-bench",
-  "name": "Model bench",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Benchmark the configured LLM the way this app uses it: classification quality on a frozen case subset, JSON reliability, injection resistance, latency - and a verdict against reference models. Ask the assistant to \"benchmark my model\".",
   "kind": [
     "tool"

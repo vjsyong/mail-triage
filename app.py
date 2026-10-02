@@ -5785,6 +5785,9 @@ CONVO_TMPL = r"""
 ASSISTANT_TMPL = r"""
 <style>
 .chip.sm{height:22px;padding:0 8px;font-size:.72rem;gap:4px}
+:root{--plug:#6d4fc4;--plug-bg:#f7f4fd;--plug-line:#d9cdf3}
+.chip.plug{color:var(--plug);border-color:var(--plug-line);background:var(--plug-bg)}
+.chip.plug:hover{border-color:var(--plug);color:var(--plug)}
 .aspecline{display:flex;align-items:flex-start;gap:12px;margin-top:10px}
 .aspecline .aspec{flex:1;min-width:0}
 .aspec summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;color:var(--dim);font-size:.78rem;user-select:none}
@@ -5872,9 +5875,9 @@ ASSISTANT_TMPL = r"""
           <details class="aspec">
             <summary><span class="chip sm">{{ llm.model or 'no model' }}</span> <span class="sub">assistant details</span></summary>
             <div class="aspec-body">
-              <div class="aspec-grp"><b>Can do directly</b><span class="aspec-chips">{% for c in spec.auto %}<span class="chip sm">{{ c }}</span>{% else %}<span class="sub">nothing yet</span>{% endfor %}</span></div>
-              <div class="aspec-grp"><b>Asks first</b><span class="aspec-chips">{% for c in spec.ask %}<span class="chip sm">{{ c }}</span>{% else %}<span class="sub">nothing yet</span>{% endfor %}</span></div>
-              <div class="aspec-grp"><b>Off</b><span class="aspec-chips">{% for c in spec.off %}<span class="chip sm">{{ c }}</span>{% else %}<span class="sub">none</span>{% endfor %}</span></div>
+              <div class="aspec-grp"><b>Can do directly</b><span class="aspec-chips">{% for c in spec.auto %}<span class="chip sm{{ ' plug' if c.plug else '' }}">{{ c.label }}</span>{% else %}<span class="sub">nothing yet</span>{% endfor %}</span></div>
+              <div class="aspec-grp"><b>Asks first</b><span class="aspec-chips">{% for c in spec.ask %}<span class="chip sm{{ ' plug' if c.plug else '' }}">{{ c.label }}</span>{% else %}<span class="sub">nothing yet</span>{% endfor %}</span></div>
+              <div class="aspec-grp"><b>Off</b><span class="aspec-chips">{% for c in spec.off %}<span class="chip sm{{ ' plug' if c.plug else '' }}">{{ c.label }}</span>{% else %}<span class="sub">none</span>{% endfor %}</span></div>
               <a class="sub" href="{{ url_for('settings') }}#ai-perms">Edit permissions &#8599;</a>
             </div>
           </details>
@@ -6145,10 +6148,13 @@ def _assistant_page(sid):
         perms = {}
     spec = {"auto": [], "ask": [], "off": []}
     for cap, label, _risk, _tools, _desc in engine.AGENT_CAPS:
-        spec.setdefault(perms.get(cap, "off"), []).append(label)
+        spec.setdefault(perms.get(cap, "off"), []).append({"label": label, "plug": False})
     for cap, lvl in perms.items():
         if cap.startswith("plugin:") and lvl in spec:
-            spec[lvl].append(cap.split(":", 1)[1])
+            pid = cap.split(":", 1)[1]
+            row = plugins.get(pid)
+            label = plugins.action_label(row) if row else pid
+            spec[lvl].append({"label": label or pid, "plug": True})
     return render(_render_src(
         ASSISTANT_TMPL, sid=sid, sessions=sessions, convo=convo, convo_html=convo_html,
         llm=engine.llm_config(), pending=pending, spec=spec))
