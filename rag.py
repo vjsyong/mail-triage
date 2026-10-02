@@ -105,6 +105,17 @@ _local_models = {}
 _local_lock = threading.Lock()
 
 
+def local_model_ids(kind="embed"):
+    """Model ids FastEmbed/ONNX ships for the local CPU protocols (Settings dropdown)."""
+    if kind == "rerank":
+        from fastembed.rerank.cross_encoder import TextCrossEncoder
+        return sorted({m.get("model") for m in TextCrossEncoder.list_supported_models()
+                       if m.get("model")})
+    from fastembed import TextEmbedding
+    return sorted({m.get("model") for m in TextEmbedding.list_supported_models()
+                   if m.get("model")})
+
+
 def _local_cache_dir():
     d = (store.get_setting("local_models_dir")
          or os.environ.get("FASTEMBED_CACHE_PATH")
