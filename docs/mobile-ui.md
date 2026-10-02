@@ -171,3 +171,18 @@ html { touch-action: manipulation; }
   by item; then the mock E2E suite stays green (add: /manifest.webmanifest 200 +
   content-type; /more renders; viewport meta).
 - Real-device smoke by Sean (Tailscale host) — installed-to-home-screen check.
+
+### Keyboard-follow, Android correction (2026-10-02)
+Bug: on Android the tab bar stayed visible over the keyboard and the composer was
+pushed out of view. Cause: `interactive-widget=resizes-content` (chosen above) means
+Chrome/Android shrinks the LAYOUT viewport with the keyboard, so the detection
+formula `kb = innerHeight - visualViewport.height` read ~0 - `kb-open` never fired,
+the tab bar never hid, and `.jumpwrap{min-height:420px}` (zeroed only under
+`kb-open`) shoved the composer below the fold. Fix (JS only, meta unchanged):
+track `baseH` = the largest innerHeight seen as the no-keyboard baseline (width
+changes from rotation reset it, and innerHeight growth adopts a new base), then
+`kb = baseH - vv.height - vv.offsetTop` with the open-threshold at 120px (above
+Chrome-Android URL-bar resizes ~56px, below any keyboard). iOS semantics are
+unchanged (baseH stays == innerHeight there). Verified in emulation both ways:
+Android-style (layout shrinks to 516/852) and iOS-style (vv stub 500/852) both hide
+the tab bar and land the composer at the visual bottom.

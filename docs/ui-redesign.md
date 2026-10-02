@@ -265,3 +265,13 @@ data, severity paired with text; auto-follow must be interruptible).
   longer rendered. Page carries its own scoped <style> (.sim-* classes).
 - Form: labelled fields (From/To stacked), explicit "Ask the classifier" checkbox with
   a one-line helper, one full-width primary "Run simulation" action.
+
+## Draft preview in the simulator (2026-10-02)
+When a simulated draft matches a flow whose steps include a `draft`, the report now
+previews the exact email that would be saved to Drafts: header row "Draft preview"
+with a provenance badge (fixed text / rendered from the template / written by the
+model), the To / Subject it would get (`Re: <subject>` like the real draft builder),
+and the body in a scrollable mono block. Template placeholders ({subject}, {sender},
+{my_name}...) are rendered with the simulated fields. LLM-mode drafts only run when
+"Ask the classifier" is ticked; otherwise the block says the model would write it and
+shows the step's instructions, so the default simulation stays instant and offline.

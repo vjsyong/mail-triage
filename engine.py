@@ -1675,6 +1675,38 @@ def example_draft_for(kind, gid):
     return {"draft": draft, "name": name, "kind": kind}
 
 
+def _sim_draft_preview(sim_msg, step, settings, use_llm):
+    """Dry-run of a flow's draft step: the text that would land in Drafts.
+    fixed / template render locally; the llm mode only runs when the user ticked
+    \u201cAsk the classifier\u201d, so the default simulation stays instant."""
+    mode = (step.get("mode") or "template").lower()
+    tpl_id = step.get("template_id")
+    try:
+        tpl_id = int(tpl_id) if tpl_id else None
+    except (TypeError, ValueError):
+        tpl_id = None
+    tpl = store.get_template(tpl_id) if tpl_id else None
+    subj = sim_msg.get("subject") or ""
+    head = {"mode": mode,
+            "to": sim_msg.get("from_addr") or "",
+            "subject": subj if subj.lower().startswith("re:") else ("Re: " + subj)}
+    if mode == "llm":
+        if not use_llm:
+            return {"mode": mode, "needs_llm": True,
+                    "instructions": (step.get("instructions") or "")[:400]}
+        body = LLMClient().draft_reply(sim_msg, sim_msg.get("body") or "", tpl, settings,
+                                       instructions=step.get("instructions") or "")
+        head.update({"by": "model", "body": (body or "").strip()[:4000]})
+        return head
+    if mode == "fixed":
+        head.update({"by": "fixed", "body": render_template_text(step.get("body") or "", sim_msg)})
+        return head
+    if not tpl:
+        return {"mode": mode, "error": "this step has no template set"}
+    head.update({"by": "template", "body": render_template_text(tpl.get("body") or "", sim_msg)})
+    return head
+
+
 def simulate_email(from_addr, subject, body, to_addr="", use_llm=False):
     """Dry-run of the triage pipeline over a drafted email: which guard/rule
     matches, which flows would fire, and (optionally) what the classifier thinks.
@@ -1682,6 +1714,9 @@ def simulate_email(from_addr, subject, body, to_addr="", use_llm=False):
     settings = store.all_settings()
     fields = {"from": from_addr or "", "to": to_addr or "",
               "subject": subject or "", "body": body or ""}
+    sim_msg = {"from_addr": from_addr or "", "to": to_addr or "",
+               "subject": subject or "", "snippet": (body or "")[:500],
+               "body": body or "", "msgid": "", "id": 0, "date": "", "folder": "", "uid": 0}
     out = {"guard": None, "rule": None, "rule_actions": [], "flow": None, "flow_taken": [],
            "verdict": None, "suggested_folder": "", "would": [], "notes": [],
            "rules_apply": bool(settings.get("rules_apply", True)),
@@ -1733,9 +1768,6 @@ def simulate_email(from_addr, subject, body, to_addr="", use_llm=False):
             out["would"] = ["No rule or deterministic flow matches."]
             out["notes"].append("Tick \u201cAsk the classifier\u201d to also test AI category / topic flows.")
     if out["use_llm"]:
-        sim_msg = {"from_addr": from_addr or "", "to_addr": to_addr or "",
-                   "subject": subject or "", "snippet": (body or "")[:500],
-                   "body": body or "", "msgid": "", "id": 0}
         res, hres = classify_verdict(sim_msg, settings)
         try:
             conf = float(res.get("confidence") or 0)
@@ -1774,6 +1806,22 @@ def simulate_email(from_addr, subject, body, to_addr="", use_llm=False):
                     out["would"].append("Auto-filing would move it to \u201c%s\u201d." % folder)
                 else:
                     out["would"].append("Suggested folder \u201c%s\u201d (auto-filing is off - suggestion only)." % folder)
+    _fl = out.get("flow")
+    if _fl:
+        try:
+            _steps = _fl.get("steps") or _fl.get("actions")
+            if isinstance(_steps, str):
+                _steps = json.loads(_steps or "[]")
+        except (TypeError, ValueError):
+            _steps = []
+        for _st in (_steps or []):
+            if isinstance(_st, dict) and _st.get("type") == "draft":
+                try:
+                    out["draft_preview"] = _sim_draft_preview(sim_msg, _st, settings,
+                                                              bool(out.get("use_llm")))
+                except Exception as exc:
+                    out["draft_preview"] = {"error": repr(exc)}
+                break
     return out
 
 

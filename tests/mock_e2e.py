@@ -2726,7 +2726,8 @@ def main():
     rf = client.get("/favicon.ico")
     check("favicon.ico served (ICO magic)", rf.status_code == 200 and rf.data[:4] == b"\x00\x00\x01\x00")
     check("keyboard-follow: composer rides above the on-screen keyboard",
-          b"--kb-h" in d and b"__mtKbFit" in d and b"kb-open:has(.assistant-main)" in d)
+          b"--kb-h" in d and b"__mtKbFit" in d and b"kb-open:has(.assistant-main)" in d
+          and b"baseH" in d)
     rt = client.get("/static/turbo.js")
     check("turbo.js served", rt.status_code == 200 and b"Turbo" in rt.data[:400])
     check("singleton guards present (no duplicate listeners across swaps)",
@@ -2961,6 +2962,31 @@ def main():
     r = client.get("/simulate")
     check("simulator page reachable via nav", r.status_code == 200 and b"Run simulation" in r.data)
     check("simulator teaches the pipeline before any run", b"Test a draft" in r.data)
+    simfd = store.add_flow("Sim draft preview", "any",
+                           [{"field": "subject", "op": "contains", "value": "simdraft-probe"}],
+                           [{"type": "draft", "mode": "fixed",
+                             "body": "Thanks for {subject} - noted."}], enabled=True)
+    r = client.post("/simulate", follow_redirects=True,
+                    data={"from_addr": "simdraft@x.com", "subject": "simdraft-probe hello",
+                          "body": "probe"})
+    check("simulator previews the fixed draft it would create",
+          b"Draft preview" in r.data and b"Thanks for simdraft-probe hello" in r.data
+          and b"fixed text" in r.data and b"saved to Drafts" in r.data)
+    store.update_flow(simfd, enabled=0)
+    simld = store.add_flow("Sim llm draft", "any",
+                           [{"field": "subject", "op": "contains", "value": "simllm-probe"}],
+                           [{"type": "draft", "mode": "llm", "instructions": "thank them briefly"}],
+                           enabled=True)
+    r = client.post("/simulate", follow_redirects=True,
+                    data={"from_addr": "simllm@x.com", "subject": "simllm-probe", "body": "b"})
+    check("llm draft preview asks for the classifier toggle first",
+          b"model not asked" in r.data and b"thank them briefly" in r.data)
+    r = client.post("/simulate", follow_redirects=True,
+                    data={"from_addr": "simllm@x.com", "subject": "simllm-probe", "body": "b",
+                          "use_llm": "1"})
+    check("llm draft previews the model-written text when asked",
+          b"written by the model" in r.data and FAKE_DRAFT.encode() in r.data)
+    store.update_flow(simld, enabled=0)
     store.update_rule(sim_rid, enabled=0)
 
     section("T42 assistant page context (this email / this flow)")

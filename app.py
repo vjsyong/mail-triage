@@ -1718,10 +1718,21 @@ window.guardApply = function(f){
 (function(){
   if(!window.visualViewport || !window.matchMedia || !matchMedia('(pointer:coarse)').matches) return;
   var root = document.documentElement, poll = null;
+  /* Keyboard height needs a device-agnostic baseline: iOS keeps innerHeight when
+     the keyboard opens (visual-only resize) while Android + Chrome with
+     interactive-widget=resizes-content shrinks the LAYOUT viewport too - there the
+     plain innerHeight - vv.height difference reads ~0, kb-open never fired and the
+     tab bar covered the composer. Track the largest innerHeight seen as the
+     no-keyboard baseline; width changes (rotation) reset it, and the threshold sits
+     above Chrome-Android's URL-bar resize (~56px) and below any real keyboard. */
+  var baseH = window.innerHeight || 0, lastW = window.innerWidth || 0;
   function fit(){
     var vv = window.visualViewport; if(!vv) return;
-    var kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    var open = kb > 40;
+    var ih = window.innerHeight || 0;
+    if((window.innerWidth || 0) !== lastW){ lastW = window.innerWidth || 0; baseH = ih; }
+    if(ih > baseH) baseH = ih;
+    var kb = Math.max(0, baseH - vv.height - (vv.offsetTop || 0));
+    var open = kb > 120;
     document.body.classList.toggle('kb-open', open);
     document.querySelectorAll('#dform,.savebar').forEach(function(el){
       el.style.transform = open ? ('translateY(-' + Math.round(kb) + 'px)') : '';
@@ -6801,6 +6812,8 @@ SIMULATE_TMPL = """
 .simrow-d{font-size:.85rem;color:var(--dim);margin-top:3px;line-height:1.5}
 .simrow.cur .simrow-d{color:var(--fg)}
 .simnest{margin-top:10px;padding-left:13px;border-left:2px solid var(--line)}
+.simdraft{margin-top:10px;border:1px solid var(--line);background:#fff;padding:10px 12px}
+.simdraft-b{white-space:pre-wrap;font-family:var(--mono);font-size:.82rem;line-height:1.5;margin:8px 0 0;max-height:260px;overflow:auto}
 .simacts{display:flex;flex-wrap:wrap;gap:6px}
 .simact{font-size:.8rem;border:1px solid var(--line);padding:2px 9px;background:#fff;color:#3f3f46}
 .simverdict{font-size:.92rem;line-height:1.5}
@@ -6841,7 +6854,7 @@ SIMULATE_TMPL = """
       <label class="simcheck" for="s-llm">
         <input id="s-llm" type="checkbox" name="use_llm" value="1" {{ 'checked' if form.use_llm else '' }}>
         <span><span class="t">Ask the classifier</span>
-        <span class="d">Runs the model too — needed to test AI category / topic flows and see its reasoning.</span></span>
+        <span class="d">Runs the model too — needed to test AI category / topic flows, preview an LLM draft and see its reasoning.</span></span>
       </label>
       <div class="simrun">
         <button class="btn primary" type="submit">Run simulation</button>
@@ -6908,6 +6921,23 @@ SIMULATE_TMPL = """
           {% if result.flow %}
           <div class="simnest">
             <ol class="simul">{% for s in result.flow_taken %}<li>{{ s }}</li>{% endfor %}</ol>
+            {% if result.draft_preview %}
+            {% set dp = result.draft_preview %}
+            <div class="simdraft">
+              <div class="simrow-t"><b>Draft preview</b>
+                {% if dp.error %}<span class="badge err">could not build</span>
+                {% elif dp.needs_llm %}<span class="badge warn">model not asked</span>
+                {% else %}<span class="badge ok">{{ 'written by the model' if dp.by == 'model' else ('rendered from the template' if dp.by == 'template' else 'fixed text') }}</span>
+                {% endif %}
+              </div>
+              {% if dp.error %}<div class="simrow-d">The draft could not be built: {{ dp.error }}</div>
+              {% elif dp.needs_llm %}<div class="simrow-d">This step writes an LLM draft{% if dp.instructions %} guided by “{{ dp.instructions }}”{% endif %}. Tick “Ask the classifier” above to preview the actual text here.</div>
+              {% else %}
+              <div class="simrow-d">Would be saved to Drafts — To: {{ dp.to or '(none)' }} · Subject: {{ dp.subject or '(none)' }}</div>
+              <pre class="simdraft-b">{{ dp.body }}</pre>
+              {% endif %}
+            </div>
+            {% endif %}
           </div>
           {% endif %}
         </div>
