@@ -392,7 +392,8 @@ def groups_for_paths(paths, project=None, base=None):
             groups |= {"learning"}
         elif p in ("rag.py", "rag_lite.py") or p.startswith("embed/"):
             groups |= {"rag"}
-        elif p in ("plugins.py", "plugin_rt.py", "plugin_worker.py") or p.startswith(
+        elif p in ("plugins.py", "plugin_rt.py", "plugin_worker.py",
+                    "plugin_ui.py") or p.startswith(
                 ("plugins/", "sdk/", "schemas/")):
             groups |= {"plugins"}
         elif p == "proxy.py":
