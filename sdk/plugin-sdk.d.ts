@@ -181,3 +181,67 @@ export function rank(ctx: PluginContext,
 export function onEvent(ctx: PluginContext,
                         event: { type: string; payload: Record<string, unknown>; ts: number }):
   void | { sent?: boolean; reason?: string };
+
+// ---- optional browser pages (`manifest.ui`) -------------------------------
+//
+// A plugin may ship one browser bundle (`ui.entrypoint`) served by the host at
+// /extensions/<id>/<page>. It runs in a sandboxed, opaque-origin frame (no
+// same-origin, no network) and reaches the backend only through the explicit
+// `ui.operations` allowlist (declared tools that are read-only). See
+// docs/plugin-pages.md. The browser bundle registers renderers on
+// globalThis.__mt_ui; the host injects sdk/ui.js (the MTUI page SDK) first.
+
+export interface UiManifest {
+  entrypoint: string;                    // browser bundle, relative + .js
+  pages: Array<{ id: string; title: string; description?: string }>;
+  navigation?: Array<{
+    page: string;                        // must reference a declared page id
+    label: string;
+    group?: "mail" | "automation" | "system";
+    icon?: "mail" | "inbox" | "search" | "list" | "tag" | "star" | "clock" |
+           "filter" | "file" | "puzzle" | "sparkles" | "settings";
+    order?: number;
+  }>;
+  operations?: string[];                 // declared read-only tool names, explicit allowlist
+}
+
+export type UiErrorCode = "invalid_args" | "denied" | "forbidden" | "timeout" |
+                          "quota" | "disabled" | "not_found" | "internal";
+
+export interface UiResult {
+  ok: boolean;
+  data?: Record<string, unknown>;
+  summary?: string;
+  error?: { code: UiErrorCode; message: string };
+}
+
+export interface PageApi {
+  /** Call one allowlisted backend operation through the host bridge. */
+  call(op: string, args?: Record<string, unknown>): Promise<UiResult>;
+  /** Ask the host to update the URL (bounded q/message state only). */
+  updateUrl(next: { q?: string; message?: string }, replace?: boolean): void;
+  setStatus(text: string): void;
+  log(message: string): void;
+  isDisposed(): boolean;
+  on(kind: "theme" | "state" | "dispose", fn: (value: unknown) => void): () => void;
+  getState(): { q?: string; message?: string };
+  components: PageComponents;
+}
+
+export interface PageComponents {
+  searchField(opts: { value?: string; placeholder?: string; ariaLabel?: string;
+                      buttonLabel?: string; onSearch?: (q: string) => void;
+                      onInput?: (q: string) => void }): HTMLFormElement;
+  splitPane(opts?: { start?: Node; end?: Node }): HTMLElement & {
+    showList(): void; showReader(): void };
+  messageList(opts: { items: Array<Record<string, unknown>>; selected?: number;
+                      onSelect?: (id: number, item: unknown) => void }): HTMLElement;
+  plainTextReader(opts: { message?: null | Record<string, unknown> }): HTMLElement;
+  stateView(kind: "loading" | "empty" | "error" | "denied",
+            opts?: { message?: string; retry?: () => void; retryLabel?: string }): HTMLElement;
+  el(tag: string, cls?: string | null, text?: string): HTMLElement;
+}
+
+export interface PageBundle {
+  pages: Record<string, { render(root: HTMLElement, api: PageApi): void }>;
+}

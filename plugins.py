@@ -179,6 +179,37 @@ def validate_semantics(m, root_kind):
         c = m.get("classifier") or {}
         if not c.get("outputs"):
             errs.append("classifier plugins must declare classifier.outputs (labels)")
+    errs += _validate_ui(m)
+    return errs
+
+
+def _validate_ui(m):
+    """Semantic checks for the browser-UI block (the JSON Schema covers shape)."""
+    errs = []
+    ui = m.get("ui")
+    if not isinstance(ui, dict):
+        return errs
+    pages = [p for p in (ui.get("pages") or []) if isinstance(p, dict)]
+    page_ids = [p.get("id") for p in pages]
+    if len(page_ids) != len(set(page_ids)):
+        errs.append("ui.pages ids must be unique within the plugin")
+    known_pages = set(i for i in page_ids if i)
+    for n in (ui.get("navigation") or []):
+        if not isinstance(n, dict):
+            continue
+        if n.get("page") not in known_pages:
+            errs.append("ui.navigation references undeclared page '%s'" % n.get("page"))
+    tools = {t.get("name"): t for t in (m.get("tools") or []) if isinstance(t, dict)}
+    for op in (ui.get("operations") or []):
+        t = tools.get(op)
+        if t is None:
+            errs.append("ui.operations '%s' is not a declared tool" % op)
+        elif str(t.get("side_effects") or "none") != "none":
+            errs.append("ui.operations '%s' must be read-only (side_effects: none)" % op)
+    if not pages and (ui.get("navigation") or []):
+        errs.append("ui.navigation requires at least one declared ui.pages entry")
+    if not pages and (ui.get("operations") or []):
+        errs.append("ui.operations requires at least one declared ui.pages entry")
     return errs
 
 
@@ -213,22 +244,47 @@ def load_manifest(pdir, root_kind):
     if schema_errs:
         return None, msha, "", [_fmt_error(e) for e in schema_errs[:8]]
     errors = validate_semantics(m, root_kind)
-    entry = m.get("entrypoint") or ""
-    base = os.path.realpath(pdir)
-    epath = os.path.realpath(os.path.join(pdir, entry))
-    if not (epath == base or epath.startswith(base + os.sep)):
-        errors.append("entrypoint '%s' escapes the plugin directory" % entry)
-    elif not epath.endswith(".js"):
-        errors.append("entrypoint must be a .js bundle")
-    elif not os.path.isfile(epath):
-        errors.append("entrypoint '%s' not found" % entry)
-    entry_sha = ""
-    if os.path.isfile(epath):
-        with open(epath, "rb") as fh:
-            entry_sha = hashlib.sha256(fh.read()).hexdigest()
+    entry_sha, _entry_raw = _asset_hash(pdir, m.get("entrypoint") or "", "entrypoint", errors)
+    ui = m.get("ui")
+    if isinstance(ui, dict):
+        ui_sha, ui_raw = _asset_hash(pdir, ui.get("entrypoint") or "", "ui.entrypoint", errors)
+        if ui_raw is not None:
+            low = ui_raw.lower()
+            if b"</script" in low:
+                errors.append("ui.entrypoint must not contain a literal '</script' sequence")
+            if b"<!--" in low:
+                errors.append("ui.entrypoint must not contain an HTML comment opener ('<!--')")
+        if ui_sha:
+            entry_sha = hashlib.sha256((entry_sha + ":" + ui_sha).encode("utf-8")).hexdigest()
     if errors:
         return None, msha, entry_sha, errors
     return m, msha, entry_sha, []
+
+
+def _asset_hash(pdir, rel, label, errors):
+    """Resolve a plugin-relative .js asset (traversal-guarded); -> (sha256, bytes)."""
+    if not rel:
+        errors.append("%s is required" % label)
+        return "", None
+    base = os.path.realpath(pdir)
+    path = os.path.realpath(os.path.join(pdir, rel))
+    if not (path == base or path.startswith(base + os.sep)):
+        errors.append("%s '%s' escapes the plugin directory" % (label, rel))
+        return "", None
+    if not path.endswith(".js"):
+        errors.append("%s must be a .js bundle" % label)
+        return "", None
+    if not os.path.isfile(path):
+        errors.append("%s '%s' not found" % (label, rel))
+        return "", None
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    return hashlib.sha256(raw).hexdigest(), raw
+
+
+def _file_sha256(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
 
 
 # ---------------------------------------------------------------- scan / registry
@@ -389,6 +445,7 @@ def set_enabled(plugin_id, enabled, grants=None):
         try:
             import plugin_rt
             plugin_rt.event_cache_reset()
+            plugin_rt.ui_sessions_drop_plugin(plugin_id)
         except Exception:
             pass
         return {"ok": True, "id": plugin_id, "enabled": True, "grants": wanted}
@@ -399,6 +456,7 @@ def set_enabled(plugin_id, enabled, grants=None):
     try:
         import plugin_rt
         plugin_rt.event_cache_reset()
+        plugin_rt.ui_sessions_drop_plugin(plugin_id)
     except Exception:
         pass
     return {"ok": True, "id": plugin_id, "enabled": False}
@@ -416,6 +474,11 @@ def set_grants(plugin_id, grants):
     with store.db() as conn:
         conn.execute("UPDATE plugins SET grants_json=?, updated_ts=? WHERE id=?",
                      (json.dumps(list(grants)), int(time.time()), plugin_id))
+    try:
+        import plugin_rt
+        plugin_rt.ui_sessions_drop_plugin(plugin_id)
+    except Exception:
+        pass
     return {"ok": True, "id": plugin_id, "grants": list(grants)}
 
 
@@ -451,6 +514,124 @@ def enabled_of_kind(kind):
     return [r for r in list_rows(enabled_only=True) if kind in (r["manifest"].get("kind") or [])]
 
 
+# ---------------------------------------------------------------- browser UI
+#
+# A plugin may ship one browser bundle (`ui.entrypoint`) that the host renders
+# inside a sandboxed frame. Page ids and navigation are host-validated; the
+# navigation icon/group come from small host-owned enumerations so a manifest
+# can never inject markup. Backend reach is the explicit `ui.operations`
+# allowlist, each pointing at a declared read-only tool that runs through the
+# existing sandbox runtime (grants, limits, audit unchanged).
+
+UI_NAV_GROUPS = ("mail", "automation", "system")
+UI_NAV_ICONS = {
+    "mail": '<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>',
+    "inbox": '<path d="M3 13h5l1 2h6l1-2h5"/><path d="M5 5h14l2 8v6H3v-6z"/>',
+    "search": '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+    "list": '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/>',
+    "tag": '<path d="M20.6 13.4 12 22l-9-9 8.6-8.6A2 2 0 0 1 13 3.8H20a2 2 0 0 1 2 2v6a2 2 0 0 1-.6 1.6z"/><circle cx="17" cy="7" r="1.2"/>',
+    "star": '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
+    "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "filter": '<path d="M3 5h18l-7 8v6l-4-2v-4z"/>',
+    "file": '<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/>',
+    "puzzle": '<path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v3"/>',
+    "sparkles": '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M17.7 6.3l-2.8 2.8M9.1 14.9l-2.8 2.8"/>',
+    "settings": '<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5L9 6a7 7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.5 3h5l.5-3a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5c.06-.3.1-.66.1-1z"/>',
+}
+
+
+def ui_block(row):
+    m = (row or {}).get("manifest") or {}
+    ui = m.get("ui")
+    return ui if isinstance(ui, dict) else None
+
+
+def ui_pages(row):
+    ui = ui_block(row) or {}
+    out = []
+    for p in (ui.get("pages") or []):
+        if isinstance(p, dict) and p.get("id"):
+            out.append({"id": p["id"], "title": (p.get("title") or p["id"])[:60],
+                        "description": (p.get("description") or "")[:160]})
+    return out
+
+
+def ui_page_declared(row, page):
+    return any(p["id"] == page for p in ui_pages(row))
+
+
+def ui_operations(row):
+    ui = ui_block(row) or {}
+    return [o for o in (ui.get("operations") or []) if isinstance(o, str)]
+
+
+def ui_nav_items():
+    """Host-rendered navigation entries for enabled plugins with a UI."""
+    items = []
+    for row in list_rows(enabled_only=True):
+        ui = ui_block(row)
+        if not ui:
+            continue
+        known = {p["id"] for p in ui_pages(row)}
+        for n in (ui.get("navigation") or []):
+            if not isinstance(n, dict) or n.get("page") not in known:
+                continue
+            grp = n.get("group") if n.get("group") in UI_NAV_GROUPS else "system"
+            icon = n.get("icon") if n.get("icon") in UI_NAV_ICONS else "puzzle"
+            try:
+                order = int(n.get("order", 100))
+            except (TypeError, ValueError):
+                order = 100
+            items.append({"pid": row["id"], "page": n["page"],
+                          "label": (n.get("label") or n["page"])[:40],
+                          "group": grp, "icon": UI_NAV_ICONS[icon], "order": order,
+                          "url": "/extensions/%s/%s" % (row["id"], n["page"]),
+                          "base": "/extensions/%s/" % row["id"]})
+    items.sort(key=lambda it: (it["group"], it["order"], it["label"], it["pid"]))
+    return items
+
+
+def ui_entry_source(row):
+    """Read a plugin's browser bundle for rendering.
+
+    Re-checks containment and the inline-embedding safety markers at serve time
+    (defence in depth against a directory swapped after install)."""
+    ui = ui_block(row)
+    if not ui or not row.get("dir"):
+        return None
+    pdir = row["dir"]
+    rel = ui.get("entrypoint") or ""
+    base = os.path.realpath(pdir)
+    path = os.path.realpath(os.path.join(pdir, rel))
+    if not (path == base or path.startswith(base + os.sep)) or not path.endswith(".js"):
+        return None
+    if not os.path.isfile(path):
+        return None
+    # Integrity: the served bundle must still hash to what scan() recorded
+    # (entry_sha256 binds the sandbox entry AND the browser bundle together).
+    entry_rel = (row.get("manifest") or {}).get("entrypoint") or ""
+    entry_path = os.path.realpath(os.path.join(pdir, entry_rel))
+    try:
+        e_sha = _file_sha256(entry_path)
+        u_sha = _file_sha256(path)
+    except OSError:
+        return None
+    stored = row.get("entry_sha256") or ""
+    if stored and e_sha and u_sha:
+        composite = hashlib.sha256((e_sha + ":" + u_sha).encode("utf-8")).hexdigest()
+        if composite != stored:
+            return None
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            src = fh.read()
+    except OSError:
+        return None
+    low = src.lower()
+    if "</script" in low or "<!--" in low:
+        return None
+    return src
+
+
 def get_config(plugin_id):
     """Per-install plugin config values (settings key plugin_config:<id>)."""
     vals = store.get_setting("plugin_config:" + plugin_id, {}) or {}
@@ -481,6 +662,11 @@ def disable_with_error(plugin_id, message):
         conn.execute("UPDATE plugins SET enabled=0, last_error=?, updated_ts=? WHERE id=?",
                      (str(message)[:300], int(time.time()), plugin_id))
     store.log_event("warn", "plugin '%s' auto-disabled: %s" % (plugin_id, str(message)[:200]))
+    try:
+        import plugin_rt
+        plugin_rt.ui_sessions_drop_plugin(plugin_id)
+    except Exception:
+        pass
     return {"ok": True, "id": plugin_id, "enabled": False}
 
 

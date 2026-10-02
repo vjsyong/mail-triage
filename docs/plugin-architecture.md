@@ -857,3 +857,17 @@ settings form on the Plugins page; values live in `plugin_config:<id>`.
 Node dev-tier adapter (`--plugins dev`), plugin code signing, Wasm adapter swap,
 retire-the-native-heuristic automation for mirrored fast-paths, nested-object
 config schemas in the form (flat types only for now).
+
+## Browser pages (2026-10-02)
+
+The v1 "no plugin-provided UI" non-goal is lifted in a deliberately narrow form.
+A manifest may declare `ui {entrypoint, pages, navigation, operations}`; the host
+serves `/extensions/<id>/<page>` and renders the untrusted bundle in
+`<iframe sandbox="allow-scripts">` (no same-origin) via srcdoc with a nonce CSP
+that denies network, forms, frames and workers. The host page holds a
+server-minted per-view session and mediates every call
+(`POST /extensions/<id>/<page>/rpc`, same-origin + session + explicit
+`ui.operations` allowlist) through the existing sandbox `invoke()` path, so
+enable/grants/limits/audit are unchanged. Navigation entries, groups, order and
+icons are host-owned enumerations. `plugins/mt-mail-desk` is the read-only
+reference demo; full details in `docs/plugin-pages.md`.

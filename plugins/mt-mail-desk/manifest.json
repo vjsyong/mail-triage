@@ -1,0 +1,49 @@
+{
+  "id": "mt-mail-desk",
+  "name": "Mail Desk",
+  "action": "Open Mail Desk",
+  "version": "0.1.0",
+  "description": "A focused read-only desk over the local index: search, browse and read plain-text, with deep links. Index-only - attachments and rich mail HTML are not read, and nothing is ever moved or sent.",
+  "engines": { "sdk": ">=0.1 <1.0" },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": ["tool"],
+  "permissions": ["mailbox.read"],
+  "limits": { "memory_mb": 64, "timeout_ms": 8000 },
+  "tools": [
+    {
+      "name": "search_messages",
+      "description": "Search the local mail index by sender, subject or snippet. Returns a capped result list; used by the Mail Desk browser page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "free text matched against from/subject/snippet" },
+          "limit": { "type": "integer", "description": "max results (1-50)", "default": 20 }
+        }
+      },
+      "side_effects": "none",
+      "surface": "hidden"
+    },
+    {
+      "name": "read_message",
+      "description": "Read one indexed message by id (headers, category, tags, plain text). Used by the Mail Desk browser page.",
+      "parameters": {
+        "type": "object",
+        "properties": { "id": { "type": "integer", "description": "local index id" } },
+        "required": ["id"]
+      },
+      "side_effects": "none",
+      "surface": "hidden"
+    }
+  ],
+  "ui": {
+    "entrypoint": "ui/mail-desk.js",
+    "pages": [
+      { "id": "desk", "title": "Mail Desk", "description": "Search and read the local mail index" }
+    ],
+    "navigation": [
+      { "page": "desk", "label": "Mail Desk", "group": "mail", "icon": "mail", "order": 5 }
+    ],
+    "operations": ["search_messages", "read_message"]
+  }
+}

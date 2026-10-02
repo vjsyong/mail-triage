@@ -85,3 +85,41 @@ replaces its predictions. Native heuristics always keep the first word.
 A manifest `config` schema renders a settings form on the Plugins page (flat
 strings / numbers / booleans / string-arrays). Plugins read the values via
 `ctx.config.get().values` (or the CLI: `python app.py --plugins config <id> '[json]'`).
+
+## Browser pages (optional)
+
+Add a `ui` block to the manifest to ship one browser page under
+`/extensions/<id>/<page>`:
+
+```json
+"ui": {
+  "entrypoint": "ui/page.js",
+  "pages": [{ "id": "main", "title": "My page" }],
+  "navigation": [{ "page": "main", "label": "My page" }],
+  "operations": ["my_read_op"]
+}
+```
+
+The host injects `sdk/ui.js` (the `MTUI` page SDK) then your bundle; register
+renderers on `globalThis.__mt_ui`:
+
+```js
+globalThis.__mt_ui = {
+  pages: {
+    main: {
+      render: function (root, api) {
+        api.call("my_read_op", { q: "" }).then(function (res) {
+          root.textContent = JSON.stringify(res.data);
+        }).catch(function (err) {
+          root.textContent = "failed: " + err.code;
+        });
+      }
+    }
+  }
+};
+```
+
+Your bundle runs in a sandboxed, opaque-origin frame (no same-origin, no
+network, no forms) and can only call the read-only tools you list in
+`operations`. Every call is re-checked server-side and audited. Full contract,
+trust boundary and lifecycle: `docs/plugin-pages.md`.

@@ -25,6 +25,7 @@ import atexit
 import json
 import os
 import queue
+import secrets
 import subprocess
 import sys
 import threading
@@ -772,6 +773,40 @@ class PluginRuntime:
                                 "plugin timed out after %dms (worker killed)" % payload)
         return self._strike(plugin_id, "internal", str(payload))
 
+    def invoke_ui(self, plugin_id, sid, page, op, args):
+        """Route one browser-UI operation through the normal sandbox path.
+
+        The view session, the declared page and the explicit `ui.operations`
+        allowlist are re-checked here; the tool call itself then goes through
+        invoke(), so enable/grants/limits/audit apply unchanged. This is the ONLY
+        way browser code reaches a plugin tool - names cannot be guessed in."""
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled"):
+            return {"ok": False, "error": {"code": "disabled",
+                                           "message": "plugin is disabled"}}
+        if not kernel.ui_page_declared(row, page):
+            return {"ok": False, "error": {"code": "not_found",
+                                           "message": "unknown page"}}
+        if not ui_session_valid(sid, plugin_id, page):
+            return {"ok": False, "error": {"code": "forbidden",
+                                           "message": "view session is not valid"}}
+        if op not in kernel.ui_operations(row):
+            return {"ok": False, "error": {"code": "forbidden",
+                                           "message": "operation not declared for the browser UI"}}
+        res = self.invoke(plugin_id, op, args or {})
+        if res.get("ok"):
+            data = res.get("result")
+            data = data if isinstance(data, dict) else {"data": data}
+            return {"ok": True, "data": data, "summary": res.get("summary") or ""}
+        err = {}
+        if isinstance(res.get("result"), dict):
+            err = res["result"].get("error") or {}
+        code = err.get("code") or "internal"
+        message = err.get("message") or res.get("summary") or "call failed"
+        if code == "internal" and "denied" in str(message).lower():
+            code = "denied"
+        return {"ok": False, "error": {"code": code, "message": message}}
+
 
 def _validate_args(params, args):
     """Light JSON-Schema check: required present, declared scalar types correct."""
@@ -795,6 +830,70 @@ def _validate_args(params, args):
 
 
 runtime = PluginRuntime()
+
+
+# ---------------------------------------------------------------- browser UI sessions
+#
+# A plugin page runs in a sandboxed, opaque-origin frame; the host page holds a
+# per-view session token minted here. Every browser->host backend call presents
+# that token and is re-checked (plugin still enabled, page declared, op in the
+# allowlist, not expired). Keep the store tiny and finite: it prunes disposed
+# sessions and the oldest entries at a hard cap.
+
+UI_SESSION_TTL = 1800          # idle seconds before a view session goes stale
+UI_SESSION_MAX = 200
+_ui_sessions = {}
+_ui_lock = threading.Lock()
+
+
+def ui_session_open(pid, page):
+    now = time.time()
+    sid = secrets.token_urlsafe(32)
+    with _ui_lock:
+        for k in [k for k, v in _ui_sessions.items()
+                  if v.get("disposed") or now - v["last"] > UI_SESSION_TTL]:
+            _ui_sessions.pop(k, None)
+        if len(_ui_sessions) >= UI_SESSION_MAX:
+            _ui_sessions.pop(min(_ui_sessions, key=lambda k: _ui_sessions[k]["last"]), None)
+        _ui_sessions[sid] = {"pid": pid, "page": page, "created": now, "last": now,
+                             "disposed": False}
+    return sid
+
+
+def ui_session_valid(sid, pid, page):
+    if not isinstance(sid, str) or len(sid) < 16:
+        return False
+    now = time.time()
+    with _ui_lock:
+        s = _ui_sessions.get(sid)
+        if not s or s.get("disposed"):
+            return False
+        if now - s["last"] > UI_SESSION_TTL:
+            _ui_sessions.pop(sid, None)
+            return False
+        if s["pid"] != pid or s["page"] != page:
+            return False
+        s["last"] = now
+        return True
+
+
+def ui_session_dispose(sid):
+    with _ui_lock:
+        s = _ui_sessions.get(sid)
+        if s:
+            s["disposed"] = True
+    return True
+
+
+def ui_sessions_drop_plugin(pid):
+    with _ui_lock:
+        for k in [k for k, v in _ui_sessions.items() if v["pid"] == pid]:
+            _ui_sessions.pop(k, None)
+
+
+def ui_session_count():
+    with _ui_lock:
+        return len(_ui_sessions)
 
 
 # ---------------------------------------------------------------- events

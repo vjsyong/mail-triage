@@ -115,3 +115,23 @@ predictions from `heuristics.py`).
 `engines.sdk` must admit the host SDK (`python app.py --plugins list` prints it).
 Bump `version` on every change you ship; same-version edits are flagged
 "modified on disk" and permission-growing bumps force re-consent.
+
+## Browser pages (optional)
+
+A plugin can also ship one browser page bundle and appear in the sidebar:
+
+```json
+"ui": {
+  "entrypoint": "ui/page.js",
+  "pages": [{ "id": "desk", "title": "My page" }],
+  "navigation": [{ "page": "desk", "label": "My page", "group": "system", "icon": "puzzle" }],
+  "operations": ["my_read_op"]
+}
+```
+
+The page runs in a sandboxed, opaque-origin frame (no same-origin, no network)
+and reaches the backend only through an explicit allowlist of read-only tools
+listed in `ui.operations`; each call goes through the normal sandbox runtime
+(grants, limits, audit). See `docs/plugin-pages.md` for the trust boundary, the
+`MTUI` page SDK and the lifecycle. `plugins/mt-mail-desk` is the reference
+implementation.

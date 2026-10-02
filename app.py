@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import sys
 import time
 from html import escape as html_escape
@@ -24,6 +25,7 @@ import config
 import engine
 import heuristics
 import learning
+import plugin_rt
 import plugins
 import proxy
 import rag
@@ -1018,6 +1020,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>') }}
       {{ navitem(url_for('assistant'), 'Assistant', p.startswith('/assistant'), '
         <path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/>', pend) }}
+      {% for it in ext_nav if it.group == 'mail' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
       <div class="nav-label">Automation</div>
       {{ navitem(url_for('rules'), 'Rules', p.startswith('/rules'), '
         <path d="M3 6h18M7 12h10M10 18h4"/>') }}
@@ -1029,6 +1032,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>') }}
       {{ navitem(url_for('templates'), 'Templates', p.startswith('/templates'), '
         <path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/>') }}
+      {% for it in ext_nav if it.group == 'automation' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
       <div class="nav-label">System</div>
       {{ navitem(url_for('accounts'), 'Accounts', p.startswith('/accounts'), '
         <circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 8h5M18.5 5.5v5"/>') }}
@@ -1038,6 +1042,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v3"/>') }}
       {{ navitem(url_for('log'), 'Log', p.startswith('/log') or p.startswith('/proxy/log'), '
         <path d="M4 4h16v16H4z"/><path d="m8 9 3 3-3 3M13 15h4"/>') }}
+      {% for it in ext_nav if it.group == 'system' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
     </nav>
     <div class="side-foot">
       <div class="sf-row">
@@ -1075,7 +1080,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   <a href="{{ url_for('assistant') }}" class="{{ 'on' if p.startswith('/assistant') else '' }}" {{ 'aria-current="page"'|safe if p.startswith('/assistant') else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
     <span>Assistant</span></a>
-  {% set morepaths = ('/more','/welcome','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/log','/proxy') %}
+  {% set morepaths = ('/more','/welcome','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/extensions','/log','/proxy') %}
   <a href="{{ url_for('more') }}" class="{{ 'on' if p.startswith(morepaths) else '' }}" {{ 'aria-current="page"'|safe if p.startswith(morepaths) else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
     <span>More</span></a>
@@ -1285,7 +1290,8 @@ if(!window.__mtVt){
     ['/settings', 0, 80],
     ['/more', 0, 90],
     ['/log', 0, 91],
-    ['/proxy', 0, 92]
+    ['/proxy', 0, 92],
+    ['/extensions', 0, 95]
   ];
   function vtPos(path){
     for (var i = 0; i < VTPOS.length; i++){
@@ -1891,10 +1897,15 @@ def render(body, setup=False):
     ws = dict(worker.state)
     info = dict(_header_info())
     info["imap_user"] = (engine.imap_config().get("user") or "").strip()
+    try:
+        ext_nav = plugins.ui_nav_items()
+    except Exception:
+        ext_nav = []
     return _render_src(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
                                   info=info,
                                   show_asb=(not setup) and not request.path.startswith("/assistant"),
                                   setup=setup,
+                                  ext_nav=ext_nav,
                                   pend=store.count_pending_agent_actions(),
                                   w={"err": ws.get("last_error"), "last_ok_r": rel_time(ws.get("last_ok")),
                                      "last_ok_iso": (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ws.get("last_ok"))) if ws.get("last_ok") else ""),
@@ -3392,6 +3403,375 @@ def plugins_update(pid):
     if nxt == "detail":
         return redirect(url_for("plugin_detail", pid=pid))
     return redirect(url_for("plugins_page"))
+
+
+# ---------------------------------------------------------------- plugin pages
+#
+# Host-rendered shell for a plugin's browser UI. The plugin bundle is untrusted:
+# it runs in a sandboxed iframe (allow-scripts only -> opaque origin) with a
+# nonce CSP that denies network/forms/frames/workers, embedded via srcdoc so it
+# never gains same-origin ambient authority. Only the host page talks to the
+# server, and it holds a per-view session token minted server-side.
+
+_UI_BASE_CSS = (
+    ":root{--fg:#000;--bg:#fff;--dim:#666;--line:#e5e5e5;--line2:#d4d4d4;--card:#fff;"
+    "--card2:#f5f5f5;--acc:#0070f3;--ok:#067a46;--warn:#b25e09;--err:#d1242f;"
+    "--hover:#f7f7f7;--focus:rgba(0,112,243,.35);"
+    "--mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}"
+    "*{box-sizing:border-box}"
+    "html,body{margin:0;height:100%}"
+    "body{background:var(--bg);color:var(--fg);"
+    "font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}"
+    ":focus-visible{outline:2px solid var(--acc);outline-offset:2px}"
+    "#mt-root{display:flex;flex-direction:column;height:100%;min-height:0}"
+    ".mt-sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}"
+    ".mt-search{display:flex;gap:8px;padding:10px;border-bottom:1px solid var(--line);"
+    "background:var(--card);flex:0 0 auto}"
+    ".mt-search-input{flex:1 1 auto;min-width:0;border:1px solid var(--line);background:#fff;"
+    "color:var(--fg);padding:8px 10px;font:inherit}"
+    ".mt-search-input:focus{outline:none;border-color:#000;box-shadow:0 0 0 3px var(--focus)}"
+    ".mt-btn{border:1px solid var(--line);background:#fff;color:var(--fg);font:inherit;"
+    "padding:8px 12px;cursor:pointer}"
+    ".mt-btn:hover{border-color:#000;background:var(--hover)}"
+    ".mt-split{display:flex;flex:1 1 auto;height:100%;min-height:0;border:0;"
+    "background:var(--card)}"
+    ".mt-split>*{min-width:0;min-height:0;overflow:auto}"
+    ".mt-split .mt-pane-list{flex:0 0 300px;border-right:1px solid var(--line)}"
+    ".mt-split .mt-pane-reader{flex:1 1 auto}"
+    "html[data-mt-layout=mobile] .mt-split{display:block}"
+    "html[data-mt-layout=mobile] .mt-split .mt-pane-list,"
+    "html[data-mt-layout=mobile] .mt-split .mt-pane-reader{display:none;border:0}"
+    "html[data-mt-layout=mobile] .mt-split[data-view=list] .mt-pane-list{display:block}"
+    "html[data-mt-layout=mobile] .mt-split[data-view=reader] .mt-pane-reader{display:block}"
+    ".mt-msg{padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer}"
+    ".mt-msg:hover{background:var(--hover)}"
+    ".mt-msg.on{background:var(--card2);box-shadow:inset 3px 0 0 var(--acc)}"
+    ".mt-msg-top{display:flex;justify-content:space-between;gap:8px}"
+    ".mt-msg-from{font-weight:600;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;"
+    "white-space:nowrap}"
+    ".mt-msg-when{color:var(--dim);font-size:.75rem;white-space:nowrap;flex:0 0 auto}"
+    ".mt-msg-subject{font-size:.9rem;margin-top:2px;overflow:hidden;text-overflow:ellipsis;"
+    "white-space:nowrap}"
+    ".mt-msg-snippet{color:var(--dim);font-size:.8rem;margin-top:2px;overflow:hidden;"
+    "text-overflow:ellipsis;white-space:nowrap}"
+    ".mt-reader{padding:16px 18px}"
+    ".mt-reader-subject{font-size:1.1rem;margin:0 0 8px;font-weight:700;letter-spacing:-.02em}"
+    ".mt-reader-meta{color:var(--dim);font-size:.83rem;display:grid;gap:2px;margin-bottom:12px}"
+    ".mt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}"
+    ".mt-chip{border:1px solid var(--line);background:var(--card2);padding:1px 7px;font-size:.75rem}"
+    ".mt-chip.warn{border-color:var(--warn);color:var(--warn)}"
+    ".mt-reader-body{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--card2);"
+    "border:1px solid var(--line);padding:12px;margin:0;font:inherit;font-size:.9rem}"
+    ".mt-hint{color:var(--dim);font-size:.76rem;margin-top:10px}"
+    ".mt-state{padding:26px 18px;color:var(--dim);display:flex;flex-direction:column;"
+    "gap:10px;align-items:flex-start}"
+    ".mt-state-error{color:var(--err)}"
+    ".mt-empty{padding:20px;color:var(--dim)}"
+    ".mt-back{display:none;margin:10px}"
+    "html[data-mt-layout=mobile] .mt-back{display:inline-flex}"
+)
+
+_SDK_UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sdk", "ui.js")
+_sdk_ui_cache = {"src": None}
+
+
+def _sdk_ui_src():
+    if _sdk_ui_cache["src"] is None:
+        try:
+            with open(_SDK_UI_PATH, "r", encoding="utf-8") as fh:
+                _sdk_ui_cache["src"] = fh.read()
+        except OSError:
+            _sdk_ui_cache["src"] = ""
+    return _sdk_ui_cache["src"]
+
+
+def _extension_srcdoc(nonce, page_title, boot_json, sdk_src, plugin_src):
+    """Build the sandboxed frame document (nonce CSP, no network, no same-origin)."""
+    csp = ("default-src 'none'; script-src 'nonce-%s'; style-src 'nonce-%s'; "
+           "img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; "
+           "object-src 'none'; frame-src 'none'; worker-src 'none'; "
+           "form-action 'none'; base-uri 'none'; frame-ancestors 'self'") % (nonce, nonce)
+    out = ["<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+           "<meta http-equiv=\"Content-Security-Policy\" content=\"%s\">" % csp,
+           "<meta name=\"referrer\" content=\"no-referrer\">",
+           "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+           "<title>%s</title>" % html_escape(page_title),
+           "<style nonce=\"%s\">%s</style>" % (nonce, _UI_BASE_CSS),
+           "</head><body><div id=\"mt-root\"></div>",
+           "<script nonce=\"%s\">window.__MT_BOOT=%s;</script>" % (nonce, boot_json),
+           "<script nonce=\"%s\">%s</script>" % (nonce, sdk_src),
+           "<script nonce=\"%s\">%s</script>" % (nonce, plugin_src),
+           "<script nonce=\"%s\">window.MTUI&&window.MTUI.start();</script>" % nonce,
+           "</body></html>"]
+    return "".join(out)
+
+
+def _same_origin_ok():
+    """CSRF / cross-site defence for the browser-UI endpoints.
+
+    A cross-site page can neither read the session token nor send a custom
+    header without a (disallowed) preflight, so requiring a same-origin
+    Origin/Referer/Sec-Fetch-Site is enough to reject it."""
+    if (request.headers.get("Sec-Fetch-Site") or "") == "same-origin":
+        return True
+    base = request.host_url.rstrip("/")
+    origin = (request.headers.get("Origin") or "").strip()
+    if origin:
+        return origin == base
+    ref = (request.headers.get("Referer") or "").strip()
+    return bool(ref) and (ref == base or ref.startswith(base + "/"))
+
+
+def _ui_envelope_status(res):
+    if res.get("ok"):
+        return 200
+    code = (res.get("error") or {}).get("code") or ""
+    if code in ("forbidden", "disabled", "denied"):
+        return 403
+    if code == "not_found":
+        return 404
+    if code == "invalid_args":
+        return 400
+    return 200
+
+
+@app.route("/extensions/<pid>/<page>")
+def extension_page(pid, page):
+    row = plugins.get(pid)
+    if not row or not row.get("enabled") or not plugins.ui_page_declared(row, page):
+        flash("No such extension page.", "warn")
+        return redirect(url_for("plugins_page"))
+    plugin_src = plugins.ui_entry_source(row)
+    sdk_src = _sdk_ui_src()
+    if plugin_src is None or not sdk_src:
+        flash("This plugin's page bundle could not be loaded safely.", "warn")
+        return redirect(url_for("plugin_detail", pid=pid))
+    nonce = secrets.token_urlsafe(18)
+    sid = plugin_rt.ui_session_open(pid, page)
+    page_info = next((p for p in plugins.ui_pages(row) if p["id"] == page),
+                     {"title": page, "description": ""})
+    boot = {"v": 1, "sid": sid, "pid": row["id"], "page": page,
+            "ops": plugins.ui_operations(row),
+            "state": {"q": (request.args.get("q") or "")[:200],
+                      "message": (request.args.get("message") or "")[:20]}}
+    boot_json = json.dumps(boot).replace("</", "<\\/")
+    srcdoc = _extension_srcdoc(nonce, (row["manifest"].get("name") or pid) + " - "
+                               + page_info["title"], boot_json, sdk_src, plugin_src)
+    cfg = {"sid": sid, "pid": row["id"], "page": page,
+           "base": "/extensions/%s/%s" % (row["id"], page),
+           "ops": plugins.ui_operations(row), "initial": boot["state"]}
+    cfg_json = json.dumps(cfg).replace("</", "<\\/")
+    return render(_render_src(EXTENSION_TMPL, p=page_info, pid=row["id"], page=page,
+                              name=row["manifest"].get("name") or pid,
+                              srcdoc=srcdoc, cfg_json=cfg_json))
+
+
+@app.route("/extensions/<pid>/<page>/rpc", methods=["POST"])
+def extension_rpc(pid, page):
+    if not _same_origin_ok():
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "cross-site request refused"}}), 403
+    sid = (request.headers.get("X-MT-Session") or "").strip()
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    op = str(payload.get("op") or "")
+    args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+    hdr_op = (request.headers.get("X-MT-Op") or "").strip()
+    if not op or (hdr_op and hdr_op != op):
+        return jsonify({"ok": False, "error": {"code": "invalid_args",
+                                               "message": "operation is required"}}), 400
+    res = plugin_rt.runtime.invoke_ui(pid, sid, page, op, args)
+    return jsonify(res), _ui_envelope_status(res)
+
+
+@app.route("/extensions/<pid>/<page>/dispose", methods=["POST"])
+def extension_dispose(pid, page):
+    if not _same_origin_ok():
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "cross-site request refused"}}), 403
+    sid = (request.headers.get("X-MT-Session") or "").strip()
+    plugin_rt.ui_session_dispose(sid)
+    return jsonify({"ok": True})
+
+
+EXTENSION_TMPL = """
+<style>
+.mt-ext-frame{width:100%;height:calc(100vh - 250px);min-height:420px;border:1px solid var(--line);
+background:var(--card);display:block}
+.ext-bad{margin:8px 0 0;color:var(--err);font-size:.85rem}
+@media(max-width:767px){.mt-ext-frame{height:calc(100vh - 230px);min-height:360px}}
+</style>
+<div class="page-head">
+  <div style="min-width:0">
+    <a class="backlink sub" href="{{ url_for('plugin_detail', pid=pid) }}">&lsaquo; {{ name }}</a>
+    <h1 class="page-title">{{ p.title }}</h1>
+    <div class="page-desc">{{ p.description or 'Plugin page' }} &middot; <span class="mono">{{ pid }}</span></div>
+  </div>
+  <div class="sub" id="mt-ext-status" role="status" aria-live="polite">Loading&hellip;</div>
+</div>
+<div id="mt-ext" data-pid="{{ pid }}" data-page="{{ page }}">
+  <iframe id="mt-ext-frame" class="mt-ext-frame" sandbox="allow-scripts"
+          referrerpolicy="no-referrer" title="{{ p.title }}" srcdoc="{{ srcdoc }}"></iframe>
+  <noscript><div class="ext-bad">This page needs JavaScript.</div></noscript>
+  <div class="ext-bad" id="mt-ext-error" hidden></div>
+</div>
+<script type="application/json" id="mt-ext-cfg">{{ cfg_json|safe }}</script>
+<script>
+(function(){
+  "use strict";
+  var cfg = {};
+  try { cfg = JSON.parse((document.getElementById('mt-ext-cfg')||{}).textContent || '{}'); } catch(e){}
+  var frame = document.getElementById('mt-ext-frame');
+  var status = document.getElementById('mt-ext-status');
+  var errorEl = document.getElementById('mt-ext-error');
+  var disposed = false;
+  var pending = {};
+  var seq = 0;
+
+  function post(msg){ try { frame.contentWindow.postMessage(msg, '*'); } catch(e){} }
+  function setStatus(t){ if(status){ status.textContent = t || ''; } }
+  function showError(msg){ if(errorEl){ errorEl.hidden = false; errorEl.textContent = msg; } }
+
+  function theme(){
+    var cs = window.getComputedStyle(document.documentElement);
+    var names = ['--fg','--bg','--dim','--line','--line2','--card','--card2','--acc',
+                 '--ok','--warn','--err','--hover','--focus','--mono'];
+    var out = {};
+    for (var i=0;i<names.length;i++){ var v = cs.getPropertyValue(names[i]); if(v) out[names[i]] = v.trim(); }
+    return out;
+  }
+
+  function rpc(op, args){
+    if(disposed) return Promise.reject(new Error('disposed'));
+    var id = 'r' + (++seq);
+    var ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    pending[id] = ac;
+    var timer = setTimeout(function(){ if(ac) ac.abort(); }, 20000);
+    return fetch(cfg.base + '/rpc', {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', 'X-MT-Session': cfg.sid, 'X-MT-Op': op},
+      body: JSON.stringify({op: op, args: args || {}}),
+      signal: ac ? ac.signal : undefined
+    }).then(function(r){
+      return r.json().catch(function(){
+        return {ok:false, error:{code:'internal', message:'invalid response'}};
+      });
+    }).then(function(j){
+      clearTimeout(timer); delete pending[id];
+      if(disposed) throw new Error('disposed');
+      return j;
+    }, function(err){
+      clearTimeout(timer); delete pending[id];
+      var aborted = err && (err.name === 'AbortError');
+      return {ok:false, error:{code: aborted ? 'timeout' : 'network',
+                               message: aborted ? 'request timed out' : 'request failed'}};
+    });
+  }
+
+  function updateUrl(next, replace){
+    try {
+      var url = new URL(location.href);
+      if(typeof next.q === 'string'){
+        if(next.q) url.searchParams.set('q', next.q.slice(0,200));
+        else url.searchParams.delete('q');
+      }
+      if(typeof next.message === 'string'){
+        if(next.message) url.searchParams.set('message', next.message.slice(0,20));
+        else url.searchParams.delete('message');
+      }
+      var nextUrl = url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '');
+      if(nextUrl !== location.pathname + location.search){
+        if(replace) history.replaceState({mtExt:1}, '', nextUrl);
+        else history.pushState({mtExt:1}, '', nextUrl);
+      }
+    } catch(e){}
+  }
+
+  function onMessage(e){
+    if(e.source !== frame.contentWindow) return;
+    var d = e.data;
+    if(!d || d.__mt !== 1 || d.sid !== cfg.sid) return;
+    if(d.kind === 'ready'){
+      setStatus('');
+      post({__mt:1, sid:cfg.sid, kind:'theme', theme:theme(), config:cfg.initial});
+      sendLayout();
+    } else if(d.kind === 'call'){
+      if(!d.op || cfg.ops.indexOf(d.op) < 0){
+        post({__mt:1, sid:cfg.sid, kind:'result', id:d.id, ok:false,
+              error:{code:'forbidden', message:'operation not allowed'}});
+        return;
+      }
+      rpc(d.op, d.args).then(function(res){
+        if(disposed) return;
+        post({__mt:1, sid:cfg.sid, kind:'result', id:d.id, ok: !!res.ok,
+              data: res.data, error: res.error, summary: res.summary});
+      });
+    } else if(d.kind === 'nav'){
+      updateUrl({q: d.q, message: d.message}, !!d.replace);
+    } else if(d.kind === 'status'){
+      setStatus(typeof d.text === 'string' ? d.text.slice(0,120) : '');
+    } else if(d.kind === 'log'){
+      try { console.log('[plugin ' + cfg.pid + '] ' + String(d.message || '').slice(0,500)); } catch(err){}
+    }
+  }
+
+  function onPop(){
+    var params = new URLSearchParams(location.search);
+    post({__mt:1, sid:cfg.sid, kind:'state',
+          state:{q: params.get('q') || '', message: params.get('message') || ''}});
+  }
+
+  function layout(){
+    return (window.matchMedia && window.matchMedia('(max-width:767px)').matches)
+      ? 'mobile' : 'desktop';
+  }
+  function sendLayout(){
+    post({__mt:1, sid:cfg.sid, kind:'layout', layout:layout()});
+  }
+  var resizeT = null;
+  function onResize(){ clearTimeout(resizeT); resizeT = setTimeout(sendLayout, 150); }
+
+  function dispose(){
+    if(disposed) return;
+    disposed = true;
+    for(var k in pending){ try { if(pending[k]) pending[k].abort(); } catch(e){} }
+    pending = {};
+    post({__mt:1, sid:cfg.sid, kind:'dispose'});
+    try {
+      fetch(cfg.base + '/dispose', {method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-MT-Session':cfg.sid},
+        body:'{}', keepalive:true});
+    } catch(e){}
+  }
+
+  function teardown(){
+    dispose();
+    window.removeEventListener('message', onMessage);
+    window.removeEventListener('popstate', onPop);
+    window.removeEventListener('pagehide', dispose);
+    window.removeEventListener('resize', onResize);
+    document.removeEventListener('turbo:before-cache', teardown);
+    document.removeEventListener('turbo:before-render', teardown);
+    document.removeEventListener('turbo:before-visit', teardown);
+  }
+
+  if(window.__mtExt && window.__mtExt.teardown){ try { window.__mtExt.teardown(); } catch(e){} }
+  window.__mtExt = {teardown: teardown};
+  window.addEventListener('message', onMessage);
+  window.addEventListener('popstate', onPop);
+  window.addEventListener('pagehide', dispose);
+  window.addEventListener('resize', onResize);
+  document.addEventListener('turbo:before-cache', teardown);
+  document.addEventListener('turbo:before-render', teardown);
+  document.addEventListener('turbo:before-visit', teardown);
+  frame.addEventListener('error', function(){
+    showError('The plugin page failed to load. Reload to retry.');
+  });
+  setStatus('Loading\\u2026');
+})();
+</script>
+"""
 
 
 @app.route("/classifiers")

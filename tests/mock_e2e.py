@@ -4079,6 +4079,222 @@ def main():
     check("same-role message grouping rule ships",
           b".crow:not(.user) + .crow:not(.user){margin-top:-10px}" in _d)
 
+    section("T53 plugin browser UI: manifest validation + navigation")
+    shutil.copytree(os.path.join(PROJECT, "plugins", "mt-mail-desk"),
+                    os.path.join(broot, "mt-mail-desk"), dirs_exist_ok=True)
+    shutil.copytree(os.path.join(fx, "good-ui"), os.path.join(proot, "good-ui"),
+                    dirs_exist_ok=True)
+    plugins_mod.scan()
+    _uirow = plugins_mod.get("mt-mail-desk")
+    check("mail-desk registers a validated UI block",
+          bool(_uirow) and plugins_mod.ui_page_declared(_uirow, "desk")
+          and plugins_mod.ui_operations(_uirow) == ["search_messages", "read_message"]
+          and plugins_mod.ui_block(_uirow) is not None)
+    check("old fixtures keep working without a ui block",
+          plugins_mod.get("good-demo") is not None
+          and plugins_mod.ui_pages(plugins_mod.get("good-demo")) == [])
+
+    def _ui_variant(name, mutate):
+        d = os.path.join(proot, name)
+        shutil.rmtree(d, ignore_errors=True)
+        shutil.copytree(os.path.join(fx, "good-ui"), d)
+        p = os.path.join(d, "manifest.json")
+        m = json.load(open(p))
+        m["id"] = name
+        mutate(m, d)
+        json.dump(m, open(p, "w"))
+        return plugins_mod.load_manifest(d, "user")[3]
+
+    def _m_dup(m, d):
+        m["ui"]["pages"] = [{"id": "main", "title": "A"}, {"id": "main", "title": "B"}]
+
+    def _m_nav(m, d):
+        m["ui"]["navigation"] = [{"page": "nope", "label": "X"}]
+
+    def _m_op(m, d):
+        m["ui"]["operations"] = ["not_a_tool"]
+
+    def _m_oprw(m, d):
+        m["tools"][0]["side_effects"] = "local_write"
+
+    def _m_icon(m, d):
+        m["ui"]["navigation"][0]["icon"] = "evil"
+
+    def _m_trav(m, d):
+        m["ui"]["entrypoint"] = "../../escape.js"
+
+    def _m_markup(m, d):
+        open(os.path.join(d, "ui", "page.js"), "w").write("globalThis.x=1;\n// </script>\n")
+
+    _e1 = _ui_variant("bad-ui-dup", _m_dup)
+    _e2 = _ui_variant("bad-ui-nav", _m_nav)
+    _e3 = _ui_variant("bad-ui-op", _m_op)
+    _e4 = _ui_variant("bad-ui-oprw", _m_oprw)
+    _e5 = _ui_variant("bad-ui-icon", _m_icon)
+    _e6 = _ui_variant("bad-ui-trav", _m_trav)
+    _e7 = _ui_variant("bad-ui-markup", _m_markup)
+    check("duplicate ui page ids are rejected", any("unique" in e for e in _e1))
+    check("navigation to an undeclared page is rejected",
+          any("undeclared page" in e for e in _e2))
+    check("ui.operations must name a declared tool",
+          any("not a declared tool" in e for e in _e3))
+    check("ui.operations must be read-only", any("read-only" in e for e in _e4))
+    check("an unknown navigation icon is rejected", any("is not one of" in e for e in _e5))
+    check("a traversing ui.entrypoint is rejected", any("escapes" in e for e in _e6))
+    check("a ui.entrypoint with a script-close marker is rejected",
+          any("script" in e for e in _e7))
+    plugins_mod.scan()
+
+    plugins_mod.set_enabled("mt-mail-desk", True)
+    _home = client.get("/").data
+    check("enabling adds the plugin navigation entry",
+          b"/extensions/mt-mail-desk/desk" in _home and b"Mail Desk" in _home)
+    _pg = client.get("/extensions/mt-mail-desk/desk")
+    _h = _pg.data
+    check("the extension page renders inside the host shell",
+          _pg.status_code == 200 and b"Mail Desk" in _h and b'id="mt-ext-frame"' in _h
+          and b'id="mt-ext-cfg"' in _h)
+    check("the frame is sandboxed without same-origin",
+          b'sandbox="allow-scripts"' in _h and b"allow-same-origin" not in _h)
+    check("the frame CSP denies network, forms, frames and workers",
+          b"connect-src &#39;none&#39;" in _h and b"form-action &#39;none&#39;" in _h
+          and b"worker-src &#39;none&#39;" in _h and b"frame-src &#39;none&#39;" in _h
+          and b"object-src &#39;none&#39;" in _h)
+    check("the plugin page bundle is embedded inline (no asset route)",
+          b"__mt_ui" in _h and b"search_messages" in _h)
+    check("the browser SDK ships with the app",
+          os.path.isfile(os.path.join(PROJECT, "sdk", "ui.js")))
+    _mm = re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>', _h, re.S)
+    _cfg = json.loads(_mm.group(1).decode()) if _mm else {}
+    _sid = _cfg.get("sid") or ""
+    check("the host page carries a per-view session token",
+          len(_sid) >= 20 and _cfg.get("ops") == ["search_messages", "read_message"]
+          and _cfg.get("pid") == "mt-mail-desk")
+
+    section("T54 extension bridge: declared ops, CSRF, sessions, isolation")
+
+    def _rpc(path, op, args=None, sid=None, origin="http://localhost"):
+        headers = {"X-MT-Op": op}
+        if origin is not None:
+            headers["Origin"] = origin
+        if sid is not None:
+            headers["X-MT-Session"] = sid
+        return client.post(path, headers=headers,
+                           data=json.dumps({"op": op, "args": args or {}}),
+                           content_type="application/json")
+
+    _RPC = "/extensions/mt-mail-desk/desk/rpc"
+    r = _rpc(_RPC, "search_messages", {"query": "invoice"}, _sid)
+    j = r.get_json() or {}
+    _msgs = (j.get("data") or {}).get("messages") or []
+    check("a declared operation runs through the sandbox and returns an envelope",
+          r.status_code == 200 and j.get("ok") is True and isinstance(_msgs, list))
+    _mid = _msgs[0]["id"] if _msgs else 1
+    r = _rpc(_RPC, "read_message", {"id": _mid}, _sid)
+    j = r.get_json() or {}
+    _m = (j.get("data") or {}).get("message") or {}
+    check("read_message returns headers and plain text",
+          j.get("ok") is True and _m.get("subject") is not None
+          and "body_text" in _m and "tags" in _m and "needs_reply" in _m)
+    r = _rpc(_RPC, "delete_everything", {}, _sid)
+    j = r.get_json() or {}
+    check("an operation outside ui.operations is refused",
+          j.get("ok") is False and (j.get("error") or {}).get("code") == "forbidden")
+    r = _rpc(_RPC, "search_messages", {}, sid=None)
+    check("a call without a session is refused", r.status_code == 403)
+    r = _rpc(_RPC, "search_messages", {}, "forged-token-forged-token")
+    check("a forged session is refused",
+          r.status_code == 403 and (r.get_json() or {}).get("ok") is False)
+    r = _rpc(_RPC, "search_messages", {}, _sid, origin=None)
+    check("a request without same-origin proof is refused", r.status_code == 403)
+    r = client.post(_RPC, headers={"X-MT-Op": "search_messages", "X-MT-Session": _sid,
+                                   "Origin": "https://evil.example"},
+                    data=json.dumps({"op": "search_messages", "args": {}}),
+                    content_type="application/json")
+    check("a cross-origin request is refused", r.status_code == 403)
+    r = client.post(_RPC, headers={"Origin": "http://localhost", "X-MT-Session": _sid,
+                                   "X-MT-Op": "read_message"},
+                    data=json.dumps({"op": "search_messages", "args": {}}),
+                    content_type="application/json")
+    check("a mismatched operation header is refused", r.status_code == 400)
+
+    # session is bound to one plugin + page
+    plugins_mod.set_enabled("good-ui", True)
+    _pg2 = client.get("/extensions/good-ui/main")
+    _mm2 = re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>', _pg2.data or b"", re.S)
+    _sid2 = (json.loads(_mm2.group(1).decode()) if _mm2 else {}).get("sid") or ""
+    r = client.post(_RPC, headers={"Origin": "http://localhost", "X-MT-Session": _sid2,
+                                   "X-MT-Op": "search_messages"},
+                    data=json.dumps({"op": "search_messages", "args": {}}),
+                    content_type="application/json")
+    check("a session is bound to its own plugin and page", r.status_code == 403)
+    r = client.post("/extensions/good-ui/main/rpc",
+                    headers={"Origin": "http://localhost", "X-MT-Session": _sid,
+                             "X-MT-Op": "ping_ui"},
+                    data=json.dumps({"op": "ping_ui", "args": {"note": "cross"}}),
+                    content_type="application/json")
+    check("a cross-plugin session is refused on the other plugin's endpoint",
+          r.status_code == 403)
+    r = client.post("/extensions/good-ui/main/rpc",
+                    headers={"Origin": "http://localhost", "X-MT-Session": _sid2,
+                             "X-MT-Op": "ping_ui"},
+                    data=json.dumps({"op": "ping_ui", "args": {"note": "ok"}}),
+                    content_type="application/json")
+    check("the fixture UI plugin runs its declared op", (r.get_json() or {}).get("ok") is True)
+
+    _ttl = rt_mod.UI_SESSION_TTL
+    rt_mod.UI_SESSION_TTL = -1
+    try:
+        r = _rpc(_RPC, "search_messages", {}, _sid)
+        check("an expired view session is refused", r.status_code == 403)
+    finally:
+        rt_mod.UI_SESSION_TTL = _ttl
+
+    # disable / revoke
+    plugins_mod.set_enabled("mt-mail-desk", False)
+    r = _rpc(_RPC, "search_messages", {}, _sid)
+    check("a disabled plugin refuses browser calls",
+          r.status_code == 403
+          and (r.get_json() or {}).get("error", {}).get("code") == "disabled")
+    plugins_mod.set_enabled("mt-mail-desk", True)
+    _pgA = client.get("/extensions/mt-mail-desk/desk")
+    _sid_a = json.loads(re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>',
+                                  _pgA.data, re.S).group(1).decode())["sid"]
+    plugins_mod.set_grants("mt-mail-desk", [])
+    check("revoking a grant disposes existing view sessions",
+          not rt_mod.ui_session_valid(_sid_a, "mt-mail-desk", "desk"))
+    _pgB = client.get("/extensions/mt-mail-desk/desk")
+    _sid_b = json.loads(re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>',
+                                  _pgB.data, re.S).group(1).decode())["sid"]
+    r = _rpc(_RPC, "search_messages", {}, _sid_b)
+    j = r.get_json() or {}
+    check("revoking mailbox.read surfaces a typed denied envelope",
+          j.get("ok") is False and (j.get("error") or {}).get("code") == "denied")
+    plugins_mod.set_grants("mt-mail-desk", ["mailbox.read"])
+
+    # a page bundle that cannot be loaded safely is not served
+    _uip = os.path.join(broot, "mt-mail-desk", "ui", "mail-desk.js")
+    _orig_ui = open(_uip, encoding="utf-8").read()
+    with open(_uip, "a", encoding="utf-8") as fh:
+        fh.write("\n// tampered-after-install\n")
+    try:
+        r = client.get("/extensions/mt-mail-desk/desk")
+        check("a same-version on-disk change is refused at serve time",
+              r.status_code in (301, 302, 303))
+    finally:
+        open(_uip, "w", encoding="utf-8").write(_orig_ui)
+    shutil.move(_uip, _uip + ".bak")
+    try:
+        r = client.get("/extensions/mt-mail-desk/desk")
+        check("a missing page bundle redirects instead of serving anything",
+              r.status_code in (301, 302, 303))
+    finally:
+        shutil.move(_uip + ".bak", _uip)
+
+    plugins_mod.set_enabled("mt-mail-desk", False)
+    check("disabling removes the navigation entry",
+          b"/extensions/mt-mail-desk/desk" not in client.get("/").data)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:
