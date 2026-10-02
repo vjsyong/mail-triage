@@ -4398,7 +4398,7 @@ def classifier_delete(hid):
     store.delete_heuristic(hid)
     if row:
         store.log_event("info", "classifier #%d '%s' deleted (by ui)" % (hid, row.get("name") or ""))
-
+    flash("Classifier '%s' deleted." % ((row or {}).get("name") or hid), "ok")
     return redirect(url_for("classifiers"))
 
 
@@ -4757,7 +4757,11 @@ def rule_toggle(rule_id):
 
 @app.route("/rules/<int:rule_id>/delete", methods=["POST"])
 def rule_delete(rule_id):
+    rule = store.get_rule(rule_id)
     store.delete_rule(rule_id)
+    if rule:
+        store.log_event("info", "rule '%s' deleted (by ui)" % (rule.get("name") or rule_id))
+    flash("Rule '%s' deleted." % ((rule or {}).get("name") or rule_id), "ok")
     return redirect(url_for("rules"))
 
 
@@ -5576,6 +5580,7 @@ def flow_delete(flow_id):
     store.delete_flow(flow_id)
     store.log_event("info", "flow #%d '%s' deleted (by ui)"
                     % (flow_id, (flow or {}).get("name") or "?"))
+    flash("Flow '%s' deleted." % ((flow or {}).get("name") or flow_id), "ok")
     return redirect(url_for("flows"))
 
 
@@ -5708,7 +5713,11 @@ def template_edit(tid):
 
 @app.route("/templates/<int:tid>/delete", methods=["POST"])
 def template_delete(tid):
+    tpl = store.get_template(tid)
     store.delete_template(tid)
+    if tpl:
+        store.log_event("info", "template '%s' deleted (by ui)" % (tpl.get("name") or tid))
+    flash("Template '%s' deleted." % ((tpl or {}).get("name") or tid), "ok")
     return redirect(url_for("templates"))
 
 

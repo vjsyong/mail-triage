@@ -153,8 +153,8 @@ matching mail in place.
 ## Testing the standard
 
 - `tests/mock_e2e.py` section **T58** pins armed delete markup, switches,
-  consequence confirms, toggle flashes, and the shared guards. Extend it when you
-  add a pattern.
+  consequence confirms, toggle/delete flashes, and the shared guards. Extend it when
+  you add a pattern.
 - Pinned strings that must survive refactors: `chat-del`, `.chat-del.armed`,
   "Press again to delete this chat" (chat two-step), and the assistant empty state.
 - Rule: add checks for new behaviour; never weaken or delete a check to make a

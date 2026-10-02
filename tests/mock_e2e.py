@@ -5117,8 +5117,18 @@ def main():
     r = client.post("/classifiers/%d/toggle" % _u_hid, follow_redirects=True)
     check("classifier toggle announces the new state",
           b'class="msg ok"' in r.data and b"disabled." in r.data)
-    store.delete_rule(_u_rule); store.delete_flow(_u_flow)
-    store.delete_template(_u_tpl); store.delete_heuristic(_u_hid)
+    r = client.post("/rules/%d/delete" % _u_rule, follow_redirects=True)
+    check("rule delete announces the removal",
+          b'class="msg ok"' in r.data and b"deleted." in r.data)
+    r = client.post("/flows/%d/delete" % _u_flow, follow_redirects=True)
+    check("flow delete announces the removal",
+          b'class="msg ok"' in r.data and b"deleted." in r.data)
+    r = client.post("/classifiers/%d/delete" % _u_hid, follow_redirects=True)
+    check("classifier delete announces the removal",
+          b'class="msg ok"' in r.data and b"deleted." in r.data)
+    r = client.post("/templates/%d/delete" % _u_tpl, follow_redirects=True)
+    check("template delete announces the removal",
+          b'class="msg ok"' in r.data and b"deleted." in r.data)
 
     # ==== suite tail (always runs, even in a partial run) ====
     if globals().get("_PARTIAL_NOTE"):
