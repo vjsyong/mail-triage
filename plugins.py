@@ -34,7 +34,7 @@ import store
 MANIFEST_NAME = "manifest.json"
 MAX_MANIFEST_BYTES = 1 << 20
 RESERVED_PREFIX = "mt-"
-HOST_SDK_VERSION = "0.1.0"
+HOST_SDK_VERSION = "0.2.0"
 VALID_KINDS = ("tool", "classifier", "matcher", "draft-provider", "retriever", "integration")
 
 _SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -179,6 +179,13 @@ def validate_semantics(m, root_kind):
         c = m.get("classifier") or {}
         if not c.get("outputs"):
             errs.append("classifier plugins must declare classifier.outputs (labels)")
+    sched = m.get("schedule")
+    if isinstance(sched, dict):
+        if "tool" not in kinds or not tools:
+            errs.append("schedule requires kind 'tool' with at least one tool")
+        run_tool = str(sched.get("run_tool") or "")
+        if run_tool and run_tool not in names:
+            errs.append("schedule.run_tool '%s' is not a declared tool" % run_tool)
     errs += _validate_ui(m)
     return errs
 

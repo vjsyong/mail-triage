@@ -30,6 +30,7 @@ from common.validation import load_schema, validate  # noqa: E402
 
 RENDER_LIMIT = 1500  # engine.py classify body truncation
 SUITES = ["classification", "assistant", "drafting", "rules", "simulate", "summary"]
+CATEGORIES = ["Action", "Notification", "Newsletter", "Receipt", "Personal", "Promo"]
 
 
 def load_cases():
@@ -157,6 +158,16 @@ def lint():
                         "%s: must_call_any has %d singleton groups — each group is "
                         "REQUIRED; use one group of alternatives for 'any of'"
                         % (where, len(mca)))
+                # A folder whose name equals a category ("Personal") is ambiguous
+                # with applying that category unless the prompt says "folder".
+                for pair in exp.get("required_calls") or []:
+                    if pair and pair[0] == "move_message":
+                        tf = (pair[1] or {}).get("target_folder")
+                        if tf in CATEGORIES and "folder" not in (c.get("user") or "").lower():
+                            errors.append(
+                                "%s: move target %r collides with a category name and "
+                                "the prompt does not say 'folder' — ambiguous with "
+                                "classify_message" % (where, tf))
 
             # near-duplicate detection
             sig = signature(c)

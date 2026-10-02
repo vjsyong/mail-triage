@@ -771,6 +771,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .crow.user{flex-direction:row-reverse}
 .crow:not(.user) + .crow:not(.user){margin-top:-10px}
 .crow.user + .crow.user{margin-top:-10px}
+.chatlive{display:flex;flex-direction:column;gap:18px}
 .avatar{flex:0 0 30px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;letter-spacing:.05em;border:1px solid var(--line)}
 .avatar.you{background:#000;color:#fff;border-color:#000}
 .avatar.ai{background:var(--acc);color:#fff;border-color:var(--acc)}
@@ -1348,6 +1349,7 @@ window.assistantChat = function(opts){
   if(!(window.fetch && window.ReadableStream && window.TextDecoder)) return null;
   if(form.__chat){ form.__chat.setSession(sid); return form.__chat; }
   var live=document.createElement('div'); live.setAttribute('aria-live','polite'); live.setAttribute('aria-atomic','false');
+  live.className='chatlive';
   root.appendChild(live);
   function mk(tag,cls,text){var d=document.createElement(tag); if(cls) d.className=cls; if(text!=null) d.textContent=text; return d;}
   function autosize(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; }
@@ -1375,6 +1377,7 @@ window.assistantChat = function(opts){
     if(regen && regen.row && regen.row.parentNode) regen.row.remove();
     if(currentAbort) currentAbort.abort();
     currentAbort=new AbortController();
+    var ce=root.querySelector('.chat-empty'); if(ce) ce.remove();
     if(btn) btn.disabled=true; if(stopBtn) stopBtn.style.display='';
     if(!regen){ ta.value=''; ta.style.height='auto'; }
     if(!regen){
@@ -1427,13 +1430,38 @@ window.assistantChat = function(opts){
       toolsBox.style.display=''; toolsList.appendChild(c);
       toolsLabel();
     }
-    function toolDone(id,ok,summary,dry,pending){
+    function toolDone(id,ok,summary,dry,pending,card){
       var c=cards[id]; if(!c) return;
       c.className='tool-chip '+(ok?'ok':'err');
       var tx=c.textContent.replace(/^[\u23f3\u2713\u2717]\s*/,'');
       c.textContent=(ok?'\u2713 ':'\u2717 ')+tx+' \u2192 '+(pending?'[awaiting approval] ':(dry?'[dry-run] ':''))+summary;
       cardInfo[id].label=(ok?'\u2713 ':'\u2717 ')+cardInfo[id].name+' \u2192 '+(pending?'[awaiting approval] ':(dry?'[dry-run] ':''))+summary;
       toolsLabel();
+      renderToolCard(card);
+    }
+    function renderToolCard(card){
+      if(!card || !card.title) return;
+      var w=mk('div','proposal');
+      w.appendChild(mk('div','p-tag','\u2726 '+String(card.title)));
+      if(card.markdown) w.appendChild(mk('div','sub',String(card.markdown)));
+      (card.fields||[]).forEach(function(f){
+        var r=mk('div','spread');
+        r.appendChild(mk('b','',String(f.label||'')));
+        r.appendChild(mk('span','sub',String(f.value||'')));
+        w.appendChild(r);
+      });
+      var links=(card.actions||[]).filter(function(a){ return a && a.kind==='link' && a.url; });
+      if(links.length){
+        var row=mk('div','row'); row.style.flexWrap='wrap'; row.style.marginTop='8px';
+        links.forEach(function(a){
+          var el=mk('a','btn small primary',String(a.label||a.url));
+          el.href=a.url; el.target='_blank'; el.rel='noopener noreferrer';
+          row.appendChild(el);
+        });
+        w.appendChild(row);
+      }
+      box.appendChild(w);
+      scrollBottom();
     }
     function actsText(a){
       a=a||{}; var out=[];
@@ -1553,7 +1581,7 @@ window.assistantChat = function(opts){
       else if(ev==='content'){ content.textContent+=(d.text||''); rawText+=(d.text||''); label('writing\u2026'); }
       else if(ev==='content_break'){ if(content.textContent){ content.textContent+='\n\n'; rawText+='\n\n'; } }
       else if(ev==='tool_start'){ label('running '+d.name+'\u2026'); toolCard(d.id,d.name,d.args); }
-      else if(ev==='tool_end'){ toolDone(d.id,d.ok,d.summary,d.dry_run,d.pending); label('thinking\u2026'); }
+      else if(ev==='tool_end'){ toolDone(d.id,d.ok,d.summary,d.dry_run,d.pending,d.card); label('thinking\u2026'); }
       else if(ev==='proposals'){ proposals=d.proposals||[]; }
       else if(ev==='action_proposals'){ pendingActions=(d.actions||[]); }
       else if(ev==='thought_summary'){ if(det.style.display!=='none' && d.text){ det.dataset.summary='1'; detSum.textContent=d.text; } }
@@ -2754,7 +2782,7 @@ PLUGIN_DETAIL_TMPL = """
     <input type="hidden" name="action" value="config">
     <input type="hidden" name="next" value="detail">
     {% for f in p.config_fields %}
-    <div class="pxd-set" style="grid-template-columns:minmax(0,1fr) minmax(220px,340px)">
+    <div class="pxd-set">
       <div class="st-l"><b class="mono" style="font-size:.84rem">{{ f.name }}</b><span class="sub">{{ f.label }}</span></div>
       <div class="st-c">
         {% if f.type == 'boolean' %}<label class="check"><input type="checkbox" name="cfg_{{ f.name }}" value="1" {{ 'checked' if f.value else '' }}> <span>enabled</span></label>
@@ -3196,6 +3224,12 @@ def _plugin_detail_ctx(pid):
     if "tool" in kinds:
         roles.append(("Role", "Assistant tools &mdash; callable in chat under the assistant "
                               "permission below"))
+    sched = m.get("schedule") or {}
+    if isinstance(sched, dict) and sched.get("every_minutes"):
+        every = int(sched.get("every_minutes") or 0)
+        when = ("every %d minutes" % every) if every < 1440 else (
+            "every day" if every == 1440 else "every %d days" % (every // 1440))
+        roles.append(("Schedule", "Runs automatically <b>%s</b> while enabled" % when))
     lim = m.get("limits") or {}
     limits_text = "memory %sMB &middot; timeout %sms" % (lim.get("memory_mb", "?"),
                                                          lim.get("timeout_ms", "?"))
@@ -6250,15 +6284,17 @@ ASSISTANT_TMPL = r"""
           <span class="sub">The assistant queued these — nothing happens until you click.</span></div>
         {% for a in pending %}
         <div class="proposal" style="margin:8px 0">
-          <div class="p-tag warn">✦ Needs your approval</div>
+          <div class="p-tag warn">{{ '✦ From a plugin' if a.card else '✦ Needs your approval' }}</div>
           <div class="spread">
             <div><b>{{ a.preview }}</b> <span class="sub">{{ a.capability }} · queued {{ a.when_h }}</span></div>
             <div class="row" style="white-space:nowrap">
-              <form class="inline" method="post" action="{{ url_for('agent_action_apply', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small primary" type="submit">Approve</button></form>
+              <form class="inline" method="post" action="{{ url_for('agent_action_apply', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small primary" type="submit">{{ 'Acknowledge' if a.card else 'Approve' }}</button></form>
               <form class="inline" method="post" action="{{ url_for('agent_action_dismiss', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small" type="submit">Dismiss</button></form>
             </div>
           </div>
-          <div class="note">Nothing happens until you click Approve.</div>
+          {% if a.card_html %}<div style="margin:6px 0 0">{{ a.card_html|safe }}</div>{% endif %}
+          {% if a.card_fields %}<div style="margin:6px 0 0">{% for f in a.card_fields %}<div style="display:flex;gap:8px;font-size:.85rem"><span class="sub" style="flex:0 0 34%">{{ f.label }}</span><span>{{ f.value }}</span></div>{% endfor %}</div>{% endif %}
+          <div class="note">{{ 'Nothing changes until you click.' if a.card else 'Nothing happens until you click Approve.' }}</div>
         </div>
         {% endfor %}
       </div>
@@ -6547,6 +6583,14 @@ def _assistant_page(sid):
     pending = store.pending_agent_actions()
     for pa in pending:
         pa["when_h"] = fmt_ts(pa.get("created_ts"))
+        try:
+            pobj = json.loads(pa.get("payload") or "{}")
+        except (TypeError, ValueError):
+            pobj = {}
+        card = pobj.get("card") if isinstance(pobj, dict) else None
+        pa["card"] = card if isinstance(card, dict) else None
+        pa["card_html"] = md_to_html(card.get("markdown") or "") if pa["card"] else ""
+        pa["card_fields"] = (card.get("fields") or [])[:16] if pa["card"] else []
     try:
         perms = engine.agent_permissions()
     except Exception:
@@ -6837,6 +6881,18 @@ def agent_action_apply(aid):
         payload = json.loads(row.get("payload") or "{}")
     except (TypeError, ValueError):
         payload = {}
+    if isinstance(payload, dict) and payload.get("card") and not payload.get("tool"):
+        # informational card from a plugin's ctx.action.propose() - there is no
+        # tool to execute; acknowledging just files it.
+        title = str((payload.get("card") or {}).get("title") or row.get("preview")
+                    or "plugin card")[:160]
+        store.set_agent_action(aid, "applied",
+                               json.dumps({"summary": title, "ok": True, "card": True},
+                                          ensure_ascii=False))
+        store.log_event("info", "agent action #%s (plugin card) acknowledged by user: %s"
+                        % (aid, title))
+        flash("Acknowledged: " + title, "ok")
+        return redirect(back)
     agent = engine.AssistantAgent(session_id=sid)
     try:
         res = agent.call_tool(payload.get("tool") or row.get("tool"),
@@ -8928,4 +8984,5 @@ if __name__ == "__main__":
     indexer.start()
     classifier.start()
     proxy.supervisor.start()  # keeps the embedded emailproxy running (embedded mode only)
+    plugin_rt.scheduler.start()  # fires due plugin onSchedule() entrypoints
     app.run(host=config.UI_HOST, port=config.UI_PORT, threaded=True)

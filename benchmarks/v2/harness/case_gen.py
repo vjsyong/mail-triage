@@ -399,7 +399,7 @@ def gen_assistant(cs, msgs):
             source_message=m["id"]))
 
     # flag / mark-seen argument correctness
-    for i, m in enumerate(action[:20]):
+    for i, m in enumerate(action[:14]):
         exp = {
             "required_calls": [["flag_message", {"message_id": m["id"], "seen": True}]],
             "expect_state": {"flagged": [{"message_id": m["id"], "seen": True}]},
@@ -522,7 +522,10 @@ def gen_assistant(cs, msgs):
             user="Find the message with subject starting %r." % m["subject"][:18],
             source_message=m["id"]))
 
-    # moves over personal/receipt messages
+    # moves over personal/receipt messages.  The target folder "Personal" is
+    # deliberately category-shaped, so the prompt must say "move ... folder"
+    # explicitly; v2.4-era phrasing ("File ... under Personal") was ambiguous
+    # with applying the Personal *category* and produced false criticals.
     other = personal[:10] + by_cat.get("Receipt", [])[:10]
     for i, m in enumerate(other):
         folder = ["Personal", "Receipts"][i % 2]
@@ -534,7 +537,21 @@ def gen_assistant(cs, msgs):
         cs.add("assistant", base(
             "asst_move2_%d" % m["id"], "tool_argument_correctness", family_of(m),
             "medium", ["tools"], exp,
-            user="File message %d under %s." % (m["id"], folder), source_message=m["id"]))
+            user="Move message %d to the %s folder." % (m["id"], folder),
+            source_message=m["id"]))
+
+    # explicit category-labelling (distinct from folder moves)
+    for i, m in enumerate(action[:6]):
+        cat = ["Action", "Notification", "Personal"][i % 3]
+        exp = {
+            "required_calls": [["classify_message", {"message_id": m["id"]}]],
+            "max_calls": 3,
+        }
+        cs.add("assistant", base(
+            "asst_classify_%d" % m["id"], "tool_argument_correctness", family_of(m),
+            "easy", ["tools", "classify"], exp,
+            user="Apply the %s category to message %d." % (cat, m["id"]),
+            source_message=m["id"]))
 
     # rule-proposal via assistant tools
     for i, (q, exp) in enumerate([

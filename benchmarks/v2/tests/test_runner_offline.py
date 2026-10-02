@@ -107,4 +107,74 @@ def test_classification_parse():
     assert a["status"] == "ok"
 
 
+class _ClassifyFake(object):
+    """Thread-safe fake for the concurrency test; one instance per worker."""
+
+    def __init__(self):
+        import threading
+        self.lock = threading.Lock()
+        self.n = 0
+
+    def chat_turn(self, system, messages, tools=None, thinking=True, max_tokens=2500,
+                  stream=True, json_mode=False):
+        with self.lock:
+            self.n += 1
+        return {"content": '{"category":"Action","needs_reply":true,'
+                           '"confidence":0.9,"summary":"s","reason":"r"}',
+                "tool_calls": [], "finish": "stop", "usage": {},
+                "metrics": {"wall_s": 0.1, "first_event_s": 0.05, "first_visible_s": 0.06,
+                            "first_tool_call_s": None, "completion_s": 0.1, "decode_s": 0.05,
+                            "prompt_tokens": 1, "completion_tokens": 1},
+                "request_sha256": "x"}
+
+
+def test_run_cases_concurrent_records_all():
+    cases = [{"id": "cls_c%02d" % i, "class": "classification", "sub": "s",
+              "family": "f%d" % i, "user": "u", "expect": {}} for i in range(20)]
+    recs = []
+    clients = []
+
+    def make():
+        c = _ClassifyFake()
+        clients.append(c)
+        return c
+
+    runner.run_cases(cases, make, "run-c", "m", "classification",
+                     concurrency=5, sink=recs.append)
+    ids = sorted(a["case_id"] for a in recs)
+    assert ids == sorted(c["id"] for c in cases)
+    assert all(a["attempt"] == 1 for a in recs)
+    assert len(clients) >= 2, "expected thread-local clients (got %d)" % len(clients)
+
+
+class _OverflowFake(object):
+    def __init__(self):
+        self.calls = 0
+
+    def chat_turn(self, system, messages, tools=None, thinking=True, max_tokens=2500,
+                  stream=True, json_mode=False):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("LLM HTTP 400: This model's maximum context length is "
+                               "16384 tokens. Please reduce the length of the messages.")
+        return {"content": "Recovered answer.", "reasoning": "", "tool_calls": [],
+                "finish": "stop", "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+                "metrics": {"wall_s": 0.1, "first_event_s": 0.05, "first_visible_s": 0.06,
+                            "first_tool_call_s": None, "completion_s": 0.1, "decode_s": 0.05,
+                            "prompt_tokens": 5, "completion_tokens": 2},
+                "request_sha256": "y"}
+
+
+def test_assistant_context_reset_retry():
+    client = _OverflowFake()
+    case = {"id": "asst_of", "class": "assistant", "sub": "transcript_budget",
+            "split": "dev", "family": "f", "user": "Summarize everything.",
+            "expect": {}}
+    a = runner.run_assistant(client, case, "run-of", "m")
+    assert a["status"] == "ok"
+    assert a["output"]["context_reset"] is True
+    assert a["output"]["reply"] == "Recovered answer."
+    assert client.calls == 2
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

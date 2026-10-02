@@ -88,11 +88,13 @@ supported actions; rule and flow proposals have one-click approval.
 ### Extend it with plugins
 
 Add capabilities without changing the core app. Plugins can provide **assistant
-tools, classifiers, rule conditions, draft providers, search re-rankers, and event
-integrations**.
+tools, classifiers, rule conditions, draft providers, search re-rankers, event
+integrations, and scheduled reports**.
 
-Built-in examples include an invoice finder, a daily digest, language-aware drafts,
-and webhook notifications. Manage each plugin's settings and permissions in the
+Built-in examples include an invoice finder, a daily digest, a commitments and
+deadline extractor, a subscription/renewal watcher, an unsubscribe helper that
+groups opt-out links by sender, language-aware drafts, and webhook notifications.
+Manage each plugin's settings and permissions in the
 UI. Plugins run in separate sandboxed worker processes with memory, time, and
 host-call limits; access to mail, models, and the network is permission-gated and
 audited.

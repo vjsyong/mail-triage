@@ -111,9 +111,10 @@ def main():
                 result = json.loads(raw) if isinstance(raw, str) else raw
                 send({"seq": cmd.get("seq"),
                       "result": result if isinstance(result, dict) else None})
-            elif c in ("matcher", "draft", "rank", "event"):
+            elif c in ("matcher", "draft", "rank", "event", "schedule"):
                 fn = {"matcher": "__mt_match", "draft": "__mt_draft",
-                      "rank": "__mt_rank", "event": "__mt_event"}[c]
+                      "rank": "__mt_rank", "event": "__mt_event",
+                      "schedule": "__mt_schedule"}[c]
                 raw = ctx.eval("%s(%s)" % (fn, json.dumps(json.dumps(cmd.get("input") or {}))))
                 result = json.loads(raw) if isinstance(raw, str) else raw
                 send({"seq": cmd.get("seq"), "result": result})

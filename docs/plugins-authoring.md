@@ -35,6 +35,11 @@ globalThis.__mt_plugin = {
   execute: function (ctx, call) {          // one per tool invocation
     return { ok: true, summary: "done", data: { echo: call.args } };
   },
+  // schedule kind: kernel runs this on the manifest's cadence while enabled
+  onSchedule: function (ctx, input) {       // {every_minutes, last_run, now, run_tool}
+    ctx.action.propose({ title: "Scheduled report", markdown: "…",
+                         actions: [{ id: "ok", label: "Dismiss", kind: "dismiss" }] });
+  },
   // classifier kind only:
   classify: function (ctx, input) {         // {kind, model, feats} -> {label, confidence}
     return { label: "", confidence: 0 };    // empty label = abstain
@@ -99,6 +104,27 @@ featurizes the message (`{tokens, from, domain, subject, body}`) and calls your
 `{label: "", confidence: 0}` to abstain. `plugins/mt-promo-fastpath` is the
 reference implementation (bit-exact ports of `decision_list`/`naive_bayes`
 predictions from `heuristics.py`).
+
+## Scheduled runs
+
+A tool plugin can ask the kernel to call `onSchedule(ctx, input)` on a cadence:
+
+```json
+"schedule": { "every_minutes": 1440, "run_tool": "my_tool", "enabled": true }
+```
+
+`every_minutes` is 15–10080. A plugin with a `schedule` must be `kind: ["tool"]`
+with at least one tool; `run_tool` (optional) must name one of them and is passed
+to `onSchedule` as a hint. Runs happen on a background thread — never the mail
+pipeline — and `last_run` is recorded before the call, so a crash cannot
+hot-loop; three consecutive failures still auto-disable the plugin. Set the
+`plugin_schedules_enabled` setting to 0 to pause every scheduled run.
+
+Deliver results by calling `ctx.action.propose(card)`: the user gets a pending
+card on the assistant page. Returning a `ToolResult` is fine too (it is logged
+and shown in the plugin's activity), but it does not notify anyone. Keep within
+`limits.timeout_ms`; LLM calls count against it. See `mt-commitments` and
+`mt-subscription-watch` for working examples.
 
 ## Testing your plugin
 

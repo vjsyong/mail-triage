@@ -170,6 +170,18 @@
     return JSON.stringify(out === undefined ? null : out);
   };
 
+  globalThis.__mt_schedule = function (inputJson) {
+    var p = globalThis.__mt_plugin;
+    if (!p || typeof p.onSchedule !== "function") {
+      throw new Error("bundle does not export onSchedule()");
+    }
+    var out = p.onSchedule(globalThis.__mt_ctx, JSON.parse(inputJson));
+    if (out && typeof out.then === "function") {
+      throw new Error("onSchedule must be synchronous (SDK v0.1)");
+    }
+    return JSON.stringify(out === undefined ? null : out);
+  };
+
   globalThis.__mt_unload = function () {
     var p = globalThis.__mt_plugin;
     if (p && typeof p.onUnload === "function") {

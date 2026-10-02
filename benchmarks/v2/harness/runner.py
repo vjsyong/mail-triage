@@ -29,7 +29,7 @@ sys.path.insert(0, V2)
 
 from scoring.base import extract_json  # noqa: E402
 
-HARNESS_REVISION = "v2.1"
+HARNESS_REVISION = "v2.4"
 
 with open(os.path.join(HERE, "prompts.json")) as f:
     PROMPTS = json.load(f)
@@ -98,6 +98,15 @@ def transcript_chars(messages):
         for tc in m.get("tool_calls") or []:
             n += len(str(tc))
     return n
+
+
+_CONTEXT_HINTS = ("context", "context length", "max_model_len", "too long",
+                  "maximum context", "prompt is too long", "reduce the length")
+
+
+def _is_context_error(exc):
+    msg = str(exc).lower()
+    return "400" in msg and any(h in msg for h in _CONTEXT_HINTS)
 
 
 # ------------------------------------------------------------------ client
@@ -324,6 +333,7 @@ def run_assistant(client, case, run_id, model, corpus_dir=CORPUS, no_stream=Fals
     reply = ""
     steps = 0
     budget_tripped = False
+    context_reset = False
     metrics = {}
     error = None
     total_chars = transcript_chars(convo)
@@ -331,8 +341,20 @@ def run_assistant(client, case, run_id, model, corpus_dir=CORPUS, no_stream=Fals
         while steps < MAX_STEPS + 1:
             steps += 1
             use_tools = ASSISTANT_TOOLS if steps <= MAX_STEPS else None
-            res = client.chat_turn(system, convo, tools=use_tools, thinking=True,
-                                   max_tokens=2500, stream=not no_stream)
+            try:
+                res = client.chat_turn(system, convo, tools=use_tools, thinking=True,
+                                       max_tokens=2500, stream=not no_stream)
+            except RuntimeError as exc:
+                if not _is_context_error(exc):
+                    raise
+                # The 16K production context can be exhausted by a long transcript.
+                # Mirror a robust client: reset to the current user turn and retry
+                # smaller. Recorded as an adaptation so it is never silent.
+                context_reset = True
+                convo = [{"role": "user", "content": case["user"]}]
+                total_chars = transcript_chars(convo)
+                res = client.chat_turn(system, convo, tools=use_tools, thinking=True,
+                                       max_tokens=1200, stream=not no_stream)
             metrics = res["metrics"]
             calls = res.get("tool_calls") or []
             if not calls or use_tools is None:
@@ -366,6 +388,7 @@ def run_assistant(client, case, run_id, model, corpus_dir=CORPUS, no_stream=Fals
     a = _attempt_base(case, "assistant", run_id, model, metrics)
     a["output"] = {"calls": all_calls, "reply": reply[:6000], "state": sim.snapshot(),
                    "steps": steps, "budget_tripped": budget_tripped,
+                   "context_reset": context_reset,
                    "transcript_chars": total_chars}
     a["tool_events"] = sim.events
     a["error"] = error
@@ -460,6 +483,71 @@ def load_corpus():
     return out
 
 
+def attempt_case(client, case, run_id, model, suite, corpus_msgs=None,
+                 no_stream=False, retries=1):
+    """Run one case with bounded retries; returns the attempt record."""
+    attempt_no = 1
+    while True:
+        try:
+            a = run_case(client, case, run_id, model,
+                         corpus_msgs=corpus_msgs, no_stream=no_stream)
+            a["attempt"] = attempt_no
+            return a
+        except Exception as exc:
+            attempt_no += 1
+            if attempt_no > retries:
+                return {"case_id": case["id"], "suite": suite, "model": model,
+                        "run_id": run_id, "attempt": attempt_no - 1,
+                        "status": "error", "error": repr(exc)}
+
+
+def run_cases(cases, make_client, run_id, model, suite, concurrency=1,
+              corpus_msgs=None, no_stream=False, retries=1, sink=None,
+              on_done=None):
+    """Run cases, optionally with ``concurrency`` in-flight requests.
+
+    Concurrency is how vLLM's continuous batching is exercised: many
+    independent prompts are in flight at once, which raises throughput several-
+    fold.  Each worker thread gets its own HTTP session (requests.Session is not
+    thread-safe).  Records are emitted from this (main) thread so the attempts
+    file never interleaves.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    tls = threading.local()
+
+    def worker_client():
+        if getattr(tls, "client", None) is None:
+            tls.client = make_client()
+        return tls.client
+
+    def work(case):
+        return attempt_case(worker_client(), case, run_id, model, suite,
+                            corpus_msgs=corpus_msgs, no_stream=no_stream,
+                            retries=retries)
+
+    done = 0
+    if concurrency <= 1:
+        for case in cases:
+            a = work(case)
+            done += 1
+            if sink:
+                sink(a)
+            if on_done:
+                on_done(a, done, len(cases))
+        return
+    with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        futs = {ex.submit(work, c): c for c in cases}
+        for fut in as_completed(futs):
+            a = fut.result()
+            done += 1
+            if sink:
+                sink(a)
+            if on_done:
+                on_done(a, done, len(cases))
+
+
 def main():
     import argparse
     from harness import run_manager
@@ -474,34 +562,31 @@ def main():
     ap.add_argument("--thinking-mode", default="auto")
     ap.add_argument("--assistant-no-stream", action="store_true")
     ap.add_argument("--retries", type=int, default=1)
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="in-flight requests (vLLM continuous batching); 1 = sequential")
     args = ap.parse_args()
 
-    client = BenchClient(args.base, args.model_name, thinking_mode=args.thinking_mode)
+    if args.concurrency < 1:
+        ap.error("--concurrency must be >= 1")
     corpus_msgs = load_corpus()
     cases = run_manager.load_suite(args.suite)
     if args.split:
         cases = [c for c in cases if c.get("split") == args.split]
-    for i, case in enumerate(cases, 1):
-        attempt_no = 1
-        while True:
-            try:
-                a = run_case(client, case, args.run_id, args.model_name,
-                             corpus_msgs=corpus_msgs, no_stream=args.assistant_no_stream)
-                a["attempt"] = attempt_no
-                run_manager.record_attempt(args.run_id, args.suite, a, results=args.results)
-                status = a["status"]
-                break
-            except Exception as exc:
-                attempt_no += 1
-                if attempt_no > args.retries:
-                    run_manager.record_attempt(args.run_id, args.suite, {
-                        "case_id": case["id"], "suite": args.suite, "model": args.model_name,
-                        "run_id": args.run_id, "attempt": attempt_no - 1,
-                        "status": "error", "error": repr(exc),
-                    }, results=args.results)
-                    status = "EXC"
-                    break
-        print("  [%d/%d] %-28s %s" % (i, len(cases), case["id"], status), flush=True)
+
+    def make_client():
+        return BenchClient(args.base, args.model_name, thinking_mode=args.thinking_mode)
+
+    def sink(a):
+        run_manager.record_attempt(args.run_id, args.suite, a, results=args.results)
+
+    def on_done(a, i, total):
+        status = a.get("status", "?")
+        print("  [%d/%d] %-28s %s" % (i, total, a["case_id"], status), flush=True)
+
+    run_cases(cases, make_client, args.run_id, args.model_name, args.suite,
+              concurrency=args.concurrency, corpus_msgs=corpus_msgs,
+              no_stream=args.assistant_no_stream, retries=args.retries,
+              sink=sink, on_done=on_done)
     print("done", args.suite, flush=True)
 
 

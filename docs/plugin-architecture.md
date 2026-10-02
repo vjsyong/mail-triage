@@ -34,9 +34,10 @@ auto-discovers as tools.
 | Discovery roots | `plugins/` (built-in, shipped in repo/image, `mt-` prefix) + `$DATA_DIR/plugins/` (user) | Built-ins version with the app; user plugins never shadow them |
 | Phasing | 1) kernel seams + SDK definition, 2) sandbox runtime, 3) two dogfood plugins, 4) assistant tool discovery + Plugins page | Each phase independently shippable with a green suite |
 
-Non-goals for v1 (explicit): plugin-provided UI panes, plugin cron/trigger registration,
-direct mail mutation from inside a plugin, npm dependencies inside the sandbox, a plugin
-marketplace, and plugin code signing (integrity hashing only; revisit later).
+Non-goals for v1 (explicit): plugin-provided UI panes, direct mail mutation from
+inside a plugin, npm dependencies inside the sandbox, a plugin marketplace, and
+plugin code signing (integrity hashing only; revisit later). Scheduled entrypoints
+(`schedule` + `onSchedule`) shipped after the first wave - see 2.5.
 
 ---
 
@@ -459,6 +460,33 @@ export async function execute(ctx: PluginContext, call: ToolCall): Promise<ToolR
 
 ---
 
+### 2.6 Scheduled entrypoints (as built)
+
+A tool plugin may declare a cadence; the kernel then calls its `onSchedule`
+entrypoint in the background, never on the mail pipeline:
+
+```json
+"schedule": { "every_minutes": 1440, "run_tool": "watch_subscriptions", "enabled": true }
+```
+
+- Schema/validation: `schedule.required = every_minutes` (15..10080). A plugin with a
+  `schedule` must be `kind: ["tool"]` with at least one tool; `run_tool`, when given,
+  must name a declared tool.
+- Runtime: `plugin_worker.py` dispatches `{"cmd":"schedule"}` to `__mt_schedule`
+  (`onSchedule(ctx, {every_minutes, last_run, now, run_tool}) -> ToolResult | void`).
+- Scheduler: `plugin_rt.PluginScheduler` (daemon thread, ~30s tick, started beside the
+  mail worker) calls `run_due_schedules()`. `last_run` is persisted in `plugin_kv`
+  under `__schedule` *before* the call, so a failing plugin cannot hot-loop. The global
+  setting `plugin_schedules_enabled` (default 1) pauses every scheduled run.
+- Delivery: `onSchedule` should call `ctx.action.propose(card)`; that lands as a pending
+  `agent_actions` row (`tool: "plugin_proposal"`) with the card in its payload, rendered
+  on the assistant page as a "From a plugin" card with an **Acknowledge** button. The
+  apply route treats a card-only proposal as informational (no tool call), so it does not
+  fail on the synthetic `plugin_proposal` name.
+- First users: `mt-commitments` and `mt-subscription-watch` (both daily).
+
+---
+
 ## 3. Dynamic AI tool discovery pipeline
 
 ### 3.1 Discovery, validation, registration
@@ -795,11 +823,12 @@ cost of ~1 MB/worker and a lazy spawn (~0.3 s) per plugin. The `PluginRuntime`
 class keeps the swap to a Wasm-packaged QuickJS adapter behind the same
 interface if we ever want it.
 
-## SDK v0.1 is synchronous
+## SDK is synchronous
 
-`execute`/`classify`/`onLoad` must be synchronous (the bridge is blocking
-JSON-RPC); async throws a clear error. TypeScript authors bundle with esbuild to
-a single IIFE assigning `globalThis.__mt_plugin`.
+`execute`/`classify`/`onLoad`/`onSchedule` must be synchronous (the bridge is
+blocking JSON-RPC); async throws a clear error. TypeScript authors bundle with
+esbuild to a single IIFE assigning `globalThis.__mt_plugin`. The host SDK is 0.2.0
+(adds `onSchedule`; manifests with `"sdk": ">=0.1 <1.0"` still load).
 
 ## Classifier kind (Phase 3 as built)
 
@@ -814,6 +843,7 @@ bit-exactly (suite checks float equality to 1e-9). Opt in via the
 
 - Tables: `plugins`, `plugin_kv`. New settings: `plugins_enabled`,
   `plugin_tools_budget` (default 8), `plugin_classifiers` (opt-in list),
+  `plugin_schedules_enabled` (default 1; pauses every scheduled run),
   `perm_plugin:<id>` (assistant gate per plugin: off/ask/auto).
 - Assistant reach: plugin tools appear as `plugin__<id>__<tool>` in the tool
   inventory (token-budgeted, keyword-ranked), execute through
@@ -834,18 +864,30 @@ bit-exactly (suite checks float equality to 1e-9). Opt in via the
 `plugins/` built-ins: `mt-promo-fastpath` (classifier), `mt-invoice-finder` (tool),
 `mt-cjk-matcher` (matcher), `mt-mirror-language` (draft-provider),
 `mt-priority-first` (retriever), `mt-webhook-notify` (integration),
-`mt-daily-digest` (tool), `mt-model-bench` (tool) · tests: suite sections T43-T50 + `tests/plugins_fixture/`.
+`mt-daily-digest` (tool), `mt-model-bench` (tool), `mt-commitments` (tool +
+schedule), `mt-subscription-watch` (tool + schedule), `mt-unsubscribe` (tool) ·
+tests: suite sections T43-T53 + `tests/plugins_fixture/`.
+
+## Plugin cards in the assistant, as built (2026-10-02)
+
+A tool's `ToolResult.card` now travels on the `tool_end` SSE event (engine.py) and
+renders in the assistant transcript by `renderToolCard` (app.py, `BASE_TMPL`
+script): title, markdown, label/value fields, and `kind:"link"` actions as
+clickable buttons. That is what gives `mt-unsubscribe` its one-click opt-out list.
+`kind:"apply"`/`kind:"dismiss"` actions are still kernel-side (`ctx.action.propose`,
+pending actions); only link actions render inline today.
 
 ## All kinds, as built (2026-10-02, second wave)
 
 | Kind | Hook | Opt-in | Built-in |
 |---|---|---|---|
-| tool | assistant inventory -> `call_tool` -> sandbox | enable + assistant gate (`plugin:<id>`) | mt-invoice-finder, mt-daily-digest, mt-model-bench |
+| tool | assistant inventory -> `call_tool` -> sandbox | enable + assistant gate (`plugin:<id>`) | mt-invoice-finder, mt-daily-digest, mt-model-bench, mt-unsubscribe, mt-commitments, mt-subscription-watch |
 | classifier | `heuristics.classify()` fallback | `plugin_classifiers` | mt-promo-fastpath |
 | matcher | `_cond_field` op `plugin` in rules/flows | `plugin_matchers` (+ builder has the op) | mt-cjk-matcher |
 | draft-provider | flow draft step `mode:"plugin"` (live + simulator preview) | referenced by the step | mt-mirror-language |
 | retriever | `_tool_semantic_search` re-rank | `plugin_retrievers` | mt-priority-first |
 | integration | `mail.filed` / `mail.classified` events on a dispatcher thread | enabled integration plugins (10s target cache, reset on enable/disable) | mt-webhook-notify |
+| schedule | `onSchedule` on the `PluginScheduler` thread (~30s tick) | `schedule.every_minutes` (+ `plugin_schedules_enabled`) | mt-commitments, mt-subscription-watch |
 
 Webhook hosts: `net.allow_config_hosts: true` lets the plugin's config add
 `allowed_hosts` patterns - the user-typed endpoint is the consent, every call

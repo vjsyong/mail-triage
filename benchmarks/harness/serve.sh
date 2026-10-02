@@ -17,7 +17,7 @@ MUSE_IMAGE=vllm/vllm-openai:muse-glimmer-x86_64-cu129
 stop() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
 
 common_args() {
-  echo -n "--served-model-name $1 --max-model-len 16384 --gpu-memory-utilization 0.92 \
+  echo -n "--served-model-name $1 --max-model-len 32768 --gpu-memory-utilization 0.92 \
 --enable-auto-tool-choice --trust-remote-code --enable-prefix-caching --enable-chunked-prefill"
 }
 
@@ -26,6 +26,14 @@ case "${1:-}" in
   status) docker ps -a --filter name=$NAME --format '{{.Names}} {{.Status}}'; exit 0 ;;
   qwen9b)
     DIR=$MODELS/qwen3.5-9b; MNAME=qwen3.5-9b
+    # bf16 9B + default max-num-seqs=256 OOMs during CUDA-graph memory
+    # profiling on a 24GB card (v1 used --enforce-eager as the workaround,
+    # which disabled graphs and cost ~2.4x throughput).  Capping the batch at
+    # 32 keeps CUDA graphs (pool 0.12 GiB) and fits: verified 2026-10-02.
+    EXTRA="--tool-call-parser qwen3_xml --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0} --gpu-memory-utilization 0.90 --max-num-seqs 32 --max-num-batched-tokens 8192";;
+  qwen9b-eager)
+    DIR=$MODELS/qwen3.5-9b; MNAME=qwen3.5-9b
+    # Historical profile retained for reproducing the v1/v2-eager numbers.
     EXTRA="--tool-call-parser qwen3_xml --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0} --gpu-memory-utilization 0.90 --enforce-eager";;
   qwen4b)
     DIR=$MODELS/qwen3.5-4b; MNAME=qwen3.5-4b
@@ -44,7 +52,7 @@ case "${1:-}" in
   lfm8b)
     DIR=$MODELS/lfm2.5-8b-a1b; MNAME=lfm2.5-8b-a1b
     EXTRA="--tool-call-parser lfm2";;
-  *) echo "usage: serve.sh <qwen9b|qwen4b|gemma4e4b|granite3b|lfm8b|stop|status>"; exit 1 ;;
+  *) echo "usage: serve.sh <qwen9b|qwen9b-eager|qwen4b|gemma4e4b|granite3b|lfm8b|stop|status>"; exit 1 ;;
 esac
 
 stop
