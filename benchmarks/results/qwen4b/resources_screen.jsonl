@@ -1666,3 +1666,8 @@
 {"t": 1790913729.39, "gpu_mem_mib": 22304, "gpu_util_pct": 100, "cpu_pct": "106.97%", "ram": "19.75GiB"}
 {"t": 1790913734.41, "gpu_mem_mib": 22304, "gpu_util_pct": 100, "cpu_pct": "106.34%", "ram": "19.75GiB"}
 {"t": 1790913739.42, "gpu_mem_mib": 22304, "gpu_util_pct": 100, "cpu_pct": "105.68%", "ram": "19.75GiB"}
+{"t": 1790913744.44, "gpu_mem_mib": 22304, "gpu_util_pct": 100, "cpu_pct": "105.72%", "ram": "19.75GiB"}
+{"t": 1790913749.46, "gpu_mem_mib": 22304, "gpu_util_pct": 100, "cpu_pct": "106.87%", "ram": "19.75GiB"}
+{"t": 1790913754.47, "gpu_mem_mib": 22304, "gpu_util_pct": 100, "cpu_pct": "105.97%", "ram": "19.75GiB"}
+{"t": 1790913759.49, "gpu_mem_mib": 22304, "gpu_util_pct": 100, "cpu_pct": "106.14%", "ram": "19.75GiB"}
+{"t": 1790913764.51, "gpu_mem_mib": 22304, "gpu_util_pct": 100, "cpu_pct": "105.84%", "ram": "19.75GiB"}

@@ -1,5 +1,6 @@
 {
  "key": "gemma4e4b",
  "model": "gemma-4-e4b",
- "boot_s": 371
+ "boot_s": 371,
+ "thinking_mode": "auto"
 }
