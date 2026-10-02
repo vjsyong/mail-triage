@@ -7546,6 +7546,10 @@ def healthz():
 
 if __name__ == "__main__":
     store.init_db()
+    try:
+        plugins.scan()  # discover built-in + user plugins (inert until enabled)
+    except Exception as exc:  # a broken plugins dir must never block boot
+        print("plugin scan failed at boot: %r" % exc, flush=True)
     if "--check" in sys.argv:
         out = engine.connectivity_check()
         try:
