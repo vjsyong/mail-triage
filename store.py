@@ -967,6 +967,38 @@ def snooze_message(mid, until_ts):
         conn.commit()
 
 
+def clear_needs_reply(ids):
+    """Clear the needs-reply flag on the given ids. Returns (count, changed_ids).
+    Only rows that were actually flagged change, so only real corrections get
+    labels and audit events downstream."""
+    changed = []
+    with db() as conn:
+        for x in ids:
+            try:
+                mid = int(x)
+            except (TypeError, ValueError):
+                continue
+            row = conn.execute("SELECT llm_needs_reply FROM messages WHERE id=?", (mid,)).fetchone()
+            if row is not None and row["llm_needs_reply"] == 1:
+                conn.execute("UPDATE messages SET llm_needs_reply=0 WHERE id=?", (mid,))
+                changed.append(mid)
+        conn.commit()
+    return len(changed), changed
+
+
+def user_needs_reply(msg_id):
+    """The user's latest explicit needs_reply correction (0/1) or None when the
+    user never corrected this message. Corrections outrank every model verdict."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT label FROM labels WHERE msg_id=? AND task='needs_reply' "
+            "AND source='explicit_user_correction' ORDER BY id DESC LIMIT 1",
+            (int(msg_id),)).fetchone()
+    if not row:
+        return None
+    return 1 if str(row["label"]) == "1" else 0
+
+
 def record_move(msg, to_folder, source, from_folder=None):
     """Record a filing for the undo trail + the per-message audit (called before
     the IMAP move). msg = pre-move dict; from_folder overrides msg['folder'] for

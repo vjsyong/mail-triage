@@ -71,3 +71,18 @@ snoozed_until -> `snooze`. Real flow_runs timestamps are used when present.
   in the empty audit card). A `backfill` marker event records what the sweep did.
 - Live result: 6,037 events reconstructed across ~3,590 messages (3,554 classify +
   2,480 move + rule/flow few); 34 messages have no stored signals and stay empty.
+
+## Clearing "needs reply" (2026-10-02)
+When the LLM flags a message but the user disagrees, the flag must be clearable:
+- **Bulk** on Messages: select rows -> "No reply needed" (stays inside the current
+  filter). **Per message** in the viewer: the queue bar's "No reply, next" and the
+  Actions card's "No reply needed".
+- Clearing sets `llm_needs_reply=0` (queue + counts drop immediately), records a
+  **weight-4 `explicit_user_correction` label** (`labels`, task `needs_reply`, value
+  "0") that the learning loop consumes like any other label, and writes a
+  `needs_reply · cleared (by ui)` audit event + an event-log line.
+- **A re-classification cannot re-flag it**: `engine.classify_and_store` writes
+  `_needs_reply_effective(msg_id, llm_value)`, and `store.user_needs_reply()` (the
+  latest explicit correction) outranks every model verdict.
+- Only rows that were actually flagged change, so bulk clears never mint labels for
+  messages the user did not correct.

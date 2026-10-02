@@ -37,8 +37,9 @@ on the machine; the LLM defaults to a local model, and a cloud fallback is optio
 - **Semantic search.** Hybrid local index: fielded FTS5 + sqlite-vec dense
   retrieval, RRF fusion, small CPU cross-encoder reranker. No GPU needed.
 - **Message viewer and triage queue.** Sanitized HTML rendering, one-click
-  file-and-next, undo trail, snooze that resurfaces, tagging, bulk "classify
-  selected" / "classify all unclassified".
+  file-and-next, undo trail, snooze that resurfaces, tagging, clearing the
+  needs-reply flag (bulk or per message), bulk "classify selected" / "classify all
+  unclassified".
 - **Templates and drafting.** Reply templates with placeholders; draft with the LLM
   and save straight into Drafts to send from your normal client.
 - **Accounts.** Mailbox sign-in via OAuth handled in the UI through the embedded

@@ -2836,6 +2836,54 @@ def main():
     check("wake clears the snooze", srow3["snoozed_until"] == 0
           and sid_ in [x["id"] for x in store.messages(limit=3000)])
 
+    section("T38b needs-reply clearing: bulk, viewer, correction survives re-classify")
+    nrid = add_msg(state, "nr@x.com", "Nr lunch probe", "lunch probe body", "nr1@x")
+    nrid2 = add_msg(state, "nr2@x.com", "Nr quiet probe", "no trigger words here", "nr2@x")
+    nrid3 = add_msg(state, "nr3@x.com", "Nr lunch again", "lunch again body", "nr3@x")
+    engine.process_mailbox()
+    def _nrrow(msgid):
+        rows = [r for r in store.messages(limit=4000) if r["msgid"] == msgid]
+        return store.get_message(rows[0]["id"]) if rows else None
+    nrA, nrB, nrC = _nrrow("nr1@x"), _nrrow("nr2@x"), _nrrow("nr3@x")
+    if not all((nrA, nrB, nrC)):
+        print("   nr fixtures missing; nr* rows seen:",
+              [(r["msgid"], r["folder"], r["uid"]) for r in store.messages(limit=4000)
+               if "nr" in (r["msgid"] or "")])
+    store.update_message(nrA["id"], llm_needs_reply=1, llm_category="Personal", status="classified")
+    store.update_message(nrB["id"], llm_needs_reply=0, llm_category="Personal", status="classified")
+    store.update_message(nrC["id"], llm_needs_reply=1, llm_category="Personal", status="classified")
+    nr_before = store.count_messages("needs_reply")
+    r = client.post("/messages/needs-reply", data={"ids": [str(nrA["id"])], "f": "needs_reply"})
+    check("bulk clear resets the flag + drops the count",
+          r.status_code == 302 and store.get_message(nrA["id"])["llm_needs_reply"] == 0
+          and store.count_messages("needs_reply") == nr_before - 1)
+    labs = store.list_labels(msg_id=nrA["id"], task="needs_reply", source="explicit_user_correction")
+    check("bulk clear records a weight-4 user-correction label",
+          bool(labs) and labs[0]["label"] == "0")
+    check("bulk clear wrote the audit event",
+          any(e["kind"] == "needs_reply" for e in store.get_msg_events(nrA["id"], limit=20)))
+    check("correction outranks any model verdict (effective value)",
+          engine._needs_reply_effective(nrA["id"], True) == 0
+          and engine._needs_reply_effective(nrB["id"], True) == 1)
+    r = client.post("/messages/%d/classify" % nrA["id"])
+    check("re-classify respects the user's correction",
+          store.get_message(nrA["id"])["llm_needs_reply"] == 0)
+    r = client.get("/messages/%d" % nrA["id"])
+    check("viewer shows the cleared state", b"cleared by you" in r.data)
+    r = client.get("/messages/%d" % nrB["id"])
+    check("viewer says not flagged for a clean message",
+          b"not flagged" in r.data and b"No reply needed" not in r.data)
+    client.post("/messages/needs-reply", data={"ids": [str(nrB["id"])]})
+    check("clearing an unflagged message mints no label",
+          not store.list_labels(msg_id=nrB["id"], task="needs_reply",
+                                source="explicit_user_correction"))
+    r = client.get("/messages/%d?f=needs_reply" % nrC["id"])
+    check("viewer offers the no-reply action when flagged",
+          b"No reply needed" in r.data and b"No reply" in r.data)
+    r = client.post("/messages/%d/needs-reply" % nrC["id"], data={"next": "1", "f": "needs_reply"})
+    check("single clear + next clears the flag and advances", r.status_code == 302
+          and store.get_message(nrC["id"])["llm_needs_reply"] == 0)
+
     section("T39 log tools: search, time window, pause")
     store.log_event("warn", "needle-alpha warning for search")
     store.log_event("info", "ordinary line without the token")

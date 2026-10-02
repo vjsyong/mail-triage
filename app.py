@@ -3726,6 +3726,7 @@ MESSAGES_TMPL = """
 
 <div class="card flush">
   <form id="bulk" method="post">
+    <input type="hidden" name="f" value="{{ filt }}">
     <div class="toolbar">
       <span class="tchips">
       {% for key, label, n in filter_chips %}
@@ -3745,6 +3746,7 @@ MESSAGES_TMPL = """
       <datalist id="taglist">{% for c in tag_options %}<option value="{{ c }}">{% endfor %}</datalist>
       <button class="btn small" type="submit" formaction="{{ url_for('messages_tag') }}">Tag</button>
       <button class="btn small" type="submit" formaction="{{ url_for('messages_untag') }}">Untag</button>
+      <button class="btn small" type="submit" formaction="{{ url_for('messages_needs_reply') }}">No reply<span class="mhide"> needed</span></button>
       <button class="btn small primary" type="submit" formaction="{{ url_for('messages_classify') }}">Classify selected</button>
     </div>
     {% if msgs %}
@@ -3898,6 +3900,29 @@ def messages_untag():
     return redirect(url_for("messages"))
 
 
+@app.route("/messages/needs-reply", methods=["POST"])
+def messages_needs_reply():
+    ids = request.form.getlist("ids")
+    f = (request.form.get("f") or "all").strip()
+    if f not in ("all", "queued", "needs_reply", "moved", "tagged", "snoozed", "errors"):
+        f = "all"
+    if not ids:
+        flash("Select at least one message first.", "err")
+        return redirect(url_for("messages", f=(None if f == "all" else f)))
+    n, changed = store.clear_needs_reply(ids)
+    for mid in changed:
+        store.log_msg_event(mid, "needs_reply", "cleared (by ui)")
+        learning.observe(mid, "needs_reply", "cleared", source="ui")
+        store.record_label(mid, "needs_reply", "0", source="explicit_user_correction",
+                           source_detail="cleared in the UI")
+    if n:
+        store.log_event("info", "cleared needs-reply on %d message(s) (by ui)" % n)
+        flash("Cleared needs-reply on %d message%s." % (n, "" if n == 1 else "s"), "ok")
+    else:
+        flash("Nothing to clear - those messages were not flagged.", "warn")
+    return redirect(url_for("messages", f=(None if f == "all" else f)))
+
+
 @app.route("/messages/classify", methods=["POST"])
 def messages_classify():
     ids = request.form.getlist("ids")
@@ -4037,6 +4062,7 @@ MESSAGE_TMPL = """
   {% else %}<span class="btn small qoff">Older →</span>{% endif %}
   <span class="sp"></span>
   {% if can_file %}<form class="inline" method="post" action="{{ url_for('message_file', mid=m.id) }}"><input type="hidden" name="next" value="1"><input type="hidden" name="f" value="{{ filt }}"><button class="btn primary small" type="submit">File &amp; next</button></form>{% endif %}
+  {% if m.llm_needs_reply %}<form class="inline" method="post" action="{{ url_for('message_needs_reply', mid=m.id) }}"><input type="hidden" name="next" value="1"><input type="hidden" name="f" value="{{ filt }}"><button class="btn small" type="submit">No reply<span class="mhide">, next</span></button></form>{% endif %}
 </div>
 <div class="msgrid">
   <div class="stack">
@@ -4083,7 +4109,7 @@ MESSAGE_TMPL = """
       <div class="arow2">
         <div class="ahead">
           <span class="mono atime">{{ ev.when }}</span>
-          <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','wake':'ok','tag':'warn','draft':'acc','backfill':'warn'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
+          <span class="badge {{ {'classify':'acc','rule':'ok','flow':'acc','file':'ok','move':'','undo':'warn','guard':'warn','snooze':'warn','needs_reply':'warn','wake':'ok','tag':'warn','draft':'acc','backfill':'warn'}.get(ev.kind,'') }}">{{ ev.kind }}</span>
           {% if ev.meta %}
           {% if ev.meta.needs_reply %}<span class="badge warn">needs reply</span>{% endif %}
           <span class="sub">{% if ev.meta.confidence is not none %}{{ '%.0f' % (ev.meta.confidence * 100) }}% · {% endif %}{{ ev.meta.by }}{% if ev.meta._backfilled %} · reconstructed{% endif %}</span>
@@ -4123,6 +4149,19 @@ MESSAGE_TMPL = """
           <button class="btn small" type="submit">Save</button>
         </div>
       </form>
+      <div style="margin-top:12px">
+        <label>Needs reply</label>
+        <div class="row">
+          {% if m.llm_needs_reply %}
+          <span class="sub" style="margin-right:auto">flagged by the LLM</span>
+          <form class="inline" method="post" action="{{ url_for('message_needs_reply', mid=m.id) }}"><button class="btn small" type="submit">No reply needed</button></form>
+          {% elif m.nr_cleared %}
+          <span class="sub">✓ cleared by you — a re-classify won't re-flag it</span>
+          {% else %}
+          <span class="sub">not flagged</span>
+          {% endif %}
+        </div>
+      </div>
       <div style="margin-top:12px">
         <label>Snooze — hide it from the lists</label>
         <div class="row">
@@ -4460,6 +4499,7 @@ def message_detail(mid):
     su = m.get("snoozed_until") or 0
     m["snoozed_active"] = bool(su and su > time.time())
     m["snoozed_h"] = fmt_ts(su) if su else ""
+    m["nr_cleared"] = store.user_needs_reply(mid) == 0
     m["audit"] = []
     for ev in store.get_msg_events(mid, limit=200):
         d = {"when": fmt_ts(ev["ts"]), "kind": ev["kind"], "detail": ev["detail"], "meta": None}
@@ -4639,6 +4679,27 @@ def message_tag(mid):
     else:
         learning.observe(mid, "untag", "", source="ui")
     flash(("Tag saved: " + tag) if tag else "Tag cleared.", "ok")
+    return redirect(url_for("message_detail", mid=mid))
+
+
+@app.route("/messages/<int:mid>/needs-reply", methods=["POST"])
+def message_needs_reply(mid):
+    n, _ = store.clear_needs_reply([mid])
+    if n:
+        store.log_msg_event(mid, "needs_reply", "cleared (by ui)")
+        learning.observe(mid, "needs_reply", "cleared", source="ui")
+        store.record_label(mid, "needs_reply", "0", source="explicit_user_correction",
+                           source_detail="cleared in the viewer")
+        store.log_event("info", "cleared needs-reply on message %d (by ui)" % mid)
+        flash("Needs-reply cleared - a re-classify will not re-flag it.", "ok")
+    else:
+        flash("This message was not flagged.", "warn")
+    filt = request.form.get("f") or "all"
+    if request.form.get("next") == "1":
+        _p, next_id = store.neighbors(mid, filt)
+        if next_id and next_id != mid:
+            return redirect(url_for("message_detail", mid=next_id, f=filt))
+        return redirect(url_for("messages", f=filt))
     return redirect(url_for("message_detail", mid=mid))
 
 

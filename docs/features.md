@@ -164,7 +164,8 @@ images; remote images are blocked by default (per-message "Load images", or
 always-on in Settings). The sidebar carries Details, the per-message audit trail
 (every event: classification, rules, moves, with reasoning), Actions, Replies.
 Triage queue: file and jump straight to the next message; undo puts a message back
-and keeps automation off it; snooze hides and resurfaces it. The simulator page
+and keeps automation off it; snooze hides and resurfaces it; clearing “needs reply” (bulk or per
+message) turns the flag off and outranks the model on any re-classify. The simulator page
 dry-runs a rule, flow or classifier decision against any message and shows the
 stage-by-stage verdict.
 

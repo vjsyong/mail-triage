@@ -2104,6 +2104,16 @@ def classify_verdict(msg, settings):
     return res, hres
 
 
+def _needs_reply_effective(msg_id, llm_value):
+    """User corrections outrank the model: a cleared needs_reply stays cleared
+    through every re-classification."""
+    try:
+        u = store.user_needs_reply(msg_id)
+    except Exception:
+        u = None
+    return u if u is not None else (1 if llm_value else 0)
+
+
 def classify_and_store(msg, settings, mc=None):
     """Classify one message, persist the result, file it when llm_apply is on.
 
@@ -2128,7 +2138,7 @@ def classify_and_store(msg, settings, mc=None):
         "llm_summary": str(res.get("summary", ""))[:200],
         "llm_reason": str(res.get("reason", ""))[:200],
         "llm_thinking": str(res.get("_thinking") or "")[:6000],
-        "llm_needs_reply": 1 if res.get("needs_reply") else 0,
+        "llm_needs_reply": _needs_reply_effective(msg.get("id"), res.get("needs_reply")),
         "llm_suggested_folder": folder,
         "classified_by": ("heuristic:%s %s" % (hres["heuristic_id"], hres["heuristic_name"])) if hres else "llm",
         "status": "classified",
