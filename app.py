@@ -2398,7 +2398,7 @@ RULES_TMPL = """
 <div class="card flush" id="rules">
   {% if rules %}
   <div class="tablewrap"><table class="tbl mcards">
-    <thead><tr><th style="width:44px">#</th><th>rule</th><th>matches</th><th>actions</th><th class="r"></th></tr></thead>
+    <thead><tr><th style="width:44px">#</th><th>rule</th><th>if</th><th>actions</th><th class="r"></th></tr></thead>
     <tbody>
     {% for r in rules %}
     <tr{% if not r.enabled %} style="opacity:.55"{% endif %}>
@@ -4080,7 +4080,7 @@ MESSAGE_TMPL = """
     <div class="card">
       <div class="row" style="margin-bottom:10px">
         {% if m.user_tag %}<span class="badge warn">tag: {{ m.user_tag }}</span>{% endif %}
-        {% if m.action_taken %}<span class="badge">{{ m.action_taken }}</span>{% endif %}
+        {% if m.action_taken %}<span class="badge">{{ m.action_taken|replace('move:', 'moved to ') }}</span>{% endif %}
         {% if m.llm_category %}<span class="badge acc">LLM: {{ m.llm_category }}{% if m.llm_confidence is not none %} ({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
         {% if m.classified_by and m.classified_by.startswith('heuristic') %}<span class="badge acc">⚙ {{ m.classified_by }}</span>{% endif %}
       </div>
@@ -4131,7 +4131,7 @@ MESSAGE_TMPL = """
           <b>{{ ev.meta.category or '(no category)' }}</b>
           {% if ev.meta.reason %}<div class="sub">why: {{ ev.meta.reason }}</div>{% endif %}
           {% if ev.meta.thinking %}<details><summary class="sub" style="cursor:pointer">full reasoning</summary><pre class="mono audit-pre">{{ ev.meta.thinking }}</pre></details>{% endif %}
-          {% else %}{{ ev.detail }}{% endif %}
+          {% else %}{{ (ev.detail or '')|replace('move:', 'moved to ') }}{% endif %}
         </div>
       </div>
       {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>
@@ -5674,7 +5674,7 @@ SETTINGS_TMPL = """
       <div class="setrow"><div class="st-l"><b>Your name</b><span class="sub">Used when drafting replies and filling template placeholders.</span></div>
         <div class="st-c"><input type="text" name="my_name" value="{{ s.my_name }}" aria-label="Your name"></div></div>
       <div class="setrow"><div class="st-l"><b>Time display offset (hours)</b><span class="sub">Hours from UTC; timestamps show as {{ tz }}.</span></div>
-        <div class="st-c"><input type="number" step="0.5" name="display_tz_offset" value="{{ s.display_tz_offset }}" min="-14" max="14" aria-label="Time display offset"></div></div>
+        <div class="st-c"><input type="number" step="0.5" name="display_tz_offset" value="{{ '%g'|format(s.display_tz_offset|float) }}" min="-14" max="14" aria-label="Time display offset"></div></div>
       <div class="setrow"><div class="st-l"><b>Remote images in the viewer</b><span class="sub">When off, every message keeps a &ldquo;Load images&rdquo; button instead.</span></div>
         <div class="st-c"><label class="check"><input type="checkbox" name="render_images" value="1" {{ 'checked' if s.render_images else '' }}><input type="hidden" name="render_images" value="0"> <span>Always load</span></label></div></div>
       <div class="savebar"><button class="btn primary" type="submit">Save general</button></div>
