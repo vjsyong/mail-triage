@@ -1,0 +1,23 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v2 report",
+ "type": "object",
+ "required": ["run_id", "model", "coverage", "quality", "failures", "cost_index"],
+ "additionalProperties": true,
+ "properties": {
+  "run_id": {"type": "string"},
+  "model": {"type": "string"},
+  "config_hash": {"type": "string"},
+  "scorer_revision": {"type": "string"},
+  "split": {"type": "string"},
+  "coverage": {"type": "object"},
+  "quality": {"type": "object"},
+  "failures": {"type": "object"},
+  "cost_index": {"type": "object"},
+  "calibration": {"type": "object"},
+  "performance": {"type": "object"},
+  "by_suite": {"type": "object"},
+  "by_sub": {"type": "object"},
+  "critical_cases": {"type": "array"}
+ }
+}

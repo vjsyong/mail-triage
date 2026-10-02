@@ -1,0 +1,18 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v2 tool event",
+ "type": "object",
+ "required": ["case_id", "seq", "name", "status"],
+ "additionalProperties": true,
+ "properties": {
+  "case_id": {"type": "string", "minLength": 1},
+  "seq": {"type": "integer", "minimum": 0},
+  "step": {"type": "integer", "minimum": 1},
+  "name": {"type": "string", "minLength": 1},
+  "status": {"enum": ["emitted", "executed", "rejected", "skipped", "error"]},
+  "args": {"type": "object"},
+  "ok": {"type": ["boolean", "null"]},
+  "result_digest": {"type": ["string", "null"]},
+  "error": {"type": ["string", "null"]}
+ }
+}
