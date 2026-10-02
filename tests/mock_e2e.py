@@ -2458,6 +2458,25 @@ def main():
     r = client.get("/settings")
     check("settings page renders the auto-populated model picker",
           b'class="model-picker"' in r.data and b'data-which="primary"' in r.data)
+    # -- the RAG dropdowns: FastEmbed list for local, endpoint /models otherwise
+    r = client.get("/settings/rag-models?which=embed&protocol=local")
+    spec = r.get_json() or {}
+    check("local embed model list comes from FastEmbed",
+          r.status_code == 200 and spec.get("ok")
+          and rag.LOCAL_EMBED_DEFAULT in spec.get("models", []))
+    r = client.get("/settings/rag-models?which=rerank&protocol=local")
+    spec = r.get_json() or {}
+    check("local rerank model list comes from FastEmbed",
+          r.status_code == 200 and spec.get("ok")
+          and rag.LOCAL_RERANK_DEFAULT in spec.get("models", []))
+    r = client.get("/settings/rag-models?which=embed&base_url=%s" % llm_base_mock)
+    check("remote embed model list comes from the endpoint /models",
+          "mock-llm-7b" in (r.get_json() or {}).get("models", []))
+    r = client.get("/settings")
+    check("settings renders the RAG model pickers and local-aware base URL ids",
+          b'data-protocol="embed_protocol"' in r.data
+          and b'data-protocol="rerank_protocol"' in r.data
+          and b'id="embed-base-url"' in r.data and b'id="rerank-base-url"' in r.data)
     client.post("/settings", data={"section": "llm", "llm_base_url": "", "llm_model": ""})
 
     section("T27 embedded proxy: account store, config generation, connection resolution")

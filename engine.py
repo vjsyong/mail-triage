@@ -1093,6 +1093,25 @@ def llm_config():
     return cfg
 
 
+def fetch_model_ids(base, key="", timeout=15):
+    """Model ids from an OpenAI-compatible /models endpoint. Raises on any
+    connection/HTTP error so callers can fall back to a manual text field."""
+    base = (base or "").rstrip("/")
+    if not base:
+        raise RuntimeError("no endpoint configured")
+    headers = {"Authorization": "Bearer " + key} if key else {}
+    r = requests.get(base + "/models", headers=headers, timeout=timeout)
+    r.raise_for_status()
+    data = r.json()
+    items = data.get("data") if isinstance(data, dict) else data
+    out = []
+    for it in items or []:
+        mid = it.get("id") if isinstance(it, dict) else it
+        if mid:
+            out.append(str(mid))
+    return sorted(set(out))
+
+
 class LLMClient:
     def __init__(self):
         c = llm_config()
@@ -1109,23 +1128,9 @@ class LLMClient:
     def list_models(self, base=None, key=None):
         """Model ids from an OpenAI-compatible /models endpoint (Settings dropdown).
         Raises on any connection/HTTP error so the UI can fall back to a text box."""
-        base = (base or self.base or "").rstrip("/")
-        if not base:
-            raise RuntimeError("no LLM endpoint configured")
         if key is None:
             key = self.key or ""
-        headers = {"Authorization": "Bearer " + key} if key else {}
-        r = requests.get(base + "/models", headers=headers,
-                         timeout=min(self.timeout or 15, 15))
-        r.raise_for_status()
-        data = r.json()
-        items = data.get("data") if isinstance(data, dict) else data
-        out = []
-        for it in items or []:
-            mid = it.get("id") if isinstance(it, dict) else it
-            if mid:
-                out.append(str(mid))
-        return sorted(set(out))
+        return fetch_model_ids(base or self.base, key, min(self.timeout or 15, 15))
 
     def _chat(self, system, user, json_mode=True, history=None, max_tokens=None,
               full=False, thinking=False):
