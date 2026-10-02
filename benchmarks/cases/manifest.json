@@ -1,18 +1,18 @@
 {
  "classification": {
-  "sha256": "32861a0279d7168242e6f25c4d6b9e67117a4ed9af8a07f81f5e875989262a9e",
+  "sha256": "06c1540d242f07879dbe48a3da02425af21c76f25c4185fc0d6ebc4eb920f6ad",
   "count": 106
  },
  "assistant": {
-  "sha256": "ccba8596c18ccd31d866b000816f5c2b2b811be276fd49491b876e8537062724",
+  "sha256": "b217acc894e27e8ff0193500d190ac9e9e1b6dde488a9d0b1c8b74c4446980e6",
   "count": 60
  },
  "drafting": {
-  "sha256": "e5bbee3b2aab01c324855870d28e2c69a98b72e0637392aaf9922d1cd07a64da",
+  "sha256": "f201b9ab114d5f0f58daea03b1d55d413be120733be66da3b54103c9ae8550dd",
   "count": 12
  },
  "rules": {
-  "sha256": "9dfbc7aa066d0215f1f7927ad71e0fed138752711d263d61ebece3f3273e29c6",
+  "sha256": "8552a2324182ea8d8fbb11166a83d76163557db3e07d2a6b6fcc3ad01bfca5e7",
   "count": 8
  },
  "simulate": {
@@ -23,6 +23,6 @@
   "sha256": "a99325889d4af5b235ee65e0cbb690535f220a96f4e52bf273c38048b32bef10",
   "count": 4
  },
- "corpus_messages": "64f996e6bd72066928622c73196316aefaff46c42995f307c8b0a43ef73c3415",
+ "corpus_messages": "f1f95f012ab2c97d28716de1786a87a71997a61cfa6436fc3b37b52b93c4d69d",
  "frozen_at": "2026-10-02"
 }

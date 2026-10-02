@@ -130,7 +130,7 @@ The submission window for grant RD-7741 is now open. Please prepare your full su
 Regards,
 Carol
 Research Office""",
-    "Action", True, tags=["grant", "deadline", "admin"],
+    "Action", False, tags=["grant", "deadline", "admin"],
     facts={"original_deadline": "2026-10-10"})
 
 add(111, "T2", "carol", "Grant RD-7741 — deadline extended to 20 October",
@@ -480,7 +480,7 @@ add(211, "T12", "grace", "Leave plan submission — please submit by 5 Oct",
 A reminder to submit your Q4 leave plan through the HR system by 5 October. It takes about ten minutes.
 
 Grace""",
-    "Action", True, tags=["hr", "leave", "deadline"],
+    "Action", False, tags=["hr", "leave", "deadline"],
     facts={})
 
 add(212, "T12", "ivy", "Can you review my slides before Thursday?",

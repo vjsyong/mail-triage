@@ -366,7 +366,7 @@ class ToolSim:
 
     def t_delete_rule(self, a):
         try:
-            rid = int(a.get("id") or 0)
+            rid = int(a.get("rule_id") or a.get("id") or 0)
         except (TypeError, ValueError):
             rid = 0
         row = next((r for r in self.rules if r["id"] == rid), None)
@@ -379,7 +379,7 @@ class ToolSim:
 
     def t_set_rule_enabled(self, a):
         try:
-            rid = int(a.get("id") or 0)
+            rid = int(a.get("rule_id") or a.get("id") or 0)
         except (TypeError, ValueError):
             rid = 0
         row = next((r for r in self.rules if r["id"] == rid), None)

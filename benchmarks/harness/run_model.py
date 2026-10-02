@@ -33,23 +33,41 @@ SEAN_EMAIL = "seanyong@ust.hk"
 
 
 class BenchClient:
-    def __init__(self, base, model, timeout=120):
+    def __init__(self, base, model, timeout=120, temperature=0.0, top_p=None,
+                 thinking_mode="auto"):
         self.base = base.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.temperature = temperature
+        self.top_p = top_p
+        self.thinking_mode = thinking_mode  # auto | off | falsekw
         self.sess = requests.Session()
+
+    def _thinking_kwarg(self, thinking):
+        """Returns the chat_template_kwargs value (or None = do not send).
+        auto: send {enable_thinking: True} when the call requests thinking (app behavior).
+        off:  never send (app behavior when llm_thinking=off).
+        falsekw: send {enable_thinking: False} (model-specific adaptation)."""
+        if self.thinking_mode == "falsekw":
+            return {"enable_thinking": False} if thinking else None
+        if self.thinking_mode == "off":
+            return None
+        return {"enable_thinking": True} if thinking else None
 
     def chat_once(self, system, user, max_tokens=None, json_mode=True, thinking=False,
                   timeout=None):
         """Mirror engine.LLMClient._chat_once (non-stream)."""
         convo = [{"role": "user", "content": user}]
-        payload = {"model": self.model, "temperature": 0,
+        payload = {"model": self.model, "temperature": self.temperature,
                    "messages": [{"role": "system", "content": system}] + convo}
+        if self.top_p:
+            payload["top_p"] = self.top_p
         if max_tokens:
             payload["max_tokens"] = int(max_tokens)
         optional = []
-        if thinking:
-            payload["chat_template_kwargs"] = {"enable_thinking": True}
+        ctk = self._thinking_kwarg(thinking)
+        if ctk is not None:
+            payload["chat_template_kwargs"] = ctk
             optional.append("chat_template_kwargs")
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
@@ -75,14 +93,17 @@ class BenchClient:
 
     def chat_stream(self, system, messages, tools=None, thinking=True, max_tokens=2500):
         """Mirror engine.LLMClient._stream_once: yields events."""
-        payload = {"model": self.model, "temperature": 0, "max_tokens": max_tokens,
+        payload = {"model": self.model, "temperature": self.temperature, "max_tokens": max_tokens,
                    "stream": True, "stream_options": {"include_usage": True},
                    "repetition_penalty": 1.05,
                    "messages": [{"role": "system", "content": system}] + messages}
+        if self.top_p:
+            payload["top_p"] = self.top_p
         if tools:
             payload["tools"] = tools
-        if thinking:
-            payload["chat_template_kwargs"] = {"enable_thinking": True}
+        ctk = self._thinking_kwarg(thinking)
+        if ctk is not None:
+            payload["chat_template_kwargs"] = ctk
         r = None
         while True:
             r = self.sess.post(self.base + "/chat/completions", json=payload,
@@ -476,10 +497,15 @@ def main():
     ap.add_argument("--ids", default="")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--sleep", type=float, default=0.0)
+    ap.add_argument("--temperature", type=float, default=0.0)
+    ap.add_argument("--top-p", type=float, default=None)
+    ap.add_argument("--thinking-mode", default="auto", choices=["auto", "off", "falsekw"])
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    client = BenchClient(args.base, args.model_name or args.model, timeout=240)
+    client = BenchClient(args.base, args.model_name or args.model, timeout=240,
+                         temperature=args.temperature, top_p=args.top_p,
+                         thinking_mode=args.thinking_mode)
 
     corpus_msgs = {}
     with open(os.path.join(CORPUS, "messages.jsonl")) as f:

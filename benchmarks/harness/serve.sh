@@ -25,10 +25,10 @@ case "${1:-}" in
   status) docker ps -a --filter name=$NAME --format '{{.Names}} {{.Status}}'; exit 0 ;;
   qwen9b)
     DIR=$MODELS/qwen3.5-9b; MNAME=qwen3.5-9b
-    EXTRA="--tool-call-parser hermes --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0}";;
+    EXTRA="--tool-call-parser qwen3_xml --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0}";;
   qwen4b)
     DIR=$MODELS/qwen3.5-4b; MNAME=qwen3.5-4b
-    EXTRA="--tool-call-parser hermes --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0}";;
+    EXTRA="--tool-call-parser qwen3_xml --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0}";;
   gemma4e4b)
     DIR=$MODELS/gemma-4-e4b-it; MNAME=gemma-4-e4b
     EXTRA="--tool-call-parser gemma4 --reasoning-parser gemma4 --limit-mm-per-prompt {\"image\":0,\"audio\":0}";;
@@ -42,15 +42,17 @@ case "${1:-}" in
 esac
 
 stop
+mkdir -p /home/xrim/models/.benchcache/vllm
 # shellcheck disable=SC2086
 docker run -d --name "$NAME" \
   --device nvidia.com/gpu=1 \
   -p 127.0.0.1:${PORT}:8000 \
   -v $MODELS:/models:ro \
+  -v /home/xrim/models/.benchcache/vllm:/root/.cache/vllm \
   -e HF_HUB_OFFLINE=1 \
   -e VLLM_NO_USAGE_STATS=1 \
   -e VLLM_WORKER_MULTIPROC_METHOD=spawn \
   --shm-size 16g --ipc host \
-  $IMAGE vllm serve "/models/$(basename "$DIR")" \
+  $IMAGE "/models/$(basename "$DIR")" \
   $(common_args "$MNAME") $EXTRA
 echo "started $MNAME from $DIR (port $PORT)"

@@ -1,0 +1,113 @@
+{
+ "model": "gemma-4-26b-a4b-baseline",
+ "suites": {
+  "classification": {
+   "cases": 106,
+   "scored": 106,
+   "missing": 0,
+   "raw_score": 93.4,
+   "sev_adjusted_score": 89.0,
+   "critical_cases": 0,
+   "by_sub": {
+    "adversarial": 91.7,
+    "ambiguous": 94.2,
+    "contradictory": 100.0,
+    "long_mail": 72.5,
+    "malformed_junk": 98.1,
+    "multilingual": 90.0,
+    "needs_reply_tricky": 91.0,
+    "normal_clear": 96.4
+   }
+  },
+  "assistant": {
+   "cases": 60,
+   "scored": 60,
+   "missing": 0,
+   "raw_score": 87.6,
+   "sev_adjusted_score": 86.7,
+   "critical_cases": 3,
+   "by_sub": {
+    "ambiguity_clarify": 75.0,
+    "grounded_qa": 85.8,
+    "hallucination_traps": 35.0,
+    "injection_in_mail": 85.8,
+    "multi_step": 75.0,
+    "retrieval_interpretation": 100.0,
+    "tool_argument_correctness": 100.0,
+    "tool_misuse": 93.8,
+    "tool_selection_basic": 100.0,
+    "unnecessary_tool": 100.0
+   }
+  },
+  "drafting": {
+   "cases": 12,
+   "scored": 12,
+   "missing": 0,
+   "raw_score": 100.0,
+   "sev_adjusted_score": 100.0,
+   "critical_cases": 0,
+   "by_sub": {
+    "injection": 100.0,
+    "reply_quality": 100.0
+   }
+  },
+  "rules": {
+   "cases": 8,
+   "scored": 8,
+   "missing": 0,
+   "raw_score": 100.0,
+   "sev_adjusted_score": 100.0,
+   "critical_cases": 0,
+   "by_sub": {
+    "content_keyword": 100.0,
+    "duplicate_avoidance": 100.0,
+    "guard_semantics": 100.0,
+    "inconsistent": 100.0,
+    "placement": 100.0,
+    "sender_pattern": 100.0,
+    "subject_pattern": 100.0,
+    "two_groups": 100.0
+   }
+  },
+  "simulate": {
+   "cases": 6,
+   "scored": 6,
+   "missing": 0,
+   "raw_score": 100.0,
+   "sev_adjusted_score": 100.0,
+   "critical_cases": 0,
+   "by_sub": {
+    "flow_example": 100.0,
+    "guard_example": 100.0,
+    "rule_example": 100.0
+   }
+  },
+  "summary": {
+   "cases": 4,
+   "scored": 4,
+   "missing": 0,
+   "raw_score": 100.0,
+   "sev_adjusted_score": 100.0,
+   "critical_cases": 0,
+   "by_sub": {
+    "?": 100.0
+   }
+  }
+ },
+ "overall": {
+  "raw_score": 92.6,
+  "sev_adjusted_score": 90.0,
+  "cases_scored": 196,
+  "severity_failures": {
+   "LOW": 0,
+   "MEDIUM": 14,
+   "HIGH": 18,
+   "CRITICAL": 3
+  },
+  "critical_cases": [
+   "assistant/asst_h2_renovation",
+   "assistant/asst_h3_tax_auditor",
+   "assistant/asst_h4_wedding"
+  ]
+ }
+}
