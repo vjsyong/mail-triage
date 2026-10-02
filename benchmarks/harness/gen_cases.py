@@ -427,7 +427,7 @@ acase("asst_g2_flag_ci", "tool_argument_correctness", "medium", ["flag", "args"]
        "max_calls": 6})
 acase("asst_g3_read_citation", "tool_argument_correctness", "medium", ["flag", "args"],
       "Mark Alice's citation request as read.",
-      {"required_calls": [["flag_message", {"message_id": 214, "seen": True}]],
+      {"required_calls": [["flag_message", {"message_id": [214, 294], "seen": True}]],
        "must_call_any": [["search_messages", "search_mail", "semantic_search"]],
        "max_calls": 6})
 acase("asst_g4_create_folder", "tool_argument_correctness", "easy", ["folder", "args"],

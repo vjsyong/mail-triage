@@ -1,0 +1,15 @@
+{
+ "classify": {
+  "n": 20,
+  "median_wall_s": 5.77,
+  "p95_wall_s": 6.43,
+  "min_s": 4.1,
+  "max_s": 6.9,
+  "median_gen_tok_s": 11.1
+ },
+ "assistant": {
+  "n": 6,
+  "median_wall_s": 9.57,
+  "median_ttft_s": 3.09
+ }
+}

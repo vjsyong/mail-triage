@@ -167,8 +167,11 @@ def score_assistant(case, res):
             args = c.get("args") or {}
             ok = True
             for k, v in subset.items():
-                av = str(args.get(k, "")).lower()
-                if k == "value":
+                if isinstance(v, (list, tuple)):
+                    ok = ok and any(
+                        (args.get(k) == x) or (str(x).lower() in str(args.get(k, "")).lower())
+                        for x in v)
+                elif k == "value":
                     ok = ok and (str(v).lower() in json.dumps(args).lower())
                 elif isinstance(v, bool):
                     ok = ok and (bool(args.get(k)) is v)
@@ -178,7 +181,7 @@ def score_assistant(case, res):
                     except (TypeError, ValueError):
                         ok = False
                 else:
-                    ok = ok and (str(v).lower() in av)
+                    ok = ok and (str(v).lower() in str(args.get(k, "")).lower())
             if ok:
                 hit = True
                 break

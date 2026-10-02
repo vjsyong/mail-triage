@@ -1,0 +1,42 @@
+{
+ "base": "http://127.0.0.1:8045/v1",
+ "model": "gemma-4-e4b",
+ "checks": {
+  "models": {
+   "ok": true,
+   "detail": [
+    "gemma-4-e4b"
+   ],
+   "t": 0.0
+  },
+  "json_thinking": {
+   "ok": true,
+   "detail": {
+    "json": {
+     "category": "A",
+     "ok": true
+    },
+    "reasoning_len": 0
+   },
+   "t": 5.53
+  },
+  "tool_call": {
+   "ok": true,
+   "detail": {
+    "tool": "list_folders"
+   },
+   "t": 0.15
+  },
+  "stream_tools": {
+   "ok": true,
+   "detail": {
+    "tool": false,
+    "content": true,
+    "reasoning": false,
+    "finish": "stop"
+   },
+   "t": 0.19
+  }
+ },
+ "pass": true
+}

@@ -14,7 +14,8 @@ RESULTS = os.path.join(BENCH, "results")
 
 META = {
     "gemma-4-26b-a4b-baseline": {"label": "Gemma 4 26B-A4B (baseline)", "params": "25.2B MoE / 3.8B active",
-                                 "quant": "AWQ-4bit + int8 KV", "dir": None, "gpu": 0},
+                                 "quant": "AWQ-4bit + int8 KV", "dir": None, "gpu": 0,
+                                 "boot_s": 397, "vram_mib": 23144},
     "qwen9b": {"label": "Qwen3.5-9B", "params": "9B dense", "quant": "bf16",
                "dir": "/home/xrim/models/qwen3.5-9b", "gpu": 1},
     "qwen4b": {"label": "Qwen3.5-4B", "params": "4B dense", "quant": "bf16",
@@ -42,6 +43,15 @@ def resource_stats(files):
     peak, last, n = None, None, 0
     for f in files:
         if not os.path.exists(f):
+            continue
+        if f.endswith(".json"):
+            try:
+                r = json.load(open(f))
+                if r.get("gpu0_mem_mib"):
+                    return {"peak_vram_mib": r["gpu0_mem_mib"], "last_vram_mib": r["gpu0_mem_mib"],
+                            "samples": "measured"}
+            except Exception:
+                pass
             continue
         for line in open(f):
             try:
@@ -79,7 +89,8 @@ def main():
             srv = json.load(open(svp))
         res = resource_stats([os.path.join(rdir, "resources_full.jsonl"),
                               os.path.join(rdir, "resources_screen.jsonl"),
-                              os.path.join(rdir, "resources.jsonl")])
+                              os.path.join(rdir, "resources.jsonl"),
+                              os.path.join(rdir, "resources_measured.json")])
         meta = META.get(key, {})
         rows.append({"key": key, "meta": meta, "summary": s, "latency": lat,
                      "server": srv, "resources": res,
@@ -111,11 +122,13 @@ def main():
         asst = g(s, "suites", "assistant", "raw_score")
         clat = g(r["latency"], "classify", "median_wall_s")
         attft = g(r["latency"], "assistant", "median_ttft_s")
-        vram = r["resources"].get("peak_vram_mib")
+        vram = r["resources"].get("peak_vram_mib") or r["meta"].get("vram_mib")
         vram_s = ("%.1f GB" % (vram / 1024)) if vram else "-"
         fs = r["file_bytes"]
         fs_s = ("%.1f GB" % (fs / 1e9)) if fs else "-"
         boot = g(r["server"], "boot_s")
+        if boot == "-":
+            boot = r["meta"].get("boot_s", "-")
         lines.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
             r["meta"].get("label", r["key"]), r["meta"].get("params", "-"),
             r["meta"].get("quant", "-"), ov, sev, crit, cls, asst,
