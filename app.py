@@ -2556,6 +2556,11 @@ PLUGIN_DETAIL_TMPL = """
  .pxd-ev{display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:.85rem;align-items:baseline}
  .pxd-ev:first-of-type{border-top:0}
  .pxd-ev time{color:var(--dim);font-family:var(--mono);font-size:.76rem;white-space:nowrap;flex:0 0 auto}
+ .pxd-set{display:grid;grid-template-columns:minmax(0,1fr) minmax(200px,340px);gap:8px 18px;padding:12px 0;border-top:1px solid var(--line);align-items:start}
+ .pxd-set:first-of-type{border-top:0;padding-top:4px}
+ .pxd-set .st-l b{display:block;font-size:.87rem;font-weight:600}
+ .pxd-set .st-l .sub{display:block}
+ @media(max-width:900px){ .pxd-set{grid-template-columns:1fr} }
  @media (max-width:640px){ .pxd-dl{grid-template-columns:1fr;gap:1px} .pxd-dl dt{margin-top:8px} }
 </style>
 <div class="page-head">
@@ -2601,7 +2606,7 @@ PLUGIN_DETAIL_TMPL = """
     </label>
     {% endfor %}
     {% if p.has_tools %}
-    <div class="setrow">
+    <div class="pxd-set">
       <div class="st-l"><b>Assistant permission</b><span class="sub">When you ask the assistant in chat. Ask = it queues a card you approve; Auto = runs directly (still audited).</span></div>
       <div class="st-c"><div class="pxd-seg" role="radiogroup" aria-label="Assistant permission for {{ p.name }}">
         {% for lvl in ('off','ask','auto') %}<label><input type="radio" name="agent_level" value="{{ lvl }}" {{ 'checked' if p.agent_level == lvl else '' }}><span>{{ lvl }}</span></label>{% endfor %}
@@ -2609,7 +2614,7 @@ PLUGIN_DETAIL_TMPL = """
     </div>
     {% endif %}
     {% if p.optin_matcher or p.optin_retriever or p.optin_classifier %}
-    <div class="setrow">
+    <div class="pxd-set">
       <div class="st-l"><b>Pipeline use</b><span class="sub">The kernel only calls this plugin inside the mail pipeline when ticked.</span></div>
       <div class="st-c" style="flex-direction:column;align-items:flex-end;gap:2px">
         {% if p.optin_classifier %}<label class="check" style="margin:2px 0"><input type="checkbox" name="opt_in_classifier" value="1" {{ 'checked' if p.in_classifiers else '' }}> <span>classification fast-path</span></label>{% endif %}
@@ -2631,7 +2636,7 @@ PLUGIN_DETAIL_TMPL = """
     <input type="hidden" name="action" value="config">
     <input type="hidden" name="next" value="detail">
     {% for f in p.config_fields %}
-    <div class="setrow" style="grid-template-columns:minmax(0,1fr) minmax(220px,340px)">
+    <div class="pxd-set" style="grid-template-columns:minmax(0,1fr) minmax(220px,340px)">
       <div class="st-l"><b class="mono" style="font-size:.84rem">{{ f.name }}</b><span class="sub">{{ f.label }}</span></div>
       <div class="st-c">
         {% if f.type == 'boolean' %}<label class="check"><input type="checkbox" name="cfg_{{ f.name }}" value="1" {{ 'checked' if f.value else '' }}> <span>enabled</span></label>
