@@ -899,3 +899,17 @@ settings form on the Plugins page; values live in `plugin_config:<id>`.
 Node dev-tier adapter (`--plugins dev`), plugin code signing, Wasm adapter swap,
 retire-the-native-heuristic automation for mirrored fast-paths, nested-object
 config schemas in the form (flat types only for now).
+
+## Browser pages (2026-10-02, revised)
+
+Two tiers. The default, **composed**, runs no plugin browser JS: the sandbox
+bundle exports synchronous `uiOpen`/`uiDispatch`/`uiClose` returning a data-only
+component tree (built with `sdk/compose.js`), which the host validates with a
+strict whitelist + bounds and renders itself; the host owns bounded controller
+state, event binding and a monotonic revision, and controller execution gets a
+read-only host capability subset (mail read/search, config, kv read, log).
+The second, **trusted**, embeds a browser bundle in an opaque-origin iframe but
+only after an explicit per-content user approval (bound to manifest/backend/
+frontend digests); its self-navigation egress is disclosed, not denied, and the
+host disposes the bridge on unexpected frame navigation. Full details in
+`docs/plugin-pages.md`; `plugins/mt-mail-desk` is the composed reference.

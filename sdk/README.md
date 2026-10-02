@@ -85,3 +85,36 @@ replaces its predictions. Native heuristics always keep the first word.
 A manifest `config` schema renders a settings form on the Plugins page (flat
 strings / numbers / booleans / string-arrays). Plugins read the values via
 `ctx.config.get().values` (or the CLI: `python app.py --plugins config <id> '[json]'`).
+
+## Browser pages (optional)
+
+Two modes (see `docs/plugin-pages.md`):
+
+**`composed`** (default, sandboxed - no plugin browser JS). Export synchronous
+`uiOpen`/`uiDispatch`/`uiClose` and build the tree with the global `MTUIB`
+helpers from `sdk/compose.js`:
+
+```js
+"ui": { "mode": "composed",
+        "pages": [{ "id": "main", "title": "My page" }],
+        "navigation": [{ "page": "main", "label": "My page" }] }
+```
+```js
+globalThis.__mt_plugin = {
+  uiOpen: function (ctx, input) {
+    return { tree: globalThis.MTUIB.text("hello", { variant: "title" }), state: {} };
+  },
+  uiDispatch: function (ctx, input) { return { tree: globalThis.MTUIB.text("done"), state: {} }; },
+  uiClose: function (ctx, input) {}
+};
+```
+
+The host validates the tree against a strict whitelist and renders it; the
+controller gets a read-only host subset (mail read/search, config, kv read,
+log). Prefer `plugins/mt-mail-desk` as the worked example.
+
+**`trusted`** (browser bundle, requires explicit user approval on the plugin
+page). Add `entrypoint` and a read-only `operations` allowlist; register
+renderers on `globalThis.__mt_ui` using the `MTUI` page SDK (injected as
+`sdk/ui.js`). Such a view runs plugin code and can transmit data it receives by
+navigating itself, so it is disclosed as such and never auto-approved.

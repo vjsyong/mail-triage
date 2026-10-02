@@ -202,3 +202,107 @@ export function onSchedule(ctx: PluginContext,
                            input: { every_minutes: number; last_run: number;
                                     now: number; run_tool: string }):
   void | ToolResult;
+
+// ---- optional browser pages (`manifest.ui`) -------------------------------
+//
+// Two tiers. `composed` (default, sandboxed) runs NO plugin browser JS: the
+// bundle exports uiOpen/uiDispatch/uiClose and the host renders a validated
+// component tree. `trusted` (requires explicit per-content user approval) runs
+// a browser bundle (`ui.entrypoint`) in a sandboxed, opaque-origin frame with a
+// nonce CSP as defence-in-depth; that CSP does NOT stop self-navigation, so
+// egress via self-navigation is accepted and disclosed at approval. In the
+// trusted tier operational messages travel over a document-bound MessagePort
+// (not global postMessage), and the backend is reachable only through the
+// explicit `ui.operations` allowlist. See docs/plugin-pages.md. Trusted bundles
+// register renderers on globalThis.__mt_ui; the host injects sdk/ui.js first.
+
+export type UiMode = "composed" | "trusted";
+
+export interface UiManifest {
+  mode: UiMode;                          // composed (default, no browser JS) | trusted (approved)
+  entrypoint?: string;                   // trusted only: browser bundle, relative + .js
+  pages: Array<{ id: string; title: string; description?: string }>;
+  navigation?: Array<{
+    page: string;                        // must reference a declared page id
+    label: string;
+    group?: "mail" | "automation" | "system";
+    icon?: "mail" | "inbox" | "search" | "list" | "tag" | "star" | "clock" |
+           "filter" | "file" | "puzzle" | "sparkles" | "settings";
+    order?: number;
+  }>;
+  operations?: string[];                 // trusted only: declared read-only tool names, explicit allowlist
+}
+
+// ---- composed controller (manifest ui.mode === "composed") ----------------
+//
+// The sandbox bundle exports synchronous uiOpen/uiDispatch/uiClose. uiOpen and
+// uiDispatch return a data-only component tree (build it with the global MTUIB
+// helpers shipped in sdk/compose.js) plus the bounded controller state and an
+// optional URL hint. The host validates the tree strictly and renders it - no
+// plugin browser JS ever runs. Controller execution gets a read-only host
+// capability subset (mail read/search, config, kv read, log); net/llm/action/
+// kv-write are denied.
+
+export interface ComposedNode {
+  type: string;
+  props?: Record<string, unknown>;
+  children?: ComposedNode[];
+  event?: string;
+  retryEvent?: string;
+  items?: unknown[];
+  message?: unknown;
+}
+
+export interface ComposedResult {
+  tree: ComposedNode;
+  state?: Record<string, unknown>;
+  url?: { q?: string; message?: string };
+}
+
+export function uiOpen(ctx: PluginContext,
+                       input: { state: Record<string, unknown> }): ComposedResult;
+export function uiDispatch(ctx: PluginContext,
+                           input: { state: Record<string, unknown>;
+                                    event: { kind: string; value?: string } }): ComposedResult;
+export function uiClose(ctx: PluginContext, input: { state: Record<string, unknown> }): void;
+
+export type UiErrorCode = "invalid_args" | "denied" | "forbidden" | "timeout" |
+                          "quota" | "disabled" | "not_found" | "internal";
+
+export interface UiResult {
+  ok: boolean;
+  data?: Record<string, unknown>;
+  summary?: string;
+  error?: { code: UiErrorCode; message: string };
+}
+
+export interface PageApi {
+  /** Call one allowlisted backend operation through the host bridge. */
+  call(op: string, args?: Record<string, unknown>): Promise<UiResult>;
+  /** Ask the host to update the URL (bounded q/message state only). */
+  updateUrl(next: { q?: string; message?: string }, replace?: boolean): void;
+  setStatus(text: string): void;
+  log(message: string): void;
+  isDisposed(): boolean;
+  on(kind: "theme" | "state" | "dispose", fn: (value: unknown) => void): () => void;
+  getState(): { q?: string; message?: string };
+  components: PageComponents;
+}
+
+export interface PageComponents {
+  searchField(opts: { value?: string; placeholder?: string; ariaLabel?: string;
+                      buttonLabel?: string; onSearch?: (q: string) => void;
+                      onInput?: (q: string) => void }): HTMLFormElement;
+  splitPane(opts?: { start?: Node; end?: Node }): HTMLElement & {
+    showList(): void; showReader(): void };
+  messageList(opts: { items: Array<Record<string, unknown>>; selected?: number;
+                      onSelect?: (id: number, item: unknown) => void }): HTMLElement;
+  plainTextReader(opts: { message?: null | Record<string, unknown> }): HTMLElement;
+  stateView(kind: "loading" | "empty" | "error" | "denied",
+            opts?: { message?: string; retry?: () => void; retryLabel?: string }): HTMLElement;
+  el(tag: string, cls?: string | null, text?: string): HTMLElement;
+}
+
+export interface PageBundle {
+  pages: Record<string, { render(root: HTMLElement, api: PageApi): void }>;
+}

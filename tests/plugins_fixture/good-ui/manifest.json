@@ -1,0 +1,52 @@
+{
+  "id": "good-ui",
+  "name": "Good UI",
+  "action": "Open Good UI",
+  "version": "0.2.0",
+  "description": "A valid composed browser-UI plugin fixture used by the kernel tests.",
+  "engines": {
+    "sdk": ">=0.2 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": [
+    "tool"
+  ],
+  "tools": [
+    {
+      "name": "ping_ui",
+      "description": "Return a small value (fixture).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "side_effects": "none",
+      "surface": "hidden"
+    }
+  ],
+  "ui": {
+    "mode": "composed",
+    "pages": [
+      {
+        "id": "main",
+        "title": "Fixture page"
+      }
+    ],
+    "navigation": [
+      {
+        "page": "main",
+        "label": "Good UI",
+        "group": "system",
+        "icon": "puzzle",
+        "order": 10
+      }
+    ]
+  },
+  "permissions": [
+    "mailbox.read"
+  ]
+}

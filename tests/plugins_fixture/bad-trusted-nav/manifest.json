@@ -1,0 +1,22 @@
+{
+  "id": "bad-trusted-nav",
+  "name": "Navigating trusted view",
+  "action": "Open navigating view",
+  "version": "0.1.0",
+  "description": "Trusted-view fixture that self-navigates on first execution (AR2-3 regression).",
+  "engines": { "sdk": ">=0.2 <1.0" },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": ["tool"],
+  "tools": [
+    { "name": "ping_ui", "description": "pong", "parameters": { "type": "object", "properties": {} },
+      "side_effects": "none", "surface": "hidden" }
+  ],
+  "ui": {
+    "mode": "trusted",
+    "entrypoint": "ui/page.js",
+    "pages": [{ "id": "main", "title": "Navigating fixture" }],
+    "navigation": [{ "page": "main", "label": "NavFixture", "group": "system", "icon": "puzzle", "order": 30 }],
+    "operations": ["ping_ui"]
+  }
+}

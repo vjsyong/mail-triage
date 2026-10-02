@@ -170,6 +170,38 @@
     return JSON.stringify(out === undefined ? null : out);
   };
 
+  globalThis.__mt_ui_open = function (inputJson) {
+    var p = globalThis.__mt_plugin;
+    if (!p || typeof p.uiOpen !== "function") {
+      throw new Error("bundle does not export uiOpen()");
+    }
+    var out = p.uiOpen(globalThis.__mt_ctx, JSON.parse(inputJson));
+    if (out && typeof out.then === "function") {
+      throw new Error("uiOpen must be synchronous (SDK v0.2)");
+    }
+    return JSON.stringify(out === undefined ? null : out);
+  };
+
+  globalThis.__mt_ui_dispatch = function (inputJson) {
+    var p = globalThis.__mt_plugin;
+    if (!p || typeof p.uiDispatch !== "function") {
+      throw new Error("bundle does not export uiDispatch()");
+    }
+    var out = p.uiDispatch(globalThis.__mt_ctx, JSON.parse(inputJson));
+    if (out && typeof out.then === "function") {
+      throw new Error("uiDispatch must be synchronous (SDK v0.2)");
+    }
+    return JSON.stringify(out === undefined ? null : out);
+  };
+
+  globalThis.__mt_ui_close = function (inputJson) {
+    var p = globalThis.__mt_plugin;
+    if (p && typeof p.uiClose === "function") {
+      p.uiClose(globalThis.__mt_ctx, JSON.parse(inputJson));
+    }
+    return "ok";
+  };
+
   globalThis.__mt_schedule = function (inputJson) {
     var p = globalThis.__mt_plugin;
     if (!p || typeof p.onSchedule !== "function") {

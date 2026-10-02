@@ -94,6 +94,11 @@ def main():
                                    "sdk", "runtime.js")
                 with open(sdk, "r", encoding="utf-8") as fh:
                     ctx.eval(fh.read())
+                compose = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "sdk", "compose.js")
+                if os.path.isfile(compose):
+                    with open(compose, "r", encoding="utf-8") as fh:
+                        ctx.eval(fh.read())
                 with open(os.path.join(cmd["dir"], cmd["entry"]), "r", encoding="utf-8") as fh:
                     ctx.eval(fh.read())
                 ctx.eval("__mt_boot()")
@@ -115,6 +120,12 @@ def main():
                 fn = {"matcher": "__mt_match", "draft": "__mt_draft",
                       "rank": "__mt_rank", "event": "__mt_event",
                       "schedule": "__mt_schedule"}[c]
+                raw = ctx.eval("%s(%s)" % (fn, json.dumps(json.dumps(cmd.get("input") or {}))))
+                result = json.loads(raw) if isinstance(raw, str) else raw
+                send({"seq": cmd.get("seq"), "result": result})
+            elif c in ("ui_open", "ui_dispatch", "ui_close"):
+                fn = {"ui_open": "__mt_ui_open", "ui_dispatch": "__mt_ui_dispatch",
+                      "ui_close": "__mt_ui_close"}[c]
                 raw = ctx.eval("%s(%s)" % (fn, json.dumps(json.dumps(cmd.get("input") or {}))))
                 result = json.loads(raw) if isinstance(raw, str) else raw
                 send({"seq": cmd.get("seq"), "result": result})
