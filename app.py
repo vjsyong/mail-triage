@@ -855,6 +855,7 @@ html:not(.asb-open) .asb-main{display:none}
 .dw-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
 .dw-ctx{font-size:.73rem;color:var(--dim);padding:5px 12px;border-bottom:1px solid var(--line);background:var(--card2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .am-ctx{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;color:var(--dim);border:1px solid var(--line);background:#fff;padding:3px 9px;width:fit-content;margin:0 0 7px}
+  .am-ctx[hidden]{display:none}
 .dw-hist{border-bottom:1px solid var(--line);max-height:42vh;overflow:auto;background:#fff}
 .dhist-item{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
 .dhist-item:hover{background:var(--hover)}
@@ -918,9 +919,11 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .jumpwrap{min-height:0}
   .composer .hint{display:none}
   .composer .comp-row .sub{display:none}
-  .composer{display:flex;align-items:flex-end;gap:8px}
+  .composer{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+  .composer .am-ctx{flex-basis:100%;margin-bottom:4px}
+  .composer .aspecline{flex-basis:100%;margin-top:2px}
   .composer .comp-row,.composer .comp-row .row{display:contents}
-  .composer textarea{flex:1;min-height:30px;max-height:120px}
+  .composer textarea{flex:1;min-width:0;min-height:30px;max-height:120px}
   .composer .btn{flex:none;min-height:40px}
   .chat-empty{padding:14px 6px}
   .chat-empty .sub{display:none}
