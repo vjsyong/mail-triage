@@ -1,0 +1,1058 @@
+[
+ {
+  "key": "gemma-4-26b-a4b-baseline",
+  "meta": {
+   "label": "Gemma 4 26B-A4B (baseline)",
+   "params": "25.2B MoE / 3.8B active",
+   "quant": "AWQ-4bit + int8 KV",
+   "dir": null,
+   "gpu": 0,
+   "boot_s": 397,
+   "vram_mib": 23144
+  },
+  "summary": {
+   "model": "gemma-4-26b-a4b-baseline",
+   "suites": {
+    "classification": {
+     "cases": 106,
+     "scored": 106,
+     "missing": 0,
+     "raw_score": 93.4,
+     "sev_adjusted_score": 89.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "adversarial": 91.7,
+      "ambiguous": 94.2,
+      "contradictory": 100.0,
+      "long_mail": 72.5,
+      "malformed_junk": 98.1,
+      "multilingual": 90.0,
+      "needs_reply_tricky": 91.0,
+      "normal_clear": 96.4
+     }
+    },
+    "assistant": {
+     "cases": 60,
+     "scored": 60,
+     "missing": 0,
+     "raw_score": 87.6,
+     "sev_adjusted_score": 86.7,
+     "critical_cases": 3,
+     "by_sub": {
+      "ambiguity_clarify": 75.0,
+      "grounded_qa": 85.8,
+      "hallucination_traps": 35.0,
+      "injection_in_mail": 85.8,
+      "multi_step": 75.0,
+      "retrieval_interpretation": 100.0,
+      "tool_argument_correctness": 100.0,
+      "tool_misuse": 93.8,
+      "tool_selection_basic": 100.0,
+      "unnecessary_tool": 100.0
+     }
+    },
+    "drafting": {
+     "cases": 12,
+     "scored": 12,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "injection": 100.0,
+      "reply_quality": 100.0
+     }
+    },
+    "rules": {
+     "cases": 8,
+     "scored": 8,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "content_keyword": 100.0,
+      "duplicate_avoidance": 100.0,
+      "guard_semantics": 100.0,
+      "inconsistent": 100.0,
+      "placement": 100.0,
+      "sender_pattern": 100.0,
+      "subject_pattern": 100.0,
+      "two_groups": 100.0
+     }
+    },
+    "simulate": {
+     "cases": 6,
+     "scored": 6,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "flow_example": 100.0,
+      "guard_example": 100.0,
+      "rule_example": 100.0
+     }
+    },
+    "summary": {
+     "cases": 4,
+     "scored": 4,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "?": 100.0
+     }
+    }
+   },
+   "overall": {
+    "raw_score": 92.6,
+    "sev_adjusted_score": 90.0,
+    "cases_scored": 196,
+    "severity_failures": {
+     "LOW": 0,
+     "MEDIUM": 14,
+     "HIGH": 18,
+     "CRITICAL": 3
+    },
+    "critical_cases": [
+     "assistant/asst_h2_renovation",
+     "assistant/asst_h3_tax_auditor",
+     "assistant/asst_h4_wedding"
+    ]
+   }
+  },
+  "latency": {
+   "classify": {
+    "n": 20,
+    "median_wall_s": 4.33,
+    "p95_wall_s": 16.51,
+    "min_s": 2.63,
+    "max_s": 40.01,
+    "median_gen_tok_s": 135.2
+   },
+   "assistant": {
+    "n": 6,
+    "median_wall_s": 1.82,
+    "median_ttft_s": 0.09
+   }
+  },
+  "server": {},
+  "resources": {
+   "peak_vram_mib": 23144,
+   "last_vram_mib": 23144,
+   "samples": "measured"
+  },
+  "file_bytes": null
+ },
+ {
+  "key": "qwen9b",
+  "meta": {
+   "label": "Qwen3.5-9B",
+   "params": "9B dense",
+   "quant": "bf16",
+   "dir": "/home/xrim/models/qwen3.5-9b",
+   "gpu": 1
+  },
+  "summary": {
+   "model": "qwen9b",
+   "suites": {
+    "classification": {
+     "cases": 106,
+     "scored": 106,
+     "missing": 0,
+     "raw_score": 94.1,
+     "sev_adjusted_score": 89.9,
+     "critical_cases": 1,
+     "by_sub": {
+      "adversarial": 78.3,
+      "ambiguous": 100.0,
+      "contradictory": 87.5,
+      "long_mail": 93.8,
+      "malformed_junk": 98.1,
+      "multilingual": 100.0,
+      "needs_reply_tricky": 93.0,
+      "normal_clear": 95.6
+     }
+    },
+    "assistant": {
+     "cases": 60,
+     "scored": 60,
+     "missing": 0,
+     "raw_score": 91.0,
+     "sev_adjusted_score": 87.8,
+     "critical_cases": 1,
+     "by_sub": {
+      "ambiguity_clarify": 88.0,
+      "grounded_qa": 100.0,
+      "hallucination_traps": 75.0,
+      "injection_in_mail": 100.0,
+      "multi_step": 100.0,
+      "retrieval_interpretation": 87.5,
+      "tool_argument_correctness": 70.0,
+      "tool_misuse": 93.8,
+      "tool_selection_basic": 95.8,
+      "unnecessary_tool": 100.0
+     }
+    },
+    "drafting": {
+     "cases": 12,
+     "scored": 12,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "injection": 100.0,
+      "reply_quality": 100.0
+     }
+    },
+    "rules": {
+     "cases": 8,
+     "scored": 8,
+     "missing": 0,
+     "raw_score": 96.9,
+     "sev_adjusted_score": 95.8,
+     "critical_cases": 0,
+     "by_sub": {
+      "content_keyword": 100.0,
+      "duplicate_avoidance": 75.0,
+      "guard_semantics": 100.0,
+      "inconsistent": 100.0,
+      "placement": 100.0,
+      "sender_pattern": 100.0,
+      "subject_pattern": 100.0,
+      "two_groups": 100.0
+     }
+    },
+    "simulate": {
+     "cases": 6,
+     "scored": 6,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "flow_example": 100.0,
+      "guard_example": 100.0,
+      "rule_example": 100.0
+     }
+    },
+    "summary": {
+     "cases": 4,
+     "scored": 4,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "?": 100.0
+     }
+    }
+   },
+   "overall": {
+    "raw_score": 93.9,
+    "sev_adjusted_score": 90.6,
+    "cases_scored": 196,
+    "severity_failures": {
+     "LOW": 0,
+     "MEDIUM": 11,
+     "HIGH": 15,
+     "CRITICAL": 2
+    },
+    "critical_cases": [
+     "classification/cls_adv_299",
+     "assistant/asst_h2_renovation"
+    ]
+   }
+  },
+  "latency": {
+   "classify": {
+    "n": 20,
+    "median_wall_s": 5.77,
+    "p95_wall_s": 6.43,
+    "min_s": 4.1,
+    "max_s": 6.9,
+    "median_gen_tok_s": 11.1
+   },
+   "assistant": {
+    "n": 6,
+    "median_wall_s": 9.57,
+    "median_ttft_s": 3.09
+   }
+  },
+  "server": {
+   "thinking_mode": "falsekw",
+   "key": "qwen9b",
+   "model": "qwen3.5-9b",
+   "boot_s": 280,
+   "adaptation_note": "falsekw: enable_thinking=false everywhere (unmodified temp-0 thinking runaways in 4/8 probe cases, median 99s)",
+   "enforce_eager": true,
+   "gpu_memory_utilization": 0.9
+  },
+  "resources": {
+   "peak_vram_mib": 23322,
+   "last_vram_mib": 22456,
+   "samples": 2025
+  },
+  "file_bytes": 19329398399
+ },
+ {
+  "key": "qwen4b",
+  "meta": {
+   "label": "Qwen3.5-4B",
+   "params": "4B dense",
+   "quant": "bf16",
+   "dir": "/home/xrim/models/qwen3.5-4b",
+   "gpu": 1
+  },
+  "summary": {
+   "model": "qwen4b",
+   "suites": {
+    "classification": {
+     "cases": 106,
+     "scored": 106,
+     "missing": 0,
+     "raw_score": 87.9,
+     "sev_adjusted_score": 81.8,
+     "critical_cases": 2,
+     "by_sub": {
+      "adversarial": 64.2,
+      "ambiguous": 90.8,
+      "contradictory": 87.5,
+      "long_mail": 85.0,
+      "malformed_junk": 92.5,
+      "multilingual": 100.0,
+      "needs_reply_tricky": 89.0,
+      "normal_clear": 91.3
+     }
+    },
+    "assistant": {
+     "cases": 60,
+     "scored": 60,
+     "missing": 0,
+     "raw_score": 83.3,
+     "sev_adjusted_score": 80.0,
+     "critical_cases": 2,
+     "by_sub": {
+      "ambiguity_clarify": 31.0,
+      "grounded_qa": 90.0,
+      "hallucination_traps": 55.0,
+      "injection_in_mail": 100.0,
+      "multi_step": 75.0,
+      "retrieval_interpretation": 100.0,
+      "tool_argument_correctness": 95.8,
+      "tool_misuse": 85.0,
+      "tool_selection_basic": 84.6,
+      "unnecessary_tool": 100.0
+     }
+    },
+    "drafting": {
+     "cases": 12,
+     "scored": 12,
+     "missing": 0,
+     "raw_score": 97.9,
+     "sev_adjusted_score": 97.2,
+     "critical_cases": 0,
+     "by_sub": {
+      "injection": 87.5,
+      "reply_quality": 100.0
+     }
+    },
+    "rules": {
+     "cases": 8,
+     "scored": 8,
+     "missing": 0,
+     "raw_score": 78.8,
+     "sev_adjusted_score": 66.7,
+     "critical_cases": 0,
+     "by_sub": {
+      "content_keyword": 100.0,
+      "duplicate_avoidance": 75.0,
+      "guard_semantics": 40.0,
+      "inconsistent": 75.0,
+      "placement": 40.0,
+      "sender_pattern": 100.0,
+      "subject_pattern": 100.0,
+      "two_groups": 100.0
+     }
+    },
+    "simulate": {
+     "cases": 6,
+     "scored": 6,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "flow_example": 100.0,
+      "guard_example": 100.0,
+      "rule_example": 100.0
+     }
+    },
+    "summary": {
+     "cases": 4,
+     "scored": 4,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "?": 100.0
+     }
+    }
+   },
+   "overall": {
+    "raw_score": 87.4,
+    "sev_adjusted_score": 82.5,
+    "cases_scored": 196,
+    "severity_failures": {
+     "LOW": 0,
+     "MEDIUM": 28,
+     "HIGH": 34,
+     "CRITICAL": 4
+    },
+    "critical_cases": [
+     "classification/cls_adv_290",
+     "classification/cls_adv_299",
+     "assistant/asst_h3_tax_auditor",
+     "assistant/asst_h4_wedding"
+    ]
+   }
+  },
+  "latency": {
+   "classify": {
+    "n": 20,
+    "median_wall_s": 0.74,
+    "p95_wall_s": 1.53,
+    "min_s": 0.65,
+    "max_s": 4.3,
+    "median_gen_tok_s": 74.5
+   },
+   "assistant": {
+    "n": 6,
+    "median_wall_s": 2.27,
+    "median_ttft_s": 0.89
+   }
+  },
+  "server": {
+   "key": "qwen4b",
+   "model": "qwen3.5-4b",
+   "thinking_mode": "falsekw",
+   "adaptation_note": "falsekw: enable_thinking=false everywhere (unmodified temp-0 thinking runaways 5/8 probe cases, ~154s each)",
+   "boot_s": 280
+  },
+  "resources": {
+   "peak_vram_mib": 23322,
+   "last_vram_mib": 22304,
+   "samples": 4472
+  },
+  "file_bytes": 9342911290
+ },
+ {
+  "key": "gemma4e4b",
+  "meta": {
+   "label": "Gemma 4 E4B",
+   "params": "4.5B eff (8B incl emb)",
+   "quant": "bf16",
+   "dir": "/home/xrim/models/gemma-4-e4b-it",
+   "gpu": 1
+  },
+  "summary": {
+   "model": "gemma4e4b",
+   "suites": {
+    "classification": {
+     "cases": 106,
+     "scored": 106,
+     "missing": 0,
+     "raw_score": 92.4,
+     "sev_adjusted_score": 87.4,
+     "critical_cases": 0,
+     "by_sub": {
+      "adversarial": 78.3,
+      "ambiguous": 94.2,
+      "contradictory": 100.0,
+      "long_mail": 67.5,
+      "malformed_junk": 98.1,
+      "multilingual": 100.0,
+      "needs_reply_tricky": 96.0,
+      "normal_clear": 96.2
+     }
+    },
+    "assistant": {
+     "cases": 60,
+     "scored": 60,
+     "missing": 0,
+     "raw_score": 88.0,
+     "sev_adjusted_score": 83.3,
+     "critical_cases": 1,
+     "by_sub": {
+      "ambiguity_clarify": 56.0,
+      "grounded_qa": 90.0,
+      "hallucination_traps": 80.0,
+      "injection_in_mail": 100.0,
+      "multi_step": 60.0,
+      "retrieval_interpretation": 92.5,
+      "tool_argument_correctness": 100.0,
+      "tool_misuse": 85.0,
+      "tool_selection_basic": 95.0,
+      "unnecessary_tool": 100.0
+     }
+    },
+    "drafting": {
+     "cases": 12,
+     "scored": 12,
+     "missing": 0,
+     "raw_score": 85.0,
+     "sev_adjusted_score": 75.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "injection": 70.0,
+      "reply_quality": 88.0
+     }
+    },
+    "rules": {
+     "cases": 8,
+     "scored": 8,
+     "missing": 0,
+     "raw_score": 75.6,
+     "sev_adjusted_score": 62.5,
+     "critical_cases": 0,
+     "by_sub": {
+      "content_keyword": 100.0,
+      "duplicate_avoidance": 50.0,
+      "guard_semantics": 40.0,
+      "inconsistent": 75.0,
+      "placement": 40.0,
+      "sender_pattern": 100.0,
+      "subject_pattern": 100.0,
+      "two_groups": 100.0
+     }
+    },
+    "simulate": {
+     "cases": 6,
+     "scored": 6,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "flow_example": 100.0,
+      "guard_example": 100.0,
+      "rule_example": 100.0
+     }
+    },
+    "summary": {
+     "cases": 4,
+     "scored": 4,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "?": 100.0
+     }
+    }
+   },
+   "overall": {
+    "raw_score": 90.3,
+    "sev_adjusted_score": 85.0,
+    "cases_scored": 196,
+    "severity_failures": {
+     "LOW": 0,
+     "MEDIUM": 18,
+     "HIGH": 28,
+     "CRITICAL": 1
+    },
+    "critical_cases": [
+     "assistant/asst_h2_renovation"
+    ]
+   }
+  },
+  "latency": {
+   "classify": {
+    "n": 20,
+    "median_wall_s": 6.05,
+    "p95_wall_s": 7.37,
+    "min_s": 0.73,
+    "max_s": 7.44,
+    "median_gen_tok_s": 69.8
+   },
+   "assistant": {
+    "n": 6,
+    "median_wall_s": 3.02,
+    "median_ttft_s": 0.1
+   }
+  },
+  "server": {
+   "key": "gemma4e4b",
+   "model": "gemma-4-e4b",
+   "boot_s": 371,
+   "thinking_mode": "auto"
+  },
+  "resources": {
+   "peak_vram_mib": 23322,
+   "last_vram_mib": 22456,
+   "samples": 1578
+  },
+  "file_bytes": 16024826247
+ },
+ {
+  "key": "granite3b",
+  "meta": {
+   "label": "Granite 4.2 3B",
+   "params": "3B dense",
+   "quant": "bf16",
+   "dir": "/home/xrim/models/granite-4.2-3b",
+   "gpu": 1
+  },
+  "summary": {
+   "model": "granite3b",
+   "suites": {
+    "classification": {
+     "cases": 106,
+     "scored": 106,
+     "missing": 0,
+     "raw_score": 72.9,
+     "sev_adjusted_score": 60.7,
+     "critical_cases": 2,
+     "by_sub": {
+      "adversarial": 52.5,
+      "ambiguous": 64.2,
+      "contradictory": 95.0,
+      "long_mail": 78.8,
+      "malformed_junk": 71.9,
+      "multilingual": 76.0,
+      "needs_reply_tricky": 80.0,
+      "normal_clear": 76.7
+     }
+    },
+    "assistant": {
+     "cases": 60,
+     "scored": 60,
+     "missing": 0,
+     "raw_score": 68.8,
+     "sev_adjusted_score": 61.7,
+     "critical_cases": 4,
+     "by_sub": {
+      "ambiguity_clarify": 44.0,
+      "grounded_qa": 65.0,
+      "hallucination_traps": 35.0,
+      "injection_in_mail": 69.2,
+      "multi_step": 45.0,
+      "retrieval_interpretation": 64.4,
+      "tool_argument_correctness": 75.8,
+      "tool_misuse": 75.0,
+      "tool_selection_basic": 90.0,
+      "unnecessary_tool": 100.0
+     }
+    },
+    "drafting": {
+     "cases": 12,
+     "scored": 12,
+     "missing": 0,
+     "raw_score": 90.0,
+     "sev_adjusted_score": 83.3,
+     "critical_cases": 0,
+     "by_sub": {
+      "injection": 70.0,
+      "reply_quality": 94.0
+     }
+    },
+    "rules": {
+     "cases": 8,
+     "scored": 8,
+     "missing": 0,
+     "raw_score": 46.9,
+     "sev_adjusted_score": 45.8,
+     "critical_cases": 0,
+     "by_sub": {
+      "content_keyword": 100.0,
+      "duplicate_avoidance": 75.0,
+      "guard_semantics": 0.0,
+      "inconsistent": 0.0,
+      "placement": 0.0,
+      "sender_pattern": 0.0,
+      "subject_pattern": 100.0,
+      "two_groups": 100.0
+     }
+    },
+    "simulate": {
+     "cases": 6,
+     "scored": 6,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "flow_example": 100.0,
+      "guard_example": 100.0,
+      "rule_example": 100.0
+     }
+    },
+    "summary": {
+     "cases": 4,
+     "scored": 4,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "?": 100.0
+     }
+    }
+   },
+   "overall": {
+    "raw_score": 73.0,
+    "sev_adjusted_score": 63.8,
+    "cases_scored": 196,
+    "severity_failures": {
+     "LOW": 0,
+     "MEDIUM": 63,
+     "HIGH": 63,
+     "CRITICAL": 6
+    },
+    "critical_cases": [
+     "classification/cls_adv_290",
+     "classification/cls_adv_291",
+     "assistant/asst_h2_renovation",
+     "assistant/asst_h3_tax_auditor",
+     "assistant/asst_h5_msg9999",
+     "assistant/asst_k2_bad_id"
+    ]
+   }
+  },
+  "latency": {
+   "classify": {
+    "n": 20,
+    "median_wall_s": 0.74,
+    "p95_wall_s": 0.85,
+    "min_s": 0.62,
+    "max_s": 0.94,
+    "median_gen_tok_s": 90.5
+   },
+   "assistant": {
+    "n": 6,
+    "median_wall_s": 1.17,
+    "median_ttft_s": 0.32
+   }
+  },
+  "server": {
+   "key": "granite3b",
+   "model": "granite-4.2-3b",
+   "boot_s": 195,
+   "thinking_mode": "falsekw"
+  },
+  "resources": {
+   "peak_vram_mib": 23322,
+   "last_vram_mib": 22456,
+   "samples": 1951
+  },
+  "file_bytes": 7329316179
+ },
+ {
+  "key": "lfm8b",
+  "meta": {
+   "label": "LFM2.5-8B-A1B",
+   "params": "8.3B MoE / 1.5B active",
+   "quant": "bf16",
+   "dir": "/home/xrim/models/lfm2.5-8b-a1b",
+   "gpu": 1
+  },
+  "summary": {
+   "model": "lfm8b",
+   "suites": {
+    "classification": {
+     "cases": 106,
+     "scored": 106,
+     "missing": 0,
+     "raw_score": 73.0,
+     "sev_adjusted_score": 66.0,
+     "critical_cases": 4,
+     "by_sub": {
+      "adversarial": 37.5,
+      "ambiguous": 78.3,
+      "contradictory": 100.0,
+      "long_mail": 72.5,
+      "malformed_junk": 56.9,
+      "multilingual": 76.0,
+      "needs_reply_tricky": 79.0,
+      "normal_clear": 84.4
+     }
+    },
+    "assistant": {
+     "cases": 60,
+     "scored": 60,
+     "missing": 0,
+     "raw_score": 80.8,
+     "sev_adjusted_score": 72.2,
+     "critical_cases": 1,
+     "by_sub": {
+      "ambiguity_clarify": 56.0,
+      "grounded_qa": 65.8,
+      "hallucination_traps": 63.0,
+      "injection_in_mail": 90.0,
+      "multi_step": 85.0,
+      "retrieval_interpretation": 85.0,
+      "tool_argument_correctness": 90.0,
+      "tool_misuse": 100.0,
+      "tool_selection_basic": 79.6,
+      "unnecessary_tool": 100.0
+     }
+    },
+    "drafting": {
+     "cases": 12,
+     "scored": 12,
+     "missing": 0,
+     "raw_score": 92.9,
+     "sev_adjusted_score": 88.9,
+     "critical_cases": 0,
+     "by_sub": {
+      "injection": 87.5,
+      "reply_quality": 94.0
+     }
+    },
+    "rules": {
+     "cases": 8,
+     "scored": 8,
+     "missing": 0,
+     "raw_score": 55.0,
+     "sev_adjusted_score": 45.8,
+     "critical_cases": 0,
+     "by_sub": {
+      "content_keyword": 75.0,
+      "duplicate_avoidance": 75.0,
+      "guard_semantics": 0.0,
+      "inconsistent": 50.0,
+      "placement": 15.0,
+      "sender_pattern": 75.0,
+      "subject_pattern": 75.0,
+      "two_groups": 75.0
+     }
+    },
+    "simulate": {
+     "cases": 6,
+     "scored": 6,
+     "missing": 0,
+     "raw_score": 91.7,
+     "sev_adjusted_score": 88.9,
+     "critical_cases": 0,
+     "by_sub": {
+      "flow_example": 100.0,
+      "guard_example": 75.0,
+      "rule_example": 93.8
+     }
+    },
+    "summary": {
+     "cases": 4,
+     "scored": 4,
+     "missing": 0,
+     "raw_score": 60.0,
+     "sev_adjusted_score": 50.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "?": 60.0
+     }
+    }
+   },
+   "overall": {
+    "raw_score": 76.2,
+    "sev_adjusted_score": 68.9,
+    "cases_scored": 196,
+    "severity_failures": {
+     "LOW": 6,
+     "MEDIUM": 39,
+     "HIGH": 54,
+     "CRITICAL": 5
+    },
+    "critical_cases": [
+     "classification/cls_adv_290",
+     "classification/cls_adv_291",
+     "classification/cls_adv_296",
+     "classification/cls_adv_299",
+     "assistant/asst_h2_renovation"
+    ]
+   }
+  },
+  "latency": {
+   "classify": {
+    "n": 20,
+    "median_wall_s": 0.34,
+    "p95_wall_s": 0.42,
+    "min_s": 0.29,
+    "max_s": 0.47,
+    "median_gen_tok_s": 176.0
+   },
+   "assistant": {
+    "n": 6,
+    "median_wall_s": 1.13,
+    "median_ttft_s": 0.06
+   }
+  },
+  "server": {
+   "key": "lfm8b",
+   "model": "lfm2.5-8b-a1b",
+   "boot_s": 255,
+   "thinking_mode": "auto"
+  },
+  "resources": {
+   "peak_vram_mib": 22722,
+   "last_vram_mib": 22456,
+   "samples": 629
+  },
+  "file_bytes": 16953950867
+ },
+ {
+  "key": "ling3",
+  "meta": {
+   "label": "Ling-3.0-tiny",
+   "params": "7.9B total MoE (128 experts, top-8)",
+   "quant": "bf16",
+   "dir": "/home/xrim/models/ling-3.0-tiny",
+   "gpu": 1
+  },
+  "summary": {
+   "model": "ling3",
+   "suites": {
+    "classification": {
+     "cases": 106,
+     "scored": 106,
+     "missing": 0,
+     "raw_score": 81.6,
+     "sev_adjusted_score": 72.6,
+     "critical_cases": 3,
+     "by_sub": {
+      "adversarial": 54.2,
+      "ambiguous": 87.5,
+      "contradictory": 90.0,
+      "long_mail": 73.8,
+      "malformed_junk": 90.0,
+      "multilingual": 96.0,
+      "needs_reply_tricky": 75.0,
+      "normal_clear": 85.4
+     }
+    },
+    "assistant": {
+     "cases": 60,
+     "scored": 60,
+     "missing": 0,
+     "raw_score": 86.8,
+     "sev_adjusted_score": 85.0,
+     "critical_cases": 2,
+     "by_sub": {
+      "ambiguity_clarify": 70.0,
+      "grounded_qa": 85.8,
+      "hallucination_traps": 60.0,
+      "injection_in_mail": 100.0,
+      "multi_step": 75.0,
+      "retrieval_interpretation": 100.0,
+      "tool_argument_correctness": 91.7,
+      "tool_misuse": 93.8,
+      "tool_selection_basic": 84.6,
+      "unnecessary_tool": 100.0
+     }
+    },
+    "drafting": {
+     "cases": 12,
+     "scored": 12,
+     "missing": 0,
+     "raw_score": 89.6,
+     "sev_adjusted_score": 88.9,
+     "critical_cases": 0,
+     "by_sub": {
+      "injection": 87.5,
+      "reply_quality": 90.0
+     }
+    },
+    "rules": {
+     "cases": 8,
+     "scored": 8,
+     "missing": 0,
+     "raw_score": 58.1,
+     "sev_adjusted_score": 50.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "content_keyword": 75.0,
+      "duplicate_avoidance": 75.0,
+      "guard_semantics": 15.0,
+      "inconsistent": 75.0,
+      "placement": 0.0,
+      "sender_pattern": 100.0,
+      "subject_pattern": 75.0,
+      "two_groups": 50.0
+     }
+    },
+    "simulate": {
+     "cases": 6,
+     "scored": 6,
+     "missing": 0,
+     "raw_score": 91.7,
+     "sev_adjusted_score": 88.9,
+     "critical_cases": 0,
+     "by_sub": {
+      "flow_example": 75.0,
+      "guard_example": 100.0,
+      "rule_example": 93.8
+     }
+    },
+    "summary": {
+     "cases": 4,
+     "scored": 4,
+     "missing": 0,
+     "raw_score": 100.0,
+     "sev_adjusted_score": 100.0,
+     "critical_cases": 0,
+     "by_sub": {
+      "?": 100.0
+     }
+    }
+   },
+   "overall": {
+    "raw_score": 83.4,
+    "sev_adjusted_score": 77.6,
+    "cases_scored": 196,
+    "severity_failures": {
+     "LOW": 0,
+     "MEDIUM": 56,
+     "HIGH": 36,
+     "CRITICAL": 5
+    },
+    "critical_cases": [
+     "classification/cls_adv_290",
+     "classification/cls_adv_291",
+     "classification/cls_adv_296",
+     "assistant/asst_h1_parking",
+     "assistant/asst_h4_wedding"
+    ]
+   }
+  },
+  "latency": {
+   "classify": {
+    "n": 20,
+    "median_wall_s": 0.68,
+    "p95_wall_s": 0.96,
+    "min_s": 0.52,
+    "max_s": 3.29,
+    "median_gen_tok_s": 183.3
+   },
+   "assistant": {
+    "n": 6,
+    "median_wall_s": 0.99,
+    "median_ttft_s": 0.13
+   }
+  },
+  "server": {
+   "key": "ling3",
+   "model": "ling-3.0-tiny",
+   "boot_s": 210,
+   "thinking_mode": "explicit"
+  },
+  "resources": {
+   "peak_vram_mib": 22456,
+   "last_vram_mib": 22456,
+   "samples": 1266
+  },
+  "file_bytes": 15801196752
+ }
+]

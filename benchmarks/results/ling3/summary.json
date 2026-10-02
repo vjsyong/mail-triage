@@ -1,0 +1,115 @@
+{
+ "model": "ling3",
+ "suites": {
+  "classification": {
+   "cases": 106,
+   "scored": 106,
+   "missing": 0,
+   "raw_score": 81.6,
+   "sev_adjusted_score": 72.6,
+   "critical_cases": 3,
+   "by_sub": {
+    "adversarial": 54.2,
+    "ambiguous": 87.5,
+    "contradictory": 90.0,
+    "long_mail": 73.8,
+    "malformed_junk": 90.0,
+    "multilingual": 96.0,
+    "needs_reply_tricky": 75.0,
+    "normal_clear": 85.4
+   }
+  },
+  "assistant": {
+   "cases": 60,
+   "scored": 60,
+   "missing": 0,
+   "raw_score": 86.8,
+   "sev_adjusted_score": 85.0,
+   "critical_cases": 2,
+   "by_sub": {
+    "ambiguity_clarify": 70.0,
+    "grounded_qa": 85.8,
+    "hallucination_traps": 60.0,
+    "injection_in_mail": 100.0,
+    "multi_step": 75.0,
+    "retrieval_interpretation": 100.0,
+    "tool_argument_correctness": 91.7,
+    "tool_misuse": 93.8,
+    "tool_selection_basic": 84.6,
+    "unnecessary_tool": 100.0
+   }
+  },
+  "drafting": {
+   "cases": 12,
+   "scored": 12,
+   "missing": 0,
+   "raw_score": 89.6,
+   "sev_adjusted_score": 88.9,
+   "critical_cases": 0,
+   "by_sub": {
+    "injection": 87.5,
+    "reply_quality": 90.0
+   }
+  },
+  "rules": {
+   "cases": 8,
+   "scored": 8,
+   "missing": 0,
+   "raw_score": 58.1,
+   "sev_adjusted_score": 50.0,
+   "critical_cases": 0,
+   "by_sub": {
+    "content_keyword": 75.0,
+    "duplicate_avoidance": 75.0,
+    "guard_semantics": 15.0,
+    "inconsistent": 75.0,
+    "placement": 0.0,
+    "sender_pattern": 100.0,
+    "subject_pattern": 75.0,
+    "two_groups": 50.0
+   }
+  },
+  "simulate": {
+   "cases": 6,
+   "scored": 6,
+   "missing": 0,
+   "raw_score": 91.7,
+   "sev_adjusted_score": 88.9,
+   "critical_cases": 0,
+   "by_sub": {
+    "flow_example": 75.0,
+    "guard_example": 100.0,
+    "rule_example": 93.8
+   }
+  },
+  "summary": {
+   "cases": 4,
+   "scored": 4,
+   "missing": 0,
+   "raw_score": 100.0,
+   "sev_adjusted_score": 100.0,
+   "critical_cases": 0,
+   "by_sub": {
+    "?": 100.0
+   }
+  }
+ },
+ "overall": {
+  "raw_score": 83.4,
+  "sev_adjusted_score": 77.6,
+  "cases_scored": 196,
+  "severity_failures": {
+   "LOW": 0,
+   "MEDIUM": 56,
+   "HIGH": 36,
+   "CRITICAL": 5
+  },
+  "critical_cases": [
+   "classification/cls_adv_290",
+   "classification/cls_adv_291",
+   "classification/cls_adv_296",
+   "assistant/asst_h1_parking",
+   "assistant/asst_h4_wedding"
+  ]
+ }
+}

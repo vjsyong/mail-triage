@@ -1,0 +1,115 @@
+{
+ "model": "lfm8b",
+ "suites": {
+  "classification": {
+   "cases": 106,
+   "scored": 106,
+   "missing": 0,
+   "raw_score": 73.0,
+   "sev_adjusted_score": 66.0,
+   "critical_cases": 4,
+   "by_sub": {
+    "adversarial": 37.5,
+    "ambiguous": 78.3,
+    "contradictory": 100.0,
+    "long_mail": 72.5,
+    "malformed_junk": 56.9,
+    "multilingual": 76.0,
+    "needs_reply_tricky": 79.0,
+    "normal_clear": 84.4
+   }
+  },
+  "assistant": {
+   "cases": 60,
+   "scored": 60,
+   "missing": 0,
+   "raw_score": 80.8,
+   "sev_adjusted_score": 72.2,
+   "critical_cases": 1,
+   "by_sub": {
+    "ambiguity_clarify": 56.0,
+    "grounded_qa": 65.8,
+    "hallucination_traps": 63.0,
+    "injection_in_mail": 90.0,
+    "multi_step": 85.0,
+    "retrieval_interpretation": 85.0,
+    "tool_argument_correctness": 90.0,
+    "tool_misuse": 100.0,
+    "tool_selection_basic": 79.6,
+    "unnecessary_tool": 100.0
+   }
+  },
+  "drafting": {
+   "cases": 12,
+   "scored": 12,
+   "missing": 0,
+   "raw_score": 92.9,
+   "sev_adjusted_score": 88.9,
+   "critical_cases": 0,
+   "by_sub": {
+    "injection": 87.5,
+    "reply_quality": 94.0
+   }
+  },
+  "rules": {
+   "cases": 8,
+   "scored": 8,
+   "missing": 0,
+   "raw_score": 55.0,
+   "sev_adjusted_score": 45.8,
+   "critical_cases": 0,
+   "by_sub": {
+    "content_keyword": 75.0,
+    "duplicate_avoidance": 75.0,
+    "guard_semantics": 0.0,
+    "inconsistent": 50.0,
+    "placement": 15.0,
+    "sender_pattern": 75.0,
+    "subject_pattern": 75.0,
+    "two_groups": 75.0
+   }
+  },
+  "simulate": {
+   "cases": 6,
+   "scored": 6,
+   "missing": 0,
+   "raw_score": 91.7,
+   "sev_adjusted_score": 88.9,
+   "critical_cases": 0,
+   "by_sub": {
+    "flow_example": 100.0,
+    "guard_example": 75.0,
+    "rule_example": 93.8
+   }
+  },
+  "summary": {
+   "cases": 4,
+   "scored": 4,
+   "missing": 0,
+   "raw_score": 60.0,
+   "sev_adjusted_score": 50.0,
+   "critical_cases": 0,
+   "by_sub": {
+    "?": 60.0
+   }
+  }
+ },
+ "overall": {
+  "raw_score": 76.2,
+  "sev_adjusted_score": 68.9,
+  "cases_scored": 196,
+  "severity_failures": {
+   "LOW": 6,
+   "MEDIUM": 39,
+   "HIGH": 54,
+   "CRITICAL": 5
+  },
+  "critical_cases": [
+   "classification/cls_adv_290",
+   "classification/cls_adv_291",
+   "classification/cls_adv_296",
+   "classification/cls_adv_299",
+   "assistant/asst_h2_renovation"
+  ]
+ }
+}

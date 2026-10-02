@@ -1,0 +1,42 @@
+{
+ "base": "http://127.0.0.1:8045/v1",
+ "model": "qwen3.5-4b",
+ "checks": {
+  "models": {
+   "ok": true,
+   "detail": [
+    "qwen3.5-4b"
+   ],
+   "t": 0.04
+  },
+  "json_thinking": {
+   "ok": true,
+   "detail": {
+    "json": {
+     "category": "A",
+     "ok": true
+    },
+    "reasoning_len": 2273
+   },
+   "t": 13.01
+  },
+  "tool_call": {
+   "ok": true,
+   "detail": {
+    "tool": "list_folders"
+   },
+   "t": 1.24
+  },
+  "stream_tools": {
+   "ok": true,
+   "detail": {
+    "tool": true,
+    "content": true,
+    "reasoning": true,
+    "finish": "tool_calls"
+   },
+   "t": 1.33
+  }
+ },
+ "pass": true
+}

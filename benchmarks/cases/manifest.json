@@ -1,0 +1,28 @@
+{
+ "classification": {
+  "sha256": "06c1540d242f07879dbe48a3da02425af21c76f25c4185fc0d6ebc4eb920f6ad",
+  "count": 106
+ },
+ "assistant": {
+  "sha256": "4d328098386bcd9ae483a345f6f8cb959dd12ca6dbcc88dd6097705b7dc3c4af",
+  "count": 60
+ },
+ "drafting": {
+  "sha256": "88aeb7b8afb0332f1ac4faf3c61c24e646da7d07b764aa588c12b5aa833b4027",
+  "count": 12
+ },
+ "rules": {
+  "sha256": "8552a2324182ea8d8fbb11166a83d76163557db3e07d2a6b6fcc3ad01bfca5e7",
+  "count": 8
+ },
+ "simulate": {
+  "sha256": "f75bb3b1654f933203d24ebecc04c8a090e51e5c6126146c6d51d4beea835bd4",
+  "count": 6
+ },
+ "summary": {
+  "sha256": "a99325889d4af5b235ee65e0cbb690535f220a96f4e52bf273c38048b32bef10",
+  "count": 4
+ },
+ "corpus_messages": "f1f95f012ab2c97d28716de1786a87a71997a61cfa6436fc3b37b52b93c4d69d",
+ "frozen_at": "2026-10-02"
+}

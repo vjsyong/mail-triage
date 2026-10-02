@@ -1,0 +1,9 @@
+{
+ "thinking_mode": "falsekw",
+ "key": "qwen9b",
+ "model": "qwen3.5-9b",
+ "boot_s": 280,
+ "adaptation_note": "falsekw: enable_thinking=false everywhere (unmodified temp-0 thinking runaways in 4/8 probe cases, median 99s)",
+ "enforce_eager": true,
+ "gpu_memory_utilization": 0.9
+}

@@ -1,0 +1,7 @@
+{
+ "key": "qwen4b",
+ "model": "qwen3.5-4b",
+ "thinking_mode": "falsekw",
+ "adaptation_note": "falsekw: enable_thinking=false everywhere (unmodified temp-0 thinking runaways 5/8 probe cases, ~154s each)",
+ "boot_s": 280
+}

@@ -1,0 +1,1 @@
+{"id": "cls_normal_101", "suite": "classification", "sub": "normal_clear", "model": "qwen3.5-4b", "content": "", "reasoning_len": 28047, "parsed": null, "parse_error": "no JSON", "retried": true, "finish": "length", "usage": {"prompt_tokens": 222, "total_tokens": 8414, "completion_tokens": 8192, "prompt_tokens_details": null}, "wall_s": 153.29, "ttft_s": 102.6}
