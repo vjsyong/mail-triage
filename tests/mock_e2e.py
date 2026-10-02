@@ -1495,6 +1495,10 @@ def main():
           "<b>bold</b>" in md and "<code>code</code>" in md and "<li>one</li>" in md)
     check("md renderer linkifies msg refs",
           'href="/messages/9"' in app_mod.md_to_html("see [msg:9]"))
+    mrel = app_mod.md_to_html("[Test flow 3](/simulate?flow=3) [ext](https://example.com) [bad](//evil.com)")
+    check("md renderer keeps same-origin links in-app and blocks protocol-relative",
+          'href="/simulate?flow=3"' in mrel and 'href="//evil.com"' not in mrel
+          and '<a href="https://example.com" target="_blank" rel="noopener">ext</a>' in mrel)
     check("md renderer escapes html",
           "&lt;script&gt;" in app_mod.md_to_html("<script>alert(1)</script>"))
     id_old = add_msg(state, "old@x.com", "Old message from 2024", "ancient history", "old1@x",
@@ -2384,6 +2388,12 @@ def main():
           b"Explain my rules" in r.data and b"Suggest rules for me" not in r.data)
     r = client.get("/assistant/panel?sid=%d&path=/messages" % esid29)
     check("suggestions change with the page (messages)", b"Oldest unread" in r.data)
+    r = client.get("/assistant/panel?sid=%d&path=/simulate" % esid29)
+    check("suggestions change with the page (simulator)",
+          b"test one of my flows" in r.data and b"Summarize my inbox" not in r.data)
+    _ck, _cd, _cblk, _ckey = engine.assistant_page_context("/simulate")
+    check("simulator page context teaches the prefill path",
+          "Prefill from" in _cblk and "/simulate?flow=" in _cblk and "dry-run" in _cblk)
     client.post("/assistant/session/%d/delete" % esid29, data={"json": "1"})
 
     section("T31 assistant: repetition guard + rule housekeeping tools")

@@ -119,3 +119,24 @@ clears everything.
   (DB-confirmed session count +1 per switch, send + reply verified); flow page chips
   render the simulator link; click-through lands on a model-written prefilled draft
   ("PhD Inquiry: Research Opportunities in your Lab" for the real PhD flow).
+
+### Simulator page: the assistant must fill, not fumble (2026-10-02)
+Report: asking the drawer (on /simulate, chip "Context: simulator") to help fill the
+draft made it search mail/drafts and ask "which email?" - the generic one-line page
+block ("the user is on the simulator") taught it nothing. Fixes:
+- A real `/simulate` context block: what the page is (dry-run draft -> rules/flows/
+  classifier), the prefill affordances ("Prefill from" select + "Generate an example
+  draft", `/simulate?flow=<id>` / `?rule=<id>`), and the expected behaviour when the
+  user wants to test a flow/rule: find it (list_flows / list_rules), then EITHER give
+  concrete From/To/Subject/Body values that exercise it, OR point at the prefill with
+  a link like `[Test "<name>" ->](/simulate?flow=<id>)`. Explicitly: no mailbox or
+  draft searches, do not ask which email they mean; reply with the values or the one
+  line of guidance, not a tool play-by-play.
+- Simulator-shaped empty-state chips (`ASSIST_SUGGESTIONS["simulate"]`): fill a draft
+  to test a flow / to test a rule / how this page works.
+- Chat markdown now renders SAME-ORIGIN relative links (`/simulate?flow=3`) as in-app
+  links in BOTH renderers (python `md_to_html` + JS `mdRender`) so the prefill link is
+  one click; protocol-relative (`//host`) and `/\host` stay blocked (only `https?://`
+  or a single-slash path renders).
+- Checks: simulator chips replace the default set on /simulate; the context block
+  names the prefill path; relative links render in-app while `//evil.com` does not.

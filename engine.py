@@ -3343,9 +3343,25 @@ def assistant_page_context(path):
         return ("messages", "messages list%s" % filt_note(),
                 "CURRENT PAGE: the user is on the messages list%s (%d matching). No single message "
                 "is selected." % (filt_note(), n), "messages")
+    if p == "/simulate":
+        return ("simulator", "simulator (dry run)",
+                "CURRENT PAGE: the user is on the SIMULATOR \u2014 a dry-run page where a drafted "
+                "email (fields From, To, Subject, Body) is pushed through rules, flows and the "
+                "classifier without changing anything in the mailbox. The page can prefill the "
+                "draft: the \u201cPrefill from\u201d dropdown picks a flow or rule and \u201cGenerate "
+                "an example draft\u201d writes a matching example; /simulate?flow=<id> and "
+                "/simulate?rule=<id> prefill the same way. When the user asks for help filling the "
+                "fields or testing a flow/rule (e.g. \u201ctest the PhD flow\u201d): find that "
+                "flow/rule first (list_flows / list_rules), then either give them concrete "
+                "From/To/Subject/Body values that would exercise it, or point them at the prefill: "
+                "a link like [Test \u201c<name>\u201d \u2192](/simulate?flow=<id>), or the Prefill "
+                "from dropdown + \u201cGenerate an example draft\u201d. The draft is test input: do "
+                "NOT search the mailbox, drafts or messages, and do not ask which email they mean. "
+                "Reply with the draft values or a line of guidance, not a play-by-play of tools.",
+                "page:simulate")
     lists = {"/flows": "flows list", "/rules": "rules list", "/classifiers": "classifiers list",
              "/templates": "templates list", "/settings": "settings", "/more": "more",
-             "/accounts": "accounts", "/log": "activity log", "/simulate": "simulator",
+             "/accounts": "accounts", "/log": "activity log",
              "/proxy/log": "proxy log"}
     if p in lists:
         return ("page", lists[p],

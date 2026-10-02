@@ -119,8 +119,12 @@ def md_to_html(text):
         s = re.sub(r"__([^_]+)__", r"<b>\1</b>", s)
         s = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"<i>\1</i>", s)
         s = re.sub(r"(?<![\w_])_([^_\n]+)_(?![\w_])", r"<i>\1</i>", s)
-        s = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)",
-                   r'<a href="\2" target="_blank" rel="noopener">\1</a>', s)
+        def _linkify(m2):
+            label, href = m2.group(1), m2.group(2)
+            if href.startswith("http"):
+                return '<a href="%s" target="_blank" rel="noopener">%s</a>' % (href, label)
+            return '<a href="%s">%s</a>' % (href, label)
+        s = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+|/(?![/\\])[^)\s\\]*)\)", _linkify, s)
         for k, v in enumerate(spans):
             s = s.replace("\x00I%d\x00" % k, "<code>%s</code>" % v)
         return s
@@ -1115,7 +1119,7 @@ function mdRender(src){
     s=s.replace(/__([^_]+)__/g,'<b>$1</b>');
     s=s.replace(/(^|[^\w*])\*([^*\n]+)\*(?![\w*])/g,'$1<i>$2</i>');
     s=s.replace(/(^|[^\w_])_([^_\n]+)_(?![\w_])/g,'$1<i>$2</i>');
-    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|\/(?![\/\\])[^)\s\\]*)\)/g,function(m,l,h){return h.indexOf('http')===0?'<a href="'+h+'" target="_blank" rel="noopener">'+l+'</a>':'<a href="'+h+'">'+l+'</a>';});
     for(var k=0;k<spans.length;k++) s=s.replace('\x01I'+k+'\x01','<code>'+spans[k]+'</code>');
     return s;
   }
@@ -4962,6 +4966,11 @@ ASSIST_SUGGESTIONS = {
         {"label": "Any errors today?", "prompt": "Summarize any errors in the event log from the last day."},
         {"label": "What moved mail?", "prompt": "What has been moving my mail in the last day - rules, flows, or the LLM?"},
     ],
+    "simulate": [
+        {"label": "Fill a draft to test a flow", "prompt": "Help me fill in the simulator draft to test one of my flows: pick a suitable flow and give me the From/To/Subject/Body values."},
+        {"label": "Fill a draft to test a rule", "prompt": "Help me fill in the simulator draft to test one of my rules: pick a rule and give me the From/To/Subject/Body values."},
+        {"label": "How does this work?", "prompt": "Explain what the simulator does and how the Prefill from / Generate an example draft options work."},
+    ],
     "accounts": [
         {"label": "Is my connection healthy?", "prompt": "Check my mail connection and token status and report anything wrong."},
     ],
@@ -4984,7 +4993,7 @@ def _suggestions_for_path(path):
         if seg == "messages":
             key = "message" if len(parts) >= 2 else "messages"
         elif seg in ("rules", "flows", "classifiers", "templates", "settings",
-                     "log", "accounts"):
+                     "log", "accounts", "simulate"):
             key = seg
         elif seg == "proxy":
             key = "log"
