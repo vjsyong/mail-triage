@@ -37,6 +37,9 @@ How this folder is organised: by what you need, not by when it was written.
 - [plugins-ui.md](plugins-ui.md) - the Plugins page: the research (progressive
   disclosure, toggle patterns, VS Code / Chrome / Home Assistant precedents) and
   the applied list + detail redesign
+- [model-bench-plugin.md](model-bench-plugin.md) - the in-app model benchmark
+  (`mt-model-bench`): frozen eval subset, slice/resume under the 30s sandbox
+  clock, severity scoring, reference anchors (2026-10-02)
 - [flows-builder-v2.md](flows-builder-v2.md) - flow canvas (trigger -> filters -> steps)
 - [flows-fuzzy-classifier.md](flows-fuzzy-classifier.md) - AI category + about-topic
   conditions for flows

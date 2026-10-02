@@ -35,7 +35,7 @@ on the machine; the LLM defaults to a local model, and a cloud fallback is optio
   any folder): search, read, move, flag, create folders, propose rules. Thinking and
   every tool step are visible; actions can run dry-run; every action is logged.
 - **Plugins.** Sandboxed extensions with per-plugin enable, permissions and
-  settings: assistant tools (invoice finder, daily digest), classification
+  settings: assistant tools (invoice finder, daily digest, model bench), classification
   fast-paths (promo fast-path), rule conditions (CJK matcher), draft providers,
   search re-rankers and event integrations (webhook notifications on filed /
   classified events). Each plugin runs in its own worker process with hard

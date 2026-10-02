@@ -831,13 +831,13 @@ bit-exactly (suite checks float equality to 1e-9). Opt in via the
 `plugins/` built-ins: `mt-promo-fastpath` (classifier), `mt-invoice-finder` (tool),
 `mt-cjk-matcher` (matcher), `mt-mirror-language` (draft-provider),
 `mt-priority-first` (retriever), `mt-webhook-notify` (integration),
-`mt-daily-digest` (tool) · tests: suite sections T43-T48 + `tests/plugins_fixture/`.
+`mt-daily-digest` (tool), `mt-model-bench` (tool) · tests: suite sections T43-T50 + `tests/plugins_fixture/`.
 
 ## All kinds, as built (2026-10-02, second wave)
 
 | Kind | Hook | Opt-in | Built-in |
 |---|---|---|---|
-| tool | assistant inventory -> `call_tool` -> sandbox | enable + assistant gate (`plugin:<id>`) | mt-invoice-finder, mt-daily-digest |
+| tool | assistant inventory -> `call_tool` -> sandbox | enable + assistant gate (`plugin:<id>`) | mt-invoice-finder, mt-daily-digest, mt-model-bench |
 | classifier | `heuristics.classify()` fallback | `plugin_classifiers` | mt-promo-fastpath |
 | matcher | `_cond_field` op `plugin` in rules/flows | `plugin_matchers` (+ builder has the op) | mt-cjk-matcher |
 | draft-provider | flow draft step `mode:"plugin"` (live + simulator preview) | referenced by the step | mt-mirror-language |

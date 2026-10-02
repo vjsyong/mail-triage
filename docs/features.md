@@ -101,7 +101,11 @@ audited. Plugins read and propose - they never mutate mail. One built-in per kin
 ships as a working reference:
 
 - **Assistant tools**: invoice finder (finds invoices in the index and extracts
-  amount + due date into a card) and daily digest ("what did I miss" summary).
+  amount + due date into a card), daily digest ("what did I miss" summary), and
+  model bench (benchmarks the configured LLM against a frozen slice of the
+  model-eval suite: classification accuracy, JSON reliability, injection
+  resistance, latency - scored severity-adjusted with reference anchors from
+  the same cases).
 - **Classifier**: promo fast-path - a mirrored heuristic's model served as a plugin.
 - **Rule condition**: CJK matcher - matches Chinese/Japanese/Korean text, which the
   native operators cannot express.

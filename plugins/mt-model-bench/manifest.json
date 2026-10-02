@@ -1,0 +1,68 @@
+{
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "id": "mt-model-bench",
+  "name": "Model bench",
+  "version": "0.1.0",
+  "description": "Benchmark the configured LLM the way this app uses it: classification quality on a frozen case subset, JSON reliability, injection resistance, latency - and a verdict against reference models. Ask the assistant to \"benchmark my model\".",
+  "kind": [
+    "tool"
+  ],
+  "permissions": [
+    "llm.complete"
+  ],
+  "required_llm_capability": "llm.complete",
+  "limits": {
+    "memory_mb": 64,
+    "timeout_ms": 30000,
+    "kv_bytes": 262144
+  },
+  "config": {
+    "type": "object",
+    "properties": {
+      "default_scope": {
+        "type": "string",
+        "default": "standard",
+        "description": "Default scope for a new run: 'quick' (14 probes) or 'standard' (28 probes)."
+      },
+      "user_name": {
+        "type": "string",
+        "default": "",
+        "description": "Name used in the classification prompt (blank = 'the user'). Match your Settings name for a faithful run."
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "model_bench",
+      "description": "Benchmark the configured LLM: frozen classification cases (category accuracy, needs_reply, JSON validity, injection resistance), endpoint compatibility, and drafting/rules/summary probes - scored against reference models. Runs in slices: call again with no arguments to continue; reset=true starts over; scope 'quick' or 'standard'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "standard"
+            ],
+            "description": "Suite size; defaults to the plugin's setting (standard)."
+          },
+          "reset": {
+            "type": "boolean",
+            "description": "Discard any run in progress and start a fresh sweep."
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none"
+    }
+  ],
+  "assistant": {
+    "when_to_use": "Use when the user asks to benchmark, test or vet the configured model, asks whether their model is good enough, or wants a quality/speed score for this app's model."
+  }
+}
