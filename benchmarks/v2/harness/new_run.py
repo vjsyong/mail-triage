@@ -43,6 +43,8 @@ def main():
     ap.add_argument("--concurrency", type=int, default=1,
                     help="batch concurrency recorded in the run identity; must match runner.py --concurrency")
     ap.add_argument("--fallback", default="none")
+    ap.add_argument("--serving-profile", default="standard",
+                    help="label for serve.sh flags (e.g. qwen9b-graphs-seqs32); recorded in the identity")
     ap.add_argument("--cache-state", default="cold")
     ap.add_argument("--results", default=DEFAULT_RESULTS)
     args = ap.parse_args()
@@ -58,7 +60,8 @@ def main():
         scorer_revision=scorer.SCORER_REVISION,
         params=params,
         adaptations={"thinking_mode": args.thinking_mode,
-                     "assistant_no_stream": args.assistant_no_stream},
+                     "assistant_no_stream": args.assistant_no_stream,
+                     "serving_profile": args.serving_profile},
         retry_policy={"max": args.retries},
         fallback_policy={"mode": args.fallback},
         cache_state=args.cache_state)

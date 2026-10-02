@@ -112,6 +112,15 @@ runs at different concurrency are never mixed in one comparison.  Latency
 recorded under concurrency N is throughput-contaminated: use a sequential
 (concurrency 1) run for clean latency numbers.
 
+### Serving profiles
+
+`../harness/serve.sh` serves candidates.  Qwen3.5-9B bf16 OOMs during CUDA-graph
+memory profiling on a 24GB card at the default `max-num-seqs=256`; capping it at
+32 (`qwen9b`) keeps CUDA graphs and is ~2.4× faster than the old
+`--enforce-eager` workaround, which is retained as `qwen9b-eager` for
+reproducing historical numbers.  `new_run.py --serving-profile <label>` records
+which profile a run used.
+
 `tests/run_v2_tests.py` is also pytest-collectible (`pytest benchmarks/v2/tests`).
 
 ## Acceptance policy
