@@ -4028,6 +4028,8 @@ def main():
     check("plugin action labels fall back to the plugin id",
           plugins_mod.action_label(plugins_mod.get("good-demo")) == "Ping demo"
           and plugins_mod.action_label({"id": "plain-demo", "manifest": {}}) == "plain-demo")
+    check("tool-call arrow uses a valid CSS escape (raw template)",
+          b"content:'\\25B8'" in r.data and b"content:'\\u25b8'" not in r.data)
     check("rail ships a filter box", b'id="chatfilter"' in r.data)
     check("rail groups sessions by day",
           b'class="rgroup"' in r.data or b"No chats yet" in r.data)

@@ -805,8 +805,8 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .tools>summary{cursor:pointer;list-style:none;font-size:.75rem;font-family:var(--mono);color:var(--dim);border:1px solid var(--line);background:#fff;padding:2px 22px 2px 10px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;position:relative}
 .tools>summary::-webkit-details-marker{display:none}
 .tools>summary:hover{color:#000;border-color:#000}
-.tools>summary::after{content:'\u25b8';position:absolute;right:8px;top:1px;font-size:.7rem}
-.tools[open]>summary::after{content:'\u25be'}
+.tools>summary::after{content:'\25B8';position:absolute;right:8px;top:1px;font-size:.7rem}
+.tools[open]>summary::after{content:'\25BE'}
 .tools-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .tools[open] .tool-chip{white-space:normal;overflow-wrap:anywhere}
 .tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
