@@ -103,6 +103,15 @@ python scoring/score.py --run <run_id> --split acceptance
 python harness/report.py --baseline <baseline_run> --candidate <run_id> --split acceptance
 ```
 
+### Batched throughput
+
+`runner.py --concurrency N` keeps N requests in flight so vLLM's continuous
+batching is exercised (several-fold throughput on classification/assistant).
+Concurrency is part of the **run identity** (`new_run.py --concurrency N`), so
+runs at different concurrency are never mixed in one comparison.  Latency
+recorded under concurrency N is throughput-contaminated: use a sequential
+(concurrency 1) run for clean latency numbers.
+
 `tests/run_v2_tests.py` is also pytest-collectible (`pytest benchmarks/v2/tests`).
 
 ## Acceptance policy

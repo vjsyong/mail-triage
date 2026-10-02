@@ -54,7 +54,8 @@ architectural points. Baseline does not count against the 5-candidate limit.
 ## Deployment plan for candidates (identical to baseline where possible)
 - **Same runtime**: vLLM **v0.22.0** (the production image) for every candidate.
 - GPU **1** (free RTX 3090; baseline keeps GPU 0). Sequential serving.
-- `--max-model-len 16384` (matches baseline; benchmark cases designed ≤ ~13K).
+- `--max-model-len 32768` (matches the 32K baseline; v1 used 16K, which was
+  raised for v2 after assistant transcripts hit the context ceiling).
 - Precision: bf16 checkpoints (all fit a 3090) → candidates get best-case quality;
   practical quantized footprints (QAT-4bit / AWQ-4bit) recorded in the report and
   spot-checked on the recommended model later.

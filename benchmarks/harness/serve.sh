@@ -17,7 +17,7 @@ MUSE_IMAGE=vllm/vllm-openai:muse-glimmer-x86_64-cu129
 stop() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
 
 common_args() {
-  echo -n "--served-model-name $1 --max-model-len 16384 --gpu-memory-utilization 0.92 \
+  echo -n "--served-model-name $1 --max-model-len 32768 --gpu-memory-utilization 0.92 \
 --enable-auto-tool-choice --trust-remote-code --enable-prefix-caching --enable-chunked-prefill"
 }
 

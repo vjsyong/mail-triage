@@ -12,7 +12,7 @@
 #              KV on Ampere; stock v0.22.0 cannot serve this KV dtype — skip
 #              the overlay for models/quants that do not need it)
 #   Topology:  one 24GB card (validated on an RTX 3090), TP=1
-#   Drafter:   none · Vision: off · Max ctx: 16384 (mail workload)
+#   Drafter:   none · Vision: off · Max ctx: 32768 (mail workload)
 #   Mem util:  0.96
 #
 # Weights:   point HF_HOME at a host directory that holds the model (or a
@@ -89,7 +89,7 @@ services:
       - --kv-cache-dtype
       - int8_per_token_head
       - --max-model-len
-      - "16384"
+      - "32768"
       - --gpu-memory-utilization
       - "0.96"
       - --max-num-seqs

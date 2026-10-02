@@ -36,15 +36,20 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--top-p", type=float, default=None)
     ap.add_argument("--max-tokens", type=int, default=4096)
+    ap.add_argument("--max-model-len", type=int, default=32768,
+                    help="served context window; recorded in the run identity")
     ap.add_argument("--assistant-no-stream", action="store_true")
     ap.add_argument("--retries", type=int, default=1)
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="batch concurrency recorded in the run identity; must match runner.py --concurrency")
     ap.add_argument("--fallback", default="none")
     ap.add_argument("--cache-state", default="cold")
     ap.add_argument("--results", default=DEFAULT_RESULTS)
     args = ap.parse_args()
 
     params = {"temperature": args.temperature, "top_p": args.top_p,
-              "max_tokens": args.max_tokens}
+              "max_tokens": args.max_tokens, "batch_concurrency": args.concurrency,
+              "max_model_len": args.max_model_len}
     manifest = identity.build_from_context(
         args.model_key, bench_dir=V2,
         model_revision=args.model_revision, tokenizer=args.tokenizer,
