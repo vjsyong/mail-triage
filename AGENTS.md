@@ -28,6 +28,7 @@ ln -s ~/mail-triage/ragmodels ragmodels
 
 # 3. land it (from ~/mail-triage) once the suite is green and work is committed
 git merge <name>
+git push origin master
 git worktree remove ~/mail-triage-<name>
 git branch -d <name>
 ```
@@ -40,6 +41,8 @@ git branch -d <name>
   worktree, resolve there, then merge back.
 - Trivial fixes (typo, one-liner) may commit straight to `master`; anything with
   behaviour changes goes through the worktree flow.
+- Push after every merge (`git push origin master`) so GitHub stays current. Normal
+  push only; never force-push (`master` is append-only history).
 - Deploy only after merging, only from `~/mail-triage`, only with a clean tree.
 
 ## Commands
