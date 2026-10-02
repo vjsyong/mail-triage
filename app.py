@@ -388,7 +388,7 @@ BASE_TMPL = r"""<!doctype html>
 <style>
 @font-face{font-family:'Geist';src:url('/fonts/geist.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
 @font-face{font-family:'Geist Mono';src:url('/fonts/geist-mono.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
-:root{--bg:#fafafa;--card:#ffffff;--card2:#f5f5f5;--line:#e5e5e5;--line2:#d4d4d4;--fg:#000000;--dim:#666666;
+:root{--bg:#fafafa;--card:#ffffff;--card2:#f5f5f5;--line:#e5e5e5;--line2:#d4d4d4;--fg:#000000;--ink:#000000;--dim:#666666;
 --acc:#0070f3;--ok:#067a46;--warn:#b25e09;--err:#d1242f;
 --tint-acc:#f0f7ff;--tint-ok:#edfbf2;--tint-warn:#fff8ea;--tint-err:#fff1f1;
 --panel:#000000;--panel-dim:#a3a3a3;--codebg:#0a0a0a;--codefg:#ededed;
@@ -4776,90 +4776,159 @@ FLOWS_TMPL = """
 FLOW_EDIT_TMPL = """
 {% if error %}<div class="msg err" role="alert" id="form-err" tabindex="-1">{{ error }}</div><script>try{document.getElementById("form-err").focus();}catch(e){}</script>{% endif %}
 <style>
-.flowcanvas{border:1px solid var(--line);background:#fff;background-image:radial-gradient(var(--line) 1.1px, transparent 1.1px);background-size:22px 22px;padding:26px 16px 20px;overflow:hidden}
-.fl-col{max-width:660px;margin:0 auto;display:flex;flex-direction:column}
-.fl-node{position:relative;background:#fff;border:1px solid var(--line);box-shadow:0 1px 0 rgba(0,0,0,.04)}
-.fl-head{display:flex;align-items:center;gap:9px;padding:9px 11px}
-.fl-node .fl-head{border-bottom:0}
-.fl-node.open .fl-head,.fl-node.filters .fl-head{border-bottom:1px solid var(--line)}
-.fl-ic{width:24px;height:24px;min-width:24px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.8rem;line-height:1}
-.fl-ic.ai{background:#0070f3}
-.fl-t{font-weight:600;font-size:.9rem}
-.fl-sub{color:var(--dim);font-size:.78rem}
+/* flow editor: trigger (dark) -> condition (blue) -> numbered action chain, with a live plain-language preview */
+.fl-setup{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;align-items:end;margin:0 0 14px}
+.fl-setup label{margin:0 0 4px}
+.fl-enable{display:flex;gap:10px;align-items:center;border:1px solid var(--line2);background:#fff;padding:11px 13px;cursor:pointer;margin:0;color:var(--fg)}
+.fl-enable:hover{border-color:#000}
+.fl-enable input[type=checkbox]{width:17px;height:17px;margin:0;flex:none}
+.fl-enable b{display:block;font-size:.88rem;font-weight:600;color:var(--fg)}
+.fl-enable em{display:block;font-style:normal;font-size:.76rem;color:var(--dim);margin-top:1px}
+.fl-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.fl-state{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:3px 8px;border:1px solid var(--line2);color:var(--dim)}
+.fl-state.on{color:var(--ok);border-color:var(--ok);background:var(--tint-ok)}
+.fl-state.off{color:var(--dim);background:var(--card2)}
+.fl-summary{display:flex;gap:12px;align-items:baseline;background:#0a0a0a;border:1px solid #0a0a0a;color:#fff;padding:12px 14px;margin:0 0 14px;flex-wrap:wrap}
+.fl-sum-lab{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#a3a3a3;white-space:nowrap}
+.fl-sum-text{font-size:.88rem;line-height:1.5;color:#ededed;min-width:0;overflow-wrap:anywhere}
+.flowcanvas{border:1px solid var(--line2);background:#fdfdfd;background-image:radial-gradient(#dcdcdc 1.1px, transparent 1.1px);background-size:22px 22px;padding:28px 16px 22px;overflow:hidden}
+.fl-col{max-width:680px;margin:0 auto;display:flex;flex-direction:column}
+.fl-node{position:relative;background:#fff;border:1px solid var(--line2);box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.fl-head{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.fl-htxt{min-width:0}
+.fl-eyebrow{display:block;font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:1px}
+.fl-ic{width:26px;height:26px;min-width:26px;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-size:.82rem;line-height:1}
+.fl-ic.ai{background:var(--acc)}
+.fl-t{font-weight:700;font-size:.95rem;letter-spacing:-.01em}
+.fl-sub{color:var(--dim);font-size:.8rem;margin-top:1px}
 .fl-sp{flex:1}
-.fl-handle{position:absolute;left:50%;width:9px;height:9px;background:#fff;border:2px solid var(--ink);transform:translateX(-50%);z-index:1}
-.fl-handle.t{top:-6px}.fl-handle.b{bottom:-6px}
-.fl-edge{position:relative;height:30px;flex:none}
-.fl-edge::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--line);transform:translateX(-1px)}
-.fl-ins{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:26px;height:26px;border:1px solid var(--line);background:#fff;color:var(--dim);font-size:1rem;line-height:1;cursor:pointer;opacity:0;transition:opacity .12s;z-index:2}
-.fl-edge:hover .fl-ins,.fl-ins:focus-visible,.fl-ins.on{opacity:1;border-color:var(--ink);color:var(--ink)}
-.fl-insert-menu{position:absolute;left:50%;top:30px;transform:translateX(-50%);background:#fff;border:1px solid var(--ink);padding:6px;display:none;flex-wrap:wrap;gap:4px;z-index:5;box-shadow:0 10px 28px rgba(0,0,0,.10);width:max-content;max-width:92%}
+.fl-handle{position:absolute;left:50%;width:8px;height:8px;background:#fff;border:2px solid #000;transform:translateX(-50%);z-index:1}
+.fl-handle.t{top:-5px}.fl-handle.b{bottom:-5px}
+.fl-edge{position:relative;height:34px;flex:none}
+.fl-edge::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--line2);transform:translateX(-1px)}
+.fl-edge::after{content:"";position:absolute;left:50%;bottom:3px;width:7px;height:7px;border-right:2px solid var(--line2);border-bottom:2px solid var(--line2);transform:translateX(-50%) rotate(45deg)}
+.fl-ins{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:28px;height:28px;border:1px solid var(--line2);background:#fff;color:var(--fg);font-size:1rem;font-weight:600;line-height:1;cursor:pointer;opacity:.55;transition:opacity .12s,border-color .12s,box-shadow .12s;z-index:2;display:flex;align-items:center;justify-content:center;padding:0}
+.fl-edge:hover .fl-ins,.fl-ins:focus-visible,.fl-ins.on{opacity:1;border-color:#000;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.fl-insert-menu{position:absolute;left:50%;top:34px;transform:translateX(-50%);background:#fff;border:1px solid #000;padding:8px;display:none;flex-wrap:wrap;gap:6px;z-index:5;box-shadow:0 12px 30px rgba(0,0,0,.14);width:max-content;max-width:94%}
 .fl-insert-menu.on{display:flex}
-.cond-row{border:1px solid var(--line);background:#fff;padding:8px 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fl-trigger{background:#0a0a0a;border-color:#0a0a0a;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.16)}
+.fl-trigger .fl-head{padding:11px 12px}
+.fl-trigger .fl-ic{background:#fff;color:#000}
+.fl-trigger .fl-eyebrow{color:#a3a3a3}
+.fl-trigger .fl-t{color:#fff}
+.fl-trigger .fl-sub{color:#a3a3a3}
+.fl-filters{border-color:#bcd8fb}
+.fl-filters .fl-head{background:var(--tint-acc);border-bottom:1px solid #cfe3fb}
+.fl-filters .fl-eyebrow{color:var(--acc)}
+.fl-filters .fl-t{color:#003a8c;font-size:.98rem}
+.fl-filters .fl-handle{border-color:var(--acc)}
+.empty-conds{color:var(--dim);font-size:.82rem;border:1px dashed var(--line2);padding:9px 10px;background:#fff}
+.cond-row{border:1px solid var(--line2);border-left:3px solid #000;background:#fff;padding:8px 10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .cond-row + .cond-row{margin-top:6px}
 .cond-row.extra{display:none}
-.cond-row .k-sel{border:1px solid var(--line);background:#fafafa;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;padding:4px 6px;color:var(--dim);cursor:pointer}
-.cond-row.k-category .k-sel,.cond-row.k-topic .k-sel{color:#0070f3;border-color:#0070f3}
+.cond-row.k-category,.cond-row.k-topic{border-left-color:var(--acc)}
+.cond-row .k-sel{width:auto;max-width:170px;flex:none;border:1px solid var(--line2);background:#fff;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:5px 7px;color:var(--fg);cursor:pointer}
+.cond-row.k-category .k-sel,.cond-row.k-topic .k-sel{color:var(--acc);border-color:var(--acc);background:var(--tint-acc)}
 .k-field-f{display:flex;gap:6px;min-width:0}
 .cond-row:not(.k-field) .k-field-f{display:none}
 .cond-row:not(.k-field) .k-score,.cond-row:not(.k-field) .k-score-lab{display:none}
-.cond-row .k-val{flex:1;min-width:120px}
-.cond-row .k-score{width:84px;flex:none}
+.cond-row.k-field .k-score,.cond-row.k-field .k-score-lab{display:none}
+.cond-row .k-score:disabled{background:var(--card2);color:var(--dim)}
+.cond-row .k-val{flex:1 1 90px;min-width:0}
+.cond-row .k-score{width:72px;flex:none}
 .k-label{font-size:.72rem;color:var(--dim);white-space:nowrap}
-.cond-rm{border:0;background:none;color:var(--dim);cursor:pointer;font-size:.85rem;padding:2px 4px}
-.cond-rm:hover{color:#d33}
-.stepcard{position:relative;background:#fff;border:1px solid var(--line)}
-.fl-step-head{display:flex;align-items:center;gap:9px;padding:9px 11px;cursor:pointer}
+.cond-rm{border:0;background:none;color:var(--dim);cursor:pointer;font-size:.85rem;padding:4px 6px;line-height:1}
+.cond-rm:hover{color:var(--err);background:var(--tint-err)}
+.fl-help{margin-top:10px;border:1px solid var(--line);background:#fbfbfb}
+.fl-help summary{cursor:pointer;font-size:.78rem;font-weight:600;color:var(--dim);padding:8px 10px;list-style:none;display:flex;align-items:center;gap:6px}
+.fl-help summary::-webkit-details-marker{display:none}
+.fl-help summary::before{content:"?";width:15px;height:15px;border:1px solid var(--line2);display:inline-flex;align-items:center;justify-content:center;font-size:.68rem;color:var(--dim);flex:none}
+.fl-help[open] summary{border-bottom:1px solid var(--line);color:var(--fg)}
+.fl-help > div{padding:9px 11px;font-size:.78rem;color:var(--dim);line-height:1.6}
+.fl-help strong{color:var(--fg)}
+.stepcard{position:relative;background:#fff;border:1px solid var(--line2)}
+.stepcard.open{box-shadow:0 2px 8px rgba(0,0,0,.07)}
+.fl-step-head{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}
 .fl-step-head:hover{background:var(--hover)}
-.fl-step-sum{color:var(--dim);font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
-.stepfields{padding:10px 11px;display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px 10px;align-items:center;border-top:1px solid var(--line)}
-.stepfields label{font-size:.78rem;color:var(--dim)}
-.steptools{display:flex;gap:4px}
-.fl-pal{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding:10px;border:1px dashed var(--line);background:rgba(255,255,255,.7)}
-.fl-pal-lab{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);width:100%}
-.fl-summary{display:flex;gap:10px;align-items:flex-start;margin-bottom:12px}
-.fl-sum-lab{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);padding-top:2px;white-space:nowrap}
-.fl-sum-text{font-size:.9rem}
-.fl-seg{display:inline-flex;border:1px solid var(--line)}
-.fl-seg label{padding:3px 9px;font-size:.78rem;cursor:pointer;color:var(--dim);position:relative}
-.fl-seg label+label{border-left:1px solid var(--line)}
+.stepcard.open .fl-step-head{background:#fbfbfb;border-bottom:1px solid var(--line)}
+.fl-num{width:26px;height:26px;min-width:26px;background:#fff;color:#000;border:2px solid #000;display:flex;align-items:center;justify-content:center;font:700 .8rem/1 var(--mono)}
+.stepcard.open .fl-num{background:#000;color:#fff}
+.fl-glyph{font-family:var(--mono);color:var(--dim);font-weight:400;margin-right:2px}
+.stepcard.open .fl-glyph{color:var(--fg)}
+.fl-step-sum{color:var(--dim);font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px}
+.stepfields{background:#fafafa;border-top:1px solid var(--line);padding:12px 14px;display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px 12px;align-items:center}
+.stepfields label{font-size:.8rem;color:var(--dim);margin:0}
+.steptools{display:flex;gap:4px;align-items:center}
+.fl-steps-empty{border:1px dashed var(--line2);background:rgba(255,255,255,.85);color:var(--dim);font-size:.82rem;padding:14px 12px;text-align:center}
+.fl-pal{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding:12px;border:1px dashed var(--line2);background:rgba(255,255,255,.9)}
+.fl-pal-lab{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);width:100%}
+.fl-pal .btn.small{height:30px;padding:0 11px;background:#fff}
+.fl-pal .btn.small:hover{border-color:#000;background:var(--hover)}
+.fl-seg{display:inline-flex;border:1px solid var(--line2);background:#fff;flex:none}
+.fl-seg label{padding:0;margin:0;cursor:pointer;position:relative;display:block}
+.fl-seg label+label{border-left:1px solid var(--line2)}
 .fl-seg input{position:absolute;opacity:0;pointer-events:none}
-.fl-seg input:checked + span{color:#fff;background:var(--ink);margin:-3px -9px;padding:3px 9px;display:inline-block}
-.fl-seg input:focus-visible + span{outline:2px solid var(--focus);outline-offset:1px}
+.fl-seg span{display:block;padding:5px 11px;font-size:.76rem;font-weight:600;color:var(--dim)}
+.fl-seg input:checked + span{background:#000;color:#fff}
+.fl-seg input:focus-visible + span{outline:2px solid var(--acc);outline-offset:-2px}
+.fl-save-hint{margin-left:auto;font-size:.8rem;color:var(--dim)}
 @media(max-width:767px){
   .flowcanvas{padding:16px 8px}
   .fl-ins{opacity:1}
-  .fl-step-sum{max-width:140px}
+  .fl-step-sum{max-width:150px}
   .stepfields{grid-template-columns:1fr}
+  .stepfields label{margin-top:4px}
   .fl-summary{flex-direction:column;gap:4px}
+  .fl-setup{grid-template-columns:1fr}
+  .fl-col{max-width:100%}
+  .fl-head{flex-wrap:wrap}
+  .cond-row .k-val{flex-basis:100%}
+  .fl-step-head{flex-wrap:wrap}
+  .fl-step-sum{max-width:none;white-space:normal}
+  .steptools{flex-basis:100%;justify-content:flex-end;margin-top:2px}
+  .fl-save-hint{display:none}
 }
 </style>
 <div class="page-head">
   <div>
     <div class="backlink"><a href="{{ url_for('flows') }}">← Flows</a></div>
-    <h1 class="page-title">{{ 'New flow' if is_new else 'Edit flow' }}</h1>
+    <div class="fl-title">
+      <h1 class="page-title">{{ 'New flow' if is_new else 'Edit flow' }}</h1>
+      <span class="fl-state {{ 'on' if (flow.enabled if flow else True) else 'off' }}" id="fl-state">{{ 'Enabled' if (flow.enabled if flow else True) else 'Disabled' }}</span>
+    </div>
     <div class="page-desc">A new message arrives, the filters decide, the steps run in order. Deterministic filters are exact and free; AI filters run only after they pass.</div>
   </div>
 </div>
 <form method="post" id="flowform">
 <input type="hidden" name="steps_json" id="steps_json">
-<div class="grid2" style="margin-bottom:12px">
-  <div><label for="f-name">Name</label><input id="f-name" type="text" name="name" value="{{ flow.name if flow else '' }}" placeholder="e.g. Invoice → file + draft ack"></div>
-  <div><label class="check" style="margin-top:26px"><input type="checkbox" name="enabled" value="1" {{ 'checked' if (flow.enabled if flow else True) else '' }}> <span>Enabled — evaluated on every check</span></label></div>
+
+<div class="fl-setup">
+  <div>
+    <label for="f-name">Flow name</label>
+    <input id="f-name" type="text" name="name" value="{{ flow.name if flow else '' }}" placeholder="e.g. Invoice → file + draft ack">
+  </div>
+  <label class="fl-enable" for="f-enabled">
+    <input id="f-enabled" type="checkbox" name="enabled" value="1" {{ 'checked' if (flow.enabled if flow else True) else '' }}>
+    <span>
+      <b>Enabled</b>
+      <em>Evaluated on every check</em>
+    </span>
+  </label>
 </div>
 
-<div class="card fl-summary">
-  <span class="fl-sum-lab">Summary</span>
+<div class="fl-summary">
+  <span class="fl-sum-lab">Live preview</span>
   <div class="fl-sum-text" id="fl-sum-text" aria-live="polite">{{ summary_text }}</div>
 </div>
 
 <div class="flowcanvas">
   <div class="fl-col" id="fl-col">
 
-    <div class="fl-node" id="fl-trigger">
+    <div class="fl-node fl-trigger" id="fl-trigger">
       <div class="fl-head">
         <span class="fl-ic">▸</span>
-        <div>
+        <div class="fl-htxt">
+          <span class="fl-eyebrow">Trigger</span>
           <div class="fl-t">New mail arrives</div>
           <div class="fl-sub">watches <strong>{{ watch_text }}</strong> every {{ poll_interval }}s — rules run first, then flows</div>
         </div>
@@ -4869,18 +4938,21 @@ FLOW_EDIT_TMPL = """
 
     <div class="fl-edge" id="fl-edge-0"></div>
 
-    <div class="fl-node filters" id="fl-filters">
+    <div class="fl-node fl-filters" id="fl-filters">
       <div class="fl-head">
         <span class="fl-ic ai">✦</span>
-        <div class="fl-t">Only when</div>
+        <div class="fl-htxt">
+          <span class="fl-eyebrow">Condition</span>
+          <div class="fl-t">Only when</div>
+        </div>
         <span class="fl-sp"></span>
         <span class="fl-seg" role="group" aria-label="Match all or any filter">
           <label><input type="radio" name="match_mode" value="all" {{ 'checked' if not (flow and flow.match_mode == 'any') else '' }}><span>match all</span></label>
           <label><input type="radio" name="match_mode" value="any" {{ 'checked' if flow and flow.match_mode == 'any' else '' }}><span>match any</span></label>
         </span>
       </div>
-      <div style="padding:10px 11px">
-        <div class="empty-conds fl-sub" id="cond-empty" {% if conditions %}style="display:none"{% endif %}>No filters yet — this runs on every new message. Add one:</div>
+      <div style="padding:12px">
+        <div class="empty-conds" id="cond-empty" {% if conditions %}style="display:none"{% endif %}>No filters yet — this runs on every new message. Add one:</div>
         {% for i in range(5) %}
         {% set c = conditions[i] if conditions|length > i else {} %}
         {% set ck = c.get('kind') or 'field' %}
@@ -4891,11 +4963,11 @@ FLOW_EDIT_TMPL = """
             <option value="topic" {{ 'selected' if ck == 'topic' else '' }}>✦ about</option>
           </select>
           <span class="k-field-f">
-            <select name="cond_field_{{ i }}" aria-label="Filter {{ i+1 }} field" {{ 'disabled' if ck != 'field' else '' }} style="width:100px">
+            <select name="cond_field_{{ i }}" aria-label="Filter {{ i+1 }} field" {{ 'disabled' if ck != 'field' else '' }} style="width:86px">
               {% for f in ['from','to','subject','body'] %}
               <option value="{{ f }}" {{ 'selected' if c.get('field') == f else '' }}>{{ f }}</option>{% endfor %}
             </select>
-            <select name="cond_op_{{ i }}" aria-label="Filter {{ i+1 }} operator" {{ 'disabled' if ck != 'field' else '' }} style="width:112px">
+            <select name="cond_op_{{ i }}" aria-label="Filter {{ i+1 }} operator" {{ 'disabled' if ck != 'field' else '' }} style="width:100px">
               {% for o in ['contains','equals','regex'] %}
               <option value="{{ o }}" {{ 'selected' if c.get('op') == o else '' }}>{{ o }}</option>{% endfor %}
             </select>
@@ -4907,13 +4979,16 @@ FLOW_EDIT_TMPL = """
         </div>
         {% endfor %}
         <datalist id="fl-cats"></datalist>
-        <div class="fl-pal" style="margin-top:8px">
+        <div class="fl-pal" style="margin-top:10px">
           <span class="fl-pal-lab">Add a filter</span>
           <button type="button" class="btn small" onclick="condAdd('field')">+ match text</button>
           <button type="button" class="btn small" onclick="condAdd('category')">+ ✦ AI category</button>
           <button type="button" class="btn small" onclick="condAdd('topic')">+ ✦ about (topic)</button>
         </div>
-        <div class="fl-sub" style="margin-top:8px"><strong>match text</strong> = exact words (checked first, free) &middot; <strong>✦ AI category</strong> fires when the classifier tags the message &middot; <strong>✦ about (topic)</strong> matches by meaning — describe the kind of mail with its boundary, e.g. &ldquo;parcels and deliveries - shipping notices, pickup codes. NOT marketing.&rdquo; &middot; min score: topic threshold (default 0.45) or category confidence floor. Text values of 3 letters or fewer match whole words only.</div>
+        <details class="fl-help">
+          <summary>Filter types &amp; scoring</summary>
+          <div><strong>match text</strong> = exact words (checked first, free) &middot; <strong>✦ AI category</strong> fires when the classifier tags the message &middot; <strong>✦ about (topic)</strong> matches by meaning — describe the kind of mail with its boundary, e.g. &ldquo;parcels and deliveries - shipping notices, pickup codes. NOT marketing.&rdquo; &middot; min score: topic threshold (default 0.45) or category confidence floor. Text values of 3 letters or fewer match whole words only.</div>
+        </details>
       </div>
       <span class="fl-handle b"></span>
     </div>
@@ -4932,7 +5007,11 @@ FLOW_EDIT_TMPL = """
   </div>
 </div>
 
-<div class="savebar"><button class="btn primary" type="submit">Save flow</button><a class="btn" href="{{ url_for('flows') }}">Cancel</a></div>
+<div class="savebar">
+  <button class="btn primary" type="submit">Save flow</button>
+  <a class="btn" href="{{ url_for('flows') }}">Cancel</a>
+  <span class="fl-save-hint">A flow only moves, tags, marks, stars, or drafts — it never deletes mail.</span>
+</div>
 <script>
 var stepsEl = document.getElementById('steps');
 var stepsInput = document.getElementById('steps_json');
@@ -5120,18 +5199,24 @@ function edge(i){
 function render(){
   stepsEl.innerHTML = '';
   stepsEl.appendChild(edge(0));
+  if(!steps.length){
+    stepsEl.appendChild(el('div','fl-steps-empty','No steps yet — add one below, or on the + above. It runs only when the filters match.'));
+  }
   steps.forEach(function(st, i){
     if(st.type === 'draft' && st.mode === 'plugin' && !st.plugin && PLUGINS.length) st.plugin = PLUGINS[0].id;
     var card = el('div','stepcard fl-node' + (st._open ? ' open' : ''));
     var head = el('div','fl-step-head');
     var info = typeInfo(st.type);
-    head.appendChild(el('span','fl-ic', info[2]));
-    var tt = el('div');
-    tt.appendChild(el('div','fl-t', info[1]));
+    head.appendChild(el('span','fl-num', String(i + 1)));
+    var tt = el('div','fl-htxt');
+    var tl = el('div','fl-t');
+    tl.appendChild(el('span','fl-glyph', info[2]));
+    tl.appendChild(document.createTextNode(info[1]));
+    tt.appendChild(tl);
     tt.appendChild(el('div','fl-step-sum', stepSummary(st)));
     head.appendChild(tt); head.appendChild(el('span','fl-sp'));
     var tools = el('div','steptools');
-    var ed = el('button', null, st._open ? '✓' : '✎'); ed.type = 'button'; ed.className = 'btn small';
+    var ed = el('button', null, st._open ? 'Done' : 'Edit'); ed.type = 'button'; ed.className = 'btn small';
     ed.title = st._open ? 'Collapse' : 'Edit this step'; ed.setAttribute('aria-label', ed.title);
     ed.onclick = function(ev){ ev.stopPropagation(); st._open = !st._open; render(); };
     var up = el('button', null, '↑'); up.type = 'button'; up.className = 'btn small'; up.disabled = (i === 0); up.setAttribute('aria-label','Move step ' + (i + 1) + ' up');
@@ -5179,6 +5264,16 @@ document.querySelectorAll('.cond-row .k-val, .cond-row .k-score').forEach(functi
 });
 document.querySelectorAll('input[name=match_mode]').forEach(function(r){ r.addEventListener('change', renderSummary); });
 CATS.forEach(function(c){ var o = document.createElement('option'); o.value = c; document.getElementById('fl-cats').appendChild(o); });
+var enBox = document.getElementById('f-enabled');
+var stPill = document.getElementById('fl-state');
+if(enBox && stPill){
+  var paintState = function(){
+    var on = enBox.checked;
+    stPill.textContent = on ? 'Enabled' : 'Disabled';
+    stPill.className = 'fl-state ' + (on ? 'on' : 'off');
+  };
+  enBox.addEventListener('change', paintState); paintState();
+}
 render(); condEmpty();
 </script>
 """

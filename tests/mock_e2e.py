@@ -2997,6 +2997,11 @@ def main():
     check("live summary bar present", b"fl-sum-text" in np and b"no filters (every message)" in np)
     check("smart mini-form labels (min trust/score)",
           b"min score" in np and b"k-field-f" in np and b"k-score" in np)
+    check("visual hierarchy hooks (status pill, trigger band, numbered steps, empty hint)",
+          b'id="fl-state"' in np and b"fl-trigger" in np and b"fl-num" in np
+          and b"fl-steps-empty" in np)
+    check("filter help is progressive disclosure",
+          b'<details class="fl-help"' in np and b"Filter types" in np)
     edit34 = client.get("/flows/%d/edit" % fl_food[0]["id"]).data
     check("edit page loads the flow into the canvas",
           b"fl-edge" in edit34 and b'value="all" checked' in edit34
