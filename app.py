@@ -4609,7 +4609,7 @@ def message_file(mid):
             try:
                 mc.ensure_selected(m["folder"])
                 mc.ensure_folder(target)
-                new_uid = mc.move(m["uid"], target)
+                new_uid = mc.move(m["uid"], target, msgid=m.get("msgid"))
             finally:
                 mc.close()
             mv = {"status": "llm-moved", "action_taken": "move:" + target, "folder": target}
@@ -7272,6 +7272,9 @@ if __name__ == "__main__":
         sys.exit(0)
     if "--heal-snippets" in sys.argv:
         print(json.dumps(engine.heal_snippets(workers=6)))
+        sys.exit(0)
+    if "--heal-locations" in sys.argv:
+        print(json.dumps(engine.heal_locations(), indent=1))
         sys.exit(0)
     if "--index" in sys.argv or "--reindex" in sys.argv:
         if "--reindex" in sys.argv:

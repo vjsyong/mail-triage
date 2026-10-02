@@ -77,15 +77,20 @@ class MockState:
             return uid
 
     def move(self, src, uid, dst):
+        # like a REAL server: the moved message gets a NEW uid in the destination
+        # (UIDPLUS COPYUID). Keeping the source uid here would hide app-side
+        # recording bugs - exactly how the stale-location regressions slipped by.
         with self.lock:
             s = self.ensure(src)
             d = self.ensure(dst)
             if uid in s["msgs"]:
                 msg = s["msgs"].pop(uid)
                 s["uids"].remove(uid)
-                d["uids"].append(uid)
-                d["msgs"][uid] = msg
-                return uid
+                new_uid = self._next_uid
+                self._next_uid += 1
+                d["uids"].append(new_uid)
+                d["msgs"][new_uid] = msg
+                return new_uid
         return None
 
     def copy(self, src, uid, dst):
@@ -265,12 +270,12 @@ class IMAPHandler(socketserver.StreamRequestHandler):
             self.send("%s OK UID STORE completed" % tag)
         elif sub == "MOVE":
             dst = st.move(self.cur, int(arg1), arg2.strip().strip('"'))
-            if dst:
+            if dst and not getattr(self.server, "no_copyuid", False):
                 self.send("* OK [COPYUID 1 %s %s] moved" % (arg1, dst))
             self.send("%s OK UID MOVE completed" % tag)
         elif sub == "COPY":
             dst = st.copy(self.cur, int(arg1), arg2.strip().strip('"'))
-            if dst:
+            if dst and not getattr(self.server, "no_copyuid", False):
                 self.send("* OK [COPYUID 1 %s %s] copied" % (arg1, dst))
             self.send("%s OK UID COPY completed" % tag)
         else:
@@ -801,6 +806,27 @@ def add_msg(state, frm, subj, body, msgid, folder="INBOX", date="Wed, 30 Sep 202
     return state.add(folder, raw)
 
 
+def state_uid(state, folder, msgid):
+    """The uid a message currently holds in `folder` (scanned by Message-ID)."""
+    f = state.get(folder)
+    if not f:
+        return None
+    needle = ("<%s>" % msgid).encode()
+    for u in f["uids"]:
+        if needle in f["msgs"][u]["raw"]:
+            return u
+    return None
+
+
+def state_find(state, msgid):
+    """(folder, uid) where the message currently lives, or None."""
+    for name in state.folders:
+        u = state_uid(state, name, msgid)
+        if u is not None:
+            return name, u
+    return None
+
+
 def main():
     state = MockState()
     state.ensure("INBOX", "\\HasNoChildren")
@@ -813,6 +839,7 @@ def main():
 
     imap_server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), IMAPHandler)
     imap_server.state = state
+    imap_server.no_copyuid = False
     imap_server.daemon_threads = True
     imap_port = imap_server.server_address[1]
     threading.Thread(target=imap_server.serve_forever, daemon=True).start()
@@ -890,11 +917,12 @@ def main():
     print("  cycle summary: %r" % summary)
     inbox = state.get("INBOX")
     check("boss mail moved out of INBOX", 1 not in inbox["uids"])
-    check("Work folder created and has the message",
-          state.get("Work") is not None and 1 in state.get("Work")["uids"])
+    work_uid1 = state_uid(state, "Work", "b1@x")
+    check("Work folder created and has the message", work_uid1 is not None)
     rows = {r["subject"]: r for r in store.messages(limit=50)}
     check("boss row status=matched", rows["Budget review Q4"]["status"] == "matched")
     check("boss row action=move:Work", rows["Budget review Q4"]["action_taken"] == "move:Work")
+    check("boss row records the destination uid", rows["Budget review Q4"]["uid"] == work_uid1)
     check("newsletter classified", rows["Weekly newsletter: top deals"]["llm_category"] == "Newsletter")
     check("invoice classified", rows["Invoice INV-1234 receipt"]["llm_category"] == "Receipt")
     check("lunch classified", rows["Lunch tomorrow?"]["llm_category"] == "Personal")
@@ -908,19 +936,57 @@ def main():
     store.set_setting("llm_apply", True)
     add_msg(state, "newsletter@deals.com", "Weekly newsletter: even more deals", "More deals inside.", "n2@x")
     engine.process_mailbox()
-    check("uid 5 moved out of INBOX", 5 not in state.get("INBOX")["uids"])
-    check("uid 5 filed in Newsletters",
-          state.get("Newsletters") is not None and 5 in state.get("Newsletters")["uids"])
-    row5 = [r for r in store.messages(limit=60) if r["uid"] == 5][0]
+    check("the newsletter left the INBOX", state_uid(state, "INBOX", "n2@x") is None)
+    news_uid5 = state_uid(state, "Newsletters", "n2@x")
+    check("the newsletter landed in Newsletters", news_uid5 is not None)
+    row5 = [r for r in store.messages(limit=60) if r["msgid"] == "n2@x"][0]
     check("row status=llm-moved", row5["status"] == "llm-moved")
     check("row action=move:Newsletters", row5["action_taken"] == "move:Newsletters")
+    check("auto-file row records the renumbered destination uid", row5["uid"] == news_uid5)
+
+    section("T2b move-uid recording + assistant self-heal (the COPYUID trap)")
+    rec_rid = store.add_rule("UID record test", "any",
+                             [{"field": "from", "op": "contains", "value": "uidrecv"}],
+                             {"move_to": "UIDBox"}, enabled=True)
+    store.set_setting("rules_apply", True)
+    add_msg(state, "uidrecv@x.com", "Recording one", "body one", "uidrecv1@x")
+    engine.process_mailbox()
+    rrow = [r for r in store.messages(limit=60) if r["msgid"] == "uidrecv1@x"][0]
+    dst1 = state_uid(state, "UIDBox", "uidrecv1@x")
+    check("rule move records the destination uid",
+          rrow["folder"] == "UIDBox" and dst1 is not None and rrow["uid"] == dst1)
+    store.delete_rule(rec_rid)
+    # a server WITHOUT UIDPLUS: the Message-ID fallback must still record the uid
+    imap_server.no_copyuid = True
+    rec_rid2 = store.add_rule("UID record fallback", "any",
+                              [{"field": "from", "op": "contains", "value": "uidrecv"}],
+                              {"move_to": "UIDBox"}, enabled=True)
+    add_msg(state, "uidrecv@x.com", "Recording two", "body two", "uidrecv2@x")
+    engine.process_mailbox()
+    rrow2 = [r for r in store.messages(limit=60) if r["msgid"] == "uidrecv2@x"][0]
+    dst2 = state_uid(state, "UIDBox", "uidrecv2@x")
+    imap_server.no_copyuid = False
+    store.delete_rule(rec_rid2)
+    check("no-UIDPLUS server: fallback records the destination uid",
+          rrow2["folder"] == "UIDBox" and dst2 is not None and rrow2["uid"] == dst2)
+    # the assistant read self-heals a stale row (same folder, drifted uid)
+    store.update_message(rrow["id"], uid=dst1 + 100000)
+    agse = engine.AssistantAgent()
+    try:
+        rrse = agse.call_tool("read_message", {"message_id": rrow["id"]})
+    finally:
+        agse.close()
+    healed = store.get_message(rrow["id"])
+    check("assistant read self-heals a stale row + writes back",
+          rrse["ok"] and healed["folder"] == "UIDBox" and healed["uid"] == dst1)
 
     section("T3 dry-run mode")
     store.set_setting("rules_apply", False)
     add_msg(state, "boss@work.com", "Second budget note", "Another budget item.", "b2@x")
     engine.process_mailbox()
-    check("uid 6 still in INBOX (dry-run)", 6 in state.get("INBOX")["uids"])
-    row6 = [r for r in store.messages(limit=60) if r["uid"] == 6][0]
+    check("second budget note still in INBOX (dry-run)",
+          state_uid(state, "INBOX", "b2@x") is not None)
+    row6 = [r for r in store.messages(limit=60) if r["msgid"] == "b2@x"][0]
     check("row status=matched-dry", row6["status"] == "matched-dry")
 
     section("T4 reply drafting + save to Drafts")
@@ -956,9 +1022,12 @@ def main():
     rows_in = [r for r in store.messages(limit=500) if r["folder"] == "INBOX"]
     uids_rows = sorted(set(r["uid"] for r in rows_in))
     check("INBOX re-indexed without duplicate rows", len(uids_rows) == len(rows_in))
-    check("INBOX rows cover the messages still in INBOX", set(uids_rows) == {4, 6})
+    check("INBOX rows cover the messages still in INBOX",
+          set(uids_rows) == set(state.get("INBOX")["uids"]))
     check("re-processing re-filed newsletter+receipt, kept lunch+boss",
-          sorted(state.get("INBOX")["uids"]) == [4, 6])
+          len(state.get("INBOX")["uids"]) == 2
+          and state_uid(state, "INBOX", "f1@x") is not None
+          and state_uid(state, "INBOX", "b2@x") is not None)
 
     section("T8 web UI smoke (Flask test client)")
     import app as app_mod
@@ -1014,7 +1083,9 @@ def main():
     check("search_mail unseen filter", r["ok"] and r["result"]["total_matched"] >= 1)
     r = agent.call_tool("search_mail", {"folder": "NoSuchBox"})
     check("search_mail on missing folder errors cleanly", (not r["ok"]) and "error" in r["result"])
-    r = agent.call_tool("read_message", {"folder": "INBOX", "uid": 6})
+    uid6 = state_uid(state, "INBOX", "b2@x")
+    row6_id = [x for x in store.messages(limit=100) if x["msgid"] == "b2@x"][0]["id"]
+    r = agent.call_tool("read_message", {"message_id": row6_id})
     check("read_message returns the full body",
           r["ok"] and "Another budget item" in r["result"]["body"])
     r = agent.call_tool("create_folder", {"name": "AgentTests"})
@@ -1022,9 +1093,9 @@ def main():
           r["ok"] and r["result"]["created"] is True and state.get("AgentTests") is not None)
     r = agent.call_tool("create_folder", {"name": "AgentTests"})
     check("create_folder idempotent", r["ok"] and r["result"]["created"] is False)
-    r = agent.call_tool("flag_message", {"folder": "INBOX", "uid": 6, "flagged": True})
+    r = agent.call_tool("flag_message", {"folder": "INBOX", "uid": uid6, "flagged": True})
     check("flag_message stars the message",
-          r["ok"] and "\\Flagged" in state.get("INBOX")["msgs"][6]["flags"])
+          r["ok"] and "\\Flagged" in state.get("INBOX")["msgs"][uid6]["flags"])
     r = agent.call_tool("propose_rule", {"name": "bad", "conditions": [], "actions": {}})
     check("invalid rule rejected with errors", (not r["ok"]) and r["result"]["errors"])
     r = agent.call_tool("propose_rule", {"name": "Budget rule",
@@ -1036,19 +1107,17 @@ def main():
     # ---- fine-grained agent permissions (docs/agent-permissions.md)
     store.set_setting("perm_move", "off")
     a0 = engine.AssistantAgent()
-    r = a0.call_tool("move_message", {"folder": "INBOX", "uid": 6, "target_folder": "Budgets"})
+    r = a0.call_tool("move_message", {"folder": "INBOX", "uid": uid6, "target_folder": "Budgets"})
     check("perm off: move refused, mail untouched",
           (not r["ok"]) and r.get("permission_denied") == "move"
-          and 6 in state.get("INBOX")["uids"] and state.get("Budgets") is None)
+          and state_uid(state, "INBOX", "b2@x") is not None and state.get("Budgets") is None)
     a0.close()
-    row6_id = [x for x in store.messages(limit=100)
-               if x["uid"] == 6 and x["folder"] == "INBOX"][0]["id"]
     store.set_setting("perm_move", "ask")
     a1 = engine.AssistantAgent()
-    r = a1.call_tool("move_message", {"folder": "INBOX", "uid": 6, "target_folder": "Budgets"})
+    r = a1.call_tool("move_message", {"folder": "INBOX", "uid": uid6, "target_folder": "Budgets"})
     check("perm ask: queued for approval, no move yet",
           r["ok"] and r.get("pending_approval") and isinstance(r.get("action_id"), int)
-          and 6 in state.get("INBOX")["uids"] and state.get("Budgets") is None)
+          and state_uid(state, "INBOX", "b2@x") is not None and state.get("Budgets") is None)
     aid = r["action_id"]
     prow = store.get_agent_action(aid)
     check("approval row stored (pending, preview, payload)",
@@ -1060,7 +1129,11 @@ def main():
     store.set_agent_action(aid, "applied" if res.get("ok") else "failed",
                            json.dumps({"summary": res.get("summary")}))
     check("approval applies the move",
-          res["ok"] and 6 not in state.get("INBOX")["uids"] and state.get("Budgets") is not None)
+          res["ok"] and state_uid(state, "INBOX", "b2@x") is None
+          and state.get("Budgets") is not None)
+    check("approval recorded the destination uid on the row",
+          store.get_message(row6_id)["folder"] == "Budgets"
+          and store.get_message(row6_id)["uid"] == state_uid(state, "Budgets", "b2@x"))
     check("approved action marked applied", store.get_agent_action(aid)["status"] == "applied")
     # put it back so later sections still see the original inbox (live-IMAP checks depend on it)
     rr = a1.call_tool("move_message", {"message_id": row6_id, "target_folder": "INBOX"}, approved=True)
@@ -1217,11 +1290,12 @@ def main():
           body.index("event: done") < body.index("event: thought_summary"))
     check("tool ran against real IMAP: model saw actual results",
           any("Second budget note" in json.dumps(c["payload"]) for c in llm_server.calls[-4:]))
-    check("assistant moved the lunch mail",
-          4 in (state.get("Personal") or {"uids": []})["uids"])
-    row4 = [x for x in store.messages(limit=100) if x["uid"] == 4 and x["folder"] == "Personal"][0]
+    lunch_uid = state_uid(state, "Personal", "f1@x")
+    check("assistant moved the lunch mail", lunch_uid is not None)
+    row4 = [x for x in store.messages(limit=100) if x["msgid"] == "f1@x"][0]
     check("move recorded on the row",
-          row4["status"] == "assistant-moved" and row4["action_taken"] == "move:Personal")
+          row4["status"] == "assistant-moved" and row4["action_taken"] == "move:Personal"
+          and row4["folder"] == "Personal" and row4["uid"] == lunch_uid)
     check("move logged to events", any("assistant moved" in e["message"]
                                        for e in store.recent_events(60)))
 
@@ -1475,8 +1549,8 @@ def main():
     job = engine.ClassifyJob()
     job._run_job()
     check("batch classified the backlog", job.state["done"] >= 3)
-    rowc1 = [r for r in store.messages(limit=2000) if r["uid"] == c1][0]
-    rowc3 = [r for r in store.messages(limit=2000) if r["uid"] == c3][0]
+    rowc1 = [r for r in store.messages(limit=2000) if r["msgid"] == "c1@x"][0]
+    rowc3 = [r for r in store.messages(limit=2000) if r["msgid"] == "c3@x"][0]
     check("batch classified lunch as Personal",
           store.get_message(rowc1["id"])["llm_category"] == "Personal")
     check("batch classified newsletter as Newsletter",
@@ -1636,9 +1710,9 @@ def main():
                "--XXB\r\nContent-Type: text/plain; charset=\"utf-8\"\r\n"
                "Content-Transfer-Encoding: base64\r\n\r\n"
                + enc_lines + "\r\n--XXB--\r\n").encode()
-    b64uid = state.add("INBOX", raw_b64)
+    state.add("INBOX", raw_b64)
     engine.process_mailbox()
-    rowb64 = [r for r in store.messages(limit=3000) if r["uid"] == b64uid][0]
+    rowb64 = [r for r in store.messages(limit=3000) if r["msgid"] == "b64msg@x"][0]
     check("scan stores the decoded body as the snippet",
           "decoded invoice text for September" in (rowb64["snippet"] or "")
           and "Content-Transfer-Encoding" not in (rowb64["snippet"] or ""))
@@ -1677,15 +1751,17 @@ def main():
 
     # move-tracking: app-initiated auto-filing records the destination on the row
     raw_mv = raw_b64.replace(b"b64msg@x", b"b64moved@x")
-    mv_uid = state.add("INBOX", raw_mv)
+    state.add("INBOX", raw_mv)
     engine.process_mailbox()
     rowmv = [r for r in store.messages(limit=3000) if r["msgid"] == "b64moved@x"][0]
     check("auto-filing records the destination folder on the row",
           rowmv["folder"] == "Receipts" and rowmv["status"] == "llm-moved")
+    rowmv_uid = state_uid(state, "Receipts", "b64moved@x")
+    check("auto-filing records the destination uid on the row",
+          rowmv_uid is not None and rowmv["uid"] == rowmv_uid)
     # server-side move by another client leaves the row stale; the viewer repairs it
     store.update_message(rowmv["id"], snippet=junk_text)
-    mvcur = [name for name, f in state.folders.items() if mv_uid in f["uids"]][0]
-    state.move(mvcur, mv_uid, "AgentTests")
+    state.move("Receipts", rowmv_uid, "AgentTests")
     r = client.get("/messages/%d" % rowmv["id"])
     fixedmv = store.get_message(rowmv["id"])
     check("viewer repairs + relocates a message moved on the server",
@@ -1695,9 +1771,9 @@ def main():
           and b"Content-Transfer-Encoding" not in r.data)
 
     # bulk snippet heal (maintenance CLI: app.py --heal-snippets)
-    heal_uid = add_msg(state, "heal@x.com", "Heal me", "healthy heal body text", "heal@x")
+    add_msg(state, "heal@x.com", "Heal me", "healthy heal body text", "heal@x")
     engine.process_mailbox()
-    healrow = [r for r in store.messages(limit=3000) if r["uid"] == heal_uid][0]
+    healrow = [r for r in store.messages(limit=3000) if r["msgid"] == "heal@x"][0]
     store.update_message(healrow["id"], snippet=junk_text)
     hres = engine.heal_snippets(workers=2)
     healed = store.get_message(healrow["id"])
@@ -1706,11 +1782,12 @@ def main():
           and hres["remaining"] == 0)
 
     # bulk heal phase 2: rescue a stale row via the Message-ID folder index
-    mv2_uid = add_msg(state, "mover2@x.com", "Heal moved", "moved heal body text", "healmoved@x")
+    add_msg(state, "mover2@x.com", "Heal moved", "moved heal body text", "healmoved@x")
     engine.process_mailbox()
-    mv2row = [r for r in store.messages(limit=3000) if r["uid"] == mv2_uid][0]
+    mv2row = [r for r in store.messages(limit=3000) if r["msgid"] == "healmoved@x"][0]
     store.update_message(mv2row["id"], snippet=junk_text)
-    state.move("INBOX", mv2_uid, "AgentTests")
+    mv2cur = state_find(state, "healmoved@x")
+    state.move(mv2cur[0], mv2cur[1], "AgentTests")
     hres2 = engine.heal_snippets(workers=2)
     mv2fixed = store.get_message(mv2row["id"])
     check("bulk heal rescue locates + repairs moved messages",
@@ -1718,9 +1795,9 @@ def main():
           and mv2fixed["folder"] == "AgentTests")
 
     # viewer: an undecodable legacy row shows the unavailable state, not garbage
-    ghost_uid = add_msg(state, "ghost@x.com", "Ghost mail", "ghost body", "ghost@x")
+    add_msg(state, "ghost@x.com", "Ghost mail", "ghost body", "ghost@x")
     engine.process_mailbox()
-    ghostrow = [r for r in store.messages(limit=3000) if r["uid"] == ghost_uid][0]
+    ghostrow = [r for r in store.messages(limit=3000) if r["msgid"] == "ghost@x"][0]
     store.update_message(ghostrow["id"], snippet="\x01\x02\x03" * 40,
                          msgid="gone-gone@x", folder="NoSuch", uid=999999)
     r = client.get("/messages/%d" % ghostrow["id"])
@@ -1758,9 +1835,9 @@ def main():
         + png_lines + "\r\n"
         "--REL--\r\n"
     ).encode()
-    html_uid = state.add("INBOX", raw_html_mail)
+    state.add("INBOX", raw_html_mail)
     engine.process_mailbox()
-    hrow = [r for r in store.messages(limit=3000) if r["uid"] == html_uid][0]
+    hrow = [r for r in store.messages(limit=3000) if r["msgid"] == "htmlmail@x"][0]
     hrowf = store.get_message(hrow["id"])
     check("scan extracted + sanitized the html body",
           (hrowf["body_html"] or "").find("<b>bold</b>") >= 0
@@ -2656,12 +2733,13 @@ def main():
                                store.list_rules(enabled_only=True), store.list_flows(enabled_only=True))
     finally:
         mc2.close()
-    rows4 = [r for r in store.messages(limit=3000) if r["uid"] == und_uid]
+    rows4 = [r for r in store.messages(limit=3000) if r["msgid"] == "und1@x"]
     urow4 = store.get_message(rows4[0]["id"]) if rows4 else None
-    arch = state.get("Archive") or {"uids": []}
+    arch = state.get("Archive")
+    in_arch = bool(arch) and any(b"und1@x" in arch["msgs"][u]["raw"] for u in arch["uids"])
     check("kept message survives a matching move rule",
           bool(urow4) and urow4["folder"] == "INBOX" and urow4["status"] == "kept"
-          and und_uid not in arch.get("uids", []))
+          and not in_arch)
     store.update_rule(keeper_rid, enabled=0)
 
     section("T37 viewer triage queue: newer/older + file & next")

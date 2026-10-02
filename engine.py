@@ -650,30 +650,71 @@ class MailClient:
         if typ != "OK":
             raise RuntimeError("STORE failed: %s %s" % (typ, dat))
 
-    @staticmethod
-    def _copyuid_new(dat):
-        """New UID from the server's COPYUID response (UIDPLUS), when present."""
-        for item in dat or []:
+    def _copyuid_new(self, dat=None):
+        """New UID from the server's UIDPLUS [COPYUID ...] response, when present.
+
+        imaplib does NOT put a tagged ``OK [COPYUID u s d]`` code into the
+        command's dat (that returns [None]); it parks the bracketed code in the
+        untagged-response store, where ``M.response`` reads AND clears it. Check
+        both places so every server/imaplib shape is covered."""
+        items = []
+        try:
+            resp = self.M.response("COPYUID")
+            if resp and resp[1]:
+                items.extend(resp[1])
+        except Exception:
+            pass
+        items.extend(dat or [])
+        for item in items:
             if not item:
                 continue
             s = item.decode("utf-8", "replace") if isinstance(item, bytes) else str(item)
             m = re.search(r"\[COPYUID\s+\d+\s+\S+\s+(\d+)\]", s)
             if m:
                 return int(m.group(1))
+            # the untagged store keeps the bare code content: "<uidvalidity> <src> <dst>"
+            m = re.match(r"\s*(\d+)\s+(\S+)\s+(\S+)\s*$", s)
+            if m:
+                dst = m.group(3).split(":")[0]
+                if dst.isdigit():
+                    return int(dst)
         return None
 
-    def move(self, uid, folder):
-        """Move a message and return its UID in the destination folder when the
-        server reports one (UIDPLUS COPYUID), else None."""
+    def _locate_uid(self, folder, msgid):
+        """Destination UID by Message-ID lookup (fallback for servers that do
+        not report COPYUID)."""
+        needle = '"<%s>"' % (msgid or "").strip().strip("<>")
+        if not msgid or needle == '"<>"':
+            return None
+        try:
+            self.ensure_selected(folder)
+            hits = self.search("HEADER", "Message-ID", needle)
+        except Exception:
+            return None
+        return hits[-1] if hits else None
+
+    def move(self, uid, folder, msgid=None):
+        """Move a message and return its UID in the destination folder (UIDPLUS
+        COPYUID; falls back to a Message-ID lookup in the destination when the
+        server does not report one and msgid is given), else None."""
+        try:
+            self.M.response("COPYUID")  # drop any stale value from earlier commands
+        except Exception:
+            pass
         typ, dat = self.M.uid("MOVE", str(uid), '"%s"' % folder)
         if typ == "OK":
-            return self._copyuid_new(dat)
+            new_uid = self._copyuid_new(dat)
+            if new_uid is None and msgid:
+                new_uid = self._locate_uid(folder, msgid)
+            return new_uid
         typ, dat = self.M.uid("COPY", str(uid), '"%s"' % folder)
         if typ != "OK":
             raise RuntimeError("COPY %s failed: %s %s" % (folder, typ, dat))
         new_uid = self._copyuid_new(dat)
         self.M.uid("STORE", str(uid), "+FLAGS", r"(\Deleted)")
         self.M.expunge()
+        if new_uid is None and msgid:
+            new_uid = self._locate_uid(folder, msgid)
         return new_uid
 
     def append_message(self, folder, raw, flags=r"(\Draft)"):
@@ -890,7 +931,7 @@ def _apply_flow(mc, flow, row, settings, live):
                     store.record_move(row, dest, "flow", from_folder=cur_folder)
                     mc.ensure_folder(dest)
                     mc.ensure_selected(cur_folder)
-                    new_uid = mc.move(cur_uid, dest)
+                    new_uid = mc.move(cur_uid, dest, msgid=row.get("msgid"))
                     cur_folder = dest
                     if new_uid:
                         cur_uid = new_uid
@@ -1390,7 +1431,7 @@ def _process_folder(mc, folder, settings, rules, flows=None):
                     if actions.get("move_to"):
                         store.record_move(row, actions["move_to"], "rule")
                         mc.ensure_folder(actions["move_to"])
-                        new_uid = mc.move(uid, actions["move_to"])
+                        new_uid = mc.move(uid, actions["move_to"], msgid=row.get("msgid"))
                         taken.append("move:" + actions["move_to"])
                         mv_fields = {"folder": actions["move_to"]}
                         if new_uid:
@@ -1446,7 +1487,7 @@ def undo_filing(log_id):
     try:
         mc.ensure_selected(msg.get("folder") or "")
         mc.ensure_folder(entry["from_folder"])
-        new_uid = mc.move(msg["uid"], entry["from_folder"])
+        new_uid = mc.move(msg["uid"], entry["from_folder"], msgid=msg.get("msgid"))
     except Exception as exc:
         return False, "Move back failed: %r" % exc
     finally:
@@ -1986,6 +2027,67 @@ def heal_snippets(workers=6, rescue=True):
             "remaining": remaining, "not_found": res_nf}
 
 
+def heal_locations(workers=6):
+    """One-shot maintenance: reconcile every stored (folder, uid) with the real
+    mailbox. Builds a Message-ID -> [(folder, uid)] index (one ranged header
+    fetch per folder, parallel), then re-points the rows whose message still
+    exists somewhere; orphans are reported, never touched. Rows whose message
+    sits in the SAME folder under a different uid (move renumbering - the
+    COPYUID recording gap) are the common case this repairs. Returns a summary
+    dict with counts + small samples."""
+    mc = MailClient().connect()
+    try:
+        folders = [f for f in sorted(mc.folders()) if f]
+    finally:
+        try:
+            mc.close()
+        except Exception:
+            pass
+    locs, lock = {}, threading.Lock()
+
+    def index_chunk(chunk):
+        for folder in chunk:
+            try:
+                found = _header_index(folder)
+            except Exception as exc:
+                store.log_event("warn", "heal-locations: %s: %r" % (folder, exc))
+                continue
+            with lock:
+                for mid, uid in found.items():
+                    key = mid.strip().strip("<>").lower()
+                    if key:
+                        locs.setdefault(key, []).append((folder, uid))
+
+    _run_parallel(folders, index_chunk, workers)
+
+    with store.db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id, folder, uid, msgid, subject FROM messages").fetchall()]
+    updated, not_found, no_id = [], [], 0
+    for r in rows:
+        mid = (r["msgid"] or "").strip().strip("<>").lower()
+        if not mid:
+            no_id += 1
+            continue
+        got = locs.get(mid)
+        if not got:
+            not_found.append(r["id"])
+            continue
+        if (r["folder"], r["uid"]) in got:
+            continue
+        same = [g for g in got if g[0] == r["folder"]]
+        pick = same[0] if same else sorted(got)[0]
+        store.update_message(r["id"], folder=pick[0], uid=pick[1])
+        updated.append({"id": r["id"], "old": "%s/%s" % (r["folder"], r["uid"]),
+                        "new": "%s/%s" % pick,
+                        "subject": (r.get("subject") or "")[:60]})
+    store.log_event("info", "heal-locations: %d row(s) re-pointed, %d not found, %d folders"
+                    % (len(updated), len(not_found), len(folders)))
+    return {"folders": len(folders), "indexed": sum(len(v) for v in locs.values()),
+            "updated": len(updated), "not_found": len(not_found), "no_msgid": no_id,
+            "updated_sample": updated[:12], "not_found_sample": not_found[:12]}
+
+
 
 def classify_verdict(msg, settings):
     """Heuristic classifiers first (deterministic, no LLM call for a confident
@@ -2093,7 +2195,7 @@ def classify_and_store(msg, settings, mc=None):
             mc.ensure_selected(msg["folder"])
             mc.ensure_folder(folder)
             store.record_move(msg, folder, "auto-file")
-            new_uid = mc.move(msg["uid"], folder)
+            new_uid = mc.move(msg["uid"], folder, msgid=msg.get("msgid"))
             fields["status"] = "llm-moved"
             fields["action_taken"] = "move:" + folder
             fields["folder"] = folder
@@ -3646,22 +3748,34 @@ class AssistantAgent:
             if row is None:
                 row = store.find_message_by_uid(folder, uid)
             return row, folder, uid, None
-        reloc = self._relocate(mc, row)
+        reloc = self._relocate(mc, row, first=folder)
         if reloc:
             if row is None:
                 row = store.find_message_by_uid(reloc[0], reloc[1])
+            elif (row.get("folder"), row.get("uid")) != (reloc[0], reloc[1]):
+                # self-heal, same as the message viewer: a moved message usually
+                # sits in the SAME folder under a NEW uid (the counters drift)
+                store.update_message(row["id"], folder=reloc[0], uid=reloc[1])
+                row = dict(row)
+                row["folder"], row["uid"] = reloc[0], reloc[1]
             return row, reloc[0], reloc[1], None
-        return row, folder, uid, ("message uid %s is not in %r — it may have been moved; "
-                                  "find it again with search_mail" % (uid, folder))
+        return row, folder, uid, ("message uid %s is not in %r — it may have been moved or "
+                                  "deleted; search_mail (live) or search_messages finds it if "
+                                  "it still exists" % (uid, folder))
 
-    def _relocate(self, mc, row):
+    def _relocate(self, mc, row, first=None):
+        """Locate a message by Message-ID: the stored folder first (a moved
+        message usually sits there under a NEW uid), then every other folder."""
         msgid = (row or {}).get("msgid") or ""
         if not msgid:
             return None
         needle = '"<%s>"' % msgid.strip().strip("<>")
-        for folder in sorted(mc.folders()):
-            if row and folder == row.get("folder"):
-                continue
+        seen, order = set(), []
+        for f in ([first] if first else []) + sorted(mc.folders()):
+            if f and f not in seen:
+                seen.add(f)
+                order.append(f)
+        for folder in order:
             try:
                 mc.ensure_selected(folder)
                 hits = mc.search("HEADER", "Message-ID", needle)
@@ -3709,7 +3823,7 @@ class AssistantAgent:
             mc.ensure_selected(folder)
             if row:
                 store.record_move(row, target, "assistant", from_folder=folder)
-            new_uid = mc.move(uid, target)
+            new_uid = mc.move(uid, target, msgid=(row or {}).get("msgid"))
         except Exception as exc:
             return {"ok": False, "summary": "move failed: %r" % exc, "result": {"error": repr(exc)}}
         if row:
@@ -4331,7 +4445,7 @@ class AssistantAgent:
             mc.ensure_selected(folder)
             if row:
                 store.record_move(row, trash, "trash", from_folder=folder)
-            new_uid = mc.move(uid, trash)
+            new_uid = mc.move(uid, trash, msgid=(row or {}).get("msgid"))
         except Exception as exc:
             return {"ok": False, "summary": "move to Trash failed: %r" % exc, "result": {"error": repr(exc)}}
         if row:
