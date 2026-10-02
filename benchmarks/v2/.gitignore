@@ -1,7 +1,9 @@
 # v2 run artifacts are regenerated; the frozen corpus/cases are committed.
+# Report markdown snapshots are kept as evidence; JSON/per-case remain ignored.
 results/*
 !results/.gitkeep
 reports/*
 !reports/.gitkeep
+!reports/*.md
 __pycache__/
 *.pyc

@@ -1106,6 +1106,27 @@ class LLMClient:
             fb = c["fallback"]
             self.fallback = (fb["base"], fb["key"], fb["model"])
 
+    def list_models(self, base=None, key=None):
+        """Model ids from an OpenAI-compatible /models endpoint (Settings dropdown).
+        Raises on any connection/HTTP error so the UI can fall back to a text box."""
+        base = (base or self.base or "").rstrip("/")
+        if not base:
+            raise RuntimeError("no LLM endpoint configured")
+        if key is None:
+            key = self.key or ""
+        headers = {"Authorization": "Bearer " + key} if key else {}
+        r = requests.get(base + "/models", headers=headers,
+                         timeout=min(self.timeout or 15, 15))
+        r.raise_for_status()
+        data = r.json()
+        items = data.get("data") if isinstance(data, dict) else data
+        out = []
+        for it in items or []:
+            mid = it.get("id") if isinstance(it, dict) else it
+            if mid:
+                out.append(str(mid))
+        return sorted(set(out))
+
     def _chat(self, system, user, json_mode=True, history=None, max_tokens=None,
               full=False, thinking=False):
         convo = list(history or []) + [{"role": "user", "content": user}]
