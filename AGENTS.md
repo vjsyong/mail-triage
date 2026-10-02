@@ -7,7 +7,10 @@ design records and research briefs; read the relevant one before a significant c
 What this is: self-hosted triage for one HKUST mailbox. Deterministic rules sort most
 mail, a local LLM classifies the rest, and a learning loop compiles repeated LLM
 reasoning into small auditable models. One container runs the Flask UI, the worker,
-and an embedded OAuth mail proxy. Mail stays on the machine; the app never deletes mail.
+and an embedded OAuth mail proxy; the index and database live on this host.
+Classification defaults to a local model; a cloud fallback, when configured in
+`.env`, runs the same prompts and therefore sees message snippets. The app never
+deletes mail.
 
 ## Feature workflow: one feature = one branch + one worktree
 
@@ -29,8 +32,10 @@ git worktree remove ~/mail-triage-<name>
 git branch -d <name>
 ```
 
-- Naming: short, lowercase, hyphenated (existing: `mail-intelligence`,
-  `rag-lite-eval`); worktree dir `~/mail-triage-<name>`.
+- Naming: branches short, lowercase, hyphenated (existing: `mail-intelligence`,
+  `rag-lite-eval`). The worktree dir sits beside the main checkout with a SHORT dir
+  name that may abbreviate the branch (`~/mail-triage-intel` runs `mail-intelligence`,
+  `~/mail-triage-rag` runs `rag-lite-eval`).
 - If `master` moved while you worked: merge `master` into your branch inside the
   worktree, resolve there, then merge back.
 - Trivial fixes (typo, one-liner) may commit straight to `master`; anything with
@@ -64,8 +69,10 @@ git branch -d <name>
 
 ## Conventions that bite
 
-- Shared CSS belongs in `BASE_TMPL`, never in a page template (a page scoped `<style>`
-  only ships on that page). `BASE_TMPL` is a raw string: `\uXXXX` renders literally.
+- CSS shared by 2+ pages lives in `BASE_TMPL`; page-exclusive styles may ride in the
+  page template's own `<style>` block (a page-scoped block never ships elsewhere, so
+  cross-page reuse silently breaks). `BASE_TMPL` is a raw string: `\uXXXX` renders
+  literally.
 - The Dockerfile COPYs files explicitly; a new module needs a Dockerfile line or the
   container fails only at runtime.
 - Never hand-edit `data/emailproxy/emailproxy.config` (generated from the DB).
