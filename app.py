@@ -2772,7 +2772,7 @@ PLUGIN_DETAIL_TMPL = """
     <input type="hidden" name="action" value="config">
     <input type="hidden" name="next" value="detail">
     {% for f in p.config_fields %}
-    <div class="pxd-set" style="grid-template-columns:minmax(0,1fr) minmax(220px,340px)">
+    <div class="pxd-set">
       <div class="st-l"><b class="mono" style="font-size:.84rem">{{ f.name }}</b><span class="sub">{{ f.label }}</span></div>
       <div class="st-c">
         {% if f.type == 'boolean' %}<label class="check"><input type="checkbox" name="cfg_{{ f.name }}" value="1" {{ 'checked' if f.value else '' }}> <span>enabled</span></label>

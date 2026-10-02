@@ -4301,6 +4301,11 @@ def main():
     _pdet53 = client.get("/plugins/mt-commitments").data
     check("the plugin detail page states the daily schedule",
           b"Runs automatically" in _pdet53 and b"every day" in _pdet53)
+    _pset = client.get("/plugins/mt-subscription-watch").data
+    check("plugin settings rows collapse on narrow screens (no inline grid override)",
+          b"Save settings" in _pset and b'name="cfg_since_days"' in _pset
+          and b"grid-template-columns:minmax(0,1fr) minmax(220px,340px)" not in _pset
+          and b".pxd-set{grid-template-columns:1fr}" in _pset)
     client.post("/agent/actions/%d/apply" % _pid53, follow_redirects=True)
     _applied = store.get_agent_action(_pid53)
     check("acknowledging a plugin card applies without a bogus tool call",
