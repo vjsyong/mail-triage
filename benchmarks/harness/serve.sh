@@ -17,7 +17,7 @@ stop() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
 
 common_args() {
   echo -n "--served-model-name $1 --max-model-len 16384 --gpu-memory-utilization 0.92 \
---enable-auto-tool-choice --trust-remote-code"
+--enable-auto-tool-choice --trust-remote-code --enable-prefix-caching --enable-chunked-prefill"
 }
 
 case "${1:-}" in
@@ -25,7 +25,7 @@ case "${1:-}" in
   status) docker ps -a --filter name=$NAME --format '{{.Names}} {{.Status}}'; exit 0 ;;
   qwen9b)
     DIR=$MODELS/qwen3.5-9b; MNAME=qwen3.5-9b
-    EXTRA="--tool-call-parser qwen3_xml --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0}";;
+    EXTRA="--tool-call-parser qwen3_xml --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0} --gpu-memory-utilization 0.90 --enforce-eager";;
   qwen4b)
     DIR=$MODELS/qwen3.5-4b; MNAME=qwen3.5-4b
     EXTRA="--tool-call-parser qwen3_xml --reasoning-parser qwen3 --limit-mm-per-prompt {\"image\":0}";;
