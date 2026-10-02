@@ -3745,11 +3745,12 @@ def assistant_page_context(path):
                 "show sign-in trouble.", "page:proxy/log")
     if p == "/welcome":
         return ("page", "welcome page",
-                "CURRENT PAGE: the welcome page - the Get started checklist of first-run setup "
-                "steps (connect a mailbox, point at an LLM, build the search index, sort some "
-                "mail), each with its state and a button; hardware advice for choosing an LLM "
-                "sits below. Help the user through setup; full deploy guidance is in "
-                "docs/getting-started.md.",
+                "CURRENT PAGE: the welcome page - a full-screen first-run setup wizard with a step "
+                "rail (Mailbox, LLM, Search index) and intro/finish bookends. Steps auto-detect "
+                "state; the LLM step edits the same settings as the Settings page and offers a "
+                "connection test; the index step starts the real indexer and shows live counts. "
+                "Help the user through setup; hardware guidance for choosing an LLM sits on this "
+                "page and in docs/getting-started.md.",
                 "page:welcome")
     if p.startswith("/plugins/"):
         return ("page", "plugin detail",

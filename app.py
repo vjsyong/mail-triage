@@ -275,46 +275,50 @@ def index_status():
 
 
 def setup_state():
-    """The Get started checklist: per-step state + counts for the dashboard banner."""
+    """Setup wizard state: 3 steps + counts, shared by /welcome and the dashboard banner."""
     accounts = []
     try:
         accounts = proxy.list_accounts()
     except Exception:
         accounts = []
-    llm = {"configured": False, "base": "", "model": ""}
+    llm = {"base": "", "model": ""}
     try:
-        cl = engine.LLMClient()
-        llm = {"configured": bool(cl.base), "base": cl.base or "", "model": cl.model or ""}
+        _c = engine.llm_config()
+        llm = {"base": (_c.get("base") or "").strip(), "model": (_c.get("model") or "").strip()}
     except Exception:
         pass
-    indexed = 0
+    indexed, chunks = 0, 0
     try:
-        indexed = int((rag.index_stats() or {}).get("messages") or 0)
+        _st = rag.index_stats() or {}
+        indexed = int(_st.get("messages") or 0)
+        chunks = int(_st.get("chunks") or 0)
     except Exception:
-        indexed = 0
-    try:
-        has_rules = bool(store.list_rules())
-    except Exception:
-        has_rules = False
+        pass
     steps = [
-        {"id": "mailbox", "title": "Connect your mailbox",
-         "desc": "Sign in through the embedded OAuth proxy. Tokens stay on this machine.",
-         "done": bool(accounts), "url": "/accounts", "action": "Open Accounts"},
-        {"id": "llm", "title": "Point at an LLM",
-         "desc": "Any OpenAI-compatible endpoint: a local server or a hosted API. Rules and "
-                 "search work without one; classification and drafting stay idle.",
-         "done": llm["configured"], "url": "/settings", "action": "Open Settings"},
-        {"id": "index", "title": "Build the search index",
-         "desc": "Semantic search over the archive. Runs on CPU, resumable, %d message(s) so far."
-                 % indexed,
-         "done": indexed > 0, "url": "/", "action": "Index now"},
-        {"id": "learn", "title": "Sort some mail",
-         "desc": "Tag a few messages or write a rule - that is the raw material the learning "
-                 "loop trains on.",
-         "done": has_rules, "url": "/messages", "action": "Open Messages"},
+        {"id": "mailbox", "label": "Mailbox",
+         "done": bool(accounts), "user": (accounts[0].get("email") if accounts else "") or ""},
+        {"id": "llm", "label": "LLM", "done": bool(llm["base"]),
+         "base": llm["base"], "model": llm["model"]},
+        {"id": "index", "label": "Search", "done": indexed > 0,
+         "messages": indexed, "chunks": chunks},
     ]
-    return {"steps": steps, "done": sum(1 for s in steps if s["done"]), "total": len(steps),
-            "dismissed": bool(store.get_setting("welcome_done", 0)), "llm": llm}
+    return {"steps": steps, "done": sum(1 for x in steps if x["done"]), "total": len(steps),
+            "dismissed": bool(store.get_setting("welcome_done", 0)),
+            "accounts": accounts, "llm": llm, "index": {"messages": indexed, "chunks": chunks}}
+
+
+def _fresh_install():
+    """True when a brand-new install has nothing configured (first-run takeover)."""
+    try:
+        if store.get_setting("welcome_done", 0):
+            return False
+        if proxy.list_accounts():
+            return False
+        if (engine.llm_config().get("base") or "").strip():
+            return False
+        return int(store.count_messages() or 0) == 0
+    except Exception:
+        return False
 
 
 def summarize_conditions(rule):
@@ -979,7 +983,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
 .px-go:hover{color:var(--fg);text-decoration:none}
 </style>
 <script>try{var v=localStorage.getItem('asb_open');if(v===null||v==='1')document.documentElement.classList.add('asb-open');var w=parseInt(localStorage.getItem('asb_w')||'',10);if(w>=280)document.documentElement.style.setProperty('--asb-w',Math.min(720,w)+'px');}catch(e){}</script>
-</head><body{% if show_asb %} class="with-asb"{% endif %}>
+</head><body{% if setup or show_asb %} class="{{ (('setup ' if setup else '') + ('with-asb' if show_asb else ''))|trim }}"{% endif %}>
 <a class="skip" href="#main">Skip to content</a>
 {% set p = request.path %}
 {% macro navitem(href, label, active, icon, badge=0) -%}
@@ -1848,13 +1852,14 @@ def _render_src(src, **ctx):
     return tpl.render(**ctx)
 
 
-def render(body):
+def render(body, setup=False):
     ws = dict(worker.state)
     info = dict(_header_info())
     info["imap_user"] = (engine.imap_config().get("user") or "").strip()
     return _render_src(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
                                   info=info,
-                                  show_asb=not request.path.startswith("/assistant"),
+                                  show_asb=(not setup) and not request.path.startswith("/assistant"),
+                                  setup=setup,
                                   pend=store.count_pending_agent_actions(),
                                   w={"err": ws.get("last_error"), "last_ok_r": rel_time(ws.get("last_ok")),
                                      "last_ok_iso": (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ws.get("last_ok"))) if ws.get("last_ok") else ""),
@@ -2106,7 +2111,7 @@ DASH_TMPL = """
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <div style="flex:1;min-width:0"><b>Getting started: {{ setup.done }} of {{ setup.total }} steps done.</b>
     <span class="sub">Connect your mailbox, point at an LLM, build the index.</span></div>
-    <a class="btn small" href="{{ url_for('welcome') }}">Open checklist</a>
+    <a class="btn small" href="{{ url_for('welcome') }}">Continue setup</a>
   </div>
 </div>
 {% endif %}
@@ -2333,6 +2338,8 @@ DASH_TMPL = """
 
 @app.route("/")
 def dashboard():
+    if _fresh_install():
+        return redirect(url_for("welcome"))
     ws = dict(worker.state)
     ws["last_ok_r"] = rel_time(ws.get("last_ok"))
     interval = int(store.get_setting("poll_interval", 90))
@@ -2444,8 +2451,9 @@ def retry_errors():
 def index_run():
     indexer.trigger()
     flash("Indexing started — progress shows on the dashboard and the Log page.", "ok")
-    if (request.form.get("next") or "") == "welcome":
-        return redirect(url_for("welcome"))
+    nxt = (request.values.get("next") or "").strip()
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return redirect(nxt)
     return redirect(url_for("dashboard"))
 
 
@@ -2453,6 +2461,9 @@ def index_run():
 def index_rebuild():
     indexer.trigger(rebuild=True)
     flash("Rebuilding the search index from scratch — mail itself is untouched.", "ok")
+    nxt = (request.values.get("next") or "").strip()
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return redirect(nxt)
     return redirect(url_for("dashboard"))
 
 
@@ -2727,70 +2738,267 @@ PLUGIN_DETAIL_TMPL = """
 </details>
 """
 
-WELCOME_TMPL = """
-<style>
-.ws-row{display:flex;gap:12px;align-items:flex-start;padding:13px 0;border-top:1px solid var(--line)}
-.ws-row:first-of-type{border-top:0;padding-top:4px}
-.ws-num{flex:0 0 26px;width:26px;height:26px;border:1px solid var(--line2);display:inline-flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:600;color:var(--dim);margin-top:2px}
-.ws-num.done{background:#000;color:#fff;border-color:#000}
-.ws-main{flex:1;min-width:0}
-.ws-main b{display:block;font-size:.92rem}
-.ws-main .sub{display:block}
-.ws-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-@media(max-width:640px){ .ws-row{flex-wrap:wrap} .ws-acts{width:100%;justify-content:flex-start;margin-left:38px} }
+WELCOME_TMPL = """<style>
+body.setup .side,body.setup .topbar,body.setup #asb,body.setup .foot{display:none !important}
+body.setup .main{margin-left:0 !important;margin-right:0 !important}
+body.setup .bottom-nav{display:none !important}
+.wz{max-width:680px;margin:0 auto;padding:26px 18px 64px;min-height:100dvh;display:flex;flex-direction:column}
+.wz-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 2px 18px}
+.wz-brand{font-weight:700;letter-spacing:-.01em}
+.wz-brand .sub{color:var(--dim);font-weight:400;margin-left:7px}
+.wz-exit{color:var(--dim);font-size:.86rem;text-decoration:none}
+.wz-exit:hover{color:var(--fg);text-decoration:underline}
+.wz-rail{list-style:none;display:flex;gap:6px;margin:0 0 20px;padding:0;flex-wrap:wrap}
+.wz-step{display:flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line);color:var(--dim);font-size:.84rem;background:#fff}
+.wz-step.reach{cursor:pointer}
+.wz-step.reach:hover{border-color:var(--fg)}
+.wz-step .wz-dot{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line2);font-size:.72rem;font-weight:600}
+.wz-step.cur{border-color:var(--fg);color:var(--fg);font-weight:600}
+.wz-step.done .wz-dot{background:#000;color:#fff;border-color:#000}
+.wz-body{flex:1}
+.wz.live .wz-screen{display:none}
+.wz.live .wz-screen.on{display:block;animation:wzIn .22s ease both}
+.wz.live.back .wz-screen.on{animation-name:wzInBack}
+@keyframes wzIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+@keyframes wzInBack{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.wz.live .wz-screen.on{animation:none}}
+.wz-card{border:1px solid var(--line);background:#fff;padding:26px 26px 22px}
+.wz-hero{border:1px solid var(--line);background:#0a0a0a;color:#fff;padding:34px 30px 30px}
+.wz-hero h1{font-size:1.6rem;margin:0 0 10px;letter-spacing:-.02em}
+.wz-hero p{color:#c9c9c9;margin:0 0 16px;line-height:1.55}
+.wz-hero ul{margin:0 0 22px;padding:0;list-style:none}
+.wz-hero li{padding:5px 0 5px 22px;position:relative;color:#e4e4e4;font-size:.93rem}
+.wz-hero li:before{content:'';position:absolute;left:2px;top:13px;width:7px;height:7px;background:#fff}
+.wz-hero .btn{background:#fff;color:#000;border-color:#fff}
+.wz-hero .wz-skip{color:#b9b9b9;margin-left:14px}
+.wz-hero .wz-skip:hover{color:#fff}
+.wz-card h2{margin:0 0 6px;font-size:1.25rem;letter-spacing:-.01em}
+.wz-lede{color:var(--dim);margin:0 0 16px;line-height:1.55;font-size:.92rem}
+.wz-note{border:1px solid var(--line);background:var(--hover,#f5f5f5);padding:10px 12px;color:var(--dim);font-size:.84rem;line-height:1.5;margin:14px 0 0}
+.wz-ok{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);background:#fff;padding:12px 14px;margin:0 0 4px}
+.wz-ok .dot{margin-top:5px}
+.wz-field{margin:13px 0 0}
+.wz-field label{display:block;font-size:.84rem;font-weight:600;margin-bottom:3px}
+.wz-field .sub{color:var(--dim);font-size:.8rem;display:block;margin-bottom:4px}
+.wz-field input{width:100%;padding:9px 10px;border:1px solid var(--line2);font:inherit;background:#fff}
+.wz-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:24px}
+.wz-linkbtn{background:none;border:0;color:var(--dim);font:inherit;font-size:.86rem;cursor:pointer;padding:0}
+.wz-linkbtn:hover{color:var(--fg);text-decoration:underline}
+.wz-skip{color:var(--dim);font-size:.86rem;text-decoration:none}
+.wz-skip:hover{color:var(--fg);text-decoration:underline}
+.wz-foot{color:var(--dim);font-size:.78rem;padding:30px 2px 0;line-height:1.5}
+.wz-recap{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--line)}
+.wz-recap:first-of-type{border-top:0}
+.wz-recap .dot{margin-top:5px}
+.wz-recap b{display:block}
+.wz-recap .sub{color:var(--dim);font-size:.85rem}
+@media (max-width:560px){.wz{padding:18px 14px 54px}.wz-step{padding:6px 8px;font-size:.78rem;gap:5px}.wz-step .wz-dot{width:17px;height:17px}.wz-card{padding:20px 16px 18px}.wz-hero{padding:26px 20px}}
 </style>
-<div class="page-head">
-  <div>
-    <h1 class="page-title">Get started</h1>
-    <div class="page-desc">A few short steps and your mail starts sorting itself. Everything runs on
-    this machine; mail only leaves it if you point the LLM at a hosted API.</div>
-  </div>
-  <form method="post" action="{{ url_for('welcome') }}">
-    <input type="hidden" name="action" value="dismiss">
-    <button class="btn">{{ 'Done - hide this' if st.done == st.total else 'Hide this checklist' }}</button>
-  </form>
-</div>
 
-<div class="card">
-  <div class="card-h"><h3>Setup checklist</h3><span class="sub">{{ st.done }} of {{ st.total }} done</span></div>
-  {% for s in st.steps %}
-  <div class="ws-row">
-    <span class="ws-num{{ ' done' if s.done else '' }}">{{ '&#10003;'|safe if s.done else loop.index }}</span>
-    <div class="ws-main">
-      <b>{{ s.title }}{% if s.done %} <span class="badge ok">done</span>{% endif %}</b>
-      <span class="sub">{{ s.desc }}</span>
-      {% if s.id == 'llm' %}
-        {% if st.llm.configured %}
-        <span class="sub">Current endpoint: <span class="mono">{{ st.llm.model or 'model?' }} @ {{ st.llm.base }}</span></span>
+<div class="wz" id="wz" data-start="{{ start }}">
+  <header class="wz-top">
+    <span class="wz-brand">Mail Triage<span class="sub">setup</span></span>
+    <a class="wz-exit" href="{{ url_for('dashboard') }}">Exit setup</a>
+  </header>
+
+  <ol class="wz-rail" id="wz-rail" aria-label="Setup steps">
+    {% for x in st.steps %}
+    <li class="wz-step{{ ' done' if x.done }}" data-i="{{ loop.index }}" data-id="{{ x.id }}">
+      <span class="wz-dot">{{ '&#10003;'|safe if x.done else loop.index }}</span><span>{{ x.label }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <div class="wz-body" id="wz-body">
+    <section class="wz-screen" data-i="0" aria-label="Welcome">
+      <div class="wz-hero">
+        <h1>Your mail, sorted on your own machine.</h1>
+        <p>Mail Triage reads your mailbox, files the repetitive mail with rules, and lets an LLM
+        handle what rules cannot. Everything runs on this box - search and learning included.</p>
+        <ul>
+          <li>Rules sort the repetitive mail automatically</li>
+          <li>An LLM classifies the rest - local or hosted, your choice</li>
+          <li>Mail is never deleted. Worst case, it moves to a folder</li>
+        </ul>
+        <button type="button" class="btn" data-go="1">Set up my mailbox &#8594;</button>
+        <a class="wz-skip" href="{{ url_for('dashboard') }}">Skip setup - take me to the app</a>
+      </div>
+    </section>
+
+    <section class="wz-screen" data-i="1" aria-label="Mailbox">
+      <div class="wz-card">
+        <h2>Connect your mailbox</h2>
+        {% if st.steps[0].done %}
+        <div class="wz-ok"><span class="dot ok"></span><span><b>Signed in as {{ st.steps[0].user or 'your account' }}</b><br>
+        <span class="sub">Tokens stay on this machine.</span></span></div>
         {% else %}
-        <span class="sub">Detected here: <b>{{ hw.tier_label }}</b>{% if hw.gpus %} ({% for g in hw.gpus %}{{ g.name }}, {{ g.gb }}GB{% if not loop.last %}; {% endif %}{% endfor %}){% endif %}. {{ hw.advice }}</span>
+        <p class="wz-lede">Sign in once through the embedded OAuth proxy. Credentials and tokens stay on
+        this machine - the app talks to your mailbox directly.</p>
+        <div class="wz-note">The Accounts page drives the sign-in and tells you exactly what to do.
+        Come back here after - setup resumes where you left off.</div>
         {% endif %}
-      {% endif %}
-    </div>
-    <div class="ws-acts">
-      {% if s.id == 'llm' %}
-      <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><input type="hidden" name="next" value="welcome"><button class="btn small" type="submit">Test LLM</button></form>
-      {% endif %}
-      {% if s.id == 'index' and not s.done %}
-      <form class="inline" method="post" action="{{ url_for('index_run') }}"><input type="hidden" name="next" value="welcome"><button class="btn small" type="submit">Build index</button></form>
-      {% endif %}
-      <a class="btn small" href="{{ s.url }}">{{ s.action }}</a>
-    </div>
+        <div class="wz-actions">
+          {% if st.steps[0].done %}
+          <button type="button" class="btn" data-go="2">Continue &#8594;</button>
+          <a class="wz-skip" href="{{ url_for('accounts') }}">Manage accounts</a>
+          {% else %}
+          <a class="btn" href="{{ url_for('accounts') }}">Open Accounts &#8594;</a>
+          <button type="button" class="wz-linkbtn" data-go="2">Do this later</button>
+          {% endif %}
+          <button type="button" class="wz-linkbtn" data-go="0">&#8592; Back</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="wz-screen" data-i="2" aria-label="LLM">
+      <div class="wz-card">
+        <h2>Point at an LLM</h2>
+        <p class="wz-lede">Classification and drafting use any OpenAI-compatible endpoint - a server on
+        this machine, or a hosted API. Skip this and rules plus search still work.</p>
+        {% if st.steps[1].done %}
+        <div class="wz-ok"><span class="dot ok"></span><span><b>{{ st.steps[1].model or 'Model' }} at {{ st.steps[1].base }}</b><br>
+        <span class="sub">Configured. Test it again any time from Settings.</span></span></div>
+        {% else %}
+        <div class="wz-note">No endpoint yet. This machine: <b>{{ hw.tier_label }}</b>. {{ hw.advice }}</div>
+        {% endif %}
+        <form method="post" action="{{ url_for('settings', next='/welcome?s=3') }}">
+          <div class="wz-field"><label for="wz-base">Base URL</label>
+            <input id="wz-base" type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'https://api.example.com/v1  or  http://host:8000/v1' }}">
+          </div>
+          <div class="wz-field"><label for="wz-model">Model</label>
+            <input id="wz-model" type="text" name="llm_model" value="{{ s.llm_model }}" placeholder="{{ llm.model or 'model name' }}">
+          </div>
+          <div class="wz-field"><label for="wz-key">API key</label>
+            <span class="sub">Blank keeps the stored key. Most local servers do not need one.</span>
+            <input id="wz-key" type="password" name="llm_api_key" value="" autocomplete="new-password" placeholder="{{ 'set - type to replace' if llm.key else 'not set' }}">
+          </div>
+          <div class="wz-actions">
+            <button type="submit" class="btn">Save &amp; continue &#8594;</button>
+            <button type="submit" class="wz-linkbtn" formaction="{{ url_for('settings_test_llm', next='/welcome?s=2') }}" formnovalidate>Test connection</button>
+            <button type="button" class="wz-linkbtn" data-go="3">Do this later</button>
+            <button type="button" class="wz-linkbtn" data-go="1">&#8592; Back</button>
+          </div>
+          <div class="wz-note">The connection test uses saved settings - save first to test a new endpoint.</div>
+        </form>
+        <details>
+          <summary class="sub" style="cursor:pointer;margin-top:14px">Choosing an LLM for this machine</summary>
+          <div class="sub" style="margin-top:8px;line-height:1.6">
+            <b>No GPU:</b> use a hosted OpenAI-compatible API (most providers work), or a small CPU
+            model via ollama / llama.cpp.<br>
+            <b>8-16GB GPU:</b> a quantized 7-14B instruct model served by vLLM or ollama fits well.<br>
+            <b>24GB+ GPU:</b> the <span class="mono">gemma/</span> example serves a 26B MoE on a single
+            24GB card.<br>
+            Examples and copy-paste commands: <span class="mono">docs/getting-started.md</span>.
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="wz-screen" data-i="3" aria-label="Search index">
+      <div class="wz-card">
+        <h2>Build the search index</h2>
+        <p class="wz-lede">Semantic search over your archive - it powers search on the Messages page and
+        the assistant. It runs on CPU in the background and is resumable; you can leave and it continues.</p>
+        <div class="wz-ok"><span class="dot {{ 'ok' if st.index.messages else '' }}"></span><span id="wz-ix">
+          {% if st.index.messages %}Indexed so far: <b>{{ st.index.messages }}</b> message(s), <b>{{ st.index.chunks }}</b> chunk(s).
+          {% else %}Not started yet.{% endif %}</span></div>
+        <div class="wz-actions">
+          <form method="post" action="{{ url_for('index_run', next='/welcome?s=3') }}" class="inline">
+            <button type="submit" class="btn">{{ 'Update index' if st.index.messages else 'Build index' }}</button>
+          </form>
+          <button type="button" class="btn small" data-go="4">Continue &#8594;</button>
+          <button type="button" class="wz-linkbtn" data-go="2">&#8592; Back</button>
+        </div>
+        <div class="wz-note">You can also start it later from the dashboard - indexing status shows there too.</div>
+      </div>
+    </section>
+
+    <section class="wz-screen" data-i="4" aria-label="Done">
+      <div class="wz-card">
+        <h2>You're set.</h2>
+        <p class="wz-lede">Here is where things stand - everything below can be changed any time.</p>
+        <div class="wz-recap"><span class="dot {{ 'ok' if st.steps[0].done }}"></span><span><b>Mailbox</b>
+          <span class="sub">{{ ('Signed in as ' + st.steps[0].user) if st.steps[0].done else 'Not connected yet - the Accounts page can do this later.' }}</span></span></div>
+        <div class="wz-recap"><span class="dot {{ 'ok' if st.steps[1].done }}"></span><span><b>LLM</b>
+          <span class="sub">{{ (st.steps[1].model or 'Configured') + ' at ' + st.steps[1].base if st.steps[1].done else 'Not configured - classification and drafting stay off until you add one.' }}</span></span></div>
+        <div class="wz-recap"><span class="dot {{ 'ok' if st.steps[2].done }}"></span><span><b>Search index</b>
+          <span class="sub">{{ st.index.messages ~ ' message(s) indexed' if st.steps[2].done else 'Not built yet - start it from the dashboard.' }}</span></span></div>
+        <div class="wz-note">Tip: tag messages as you triage. Your tags train the learning loop, and new
+        rules can be learned straight from them.</div>
+        <div class="wz-actions">
+          <a class="btn" href="{{ url_for('dashboard') }}">Open the dashboard</a>
+          <a class="wz-skip" href="{{ url_for('messages') }}">Browse your mail</a>
+          <form method="post" action="{{ url_for('welcome') }}" class="inline">
+            <input type="hidden" name="action" value="dismiss">
+            <button type="submit" class="wz-linkbtn">Hide setup help</button>
+          </form>
+        </div>
+      </div>
+    </section>
   </div>
-  {% endfor %}
+
+  <div class="wz-foot">Everything runs on this machine. Mail Triage never deletes mail - worst case it files
+  it into a folder. Reopen this setup any time from the More page.</div>
+  <noscript><div class="wz-note">The guided view needs JavaScript. You can use the normal pages instead:
+  <a href="{{ url_for('accounts') }}">Accounts</a>, <a href="{{ url_for('settings') }}">Settings</a>,
+  <a href="{{ url_for('dashboard') }}">Dashboard</a>.</div></noscript>
 </div>
 
-<details class="card" open>
-  <summary class="sub" style="cursor:pointer">Choosing an LLM for this machine</summary>
-  <div class="sub" style="margin-top:8px">
-    <b>No GPU:</b> rules and search run as-is; for classification use a hosted OpenAI-compatible
-    API, or a small CPU model via ollama / llama.cpp (quality is modest).<br>
-    <b>8-16GB GPU:</b> a quantized 7-14B instruct model served by vLLM or ollama is a good fit.<br>
-    <b>24GB+ GPU:</b> the <span class="mono">gemma/</span> example serves a 26B MoE on a single
-    24GB card (vLLM).<br>
-    Details and copy-paste examples: <span class="mono">docs/getting-started.md</span>.
-  </div>
-</details>
+<script>
+(function(){
+  var wz = document.getElementById('wz');
+  if(!wz){ return; }
+  var screens = [].slice.call(wz.querySelectorAll('.wz-screen'));
+  var rail = [].slice.call(wz.querySelectorAll('.wz-step'));
+  var timer = null;
+  var cur = parseInt(wz.getAttribute('data-start'), 10);
+  if(isNaN(cur)){ cur = 0; }
+  var visited = {}; visited[cur] = true;
+  function paint(focus){
+    screens.forEach(function(el){ var i = +el.getAttribute('data-i');
+      el.classList.toggle('on', i === cur); });
+    rail.forEach(function(el){ var i = +el.getAttribute('data-i');
+      el.classList.toggle('cur', i === cur);
+      el.classList.toggle('reach', !!visited[i] || i < cur); });
+    var on = screens[cur];
+    if(focus && on){ var h = on.querySelector('h1,h2'); if(h){ h.setAttribute('tabindex','-1'); h.focus({preventScroll:true}); } }
+    if(cur === 3){ startPoll(); } else { stopPoll(); }
+  }
+  function go(n){
+    n = Math.max(0, Math.min(4, n));
+    if(n === cur){ return; }
+    wz.classList.toggle('back', n < cur);
+    visited[n] = true; cur = n; paint(true);
+  }
+  function refresh(){
+    fetch('/welcome/state.json', {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!document.getElementById('wz')){ stopPoll(); return; }
+        var live = document.getElementById('wz-ix');
+        if(live && j && j.messages !== undefined){
+          live.innerHTML = j.messages ?
+            'Indexed so far: <b>' + j.messages + '</b> message(s), <b>' + j.chunks + '</b> chunk(s).'
+            : 'Not started yet.';
+        }
+        rail.forEach(function(el){ var id = el.getAttribute('data-id');
+          (j.steps || []).forEach(function(x){ if(x.id === id && x.done){ el.classList.add('done'); } }); });
+      }).catch(function(){});
+  }
+  function startPoll(){ if(timer){ return; } refresh(); timer = setInterval(refresh, 4000); }
+  function stopPoll(){ if(timer){ clearInterval(timer); timer = null; } }
+  wz.addEventListener('click', function(e){
+    var t = e.target.closest('[data-go]');
+    if(!t){ return; }
+    var n = parseInt(t.getAttribute('data-go'), 10);
+    if(isNaN(n)){ return; }
+    if(t.classList.contains('wz-step') && !(visited[n] || n < cur)){ return; }
+    e.preventDefault(); go(n);
+  });
+  wz.classList.add('live');
+  paint(false);
+})();
+</script>
 """
 
 
@@ -3022,14 +3230,31 @@ def welcome():
         act = (request.form.get("action") or "").strip()
         if act == "dismiss":
             store.set_setting("welcome_done", 1)
-            flash("Checklist hidden - reopen it from More any time.", "info")
+            flash("Setup help hidden - reopen it from the More page any time.", "info")
             return redirect(url_for("dashboard"))
         if act == "reset":
             store.set_setting("welcome_done", 0)
             return redirect(url_for("welcome"))
     st = setup_state()
-    return render(_render_src(WELCOME_TMPL, st=st,
-                              hw=engine.detect_hardware(), sdk=plugins.HOST_SDK_VERSION))
+    start = 0 if st["done"] == 0 else next((i + 1 for i, x in enumerate(st["steps"]) if not x["done"]), 4)
+    try:
+        start = max(0, min(4, int(request.args.get("s"))))
+    except Exception:
+        pass
+    return render(_render_src(WELCOME_TMPL, st=st, hw=engine.detect_hardware(),
+                              s=store.all_settings(), llm=engine.llm_config(),
+                              start=start), setup=True)
+
+
+@app.route("/welcome/state.json")
+def welcome_state():
+    st = setup_state()
+    ix_ = {k: v for k, v in (st.get("index") or {}).items()}
+    return jsonify({"done": st["done"], "total": st["total"],
+                    "steps": [{"id": x["id"], "done": bool(x["done"])} for x in st["steps"]],
+                    "messages": int(ix_.get("messages") or 0),
+                    "chunks": int(ix_.get("chunks") or 0),
+                    "running": False})
 
 
 @app.route("/plugins/rescan", methods=["POST"])
@@ -6691,6 +6916,7 @@ def settings():
     if request.method == "POST":
         section = request.form.get("section") or "behavior"
         scope = (request.form.get("scope") or "").strip()
+        nxt = (request.values.get("next") or "").strip()
         if section == "llm":
             _save_llm_settings()
             flash(("%s saved." % scope) if scope else "LLM endpoint settings saved.", "ok")
@@ -6713,6 +6939,8 @@ def settings():
             _save_behavior_settings()
             flash(("%s saved." % scope) if scope else "Settings saved.", "ok")
         _TZ_CACHE["at"] = 0  # re-read the display timezone on the next render
+        if nxt.startswith("/") and not nxt.startswith("//"):
+            return redirect(nxt)
         anchor = _settings_anchor(section, scope)
         return redirect(url_for("settings") + ("#" + anchor if anchor else ""))
     return render(_render_src(
@@ -6725,8 +6953,8 @@ def settings():
 @app.route("/settings/test-llm", methods=["POST"])
 def settings_test_llm():
     which = request.args.get("which") or "primary"
-    nxt = request.values.get("next") or ""
-    dest = url_for("welcome") if nxt == "welcome" else url_for("settings")
+    nxt = (request.values.get("next") or "").strip()
+    dest = nxt if (nxt.startswith("/") and not nxt.startswith("//")) else url_for("settings")
     started = time.time()
     client = engine.LLMClient()
     if which == "fallback":

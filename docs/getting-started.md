@@ -111,20 +111,27 @@ requirement.
 
 ## 4. First run
 
-Open http://localhost:8097. The app lands on the **Get started** checklist
-(also under More → Get started) which tracks four steps:
+Open http://localhost:8097. A fresh install lands directly on the **setup wizard**
+(`/welcome`, also under More → Get started). It is a full-screen three-step flow,
+resumable and skippable - state is auto-detected, so you can exit and come back
+any time:
 
-1. **Connect your mailbox** (Accounts page) - the page shows the exact redirect
-   URI to register with your provider and drives the OAuth login.
-2. **Point at an LLM** - set it in `.env` (above) or on the Settings page, then
-   press "Test LLM". Blank settings fall back to `.env`.
-3. **Build the search index** - CPU-only and resumable; "Index now" on the
-   dashboard or the checklist starts it.
-4. **Sort some mail** - tag a few messages or write a rule. That is the raw
-   material the learning loop trains on.
+1. **Connect your mailbox** - links to the Accounts page, which shows the exact
+   redirect URI to register with your provider and drives the OAuth login. Come
+   back and the step shows as done.
+2. **Point at an LLM** - edit the endpoint right in the wizard (same settings as
+   the Settings page), then "Test connection". The wizard shows what hardware it
+   detected to help you choose; skip it and rules plus search still work.
+3. **Build the search index** - CPU-only and resumable; the wizard starts it and
+   shows live progress.
 
-The dashboard banner tracks the same state and hides once you dismiss the
-checklist.
+Afterwards, keep an eye on the dashboard banner if you skipped a step - it links
+back to the wizard until setup is complete. Tagging a few messages as you triage
+feeds the learning loop that turns repeated LLM decisions into small local
+models.
+
+The dashboard banner tracks the same state; "Hide setup help" on the final screen
+dismisses it.
 
 ## 5. Troubleshooting
 

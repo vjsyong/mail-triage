@@ -13,9 +13,11 @@ How this folder is organised: by what you need, not by when it was written.
 - [../README.md](../README.md) - what the app is, quick start, operations
 - [getting-started.md](getting-started.md) - install, hardware tiers, choosing an
   LLM (including no-GPU setups), first-run checklist
-- [deployment.md](deployment.md) - ports, TLS / reverse proxies, backups,
-  upgrades, resource notes for real deployments
+- [deployment.md](deployment.md) - ports, TLS, backups, upgrades for real
+  deployments
 - [features.md](features.md) - the full feature tour
+- [onboarding.md](onboarding.md) - research + decisions behind the setup wizard
+  (`/welcome`)
 - [app-inventory.md](app-inventory.md) - page-by-page inventory + the app-wide layout campaign
 
 ## Design records

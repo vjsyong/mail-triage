@@ -3938,52 +3938,78 @@ def main():
     check("bench config form persists scope + prompt name",
           _cfg.get("default_scope") == "quick" and _cfg.get("user_name") == "the user")
 
-    section("T51 onboarding: welcome checklist, banner, doctor")
-    hw = eng_mod.detect_hardware()
-    check("doctor detects a hardware tier",
-          hw.get("tier") in ("none", "small", "medium", "large")
-          and bool(hw.get("tier_label")) and bool(hw.get("advice")))
-    _rep = eng_mod.doctor()
-    check("doctor report covers hardware, mailbox and llm",
-          "hardware" in _rep and "mailbox" in _rep and "llm" in _rep)
+    section("T51 onboarding wizard: welcome flow, state.json, next redirects")
     r = client.get("/welcome")
-    check("welcome checklist renders its steps",
-          r.status_code == 200 and b"Setup checklist" in r.data
-          and b"Connect your mailbox" in r.data and b"Point at an LLM" in r.data
-          and b"Build the search index" in r.data and b"Test LLM" in r.data)
-    _st2 = app_mod.setup_state()
-    check("setup_state reports 4 steps with a done count",
-          isinstance(_st2["steps"], list) and len(_st2["steps"]) == 4
-          and 0 <= _st2["done"] <= _st2["total"] == 4)
-    client.post("/welcome", data={"action": "dismiss"}, follow_redirects=True)
-    check("dismiss persists welcome_done", store.get_setting("welcome_done", 0) == 1)
-    _orig_setup = app_mod.setup_state
-    app_mod.setup_state = lambda: {"steps": [], "done": 1, "total": 4,
-                                   "dismissed": True, "llm": {}}
+    check("wizard renders chrome-free with the step rail",
+          b'class="setup"' in r.data and b'class="wz"' in r.data and b"Exit setup" in r.data
+          and b">Mailbox<" in r.data and b">LLM<" in r.data and b">Search<" in r.data
+          and r.data.count(b'class="wz-screen"') == 5)
+    check("wizard sets a start screen", b'data-start="' in r.data)
+    r = client.get("/welcome?s=2")
+    check("?s= deep link selects the screen", b'data-start="2"' in r.data)
+    r = client.get("/welcome?s=99")
+    check("start screen clamps to the finish", b'data-start="4"' in r.data)
+    rj = client.get("/welcome/state.json")
+    j = rj.get_json() or {}
+    check("state.json reports steps + counts",
+          rj.status_code == 200 and j.get("total") == 3 and len(j.get("steps") or []) == 3
+          and isinstance(j.get("messages"), int) and isinstance(j.get("chunks"), int))
+    st2 = app_mod.setup_state()
+    check("setup_state tracks 3 steps", len(st2["steps"]) == 3 and 0 <= st2["done"] <= 3)
+    _cfg = eng_mod.llm_config()
+    _base = (_cfg.get("base") or "").strip()
+    _model = (_cfg.get("model") or "").strip()
+    r = client.post("/settings?next=%2Fwelcome%3Fs%3D3",
+                    data={"section": "llm", "scope": "LLM endpoint",
+                          "llm_base_url": _base, "llm_model": _model})
+    check("settings save honours the next redirect",
+          r.status_code == 302 and r.headers["Location"].endswith("/welcome?s=3"))
+    check("settings save persisted the endpoint",
+          (store.get_setting("llm_base_url", "") or "") == _base)
+    r = client.post("/settings/test-llm?next=%2Fwelcome%3Fs%3D2")
+    check("LLM test honours the next redirect",
+          r.status_code == 302 and r.headers["Location"].endswith("/welcome?s=2"))
+    r = client.post("/index/run?next=%2Fwelcome%3Fs%3D3")
+    check("index run honours the next redirect",
+          r.status_code == 302 and r.headers["Location"].endswith("/welcome?s=3"))
+    _orig_fi = app_mod._fresh_install
+    app_mod._fresh_install = lambda: True
     r = client.get("/")
-    check("dashboard banner respects the dismissed flag",
-          b"Getting started" not in r.data)
-    app_mod.setup_state = lambda: {"steps": [], "done": 1, "total": 4,
-                                   "dismissed": False, "llm": {}}
+    check("fresh install lands on the wizard",
+          r.status_code == 302 and r.headers["Location"].endswith("/welcome"))
+    app_mod._fresh_install = _orig_fi
+    check("configured install stays on the dashboard", client.get("/").status_code == 200)
+    _orig_ss = app_mod.setup_state
+    app_mod.setup_state = lambda: {"steps": [], "done": 1, "total": 3, "dismissed": False}
     r = client.get("/")
     check("dashboard banner shows while setup is incomplete",
-          b"Getting started" in r.data and b"Open checklist" in r.data)
-    app_mod.setup_state = _orig_setup
+          b"Getting started" in r.data and b"Continue setup" in r.data)
+    app_mod.setup_state = lambda: {"steps": [], "done": 1, "total": 3, "dismissed": True}
+    r = client.get("/")
+    check("banner respects the dismissed flag", b"Getting started" not in r.data)
+    app_mod.setup_state = _orig_ss
+    client.post("/welcome", data={"action": "dismiss"}, follow_redirects=True)
+    check("dismiss persists", store.get_setting("welcome_done", 0) == 1)
     client.post("/welcome", data={"action": "reset"}, follow_redirects=True)
-    check("checklist can be reopened", store.get_setting("welcome_done", 0) == 0)
+    check("setup can be reopened", store.get_setting("welcome_done", 0) == 0)
     r = client.get("/more")
-    check("More page links the checklist",
-          b'href="/welcome"' in r.data and b"Get started" in r.data)
-    _denv = dict(os.environ, DATA_DIR=str(tmp), LLM_BASE_URL="http://127.0.0.1:9/v1",
+    check("More page links the setup wizard", b'href="/welcome"' in r.data)
+    hw = eng_mod.detect_hardware()
+    check("hardware detect reports a tier",
+          hw.get("tier") in ("none", "small", "medium", "large") and bool(hw.get("tier_label")))
+    rep = eng_mod.doctor()
+    check("doctor reports its sections", all(k in rep for k in ("hardware", "llm", "mailbox")))
+    import subprocess as _sp
+    _drtmp = tempfile.mkdtemp(prefix="mt-doctor-")
+    _denv = dict(os.environ, DATA_DIR=_drtmp, LLM_BASE_URL="http://127.0.0.1:9/v1",
                  LLM_API_KEY="x", LLM_MODEL="dummy",
-                 PLUGINS_DIR=os.path.join(str(tmp), "plugins"),
+                 PLUGINS_DIR=os.path.join(_drtmp, "plugins"),
                  PLUGINS_BUILTIN_DIR=os.path.join(PROJECT, "plugins"))
-    _dr = subprocess.run([sys.executable, "app.py", "--doctor"], capture_output=True,
-                         text=True, timeout=120, cwd=PROJECT, env=_denv)
+    _dr = _sp.run([sys.executable, "app.py", "--doctor"], capture_output=True, text=True,
+                  timeout=120, cwd=PROJECT, env=_denv)
     check("--doctor CLI prints the setup report",
           _dr.returncode == 0 and "Mail Triage doctor" in _dr.stdout
           and "hardware:" in _dr.stdout and "UNREACHABLE" in _dr.stdout)
-
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:
