@@ -33,6 +33,8 @@ How this folder is organised: by what you need, not by when it was written.
   conditions for flows
 - [undo-triage-snooze.md](undo-triage-snooze.md) - undo trail, triage queue, snooze,
   log tools
+- [dashboard-recent-mail.md](dashboard-recent-mail.md) - the dashboard recent-mail
+  stacked feed (why the 5-col table became a list; activity-row flow fix)
 - [spa-turbo.md](spa-turbo.md) - SPA navigation layer (Turbo Drive), and why not a
   framework rewrite
 - [ui-redesign.md](ui-redesign.md) - simulator / dry-run report page design

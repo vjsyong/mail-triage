@@ -1425,8 +1425,12 @@ def main():
           "&lt;script&gt;" in app_mod.md_to_html("<script>alert(1)</script>"))
     id_old = add_msg(state, "old@x.com", "Old message from 2024", "ancient history", "old1@x",
                      date="Mon, 15 Jan 2024 09:00:00 +0800")
+    # relative "fresh" date: a hardcoded near-term date rots the moment the wall
+    # clock passes it (undated rows fall back to processed_at and out-rank the
+    # fixture). Keep it ahead of both run time and every fixed fixture date.
+    _fresh_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(time.time() + 86400))
     id_new = add_msg(state, "new@x.com", "Fresh message latest", "recent stuff", "new1@x",
-                     date="Fri, 02 Oct 2026 09:00:00 +0800")
+                     date=_fresh_date)
     rag.index_pass(limit=60)
     rows_dated = store.messages(limit=5)
     check("messages ordered by mail date", rows_dated[0]["subject"] == "Fresh message latest")
@@ -2586,6 +2590,11 @@ def main():
           b'class="card flush actwrap"' in d and b'act-sum' in d and b"Full log" in d)
     check("index card tagged for mobile hiding", b'card ixcard' in d)
     check("mobile collapse script present", b"removeAttribute('open')" in d)
+    check("recent mail renders as a stacked feed, not a squished table",
+          b'class="mfeed"' in d and d.count(b'class="mrow"') >= 3
+          and b"<th>when</th>" not in d)
+    check("feed rows keep subject link + status/LLM meta",
+          b'class="mr-subj"' in d and b'class="mr-meta"' in d and b'class="mr-llm"' in d)
 
     # --- two-step chat delete (armed red trash reveal, no confirm popup)
     r = client.get("/assistant", follow_redirects=True)

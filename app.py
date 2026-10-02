@@ -353,7 +353,6 @@ a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
 #bulk .tbl th:nth-child(2),#bulk .tbl td:nth-child(2){white-space:nowrap}
 #classifiers .tbl th:nth-child(7),#classifiers .tbl td:nth-child(7){white-space:nowrap}
 #classifiers .tbl th:nth-child(2),#classifiers .tbl td:nth-child(2){white-space:nowrap}
-.dashgrid .tbl th:nth-child(1),.dashgrid .tbl td:nth-child(1){white-space:nowrap}
 .skip:focus{left:8px}
 /* ---- app shell ---- */
 .app{display:flex;min-height:100vh}
@@ -1911,6 +1910,29 @@ DASH_TMPL = """
 .act-chev::after{content:'▾'}
 .actwrap:not([open]) .act-chev::after{content:'▸'}
 .dashactions,.mlines,.sys-ix-actions{display:none}
+/* Recent mail = a stacked feed, not a 5-col table: this card's column is only
+   218-673px wide (assistant rail open/collapsed) while the table needed ~690px,
+   so the subject got crushed into a sliver and the rest hid behind a horizontal
+   scrollbar (measured: a 686px table inside a 396px card). Every line gets the
+   full column width instead. Ref: CSS-Tricks "Responsive Data Tables" reflow +
+   Material 3 lists (two-line anatomy: primary + supporting text). */
+.mfeed{display:block}
+.mrow{display:block;padding:9px 16px 10px;border-bottom:1px solid var(--line);color:var(--fg);text-decoration:none}
+.mrow:last-child{border-bottom:0}
+.mrow:hover{background:#fcfcfc;text-decoration:none}
+.mrow:hover .mr-subj{text-decoration:underline}
+.mr-top{display:flex;align-items:baseline;gap:10px;min-width:0}
+.mr-from{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;color:var(--dim)}
+.mr-when{flex:none;font-family:var(--mono);font-size:.74rem;color:var(--dim)}
+.mr-subj{display:block;margin-top:2px;font-size:.92rem;font-weight:500;color:var(--acc);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mr-sum{display:block;margin-top:2px;font-size:.78rem;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mr-meta{display:flex;align-items:center;gap:8px;margin-top:6px;min-width:0}
+.mr-meta .badge{flex:none}
+.mr-llm{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.74rem;color:var(--dim)}
+/* Activity rows: inline time+level left the message a ~60px sliver in this
+   column (events wrapped 13 lines deep). Flow the message full-width under
+   the inline prefix instead. Scoped to the dashboard card - /log untouched. */
+.actwrap .logpanel .logrow{display:block;padding:4px 0}
 @media(max-width:767px){
   .dh-actions{display:none}
   .syswrap>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;padding:2px 0}
@@ -1930,7 +1952,7 @@ DASH_TMPL = """
   .dashactions .btn{flex:1;text-align:center;justify-content:center}
   .sys-ix-actions{display:flex;gap:8px;margin-top:10px;align-items:center}
   .ixcard{display:none}
-  .tbl.mcards tr:nth-child(n+5){display:none}
+  .mfeed .mrow:nth-child(n+5){display:none}
   .actwrap .logpanel{max-height:240px}
 }
 </style>
@@ -2106,20 +2128,19 @@ DASH_TMPL = """
       <a class="sub" href="{{ url_for('messages') }}">All messages →</a>
     </div>
     {% if messages %}
-    <div class="tablewrap"><table class="tbl mcards">
-      <thead><tr><th>when</th><th>from</th><th>subject</th><th>status</th><th>LLM</th></tr></thead>
-      <tbody>
+    <div class="mfeed">
       {% for m in messages %}
-      <tr>
-        <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
-        <td class="sub" title="{{ m.from_addr }}">{{ m.from_addr|clip(38) }}</td>
-        <td><a href="{{ url_for('message_detail', mid=m.id) }}" title="{{ m.subject }}">{{ m.subject|clip(70) or '(no subject)' }}</a>
-          {% if m.llm_summary %}<div class="sub" style="font-size:.77rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(110) }}</div>{% endif %}</td>
-        <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span></td>
-        <td class="sub">{{ m.llm }}</td>
-      </tr>
+      <a class="mrow" href="{{ url_for('message_detail', mid=m.id) }}">
+        <span class="mr-top">
+          <span class="mr-from" title="{{ m.from_addr }}">{{ m.from_addr|clip(44) }}</span>
+          <span class="mr-when">{{ m.when }}</span>
+        </span>
+        <span class="mr-subj" title="{{ m.subject }}">{{ m.subject|clip(90) or '(no subject)' }}</span>
+        {% if m.llm_summary %}<span class="mr-sum" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(140) }}</span>{% endif %}
+        <span class="mr-meta"><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span><span class="mr-llm">{{ m.llm }}</span></span>
+      </a>
       {% endfor %}
-      </tbody></table></div>
+    </div>
     {% else %}
     <div class="empty">
       <h4>No mail processed yet</h4>
