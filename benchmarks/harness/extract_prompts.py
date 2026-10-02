@@ -2,7 +2,7 @@
 """Extract the EXACT production prompt strings from the app's engine.py.
 
 Run with the app venv from the repo worktree root (engine.py @ master 5374d26):
-    cd ~/mail-triage-bench && DATA_DIR=/tmp/benchextract IMAP_USER=seanyong@ust.hk \
+    cd ~/mail-triage-bench && DATA_DIR=/tmp/benchextract IMAP_USER=user@example.com \
         ~/mail-triage/.venv/bin/python benchmarks/harness/extract_prompts.py
 
 Writes benchmarks/harness/prompts.json — used by the benchmark runner so the
@@ -13,7 +13,7 @@ import os
 import sys
 
 os.environ.setdefault("DATA_DIR", "/tmp/benchextract")
-os.environ.setdefault("IMAP_USER", "seanyong@ust.hk")
+os.environ.setdefault("IMAP_USER", "user@example.com")
 sys.path.insert(0, os.path.abspath("."))
 
 import engine  # noqa: E402

@@ -27,7 +27,7 @@ with open(os.path.join(HERE, "prompts.json")) as f:
     PROMPTS = json.load(f)
 
 FROZEN_TODAY = "2026-09-30 (Wed)"
-SEAN_EMAIL = "seanyong@ust.hk"
+SEAN_EMAIL = "user@example.com"
 
 # ---------------------------------------------------------------- client ----
 

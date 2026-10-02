@@ -7,7 +7,7 @@
  },
  "classification": {
   "count": 240,
-  "sha256": "24e26aff6ed285e565d632846f638377f57a299e3fb6b5bbc480e7fb67edd849",
+  "sha256": "3c1a661416fe61ac320db1fb44e4dc6f875b97182432ae76e49ab1c6f58e849f",
   "dev": 136,
   "acceptance": 104
  },
@@ -41,5 +41,5 @@
   "acceptance": 262,
   "frozen_at": "2026-09-30 (Wed)"
  },
- "corpus_messages_sha256": "bf73fdf2da75af31aad0d036262a6c416643b9b6e53f35ae99b08471030dc286"
+ "corpus_messages_sha256": "bb32a2f901427eaff93eb275427037626d6e09ed68ec28d56269ecfcc06d22c5"
 }

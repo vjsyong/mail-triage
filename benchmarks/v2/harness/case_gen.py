@@ -22,7 +22,7 @@ V2 = os.path.abspath(os.path.join(HERE, ".."))
 CORPUS = os.path.join(V2, "corpus")
 CASES = os.path.join(V2, "cases")
 
-SEAN = "seanyong@ust.hk"
+SEAN = "user@example.com"
 TODAY = "2026-09-30 (Wed)"
 CATEGORIES = ["Action", "Notification", "Newsletter", "Receipt", "Personal", "Promo"]
 ACCEPT_PCT = 40  # percent of families held out

@@ -53,7 +53,7 @@ PEOPLE = {
     "calendar": "Westgate Calendar <calendar@westgate.example>",
     "facilities": "Facilities Office <facilities@westgate.example>",
     "list": "RCC Users List <rcc-users@lists.westgate.example>",
-    "sean": "Sean Yeung <seanyong@ust.hk>",
+    "sean": "Sean <user@example.com>",
 }
 
 SEAN = PEOPLE["sean"]
@@ -804,7 +804,7 @@ GROUND_TRUTH = {
     "categories": ["Action", "Notification", "Newsletter", "Receipt", "Personal", "Promo"],
     "category_defs": CATEGORY_DEFS.strip(),
     "frozen_today": "2026-09-30 (Wed)",
-    "sean_email": "seanyong@ust.hk",
+    "sean_email": "user@example.com",
     "facts": {
         "meeting_current": "Tue 15 Sep 2026 10:00",
         "grant_deadline_current": "2026-10-20 17:00",

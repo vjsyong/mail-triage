@@ -90,7 +90,7 @@ def _live_compare():
         if not here_app:
             return False, "MAIL_TRIAGE_APP not set; live check skipped"
         env = dict(os.environ, DATA_DIR="/tmp/benchv2extract",
-                   IMAP_USER="seanyong@ust.hk")
+                   IMAP_USER="user@example.com")
         subprocess.run([sys.executable, os.path.join(HERE, "extract_prompts.py")],
                        cwd=here_app, env=env, check=True, capture_output=True)
         live = _load(PROMPTS)

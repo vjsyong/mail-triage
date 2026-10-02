@@ -18,7 +18,7 @@ with open(os.path.join(CORPUS, "messages.jsonl")) as f:
         m = json.loads(line)
         MSGS[m["id"]] = m
 
-SEAN = "Sean Yeung <seanyong@ust.hk>"
+SEAN = "Sean <user@example.com>"
 
 
 def user_str(m, body=None, subj=None, date=None, frm=None):

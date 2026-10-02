@@ -9,7 +9,7 @@
  ],
  "category_defs": "Action       - Sean must do something (reply, sign, submit, decide, review).\nNotification - automated/status/system messages and information-only updates needing no action.\nNewsletter   - periodic bulletins / editorial digests (usually unsubscribe footers).\nReceipt      - financial documents: invoices, receipts, payment confirmations, statements.\nPersonal     - interpersonal, non-workflow messages (friends, family, casual colleagues).\nPromo        - marketing / offers / sales / spam.",
  "frozen_today": "2026-09-30 (Wed)",
- "sean_email": "seanyong@ust.hk",
+ "sean_email": "user@example.com",
  "facts": {
   "meeting_current": "Tue 15 Sep 2026 10:00",
   "grant_deadline_current": "2026-10-20 17:00",

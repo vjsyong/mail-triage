@@ -24,7 +24,7 @@ CORPUS = os.path.join(V2, "corpus")
 
 BASE = dt.datetime(2026, 9, 1, 8, 0)  # Monday
 FROZEN_TODAY = "2026-09-30 (Wed)"
-SEAN_EMAIL = "seanyong@ust.hk"
+SEAN_EMAIL = "user@example.com"
 
 PEOPLE = {
     # research
@@ -103,7 +103,7 @@ class Corpus(object):
                 "thread": tid,
                 "scenario": scenario,
                 "from": _addr(sender),
-                "to": "Sean Yeung <seanyong@ust.hk>",
+                "to": "Sean <user@example.com>",
                 "subject": subj,
                 "date": (BASE + dt.timedelta(days=off, hours=hour)).strftime(
                     "%a, %d %b %Y %H:%M:%S +0800"),
@@ -602,7 +602,7 @@ def _enrich(c):
             c.messages.append({
                 "id": c._id, "thread": t["thread"], "scenario": t["scenario"],
                 "from": _addr(sender) if sender in PEOPLE else _addr("digest"),
-                "to": "Sean Yeung <seanyong@ust.hk>", "subject": ssubj,
+                "to": "Sean <user@example.com>", "subject": ssubj,
                 "date": (BASE + dt.timedelta(days=off + 3, hours=hour)).strftime(
                     "%a, %d %b %Y %H:%M:%S +0800"),
                 "folder": "INBOX", "body": body,
