@@ -3969,6 +3969,10 @@ def main():
     r = client.post("/settings/test-llm?next=%2Fwelcome%3Fs%3D2")
     check("LLM test honours the next redirect",
           r.status_code == 302 and r.headers["Location"].endswith("/welcome?s=2"))
+    r = client.post("/welcome/test-llm", data={"llm_base_url": _base, "llm_model": _model})
+    check("wizard save & test saves and returns to the LLM step",
+          r.status_code == 302 and r.headers["Location"].endswith("/welcome?s=2")
+          and (store.get_setting("llm_base_url", "") or "") == _base)
     r = client.post("/index/run?next=%2Fwelcome%3Fs%3D3")
     check("index run honours the next redirect",
           r.status_code == 302 and r.headers["Location"].endswith("/welcome?s=3"))
