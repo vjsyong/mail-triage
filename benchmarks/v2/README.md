@@ -114,7 +114,7 @@ recorded under concurrency N is throughput-contaminated: use a sequential
 
 ### Serving profiles
 
-`../harness/serve.sh` serves candidates.  Qwen3.5-9B bf16 OOMs during CUDA-graph
+`../serving/serve.sh` serves candidates.  Qwen3.5-9B bf16 OOMs during CUDA-graph
 memory profiling on a 24GB card at the default `max-num-seqs=256`; capping it at
 32 (`qwen9b`) keeps CUDA graphs and is ~2.4× faster than the old
 `--enforce-eager` workaround, which is retained as `qwen9b-eager` for
