@@ -4949,8 +4949,9 @@ function stepSummary(st){
     st.mode = st.mode || 'template';
     if(st.mode === 'fixed') return 'fixed draft "' + String(st.body || '').slice(0, 40) + '" → Drafts';
     if(st.mode === 'plugin'){
+      var pp = PLUGINS.filter(function(x){ return x.id === st.plugin; })[0];
       var pt = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
-      return 'plugin draft (' + (st.plugin || '?') + ')' + (pt ? ' using "' + pt.name + '"' : '') + ' → Drafts';
+      return 'plugin draft (' + (pp ? pp.name : (st.plugin || 'pick a plugin')) + ')' + (pt ? ' using "' + pt.name + '"' : '') + ' → Drafts';
     }
     if(st.mode === 'llm') return 'LLM draft' + (st.instructions ? ' guided by "' + String(st.instructions).slice(0, 40) + '"' : '') + ' → Drafts';
     var t = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
@@ -5048,6 +5049,7 @@ function fieldsFor(st){
     } else if(st.mode === 'plugin'){
       f.appendChild(el('label', null, 'Plugin'));
       var pSel = el('select');
+      if(!PLUGINS.length){ var pnone = el('option', null, '(no draft plugins enabled)'); pnone.value = ''; pSel.appendChild(pnone); }
       PLUGINS.forEach(function(pp){ var o = el('option', null, pp.name); o.value = pp.id; if((st.plugin || '') === pp.id) o.selected = true; pSel.appendChild(o); });
       pSel.onchange = function(){ st.plugin = pSel.value; renderSummary(); sync(); };
       f.appendChild(pSel);
@@ -5057,7 +5059,9 @@ function fieldsFor(st){
       TEMPLATES.forEach(function(t){ var o = el('option', null, t.name); o.value = String(t.id); if(String(st.template_id || '') === String(t.id)) o.selected = true; ptSel.appendChild(o); });
       ptSel.onchange = function(){ st.template_id = ptSel.value; renderSummary(); sync(); };
       f.appendChild(ptSel);
-      f.appendChild(el('div', 'sub', 'Plugins that support it fill only the blocks wrapped in {llm-infill}...{/llm-infill}.'));
+      var hint = el('div', 'sub', 'Blocks wrapped in {llm-infill}...{/llm-infill} are written by plugins that support them; everything else stays as typed.');
+      hint.style.gridColumn = '1 / -1';
+      f.appendChild(hint);
       f.appendChild(el('label', null, 'Extra instructions (optional)'));
       var pa = document.createElement('textarea'); pa.rows = 2; pa.value = st.instructions || '';
       pa.placeholder = 'e.g. keep it to three sentences';
@@ -5112,6 +5116,7 @@ function render(){
   stepsEl.innerHTML = '';
   stepsEl.appendChild(edge(0));
   steps.forEach(function(st, i){
+    if(st.type === 'draft' && st.mode === 'plugin' && !st.plugin && PLUGINS.length) st.plugin = PLUGINS[0].id;
     var card = el('div','stepcard fl-node' + (st._open ? ' open' : ''));
     var head = el('div','fl-step-head');
     var info = typeInfo(st.type);
