@@ -27,6 +27,7 @@
   "use strict";
 
   var boot = window.__MT_BOOT || {};
+  var bridge = null;  // {port, sid} set only by the host-gated bootstrap
   try {
     // Layout mode comes from the host (the frame is often much narrower than
     // the device, so the page's own media queries cannot decide this).
@@ -41,11 +42,12 @@
 
   function send(msg) {
     try {
-      var out = { __mt: 1, sid: boot.sid };
+      if (!bridge || !bridge.port) return;
+      var out = { __mt: 1, sid: bridge.sid };
       for (var k in msg) {
         if (Object.prototype.hasOwnProperty.call(msg, k)) out[k] = msg[k];
       }
-      window.parent.postMessage(out, "*");
+      bridge.port.postMessage(out);
     } catch (e) { /* frame gone */ }
   }
 
@@ -128,10 +130,9 @@
     } catch (e) { /* ignore */ }
   }
 
-  window.addEventListener("message", function (e) {
-    if (e.source !== window.parent) return;
-    var d = e.data;
-    if (!d || d.__mt !== 1 || (boot.sid && d.sid !== boot.sid)) return;
+  function handle(d) {
+    if (!d || d.__mt !== 1) return;
+    if (bridge && bridge.sid && d.sid && d.sid !== bridge.sid) return;
     if (d.kind === "theme") {
       theme = d.theme || {};
       applyTheme();
@@ -150,10 +151,28 @@
         delete waiting[d.id];
         if (d.ok) w.resolve(d); else w.reject(errFrom(d));
       }
+    } else if (d.kind === "ping") {
+      send({ kind: "pong" });
     } else if (d.kind === "dispose") {
       disposeLocal();
     }
-  });
+  }
+
+  // The host-gated bootstrap calls this ONLY after it transferred a MessagePort
+  // tied to THIS document. Operational messages then travel on that port, never
+  // the global WindowProxy, so a remote page that later navigates the frame
+  // cannot inherit or re-establish the bridge (AR2-3).
+  window.__mt_sdk_connect = function (port, sid, b) {
+    if (bridge) return;
+    if (b) { boot = b; window.__MT_BOOT = b; }
+    bridge = { port: port, sid: sid || boot.sid || "" };
+    state = boot.state || state || {};
+    try {
+      port.onmessage = function (e) { handle(e.data); };
+      if (port.start) port.start();
+    } catch (e) { /* ignore */ }
+    send({ kind: "ready" });
+  };
 
   /* ---------------------------------------------------------------- elements */
 
@@ -319,5 +338,4 @@
     }
   };
 
-  send({ kind: "ready" });
 })();

@@ -4656,6 +4656,9 @@ def main():
           and b"allow-same-origin" not in _pg.data and b"mt-ext-frame" in _pg.data)
     check("the trusted page discloses the residual egress warning",
           b"navigating itself" in _pg.data)
+    check("the trusted bundle is gated (wrapper-function + hello/MessagePort bridge)",
+          b"__mt_bundle" in _pg.data and b"__mt_hello" in _pg.data
+          and b"MessageChannel" in _pg.data)
     _mm = re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>', _pg.data, re.S)
     _tcfg = json.loads(_mm.group(1).decode()) if _mm else {}
     _tsid = _tcfg.get("sid") or ""
@@ -4770,6 +4773,16 @@ def main():
     check("an oversized dispatch body is refused", _r.status_code in (400, 413))
     _r = client.get("/extensions/mt-mail-desk/desk/status", headers={"X-MT-Session": _sid})
     check("the status endpoint reports a live view", (_r.get_json() or {}).get("valid") is True)
+    _r = client.get("/extensions/mt-mail-desk/desk/status")
+    check("a session-less status probe is side-effect-free",
+          (_r.get_json() or {}).get("valid") is False)
+    _r = client.get("/extensions/mt-mail-desk/desk/status",
+                    headers={"X-MT-Session": "forged-forged-forged"})
+    check("a forged-session status probe is side-effect-free",
+          (_r.get_json() or {}).get("valid") is False)
+    _r = client.get("/extensions/mt-mail-desk/desk/status", headers={"X-MT-Session": _sid})
+    check("a live view survives session-less/forged status probes",
+          (_r.get_json() or {}).get("valid") is True)
     with store.db() as conn:
         _na = conn.execute("SELECT COUNT(*) AS n FROM events "
                            "WHERE message LIKE 'ui[view-%mt-mail-desk%'").fetchone()["n"]
@@ -4830,6 +4843,81 @@ def main():
           "mail:allowed" in _eh and "kvget:allowed" in _eh)
     check("the composed page never embeds plugin frontend script",
           b"RawHTML" not in _gpage and b"__mt_ui" not in _gpage)
+    check("a JSON list/dict component type is rejected", _bad_rejected("type_list")
+          and _bad_rejected("type_dict"))
+    check("deeply nested controller state is rejected", _bad_rejected("deep_state"))
+
+    # AR2-2 unit-level: non-string type and deep state must raise UiError, not TypeError/RecursionError
+    def _ui_raises(fn):
+        try:
+            fn()
+            return False
+        except ui_mod.UiError:
+            return True
+        except Exception:
+            return False
+    check("validate_tree maps a list type to UiError",
+          _ui_raises(lambda: ui_mod.validate_tree({"type": []})))
+    check("validate_tree maps a dict type to UiError",
+          _ui_raises(lambda: ui_mod.validate_tree({"type": {}})))
+    _deep = {}
+    _cur = _deep
+    for _i in range(3000):
+        _cur["n"] = {}
+        _cur = _cur["n"]
+    check("validate_state rejects pathological nesting before serializing",
+          _ui_raises(lambda: ui_mod.validate_state(_deep)))
+    # deeply nested raw JSON body must not 500
+    _deepbody = "[" * 3000 + "]" * 3000
+    _r = client.post("/extensions/good-ui/main/dispatch",
+                     headers={"Origin": "http://localhost", "X-MT-Session": _gsid},
+                     data=_deepbody, content_type="application/json")
+    check("a deeply nested raw JSON body is a typed 400, not a 500",
+          _r.status_code == 400)
+
+    # AR2-1: per-call capability profile is thread-local (no shared-slot race)
+    import threading as _th
+    _rt = rt_mod.runtime
+    _enable_pid = "good-ui"
+    _bar = _th.Barrier(2)
+    _seen = {}
+    def _probe(name, profile):
+        _rt._tls.profile = profile
+        _bar.wait()
+        _seen[name] = _rt._host(_enable_pid, "kv.set", "{}")
+    _t1 = _th.Thread(target=_probe, args=("ui", "ui"))
+    _t2 = _th.Thread(target=_probe, args=("plain", None))
+    _t1.start(); _t2.start(); _t1.join(); _t2.join()
+    check("the UI capability profile is per-call, not shared across threads",
+          "not granted" in _seen.get("ui", "") or "denied" in _seen.get("ui", "")
+          or "composed UI" in _seen.get("ui", ""))
+    check("a non-UI call is not denied by a concurrent UI call",
+          "not granted" not in _seen.get("plain", ""))
+
+    # functional concurrency: composed effects probe while a non-UI tool runs
+    _res = {}
+    _bar2 = _th.Barrier(2)
+    def _run_dispatch():
+        _sx, _ = _gsid_for("good-ui", "main")
+        _bar2.wait()
+        _res["dispatch"] = _disp("good-ui", "main", "go", "effects", 0, _sx).get_json() or {}
+    def _run_tool():
+        _bar2.wait()
+        _res["tool"] = _rt.invoke("good-ui", "ping_ui", {"note": "x"})
+    _ta = _th.Thread(target=_run_dispatch); _tb = _th.Thread(target=_run_tool)
+    _ta.start(); _tb.start(); _ta.join(); _tb.join()
+    _conc_html = _res.get("dispatch", {}).get("html") or ""
+    check("UI read-only subset holds while a non-UI tool runs concurrently",
+          "http:denied" in _conc_html and "llm:denied" in _conc_html
+          and "kvset:denied" in _conc_html and _res.get("tool", {}).get("ok") is True)
+
+    # orchestrator extra: post-op revalidation + session validity helper
+    _rv_sid, _ = _gsid_for("good-ui", "main")
+    check("a live session revalidates true",
+          app_mod._ui_session_valid_now("good-ui", "main", _rv_sid, "composed") is True)
+    ui_mod.dispose(_rv_sid)
+    check("a disposed session revalidates false",
+          app_mod._ui_session_valid_now("good-ui", "main", _rv_sid, "composed") is False)
     plugins_mod.set_enabled("good-ui", False)
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

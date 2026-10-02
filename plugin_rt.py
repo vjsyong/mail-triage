@@ -357,7 +357,7 @@ class PluginRuntime:
         self._workers = {}
         self._locks = {}
         self._strikes = {}
-        self._call_profile = {}
+        self._tls = threading.local()
         self._guard = threading.Lock()
 
     # ---- lifecycle
@@ -415,11 +415,15 @@ class PluginRuntime:
             return "msg", msg
 
     def _call_worker(self, plugin_id, row, cmd, profile=None):
-        self._call_profile[plugin_id] = profile
+        # Capability profile is per-call and thread-local: the host bridge pumps
+        # on THIS thread inside _call_worker_inner, so a concurrent call for the
+        # same plugin (matcher/schedule/tool) can never overwrite it (AR2-1).
+        prev = getattr(self._tls, "profile", None)
+        self._tls.profile = profile
         try:
             return self._call_worker_inner(plugin_id, row, cmd)
         finally:
-            self._call_profile.pop(plugin_id, None)
+            self._tls.profile = prev
 
     def _call_worker_inner(self, plugin_id, row, cmd):
         """Send one command to the plugin worker and pump until its reply.
@@ -676,7 +680,7 @@ class PluginRuntime:
         row = kernel.get(plugin_id)
         if not row or not row.get("enabled"):
             return _err_json("denied", "plugin '%s' is not enabled" % plugin_id)
-        if self._call_profile.get(plugin_id) == "ui" and name not in UI_HOST_ALLOW:
+        if getattr(self._tls, "profile", None) == "ui" and name not in UI_HOST_ALLOW:
             return _err_json("denied",
                              "capability '%s' is not available to the composed UI" % name)
         try:

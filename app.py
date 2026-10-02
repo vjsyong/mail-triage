@@ -3616,11 +3616,34 @@ def _sdk_ui_src():
     return _sdk_ui_cache["src"]
 
 
-def _extension_srcdoc(nonce, page_title, boot_json, sdk_src, plugin_src):
+def _extension_srcdoc(nonce, page_title, sdk_src, plugin_src):
+    """Trusted frame document: gated bootstrap + SDK + bundle wrapper.
+
+    The plugin bundle is embedded only as the BODY of a function; it does not
+    execute at parse time. The bootstrap calls it only after the host has
+    transferred a MessagePort bound to this document, so the bridge is one-shot
+    and document-bound and a synchronous self-navigation at first execution
+    cannot retain it (AR2-3). No eval / no unsafe-eval is used."""
     csp = ("default-src 'none'; script-src 'nonce-%s'; style-src 'nonce-%s'; "
            "img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; "
            "object-src 'none'; frame-src 'none'; worker-src 'none'; "
            "form-action 'none'; base-uri 'none'") % (nonce, nonce)
+    token = json.dumps(nonce)
+    bootstrap = (
+        "(function(){\"use strict\";var TOKEN=%s;var started=false;"
+        "function start(port,boot){if(started)return;started=true;"
+        "try{window.__MT_BOOT=boot||{};}catch(e){}"
+        "if(window.__mt_sdk_connect)window.__mt_sdk_connect(port,(boot&&boot.sid)||'',boot||{});"
+        "try{if(window.__mt_bundle)window.__mt_bundle();}catch(e){}"
+        "try{if(window.MTUI&&window.MTUI.start)window.MTUI.start();}catch(e){}}"
+        "window.addEventListener('message',function(e){"
+        "if(e.source!==window.parent)return;var d=e.data;"
+        "if(!d||d.__mt_ack!==1||d.token!==TOKEN)return;"
+        "var port=e.ports&&e.ports[0];if(!port)return;start(port,d.boot);});"
+        "var tries=0;function hello(){if(started)return;"
+        "try{window.parent.postMessage({__mt_hello:1,token:TOKEN},'*');}catch(e){}"
+        "if(tries++<40)setTimeout(hello,150);}hello();})();"
+    ) % token
     out = ["<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
            "<meta http-equiv=\"Content-Security-Policy\" content=\"%s\">" % csp,
            "<meta name=\"referrer\" content=\"no-referrer\">",
@@ -3628,12 +3651,12 @@ def _extension_srcdoc(nonce, page_title, boot_json, sdk_src, plugin_src):
            "<title>%s</title>" % html_escape(page_title),
            "<style nonce=\"%s\">%s</style>" % (nonce, _UI_BASE_CSS),
            "</head><body><div id=\"mt-root\"></div>",
-           "<script nonce=\"%s\">window.__MT_BOOT=%s;</script>" % (nonce, boot_json),
            "<script nonce=\"%s\">%s</script>" % (nonce, sdk_src),
-           "<script nonce=\"%s\">%s</script>" % (nonce, plugin_src),
-           "<script nonce=\"%s\">window.MTUI&&window.MTUI.start();</script>" % nonce,
+           "<script nonce=\"%s\">%s</script>" % (nonce, bootstrap),
+           "<script nonce=\"%s\">window.__mt_bundle=function(){\n%s\n};</script>" % (nonce, plugin_src),
            "</body></html>"]
     return "".join(out)
+
 
 
 def _same_origin_ok():
@@ -3662,12 +3685,12 @@ def _read_json_capped(limit=_UI_JSON_CAP):
         return {}, None
     try:
         return json.loads(data.decode("utf-8")), None
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         return None, "bad_json"
 
 
 def _ui_envelope_status(err_code):
-    if err_code in ("forbidden", "disabled", "denied", "stale"):
+    if err_code in ("forbidden", "disabled", "denied", "stale", "closed"):
         return 403
     if err_code == "not_found":
         return 404
@@ -3676,6 +3699,20 @@ def _ui_envelope_status(err_code):
     if err_code == "busy":
         return 429
     return 200
+
+
+def _ui_session_valid_now(pid, page, sid, mode):
+    """Re-check authority AFTER a controller/tool op, before surfacing results."""
+    row = plugins.get(pid)
+    sess = plugin_ui.get_session(sid, pid, page)
+    if not sess or not row or not row.get("enabled") or sess.get("mode") != mode:
+        return False
+    if mode == "trusted":
+        rec = plugin_ui.approval(pid)
+        if not plugin_ui.is_approved(row) or \
+                sess.get("generation") != int(rec.get("approved_at") or 0):
+            return False
+    return True
 
 
 def _composed_view(result):
@@ -3736,11 +3773,18 @@ def extension_page(pid, page):
             return redirect(url_for("plugin_detail", pid=pid))
         try:
             result = opened.get("result") or {}
+            if not isinstance(result, dict):
+                raise plugin_ui.UiError("invalid_tree", "controller result must be an object")
             tree = plugin_ui.validate_tree(result.get("tree"))
             state = plugin_ui.validate_state(result.get("state") or initial)
         except plugin_ui.UiError as exc:
             plugin_ui.dispose(sid)
             flash("This plugin returned an invalid view (%s)." % exc, "warn")
+            return redirect(url_for("plugin_detail", pid=pid))
+        except Exception as exc:  # noqa: BLE001 - untrusted output must not 500
+            app.logger.warning("composed ui open rejected: %r", exc)
+            plugin_ui.dispose(sid)
+            flash("This plugin returned an invalid view.", "warn")
             return redirect(url_for("plugin_detail", pid=pid))
         plugin_ui.set_tree(sid, tree, plugin_ui.tree_events(tree), state)
         cfg = {"mode": "composed", "sid": sid, "pid": pid, "page": page,
@@ -3764,13 +3808,10 @@ def extension_page(pid, page):
     generation = int(plugin_ui.approval(pid).get("approved_at") or 0)
     sid = plugin_ui.open_session(pid, page, "trusted", generation=generation)
     nonce = secrets.token_urlsafe(18)
-    boot = {"v": 1, "sid": sid, "pid": pid, "page": page,
-            "ops": plugins.ui_operations(row), "state": initial}
-    boot_json = json.dumps(boot).replace("</", "<\\/")
     srcdoc = _extension_srcdoc(nonce, name + " - " + page_info["title"],
-                               boot_json, sdk_src, plugin_src)
+                               sdk_src, plugin_src)
     cfg = {"mode": "trusted", "sid": sid, "pid": pid, "page": page,
-           "base": "/extensions/%s/%s" % (pid, page),
+           "base": "/extensions/%s/%s" % (pid, page), "bootToken": nonce,
            "ops": plugins.ui_operations(row), "initial": initial,
            "generation": generation}
     cfg_json = json.dumps(cfg).replace("</", "<\\/")
@@ -3797,6 +3838,9 @@ def extension_dispatch(pid, page):
         return jsonify({"ok": False, "error": {"code": "busy",
                                                "message": "too many events"}}), 429
     ev = payload.get("event")
+    if not isinstance(ev, str):
+        return jsonify({"ok": False, "error": {"code": "invalid_args",
+                                               "message": "event must be a string"}}), 400
     info = (sess.get("events") or {}).get(ev)
     if not info:
         return jsonify({"ok": False, "error": {"code": "forbidden",
@@ -3836,12 +3880,22 @@ def extension_dispatch(pid, page):
                                                    "message": e.get("message") or "failed"}}), \
                 _ui_envelope_status(e.get("code"))
         result = out.get("result") or {}
+        if not isinstance(result, dict):
+            return jsonify({"ok": False, "error": {"code": "invalid_tree",
+                                                   "message": "controller result must be an object"}}), 400
+        if not _ui_session_valid_now(pid, page, sid, "composed"):
+            return jsonify({"ok": False, "error": {"code": "closed",
+                                                   "message": "view was closed"}}), 403
         try:
             tree = plugin_ui.validate_tree(result.get("tree"))
             state = plugin_ui.validate_state(result.get("state") or {})
         except plugin_ui.UiError as exc:
             return jsonify({"ok": False, "error": {"code": exc.code,
                                                    "message": str(exc)}}), 400
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("composed ui dispatch rejected: %r", exc)
+            return jsonify({"ok": False, "error": {"code": "invalid_tree",
+                                                   "message": "controller returned an invalid view"}}), 400
         plugin_ui.set_tree(sid, tree, plugin_ui.tree_events(tree), state)
         newrev = plugin_ui.bump_revision(sid)
         try:
@@ -3851,6 +3905,7 @@ def extension_dispatch(pid, page):
             pass
         return jsonify({"ok": True, "html": plugin_ui.render_tree(tree),
                         "revision": newrev, "view": _composed_view(result),
+                        "replace": bool(result.get("replace")),
                         "url": _ext_url(pid, page, result.get("url"))})
 
 
@@ -3888,6 +3943,9 @@ def extension_rpc(pid, page):
             return jsonify({"ok": False, "error": {"code": "busy",
                                                    "message": "too many concurrent calls"}}), 429
         res = plugin_rt.runtime.invoke_ui(pid, page, op, args)
+    if not _ui_session_valid_now(pid, page, sid, "trusted"):
+        return jsonify({"ok": False, "error": {"code": "closed",
+                                               "message": "view was closed"}}), 403
     try:
         store.log_event("plugin", "ui[%s] %s.%s %s"
                         % (plugin_ui.view_id(sid), pid, op,
@@ -3906,10 +3964,12 @@ def extension_dispose(pid, page):
     sid = (request.headers.get("X-MT-Session") or "").strip()
     sess = plugin_ui.get_session(sid, pid, page)
     if sess and sess.get("mode") == "composed":
-        try:
-            plugin_rt.runtime.ui_close(pid, sess.get("state") or {})
-        except Exception:
-            pass
+        with plugin_ui.slot(pid) as _slot:
+            if _slot.got:
+                try:
+                    plugin_rt.runtime.ui_close(pid, sess.get("state") or {})
+                except Exception:
+                    pass
     plugin_ui.dispose(sid)
     return jsonify({"ok": True})
 
@@ -3920,15 +3980,19 @@ def extension_status(pid, page):
     # effect (it never mutates and exposes no plugin data).
     sid = (request.headers.get("X-MT-Session") or "").strip()
     sess = plugin_ui.get_session(sid, pid, page)
+    if not sess:
+        # Unknown/forged/session-less caller: report invalid but DO NOT drop other
+        # live views (AR2-4).
+        return jsonify({"ok": True, "valid": False, "revision": 0})
     row = plugins.get(pid)
-    valid = bool(sess and row and row.get("enabled"))
+    valid = bool(row and row.get("enabled"))
     if valid and plugins.ui_mode(row) == "trusted":
         valid = plugin_ui.is_approved(row) and \
             sess.get("generation") == int(plugin_ui.approval(pid).get("approved_at") or 0)
-    if not valid:
-        plugin_ui.drop_plugin(pid)
+    if not valid and _same_origin_ok():
+        plugin_ui.dispose(sid)
     return jsonify({"ok": True, "valid": valid,
-                    "revision": (sess or {}).get("revision", 0)})
+                    "revision": sess.get("revision", 0)})
 
 
 @app.route("/plugins/<pid>/ui-approve", methods=["POST"])
@@ -4000,9 +4064,22 @@ padding:9px 12px;font-size:.84rem}
   var errorEl = document.getElementById('mt-ext-error');
   var disposed = false;
   var pollT = null;
+  var cleanups = [];
+  function on(target, type, fn){ if(!target) return; target.addEventListener(type, fn); cleanups.push(function(){ try{ target.removeEventListener(type, fn); }catch(e){} }); }
   function setStatus(t){ if(status){ status.textContent = t || ''; } }
   function showError(msg){ if(errorEl){ errorEl.hidden = false; errorEl.textContent = msg; } }
   function clearTree(){ var t=document.getElementById('mt-tree'); if(t) t.textContent=''; }
+  function teardown(){
+    if(disposed) return;
+    disposed = true;
+    if(pollT){ clearInterval(pollT); pollT = null; }
+    while(cleanups.length){ try{ cleanups.pop()(); }catch(e){} }
+    try {
+      fetch(cfg.base + '/dispose', {method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-MT-Session':cfg.sid}, body:'{}', keepalive:true});
+    } catch(e){}
+  }
+  function fail(msg){ clearTree(); showError(msg); teardown(); }
   function poll(){
     if(disposed) return;
     fetch(cfg.base + '/status', {credentials:'same-origin',
@@ -4010,25 +4087,13 @@ padding:9px 12px;font-size:.84rem}
       .then(function(j){
         if(disposed) return;
         if(j && j.ok && j.valid) return;
-        disposed = true;
-        if(pollT){ clearInterval(pollT); pollT = null; }
-        clearTree();
-        showError('This plugin page was closed (the plugin was disabled, unapproved or changed). Reload to retry.');
+        fail('This plugin page was closed (the plugin was disabled, unapproved or changed). Reload to retry.');
       }).catch(function(){});
   }
-  function teardown(){
-    if(disposed) return;
-    disposed = true;
-    if(pollT){ clearInterval(pollT); pollT = null; }
-    try {
-      fetch(cfg.base + '/dispose', {method:'POST', credentials:'same-origin',
-        headers:{'Content-Type':'application/json','X-MT-Session':cfg.sid}, body:'{}', keepalive:true});
-    } catch(e){}
-  }
-  window.addEventListener('pagehide', teardown);
-  document.addEventListener('turbo:before-cache', teardown);
-  document.addEventListener('turbo:before-render', teardown);
-  document.addEventListener('turbo:before-visit', teardown);
+  on(window, 'pagehide', teardown);
+  on(document, 'turbo:before-cache', teardown);
+  on(document, 'turbo:before-render', teardown);
+  on(document, 'turbo:before-visit', teardown);
   if(window.__mtExt && window.__mtExt.teardown){ try{ window.__mtExt.teardown(); }catch(e){} }
   window.__mtExt = {teardown: teardown};
 
@@ -4047,16 +4112,21 @@ padding:9px 12px;font-size:.84rem}
     function apply(res){
       if(disposed || !res) return;
       if(!res.ok){
-        var e = (res.error && res.error.message) || 'Request failed.';
-        showError(String(e)); setStatus('');
+        showError(String((res.error && res.error.message) || 'Request failed.'));
+        setStatus('');
         return;
       }
       errorEl.hidden = true;
       if(typeof res.html === 'string') tree.innerHTML = res.html;
       applyView(res.view || cfg.view);
       if(res.revision) revision = res.revision;
-      if(res.url) history[res.replace ? 'replaceState' : 'pushState'](
-        Object.assign({}, history.state || {}, {mtExt: 1}), '', res.url);
+      if(res.url){
+        var cur = location.pathname + location.search;
+        if(res.url !== cur){
+          history[res.replace ? 'replaceState' : 'pushState'](
+            Object.assign({}, history.state || {}, {mtExt: 1}), '', res.url);
+        }
+      }
       setStatus('');
     }
     function dispatch(ev, value){
@@ -4074,38 +4144,39 @@ padding:9px 12px;font-size:.84rem}
       }).catch(function(){ showError('Request failed. Reload to retry.'); })
         .then(function(){ busy = false; });
     }
-    document.addEventListener('click', function(e){
+    on(document, 'click', function(e){
       var m = e.target && e.target.closest ? e.target.closest('[data-mt-event]') : null;
       if(!m || m.tagName === 'INPUT') return;
       e.preventDefault();
       dispatch(m.getAttribute('data-mt-event'), m.getAttribute('data-mt-value'));
     });
-    document.addEventListener('keydown', function(e){
+    on(document, 'keydown', function(e){
       if(e.key !== 'Enter') return;
       var m = e.target && e.target.closest ? e.target.closest('[data-mt-event]') : null;
-      if(m && m.tagName === 'INPUT'){
-        e.preventDefault();
-        dispatch(m.getAttribute('data-mt-event'), m.value);
-      }
+      if(m && m.tagName === 'INPUT'){ e.preventDefault(); dispatch(m.getAttribute('data-mt-event'), m.value); }
     });
-    var tabs = document.getElementById('mt-tree');
-    if(tabs){ tabs.addEventListener('click', function(e){
-      var b = e.target && e.target.closest ? e.target.closest('[data-mt-tab]') : null;
-      if(!b) return;
-      var bar = b.parentNode;
-      var idx = parseInt(b.getAttribute('data-mt-tab'), 10);
-      bar.querySelectorAll('[data-mt-tab]').forEach(function(x){ x.classList.remove('on'); });
-      b.classList.add('on');
-      var wrap = b.closest('.mtc-tabs');
-      if(wrap){ wrap.querySelectorAll('.mtc-tabpanel').forEach(function(p, i){ p.hidden = i !== idx; }); }
-    }); }
+    (function(){
+      var tabs = document.getElementById('mt-tree');
+      if(!tabs) return;
+      on(tabs, 'click', function(e){
+        var b = e.target && e.target.closest ? e.target.closest('[data-mt-tab]') : null;
+        if(!b) return;
+        var idx = parseInt(b.getAttribute('data-mt-tab'), 10);
+        var bar = b.parentNode;
+        bar.querySelectorAll('[data-mt-tab]').forEach(function(x){ x.classList.remove('on'); });
+        b.classList.add('on');
+        var wrap = b.closest('.mtc-tabs');
+        if(wrap){ wrap.querySelectorAll('.mtc-tabpanel').forEach(function(p, i){ p.hidden = i !== idx; }); }
+      });
+    })();
     applyView(cfg.view);
-    window.addEventListener('popstate', function(){ if(!disposed) location.reload(); });
+    on(window, 'popstate', function(){ if(!disposed) location.reload(); });
     setStatus('');
   } else {
     var frame = document.getElementById('mt-ext-frame');
-    var pending = {}, seq = 0, loads = 0;
-    function post(msg){ try { frame.contentWindow.postMessage(msg, '*'); } catch(e){} }
+    var pending = {}, seq = 0, handshaken = false, bridged = false, port = null;
+    var watchdog = null, heartbeatT = null, checkT = null, lastPong = 0;
+    function post(msg){ if(port){ try{ port.postMessage(msg); }catch(e){} } }
     function theme(){
       var cs = window.getComputedStyle(document.documentElement);
       var names = ['--fg','--bg','--dim','--line','--line2','--card','--card2','--acc',
@@ -4131,13 +4202,26 @@ padding:9px 12px;font-size:.84rem}
                 var ab = err && err.name === 'AbortError';
                 return {ok:false, error:{code: ab?'timeout':'network', message: ab?'request timed out':'request failed'}}; });
     }
-    function onMessage(e){
-      if(e.source !== frame.contentWindow || disposed) return;
+    function onPortMessage(e){
+      if(disposed) return;
       var d = e.data;
-      if(!d || d.__mt !== 1 || d.sid !== cfg.sid) return;
+      if(!d || d.__mt !== 1) return;
+      if(d.sid && d.sid !== cfg.sid) return;
       if(d.kind === 'ready'){
         post({__mt:1, sid:cfg.sid, kind:'theme', theme:theme(), config:cfg.initial});
         post({__mt:1, sid:cfg.sid, kind:'layout', layout:layout()});
+        if(!bridged){
+          bridged = true;
+          lastPong = Date.now();
+          heartbeatT = setInterval(function(){ if(!disposed) post({__mt:1, sid:cfg.sid, kind:'ping'}); }, 2000);
+          checkT = setInterval(function(){
+            if(!disposed && Date.now() - lastPong > 6000){
+              fail('The plugin view stopped responding; its bridge was closed. Reload to retry.');
+            }
+          }, 2000);
+        }
+      } else if(d.kind === 'pong'){
+        lastPong = Date.now();
       } else if(d.kind === 'call'){
         if(!d.op || cfg.ops.indexOf(d.op) < 0){
           post({__mt:1, sid:cfg.sid, kind:'result', id:d.id, ok:false, error:{code:'forbidden', message:'operation not allowed'}});
@@ -4154,28 +4238,44 @@ padding:9px 12px;font-size:.84rem}
           if(typeof d.message === 'string'){ if(d.message) url.searchParams.set('message', d.message.slice(0,20)); else url.searchParams.delete('message'); }
           var next = url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '');
           if(next !== location.pathname + location.search){
-            history[d.replace ? 'replaceState' : 'pushState'](
-              Object.assign({}, history.state || {}, {mtExt:1}), '', next);
+            history[d.replace ? 'replaceState' : 'pushState'](Object.assign({}, history.state || {}, {mtExt:1}), '', next);
           }
         } catch(e){}
       } else if(d.kind === 'log'){
         try{ console.log('[plugin ' + cfg.pid + '] ' + String(d.message||'').slice(0,500)); }catch(err){}
       }
     }
-    window.addEventListener('resize', function(){ if(!disposed) post({__mt:1, sid:cfg.sid, kind:'layout', layout:layout()}); });
-    window.addEventListener('popstate', function(){
+    function onHello(e){
+      if(disposed || handshaken) return;
+      if(e.source !== frame.contentWindow) return;
+      var d = e.data;
+      if(!d || d.__mt_hello !== 1 || d.token !== cfg.bootToken) return;
+      handshaken = true;   // one-shot: a later remote page cannot re-establish
+      var ch = new MessageChannel();
+      port = ch.port1;
+      port.onmessage = onPortMessage;
+      if(port.start) port.start();
+      if(watchdog){ clearTimeout(watchdog); watchdog = null; }
+      try {
+        frame.contentWindow.postMessage({__mt_ack:1, token:cfg.bootToken, sid:cfg.sid,
+          boot:{v:1, pid:cfg.pid, page:cfg.page, ops:cfg.ops, state:cfg.initial}},
+          '*', [ch.port2]);
+      } catch(err){}
+      setStatus('');
+    }
+    on(window, 'message', onHello);
+    on(window, 'resize', function(){ if(!disposed) post({__mt:1, sid:cfg.sid, kind:'layout', layout:layout()}); });
+    on(window, 'popstate', function(){
       var params = new URLSearchParams(location.search);
       post({__mt:1, sid:cfg.sid, kind:'state', state:{q:params.get('q')||'', message:params.get('message')||''}});
     });
-    frame.addEventListener('load', function(){
-      loads++;
-      if(loads > 1){
-        // Unexpected self-navigation: drop the bridge immediately (AR1-1/A10).
-        teardown();
-        showError('The plugin view navigated away; its bridge was closed. Reload to retry.');
-      }
-    });
-    window.addEventListener('message', onMessage);
+    cleanups.push(function(){ if(heartbeatT){ clearInterval(heartbeatT); heartbeatT = null; } });
+    cleanups.push(function(){ if(checkT){ clearInterval(checkT); checkT = null; } });
+    cleanups.push(function(){ if(port){ try{ port.onmessage = null; port.close(); }catch(e){} port = null; } });
+    cleanups.push(function(){ if(frame && frame.parentNode){ try{ frame.parentNode.removeChild(frame); }catch(e){} } });
+    watchdog = setTimeout(function(){
+      if(!handshaken && !disposed){ fail('The plugin view did not start.'); }
+    }, 4000);
     setStatus('Loading\u2026');
   }
   pollT = setInterval(poll, 4000);

@@ -35,6 +35,8 @@ MAX_TREE_DEPTH = 12
 MAX_TEXT = 4000
 MAX_ARRAY = 200
 MAX_STATE_BYTES = 16384
+MAX_STATE_NODES = 2000
+MAX_STATE_DEPTH = 20
 SESSION_TTL = 1800
 SESSION_MAX = 200
 RATE_WINDOW = 10.0          # seconds
@@ -133,6 +135,8 @@ def validate_tree(node, depth=0, counter=None):
     if not isinstance(node, dict):
         raise UiError("invalid_tree", "each node must be an object")
     t = node.get("type")
+    if not isinstance(t, str):
+        raise UiError("invalid_tree", "component type must be a string")
     if t not in _TYPES:
         raise UiError("invalid_tree", "unknown component type %r" % (t,))
     extra_keys = set(node) - _ALLOWED_NODE_KEYS
@@ -474,22 +478,6 @@ def drop_plugin(pid):
             _session_locks.pop(k, None)
 
 
-def live_count():
-    with _lock:
-        return len(_sessions)
-
-
-def touch_plugin(pid):
-    """Drop every session whose plugin is no longer enabled or whose approval
-    no longer matches current content. Called by the status poll + list/render."""
-    row = kernel.get(pid)
-    keep = bool(row and row.get("enabled"))
-    if keep and kernel.ui_mode(row) == "trusted":
-        keep = is_approved(row)
-    if not keep:
-        drop_plugin(pid)
-    return keep
-
 
 # ---------------------------------------------------------------- rate / concurrency
 
@@ -572,13 +560,40 @@ def revoke(pid):
 
 # ---------------------------------------------------------------- bounded state
 
+def _state_shape(obj):
+    """Iterative depth/node count (no recursion) to reject pathological state."""
+    stack = [(obj, 0)]
+    nodes = 0
+    maxd = 0
+    while stack:
+        v, d = stack.pop()
+        nodes += 1
+        if d > maxd:
+            maxd = d
+        if maxd > MAX_STATE_DEPTH or nodes > MAX_STATE_NODES:
+            return maxd, nodes
+        if isinstance(v, dict):
+            for val in v.values():
+                stack.append((val, d + 1))
+        elif isinstance(v, list):
+            for val in v:
+                stack.append((val, d + 1))
+    return maxd, nodes
+
+
 def validate_state(state):
+    """Bound shape/bytes BEFORE serializing so deep state can't raise."""
+    if state is None:
+        state = {}
+    if not isinstance(state, dict):
+        raise UiError("invalid_state", "controller state must be a JSON object")
+    depth, nodes = _state_shape(state)
+    if depth > MAX_STATE_DEPTH or nodes > MAX_STATE_NODES:
+        raise UiError("invalid_state", "controller state is too large/nested")
     try:
-        blob = json.dumps(state if state is not None else {}, ensure_ascii=False)
-    except (TypeError, ValueError):
+        blob = json.dumps(state, ensure_ascii=False)
+    except (TypeError, ValueError, RecursionError):
         raise UiError("invalid_state", "controller state is not JSON")
     if len(blob.encode("utf-8")) > MAX_STATE_BYTES:
         raise UiError("invalid_state", "controller state exceeds %d bytes" % MAX_STATE_BYTES)
-    if len(blob) > 0 and not isinstance(json.loads(blob), dict):
-        raise UiError("invalid_state", "controller state must be a JSON object")
     return json.loads(blob)

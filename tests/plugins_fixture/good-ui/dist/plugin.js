@@ -20,6 +20,13 @@ globalThis.__mt_plugin = {
         B.list([B.listItem([B.badge("ok")], { event: "go", selected: true })])
       ]) };
     }
+    if (ev.kind === "go" && v === "type_list") { return { tree: { type: [] } }; }
+    if (ev.kind === "go" && v === "type_dict") { return { tree: { type: {} } }; }
+    if (ev.kind === "go" && v === "deep_state") {
+      var deep = {}; var cur = deep;
+      for (var i = 0; i < 50; i++) { cur.n = {}; cur = cur.n; }
+      return { tree: base(), state: deep };
+    }
     if (ev.kind === "go" && v === "boom") {
       throw new Error("kaboom");
     }

@@ -111,11 +111,20 @@ inherent browser capability and is **not** constrained by the plugin's
 - Approval is stored in settings and bound to the exact manifest + backend +
   frontend content digests and version; editing or updating the plugin
   invalidates it and requires fresh consent. **Revoke approval** removes it.
-- The host page polls a bounded status endpoint; on revoke/disable/tamper it
-  clears the tree and tears the frame down, and the host disposes the bridge
-  (and ignores late results) on any unexpected frame navigation.
+- The host bridges over a **gated, document-bound `MessagePort`**: the bundle is
+  embedded only as the body of a function (it does not run at parse time, and no
+  `eval`/`unsafe-eval` is used); a bootstrap performs a `hello`/`ack` handshake
+  and the host transfers a port tied to the original srcdoc document before the
+  bundle is invoked. Operational messages travel only on that port, never the
+  global `WindowProxy`, so a page that self-navigates after the accepted initial
+  egress cannot inherit or re-establish the bridge. A bounded heartbeat
+  (`ping`/`pong`) tears the frame and session down when the port goes quiet, and
+  a handshake watchdog handles a skipped load.
+- A bounded status poll clears the rendered tree when the plugin is
+  disabled/unapproved/changed; dispatch and RPC re-validate the session, grants
+  and trust generation *after* the operation, so a late result cannot resurface.
 - Host responses for `/extensions/*` carry `X-Frame-Options: DENY` and
-  `Content-Security-Policy: frame-ancestors 'none'`.
+  `Content-Security-Policy: frame-ancestors 'none'` (response header, not meta).
 
 The trusted fixture/sample is inert (public SDK, no network) so approval can be
 tested safely. Enable, grants, built-in origin, CLI enable and manifest
