@@ -900,16 +900,16 @@ Node dev-tier adapter (`--plugins dev`), plugin code signing, Wasm adapter swap,
 retire-the-native-heuristic automation for mirrored fast-paths, nested-object
 config schemas in the form (flat types only for now).
 
-## Browser pages (2026-10-02)
+## Browser pages (2026-10-02, revised)
 
-The v1 "no plugin-provided UI" non-goal is lifted in a deliberately narrow form.
-A manifest may declare `ui {entrypoint, pages, navigation, operations}`; the host
-serves `/extensions/<id>/<page>` and renders the untrusted bundle in
-`<iframe sandbox="allow-scripts">` (no same-origin) via srcdoc with a nonce CSP
-that denies network, forms, frames and workers. The host page holds a
-server-minted per-view session and mediates every call
-(`POST /extensions/<id>/<page>/rpc`, same-origin + session + explicit
-`ui.operations` allowlist) through the existing sandbox `invoke()` path, so
-enable/grants/limits/audit are unchanged. Navigation entries, groups, order and
-icons are host-owned enumerations. `plugins/mt-mail-desk` is the read-only
-reference demo; full details in `docs/plugin-pages.md`.
+Two tiers. The default, **composed**, runs no plugin browser JS: the sandbox
+bundle exports synchronous `uiOpen`/`uiDispatch`/`uiClose` returning a data-only
+component tree (built with `sdk/compose.js`), which the host validates with a
+strict whitelist + bounds and renders itself; the host owns bounded controller
+state, event binding and a monotonic revision, and controller execution gets a
+read-only host capability subset (mail read/search, config, kv read, log).
+The second, **trusted**, embeds a browser bundle in an opaque-origin iframe but
+only after an explicit per-content user approval (bound to manifest/backend/
+frontend digests); its self-navigation egress is disclosed, not denied, and the
+host disposes the bridge on unexpected frame navigation. Full details in
+`docs/plugin-pages.md`; `plugins/mt-mail-desk` is the composed reference.

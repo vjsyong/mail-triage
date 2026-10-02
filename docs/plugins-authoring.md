@@ -144,20 +144,26 @@ Bump `version` on every change you ship; same-version edits are flagged
 
 ## Browser pages (optional)
 
-A plugin can also ship one browser page bundle and appear in the sidebar:
+A plugin can ship a page in the sidebar. There are two modes; see
+`docs/plugin-pages.md` for the full contract:
+
+- **`composed`** (default, sandboxed): the bundle exports synchronous
+  `uiOpen`/`uiDispatch`/`uiClose` and returns a data-only component tree built
+  with the `MTUIB` helpers from `sdk/compose.js`. The host validates and renders
+  it; no plugin browser JS runs, and controller execution gets a read-only host
+  capability subset (mail read/search, config, kv read, log).
+- **`trusted`**: a browser bundle in an isolated iframe. It only runs after the
+  user explicitly approves it on the plugin page, and the warning states that
+  such a view can transmit any data it receives by navigating itself (not
+  constrained by `net.http`).
 
 ```json
 "ui": {
-  "entrypoint": "ui/page.js",
+  "mode": "composed",
   "pages": [{ "id": "desk", "title": "My page" }],
-  "navigation": [{ "page": "desk", "label": "My page", "group": "system", "icon": "puzzle" }],
-  "operations": ["my_read_op"]
+  "navigation": [{ "page": "desk", "label": "My page", "group": "system", "icon": "puzzle" }]
 }
 ```
 
-The page runs in a sandboxed, opaque-origin frame (no same-origin, no network)
-and reaches the backend only through an explicit allowlist of read-only tools
-listed in `ui.operations`; each call goes through the normal sandbox runtime
-(grants, limits, audit). See `docs/plugin-pages.md` for the trust boundary, the
-`MTUI` page SDK and the lifecycle. `plugins/mt-mail-desk` is the reference
-implementation.
+`plugins/mt-mail-desk` is the composed reference; `sdk/compose.js` is the
+component builder.

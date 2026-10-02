@@ -1,0 +1,27 @@
+{
+  "id": "good-trusted",
+  "name": "Good trusted view",
+  "action": "Open trusted view",
+  "version": "0.1.0",
+  "description": "A valid trusted browser-view fixture (inert): requires explicit approval.",
+  "engines": { "sdk": ">=0.2 <1.0" },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": ["tool"],
+  "tools": [
+    {
+      "name": "ping_ui",
+      "description": "Return a small value (fixture).",
+      "parameters": { "type": "object", "properties": { "note": { "type": "string" } } },
+      "side_effects": "none",
+      "surface": "hidden"
+    }
+  ],
+  "ui": {
+    "mode": "trusted",
+    "entrypoint": "ui/page.js",
+    "pages": [{ "id": "main", "title": "Trusted fixture" }],
+    "navigation": [{ "page": "main", "label": "Trusted", "group": "system", "icon": "puzzle", "order": 20 }],
+    "operations": ["ping_ui"]
+  }
+}

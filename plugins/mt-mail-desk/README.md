@@ -1,34 +1,31 @@
 # Mail Desk (mt-mail-desk)
 
-A focused, **read-only** desk over the local mail index, shipped as the reference
-browser-UI plugin. It exercises only the public plugin contracts: a sandboxed
-`execute` bundle plus one browser page, with no host privileges beyond
-`mailbox.read`.
+A focused, **read-only**, **composed** plugin page over the local mail index -
+the reference for the sandboxed UI tier. It runs no browser plugin code and gets
+no host privileges beyond `mailbox.read`.
 
 ## What it does
 
 - **Search** the local index (capped at 50 results) by sender, subject or
-  snippet.
-- **Select** a result and read headers, category, tags and needs-reply state,
-  plus the locally indexed plain text.
+  snippet; **select** a result to read headers, category, tags and needs-reply
+  state plus the locally indexed plain text.
+- **Refresh**, and loading/empty/denied/error states with retry.
 - **Deep links**: `?q=` and `?message=` survive reload, back and forward.
-- Desktop shows a two-pane list/reader; at <=767px it becomes a list that pushes
-  to a reader with a back control.
+- Desktop shows a split list/reader; at <=767px the host switches to a
+  list-then-reader layout with a back control (host-controlled layout).
 - **Honest, index-only caveat:** the reader shows only what the local index
-  stores (the same body text the sandbox `ctx.mail.read` exposes). Attachments
-  and rich mail HTML are never read. No LLM is called and nothing is moved, sent
-  or deleted.
+  stores. Attachments and rich mail HTML are never read. No LLM is called and
+  nothing is moved, sent or deleted.
 
-## How it is wired
+## How it is wired (composed)
 
-- `manifest.json` declares two hidden, read-only tools
-  (`search_messages`, `read_message`) and a `ui` block whose `operations` list
-  allowlists exactly those two tools for the browser page.
-- `dist/plugin.js` is the sandbox bundle; it calls `ctx.mail.search` /
-  `ctx.mail.read` and catches host errors, returning typed
-  `{ok:false, error:{code}}` envelopes.
-- `ui/mail-desk.js` is the browser bundle; it uses only the host page SDK
-  (`MTUI`) and never fetches directly.
+- `manifest.json` declares `ui.mode: "composed"`, one page, two hidden
+  read-only tools, and `mailbox.read`.
+- `dist/plugin.js` exports synchronous `uiOpen` / `uiDispatch` / `uiClose`; it
+  builds a data-only component tree with the `MTUIB` helpers and calls
+  `ctx.mail.search` / `ctx.mail.read`. The host validates the tree and renders
+  it; controller execution gets a read-only host capability subset (net, LLM,
+  kv writes and action proposals are denied).
 
 ## Install / try it
 
@@ -40,5 +37,5 @@ python app.py --plugins rescan
 python app.py --plugins enable mt-mail-desk
 ```
 
-Then use the **Mail Desk** entry in the sidebar. See
-`docs/plugin-pages.md` for the trust boundary and authoring details.
+Then use the **Mail Desk** entry in the sidebar. See `docs/plugin-pages.md` for
+the composed/trusted contract.

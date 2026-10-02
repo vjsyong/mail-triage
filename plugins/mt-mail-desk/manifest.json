@@ -2,9 +2,9 @@
   "id": "mt-mail-desk",
   "name": "Mail Desk",
   "action": "Open Mail Desk",
-  "version": "0.1.0",
-  "description": "A focused read-only desk over the local index: search, browse and read plain-text, with deep links. Index-only - attachments and rich mail HTML are not read, and nothing is ever moved or sent.",
-  "engines": { "sdk": ">=0.1 <1.0" },
+  "version": "0.2.0",
+  "description": "A focused read-only composed desk over the local index: search, browse and read plain-text, with deep links. Index-only - no attachments or rich mail HTML, no browser plugin code, nothing moved or sent.",
+  "engines": { "sdk": ">=0.2 <1.0" },
   "runtime": "quickjs",
   "entrypoint": "dist/plugin.js",
   "kind": ["tool"],
@@ -13,7 +13,7 @@
   "tools": [
     {
       "name": "search_messages",
-      "description": "Search the local mail index by sender, subject or snippet. Returns a capped result list; used by the Mail Desk browser page.",
+      "description": "Search the local mail index by sender, subject or snippet. Returns a capped result list.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -26,7 +26,7 @@
     },
     {
       "name": "read_message",
-      "description": "Read one indexed message by id (headers, category, tags, plain text). Used by the Mail Desk browser page.",
+      "description": "Read one indexed message by id (headers, category, tags, plain text).",
       "parameters": {
         "type": "object",
         "properties": { "id": { "type": "integer", "description": "local index id" } },
@@ -37,13 +37,12 @@
     }
   ],
   "ui": {
-    "entrypoint": "ui/mail-desk.js",
+    "mode": "composed",
     "pages": [
       { "id": "desk", "title": "Mail Desk", "description": "Search and read the local mail index" }
     ],
     "navigation": [
       { "page": "desk", "label": "Mail Desk", "group": "mail", "icon": "mail", "order": 5 }
-    ],
-    "operations": ["search_messages", "read_message"]
+    ]
   }
 }

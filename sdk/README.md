@@ -88,38 +88,33 @@ strings / numbers / booleans / string-arrays). Plugins read the values via
 
 ## Browser pages (optional)
 
-Add a `ui` block to the manifest to ship one browser page under
-`/extensions/<id>/<page>`:
+Two modes (see `docs/plugin-pages.md`):
 
-```json
-"ui": {
-  "entrypoint": "ui/page.js",
-  "pages": [{ "id": "main", "title": "My page" }],
-  "navigation": [{ "page": "main", "label": "My page" }],
-  "operations": ["my_read_op"]
-}
-```
-
-The host injects `sdk/ui.js` (the `MTUI` page SDK) then your bundle; register
-renderers on `globalThis.__mt_ui`:
+**`composed`** (default, sandboxed - no plugin browser JS). Export synchronous
+`uiOpen`/`uiDispatch`/`uiClose` and build the tree with the global `MTUIB`
+helpers from `sdk/compose.js`:
 
 ```js
-globalThis.__mt_ui = {
-  pages: {
-    main: {
-      render: function (root, api) {
-        api.call("my_read_op", { q: "" }).then(function (res) {
-          root.textContent = JSON.stringify(res.data);
-        }).catch(function (err) {
-          root.textContent = "failed: " + err.code;
-        });
-      }
-    }
-  }
+"ui": { "mode": "composed",
+        "pages": [{ "id": "main", "title": "My page" }],
+        "navigation": [{ "page": "main", "label": "My page" }] }
+```
+```js
+globalThis.__mt_plugin = {
+  uiOpen: function (ctx, input) {
+    return { tree: globalThis.MTUIB.text("hello", { variant: "title" }), state: {} };
+  },
+  uiDispatch: function (ctx, input) { return { tree: globalThis.MTUIB.text("done"), state: {} }; },
+  uiClose: function (ctx, input) {}
 };
 ```
 
-Your bundle runs in a sandboxed, opaque-origin frame (no same-origin, no
-network, no forms) and can only call the read-only tools you list in
-`operations`. Every call is re-checked server-side and audited. Full contract,
-trust boundary and lifecycle: `docs/plugin-pages.md`.
+The host validates the tree against a strict whitelist and renders it; the
+controller gets a read-only host subset (mail read/search, config, kv read,
+log). Prefer `plugins/mt-mail-desk` as the worked example.
+
+**`trusted`** (browser bundle, requires explicit user approval on the plugin
+page). Add `entrypoint` and a read-only `operations` allowlist; register
+renderers on `globalThis.__mt_ui` using the `MTUI` page SDK (injected as
+`sdk/ui.js`). Such a view runs plugin code and can transmit data it receives by
+navigating itself, so it is disclosed as such and never auto-approved.

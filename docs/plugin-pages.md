@@ -1,176 +1,148 @@
-# Plugin pages (browser UI) - design + authoring
+# Plugin pages (browser UI) - two tiers
 
-Status: implemented 2026-10-02. A plugin may now ship one browser page bundle
-alongside its sandbox bundle. The host renders it at `/extensions/<id>/<page>`
-and mediates every backend call. This document is the trust-boundary record and
-the authoring guide; `docs/plugins-authoring.md` covers the sandbox side.
+Status: implemented 2026-10-02 (v1: browser-bundle pages; this revision adds a
+sandboxed composed default and explicit approval for trusted views). A plugin
+may declare an optional `ui` block. There are two modes, and they are not equal:
 
-## What a plugin declares
+| Mode | Default? | Plugin browser JS | Reach | Gate |
+|---|---|---|---|---|
+| `composed` | yes | **none** | validated component tree rendered by the host | none beyond enable + grants |
+| `trusted` | no | yes, in an opaque-origin iframe | read-only backend ops through the host bridge | **explicit per-content user approval** |
 
-`manifest.json` gains an optional `ui` object (validated by
-`schemas/plugin-manifest.schema.json` plus semantic checks in `plugins.py`):
+The composed tier is the safe default: a malicious backend cannot inject markup
+or a network sink, because the host parses a whitelisted tree and renders it
+itself. The trusted tier exists for richer views but must be approved by the
+user, and its residual egress is disclosed rather than denied.
+
+## Manifest
 
 ```json
 "ui": {
-  "entrypoint": "ui/page.js",          // browser bundle, inside the plugin dir
-  "pages": [
-    { "id": "desk", "title": "Mail Desk", "description": "Search and read" }
-  ],
-  "navigation": [
-    { "page": "desk", "label": "Mail Desk",
-      "group": "mail", "icon": "mail", "order": 5 }
-  ],
-  "operations": ["search_messages", "read_message"]
+  "mode": "composed",
+  "pages": [{ "id": "desk", "title": "Mail Desk" }],
+  "navigation": [{ "page": "desk", "label": "Mail Desk", "group": "mail", "icon": "mail", "order": 5 }]
 }
 ```
 
-Rules enforced at discovery/validate time (re-checked at serve time):
+Trusted mode adds `entrypoint` (a browser bundle) and `operations` (the read-only
+tool allowlist):
 
-- `entrypoint` must be relative, resolve inside the plugin directory (no
-  traversal or symlink escape), end in `.js`, and must not contain a literal
-  `</script` sequence or an HTML comment opener (`<!--`) - the host embeds it
-  inline in a frame document.
-- `pages[].id` are lowercase namespaced ids, unique within the plugin; the host
-  route is `/extensions/<plugin-id>/<page-id>`.
-- `navigation[].page` must reference a declared page; `group` and `icon` come
-  from small host-owned enumerations (mail/automation/system;
-  mail/inbox/search/list/tag/star/clock/filter/file/puzzle/sparkles/settings) so
-  a manifest can never inject markup. The host controls grouping and ordering.
-- `operations` is the explicit allowlist of backend tools the page may call.
-  Each must name a declared tool and that tool must be read-only
-  (`side_effects: "none"`). A tool may be `surface: "hidden"` - hidden means
-  "not advertised to the assistant", not "unreachable"; being listed in
-  `operations` is the only thing that makes it callable from a page.
+```json
+"ui": {
+  "mode": "trusted",
+  "entrypoint": "ui/page.js",
+  "pages": [{ "id": "main", "title": "My view" }],
+  "operations": ["my_read_op"]
+}
+```
 
-Existing plugins without a `ui` block are unaffected, and every plugin still
-installs **disabled** and inert until the user enables it.
+Validation (`plugins.py`, `schemas/plugin-manifest.schema.json`) rejects:
+composed with an `entrypoint`/`operations`, trusted without an `entrypoint`,
+duplicate page ids, navigation to an undeclared page, unknown group/icon,
+`operations` naming an undeclared or non-read-only tool, and a traversal or
+`</script`/`<!--`-bearing trusted bundle. Existing plugins without a `ui` block
+are unaffected; every plugin still installs disabled.
 
-## Trust boundary
+## Composed tier
 
-The page bundle is untrusted code. Three layers isolate it:
-
-1. **Opaque-origin frame.** The host renders the bundle in
-   `<iframe sandbox="allow-scripts" srcdoc="...">`. No `allow-same-origin`,
-   `allow-forms`, `allow-popups` or `allow-top-navigation`, so the frame cannot
-   read the host DOM, cookies, storage, or navigate the top window. The srcdoc
-   document carries its own nonce CSP:
-   `default-src 'none'; script-src 'nonce-…'; style-src 'nonce-…'; img-src data:;
-   connect-src 'none'; frame-src 'none'; worker-src 'none'; form-action 'none';
-   base-uri 'none'; frame-ancestors 'self'`. Network, images, forms, nested
-   frames and workers are all denied; only the host's own nonce'd scripts run.
-2. **Host bridge.** Only the host page (same-origin, trusted) talks to the
-   server. The frame talks to it with `postMessage`; the host ignores any
-   message whose `event.source` is not the exact frame window and whose `sid`
-   does not match the view. The host page holds a per-view session token minted
-   server-side (`plugin_rt.ui_session_open`); the iframe never sees the plugin
-   id as authority - the server binds the session to the plugin id + page it
-   rendered and never trusts a pid from the frame.
-3. **Server mediation.** Backend calls go over
-   `POST /extensions/<id>/<page>/rpc` with `X-MT-Session` and `X-MT-Op`. The
-   endpoint requires a same-origin `Origin`/`Referer`/`Sec-Fetch-Site` (a custom
-   header cannot be sent cross-site without a disallowed preflight, and the
-   opaque-origin frame cannot produce a matching Origin). The server then
-   re-checks: plugin still enabled, page declared, session live and not expired,
-   and the operation is in `ui.operations`. Finally the call runs through the
-   normal sandbox `invoke()` path, so argument validation, grants, limits,
-   strikes and the event audit all apply exactly as for an assistant call.
-
-The browser SDK running inside the frame is convenience only - the server checks
-do not depend on it. A malicious page can post arbitrary messages, but it can
-only ever reach its own declared, read-only operations, and only while its
-session is live.
-
-## Page SDK (`sdk/ui.js`)
-
-The host injects `sdk/ui.js` before the plugin bundle and calls `MTUI.start()`,
-which invokes the renderer the bundle registered:
+The sandbox bundle exports synchronous `uiOpen` / `uiDispatch` / `uiClose`
+(QuickJS, same worker/limits as everything else). Build the tree with the
+data-only `MTUIB` helpers from `sdk/compose.js`:
 
 ```js
-globalThis.__mt_ui = {
-  pages: {
-    desk: {
-      render: function (root, api) {
-        // api.call(op, args) -> Promise<{ok, data, error, summary}>
-        // api.updateUrl({q, message}, replace)   // host-mediated, bounded
-        // api.on('theme'|'state'|'dispose', fn)
-        // api.components: searchField, splitPane, messageList,
-        //                 plainTextReader, stateView, el
-      }
-    }
-  }
-};
+uiOpen: function (ctx, input) {
+  var state = { q: input.state.q || "", selected: 0 };
+  return { tree: build(ctx, state), state: state };
+},
+uiDispatch: function (ctx, input) {
+  var state = input.state, ev = input.event;
+  if (ev.kind === "search") state.q = String(ev.value || "").slice(0, 200);
+  if (ev.kind === "select") state.selected = parseInt(ev.value, 10) || 0;
+  return { tree: build(ctx, state), state: state, url: { q: state.q, message: String(state.selected) } };
+},
+uiClose: function (ctx, input) {}
 ```
 
-- `api.call` resolves `{ok:true, data, summary}` or rejects with an `Error`
-  carrying a stable `.code` (`invalid_args`, `denied`, `forbidden`, `timeout`,
-  `quota`, `disabled`, `not_found`, `internal`).
-- Components render only; fetching stays in the page. All components build DOM
-  with `textContent` (never `innerHTML`), so mail text cannot become markup.
-- Theme tokens arrive through the bridge (`theme` message) from the host's
-  computed styles, not by reading host DOM - `MTUI` applies them as CSS
-  variables inside the frame.
-- Layout mode is host-controlled too (`layout` message -> the frame root's
-  `data-mt-layout`): the frame is often much narrower than the device, so the
-  page cannot decide desktop-vs-mobile from its own media queries. The host
-  re-sends it on resize.
-- The page URL carries only bounded `q` and `message` state. The host validates
-  and writes it with `history.pushState`/`replaceState`; `popstate` pushes the
-  new state back into the page, so deep links, reload, back and forward work.
-  Turbo navigations that unmount the page tear the session down.
+Host guarantees:
 
-## Lifecycle
+- **No plugin browser JS.** The route renders host HTML only; the plugin bundle
+  is never embedded in a page.
+- **Strict server-side validation** (`plugin_ui.validate_tree`): whitelisted
+  component types (Stack/Grid/SplitPane/Tabs/Tab/Text/Badge/Separator/Button/
+  Input/Menu/MenuItem/Dialog/List/ListItem/StateView/MessageList/MessageReader/
+  SearchField), whitelisted props/enums, no `rawHTML`/`style`/`href`/`src`/
+  `srcdoc`/handler functions/unknown node keys/prototype keys; bounds on node
+  count, depth, children, text and state bytes.
+- **Independent host renderer** (`plugin_ui.render_tree`) escapes all text and
+  emits no URLs, scripts, iframes or `on*` attributes.
+- **Bounded state + revision.** The host owns the controller state, the event
+  ids present in the current tree and a monotonic revision. Dispatch must name
+  an event that exists in the rendered tree; list events accept only the item ids
+  that were rendered; a mismatched revision is rejected (409) so stale responses
+  cannot overwrite newer state. Per-view serialization + small per-plugin/global
+  concurrency + rate limits bound the work.
+- **URL state** is host-composed from a bounded `{q, message}` hint and written
+  with `history.pushState(Object.assign({}, history.state, {mtExt:1}), ...)`
+  (Turbo metadata preserved); deep links seed `uiOpen`'s initial state.
+- **Read-only host capability subset.** Controller execution may use
+  `ctx.plugin`, `ctx.log`, `ctx.config.get`, `ctx.kv.get/list`, `ctx.mail.read/
+  search`; `ctx.http.fetch`, `ctx.llm.*`, `ctx.action.propose` and `ctx.kv.set/
+  delete` are denied (`plugin_rt.UI_HOST_ALLOW`).
+- A bounded status poll clears the tree and shows a recovery message when the
+  plugin is disabled, changed or unapproved (server-side expiry/revoke).
 
-```
-GET /extensions/<id>/<page>     host mints a session, renders shell + frame
-  frame loads  -> postMessage {kind:"ready"}
-  host         -> postMessage {kind:"theme", theme, config}
-  frame        -> {kind:"call", id, op, args}
-  host         -> POST …/rpc  (session + Origin + op header)
-  server       -> invoke_ui -> sandbox invoke (grants/limits/audit)
-  host         -> postMessage {kind:"result", id, ok, data|error}
-  frame        -> {kind:"nav", q, message}        host updates the URL
-unmount / Turbo / disable / revoke
-  host -> {kind:"dispose"}; aborts in-flight fetches; POST …/dispose
-  server drops the session; late results are ignored
-```
+## Trusted tier
 
-- Sessions expire after 30 idle minutes and are capped (oldest evicted) so the
-  store stays finite.
-- Disabling a plugin, changing its grants, or auto-disabling it after repeated
-  failures drops all of its sessions immediately (`plugins.set_enabled`,
-  `set_grants`, `disable_with_error`).
-- If a page bundle is missing or unsafe to embed, the route redirects back to
-  the plugin detail page with a flash; the host never serves arbitrary files.
+The browser bundle runs in `<iframe sandbox="allow-scripts">` (no
+`allow-same-origin`), via srcdoc with a nonce CSP (`connect-src 'none'`,
+`frame-src/worker-src/form-action 'none'`), and talks to the host over
+`postMessage`; the host page holds a server-minted view session and mediates
+every call through `POST /extensions/<id>/<page>/rpc` (same-origin + session +
+`X-MT-Op` + the `operations` allowlist) into the normal sandbox `invoke()` path.
 
-## The demo: `plugins/mt-mail-desk`
+**Disclosure, not denial.** An isolated frame can still navigate itself
+(`location.href`, meta refresh), so a bundle that receives mail text can send it
+anywhere. The CSP blocks `fetch`/images/forms/workers, but self-navigation is an
+inherent browser capability and is **not** constrained by the plugin's
+`net.http` grant. Therefore:
 
-`mt-mail-desk` is the reference UI plugin and a normal user of the public
-contracts - it declares no extra keys and gets no host privileges beyond
-`mailbox.read`.
+- The view does not run until the user approves it on the plugin detail page
+  (**Approve browser view**), through an unambiguous warning.
+- Approval is stored in settings and bound to the exact manifest + backend +
+  frontend content digests and version; editing or updating the plugin
+  invalidates it and requires fresh consent. **Revoke approval** removes it.
+- The host page polls a bounded status endpoint; on revoke/disable/tamper it
+  clears the tree and tears the frame down, and the host disposes the bridge
+  (and ignores late results) on any unexpected frame navigation.
+- Host responses for `/extensions/*` carry `X-Frame-Options: DENY` and
+  `Content-Security-Policy: frame-ancestors 'none'`.
 
-- Two hidden, read-only tools: `search_messages` (capped index search) and
-  `read_message` (headers/category/tags/needs-reply plus plain text), both
-  backed by `ctx.mail.search`/`ctx.mail.read`.
-- One page (`desk`) in the Mail navigation group. Desktop shows a split pane
-  (list + reader); at <=767px it becomes a list that pushes to a reader with a
-  back control. Keyboard focus is preserved.
-- Search field, explicit Refresh, selection, and loading/empty/denied/error
-  states. `?q=` and `?message=` deep links survive reload/back/forward.
-- **Index-only, honest:** the reader shows the locally indexed text (the same
-  `snippet` body the sandbox `ctx.mail.read` exposes). Attachments and rich mail
-  HTML are never read, no LLM is called, and nothing is moved, sent or deleted.
+The trusted fixture/sample is inert (public SDK, no network) so approval can be
+tested safely. Enable, grants, built-in origin, CLI enable and manifest
+declaration never auto-approve a trusted view.
+
+## The demo: `plugins/mt-mail-desk` (composed)
+
+Read-only Mail Desk, exercising only public contracts:
+
+- Two declared hidden/read-only tools plus a composed controller; `ctx.mail`
+  read-only under `mailbox.read`.
+- Search (capped), select, plain-text reader with headers/category/tags/
+  needs-reply, Refresh, loading/empty/denied/error states.
+- Desktop split list/reader; <=767px a list that pushes to the reader with a
+  host-controlled layout (`data-mt-layout`, sent over the bridge).
+- `?q=` / `?message=` deep links survive reload/back/forward.
+- **Index-only and honest:** the reader shows the locally indexed body text only;
+  attachments and rich mail HTML are never read, no LLM is called, nothing is
+  moved or sent.
 
 ## Install locally
 
-Built-ins load from the repo `plugins/` directory. To try a user copy:
-
 ```
-cp -r plugins/mt-mail-desk ~/.mail-triage/plugins/   # or <DATA_DIR>/plugins
+cp -r plugins/mt-mail-desk ~/.mail-triage/plugins/
 python app.py --plugins validate ~/.mail-triage/plugins/mt-mail-desk
 python app.py --plugins rescan
 python app.py --plugins enable mt-mail-desk
 ```
 
-Then open `/plugins/mt-mail-desk` (or the Plugins page), enable it, and use the
-**Mail Desk** entry in the sidebar. Disable it to remove the entry and drop the
-session. The plugin never touches real mail beyond the read-only index.
+See also `docs/plugins-authoring.md` (sandbox contract) and `sdk/README.md`.

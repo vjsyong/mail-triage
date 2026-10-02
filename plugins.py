@@ -196,6 +196,9 @@ def _validate_ui(m):
     ui = m.get("ui")
     if not isinstance(ui, dict):
         return errs
+    mode = ui.get("mode")
+    if mode not in UI_MODES:
+        errs.append("ui.mode must be one of %s" % ", ".join(UI_MODES))
     pages = [p for p in (ui.get("pages") or []) if isinstance(p, dict)]
     page_ids = [p.get("id") for p in pages]
     if len(page_ids) != len(set(page_ids)):
@@ -207,6 +210,14 @@ def _validate_ui(m):
         if n.get("page") not in known_pages:
             errs.append("ui.navigation references undeclared page '%s'" % n.get("page"))
     tools = {t.get("name"): t for t in (m.get("tools") or []) if isinstance(t, dict)}
+    if mode == "composed":
+        if ui.get("entrypoint"):
+            errs.append("composed ui must not declare ui.entrypoint (no browser code)")
+        if ui.get("operations"):
+            errs.append("composed ui must not declare ui.operations (capabilities are host-enforced)")
+    elif mode == "trusted":
+        if not ui.get("entrypoint"):
+            errs.append("trusted ui requires ui.entrypoint")
     for op in (ui.get("operations") or []):
         t = tools.get(op)
         if t is None:
@@ -253,7 +264,7 @@ def load_manifest(pdir, root_kind):
     errors = validate_semantics(m, root_kind)
     entry_sha, _entry_raw = _asset_hash(pdir, m.get("entrypoint") or "", "entrypoint", errors)
     ui = m.get("ui")
-    if isinstance(ui, dict):
+    if isinstance(ui, dict) and ui.get("mode") == "trusted":
         ui_sha, ui_raw = _asset_hash(pdir, ui.get("entrypoint") or "", "ui.entrypoint", errors)
         if ui_raw is not None:
             low = ui_raw.lower()
@@ -292,6 +303,34 @@ def _asset_hash(pdir, rel, label, errors):
 def _file_sha256(path):
     with open(path, "rb") as fh:
         return hashlib.sha256(fh.read()).hexdigest()
+
+
+def current_content_digest(row):
+    """Digest of a plugin's content as it is on disk right now.
+
+    Used to bind trusted-view approval to the exact manifest + backend +
+    frontend bytes: editing or updating any of them changes this digest, so a
+    previously stored approval no longer matches. Returns "" when content is
+    missing/unreadable."""
+    pdir = row.get("dir")
+    m = row.get("manifest") or {}
+    if not pdir or not os.path.isfile(os.path.join(pdir, MANIFEST_NAME)):
+        return ""
+    try:
+        with open(os.path.join(pdir, MANIFEST_NAME), "rb") as fh:
+            msha = hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ""
+    e_sha, _ = _asset_hash(pdir, m.get("entrypoint") or "", "entrypoint", [])
+    if not e_sha:
+        return ""
+    ui = m.get("ui")
+    if isinstance(ui, dict) and ui.get("mode") == "trusted":
+        u_sha, _ = _asset_hash(pdir, ui.get("entrypoint") or "", "ui.entrypoint", [])
+        if not u_sha:
+            return ""
+        e_sha = hashlib.sha256((e_sha + ":" + u_sha).encode("utf-8")).hexdigest()
+    return hashlib.sha256((msha + "|" + e_sha).encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------- scan / registry
@@ -451,8 +490,9 @@ def set_enabled(plugin_id, enabled, grants=None):
                         % (plugin_id, ", ".join(wanted) or "none"))
         try:
             import plugin_rt
+            import plugin_ui
             plugin_rt.event_cache_reset()
-            plugin_rt.ui_sessions_drop_plugin(plugin_id)
+            plugin_ui.drop_plugin(plugin_id)
         except Exception:
             pass
         return {"ok": True, "id": plugin_id, "enabled": True, "grants": wanted}
@@ -462,8 +502,9 @@ def set_enabled(plugin_id, enabled, grants=None):
     store.log_event("plugin", "disabled '%s'" % plugin_id)
     try:
         import plugin_rt
+        import plugin_ui
         plugin_rt.event_cache_reset()
-        plugin_rt.ui_sessions_drop_plugin(plugin_id)
+        plugin_ui.drop_plugin(plugin_id)
     except Exception:
         pass
     return {"ok": True, "id": plugin_id, "enabled": False}
@@ -483,7 +524,8 @@ def set_grants(plugin_id, grants):
                      (json.dumps(list(grants)), int(time.time()), plugin_id))
     try:
         import plugin_rt
-        plugin_rt.ui_sessions_drop_plugin(plugin_id)
+        import plugin_ui
+        plugin_ui.drop_plugin(plugin_id)
     except Exception:
         pass
     return {"ok": True, "id": plugin_id, "grants": list(grants)}
@@ -531,6 +573,7 @@ def enabled_of_kind(kind):
 # existing sandbox runtime (grants, limits, audit unchanged).
 
 UI_NAV_GROUPS = ("mail", "automation", "system")
+UI_MODES = ("composed", "trusted")
 UI_NAV_ICONS = {
     "mail": '<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>',
     "inbox": '<path d="M3 13h5l1 2h6l1-2h5"/><path d="M5 5h14l2 8v6H3v-6z"/>',
@@ -551,6 +594,11 @@ def ui_block(row):
     m = (row or {}).get("manifest") or {}
     ui = m.get("ui")
     return ui if isinstance(ui, dict) else None
+
+
+def ui_mode(row):
+    ui = ui_block(row)
+    return ui.get("mode") if ui else None
 
 
 def ui_pages(row):
@@ -605,6 +653,8 @@ def ui_entry_source(row):
     (defence in depth against a directory swapped after install)."""
     ui = ui_block(row)
     if not ui or not row.get("dir"):
+        return None
+    if ui.get("mode") != "trusted":
         return None
     pdir = row["dir"]
     rel = ui.get("entrypoint") or ""
@@ -671,7 +721,8 @@ def disable_with_error(plugin_id, message):
     store.log_event("warn", "plugin '%s' auto-disabled: %s" % (plugin_id, str(message)[:200]))
     try:
         import plugin_rt
-        plugin_rt.ui_sessions_drop_plugin(plugin_id)
+        import plugin_ui
+        plugin_ui.drop_plugin(plugin_id)
     except Exception:
         pass
     return {"ok": True, "id": plugin_id, "enabled": False}

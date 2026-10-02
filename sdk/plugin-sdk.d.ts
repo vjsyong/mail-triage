@@ -205,8 +205,11 @@ export function onSchedule(ctx: PluginContext,
 // docs/plugin-pages.md. The browser bundle registers renderers on
 // globalThis.__mt_ui; the host injects sdk/ui.js (the MTUI page SDK) first.
 
+export type UiMode = "composed" | "trusted";
+
 export interface UiManifest {
-  entrypoint: string;                    // browser bundle, relative + .js
+  mode: UiMode;                          // composed (default, no browser JS) | trusted (approved)
+  entrypoint?: string;                   // trusted only: browser bundle, relative + .js
   pages: Array<{ id: string; title: string; description?: string }>;
   navigation?: Array<{
     page: string;                        // must reference a declared page id
@@ -216,8 +219,41 @@ export interface UiManifest {
            "filter" | "file" | "puzzle" | "sparkles" | "settings";
     order?: number;
   }>;
-  operations?: string[];                 // declared read-only tool names, explicit allowlist
+  operations?: string[];                 // trusted only: declared read-only tool names, explicit allowlist
 }
+
+// ---- composed controller (manifest ui.mode === "composed") ----------------
+//
+// The sandbox bundle exports synchronous uiOpen/uiDispatch/uiClose. uiOpen and
+// uiDispatch return a data-only component tree (build it with the global MTUIB
+// helpers shipped in sdk/compose.js) plus the bounded controller state and an
+// optional URL hint. The host validates the tree strictly and renders it - no
+// plugin browser JS ever runs. Controller execution gets a read-only host
+// capability subset (mail read/search, config, kv read, log); net/llm/action/
+// kv-write are denied.
+
+export interface ComposedNode {
+  type: string;
+  props?: Record<string, unknown>;
+  children?: ComposedNode[];
+  event?: string;
+  retryEvent?: string;
+  items?: unknown[];
+  message?: unknown;
+}
+
+export interface ComposedResult {
+  tree: ComposedNode;
+  state?: Record<string, unknown>;
+  url?: { q?: string; message?: string };
+}
+
+export function uiOpen(ctx: PluginContext,
+                       input: { state: Record<string, unknown> }): ComposedResult;
+export function uiDispatch(ctx: PluginContext,
+                           input: { state: Record<string, unknown>;
+                                    event: { kind: string; value?: string } }): ComposedResult;
+export function uiClose(ctx: PluginContext, input: { state: Record<string, unknown> }): void;
 
 export type UiErrorCode = "invalid_args" | "denied" | "forbidden" | "timeout" |
                           "quota" | "disabled" | "not_found" | "internal";
