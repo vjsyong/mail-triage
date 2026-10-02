@@ -750,6 +750,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .tools>summary::after{content:'\u25b8';position:absolute;right:8px;top:1px;font-size:.7rem}
 .tools[open]>summary::after{content:'\u25be'}
 .tools-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.tools[open] .tool-chip{white-space:normal;overflow-wrap:anywhere}
 .tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-chip.ok{color:var(--ok);border-color:var(--ok)}
 .tool-chip.err{color:var(--err);border-color:var(--err)}
@@ -1298,12 +1299,12 @@ window.assistantChat = function(opts){
     timer=setInterval(function(){ if(!document.body.contains(status)){ clearInterval(timer); return; } if(!finished && status.dataset.label) status.textContent=status.dataset.label+' \u00b7 '+secs()+'s'; }, 500);
     function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
     function label(x){ if(!finished){ status.dataset.label=x; status.textContent=x+' \u00b7 '+secs()+'s'; } }
-    var cards=[], cardOrder=[];
+    var cards=[], cardOrder=[], cardInfo={};
     function toolsLabel(){
       var n=cardOrder.length;
       var txt='\u2699 '+n+' tool call'+(n===1?'':'s');
-      var last=cards[cardOrder[n-1]];
-      if(last) txt+=' \u00b7 '+last.textContent;
+      var id=cardOrder[n-1];
+      if(id!=null && cardInfo[id] && cardInfo[id].label) txt+=' \u00b7 '+cardInfo[id].label;
       toolsSum.textContent=txt;
     }
     function toolCard(id,name,args){
@@ -1314,6 +1315,7 @@ window.assistantChat = function(opts){
       c.textContent='\u23f3 '+name+' '+a;
       if(!cards[id]) cardOrder.push(id);
       cards[id]=c;
+      cardInfo[id]={name:name, label:'running '+name+'\u2026'};
       toolsBox.style.display=''; toolsList.appendChild(c);
       toolsLabel();
     }
@@ -1322,6 +1324,7 @@ window.assistantChat = function(opts){
       c.className='tool-chip '+(ok?'ok':'err');
       var tx=c.textContent.replace(/^[\u23f3\u2713\u2717]\s*/,'');
       c.textContent=(ok?'\u2713 ':'\u2717 ')+tx+' \u2192 '+(pending?'[awaiting approval] ':(dry?'[dry-run] ':''))+summary;
+      cardInfo[id].label=(ok?'\u2713 ':'\u2717 ')+cardInfo[id].name+' \u2192 '+(pending?'[awaiting approval] ':(dry?'[dry-run] ':''))+summary;
       toolsLabel();
     }
     function actsText(a){
