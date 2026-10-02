@@ -770,6 +770,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .crow.user{flex-direction:row-reverse}
 .crow:not(.user) + .crow:not(.user){margin-top:-10px}
 .crow.user + .crow.user{margin-top:-10px}
+.chatlive{display:flex;flex-direction:column;gap:18px}
 .avatar{flex:0 0 30px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;letter-spacing:.05em;border:1px solid var(--line)}
 .avatar.you{background:#000;color:#fff;border-color:#000}
 .avatar.ai{background:var(--acc);color:#fff;border-color:var(--acc)}
@@ -1343,6 +1344,7 @@ window.assistantChat = function(opts){
   if(!(window.fetch && window.ReadableStream && window.TextDecoder)) return null;
   if(form.__chat){ form.__chat.setSession(sid); return form.__chat; }
   var live=document.createElement('div'); live.setAttribute('aria-live','polite'); live.setAttribute('aria-atomic','false');
+  live.className='chatlive';
   root.appendChild(live);
   function mk(tag,cls,text){var d=document.createElement(tag); if(cls) d.className=cls; if(text!=null) d.textContent=text; return d;}
   function autosize(){ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; }

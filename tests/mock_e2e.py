@@ -4200,6 +4200,9 @@ def main():
     check("context chip lives inside the composer", 0 <= _i1 < _i2 < _i3)
     check("same-role message grouping rule ships",
           b".crow:not(.user) + .crow:not(.user){margin-top:-10px}" in _d)
+    check("live stream rows keep the chat's vertical rhythm",
+          b".chatlive{display:flex;flex-direction:column;gap:18px}" in _d
+          and b"live.className='chatlive'" in _d)
 
     section("T53 plugin scheduling + commitments/subscription-watch dogfood")
     import plugin_rt as _rt53
