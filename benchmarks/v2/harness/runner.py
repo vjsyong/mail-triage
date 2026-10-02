@@ -29,7 +29,7 @@ sys.path.insert(0, V2)
 
 from scoring.base import extract_json  # noqa: E402
 
-HARNESS_REVISION = "v2.0"
+HARNESS_REVISION = "v2.1"
 
 with open(os.path.join(HERE, "prompts.json")) as f:
     PROMPTS = json.load(f)
@@ -138,6 +138,29 @@ class BenchClient(object):
             payload["chat_template_kwargs"] = ctk
         return payload
 
+    def _post_with_fallback(self, payload, stream):
+        """POST, mirroring production's optional-parameter fallback.
+
+        Production strips unsupported optional fields on 4xx rather than
+        failing, so candidates whose template/parser rejects them still run.
+        """
+        optional = (["chat_template_kwargs", "repetition_penalty"] if stream
+                    else ["chat_template_kwargs", "response_format"])
+        r = self.sess.post(self.base + "/chat/completions", json=payload,
+                           timeout=self.timeout, stream=stream)
+        while r.status_code in (400, 404, 422):
+            nxt = next((k for k in optional if k in payload), None)
+            if nxt is None:
+                break
+            payload.pop(nxt, None)
+            try:
+                r.close()
+            except Exception:
+                pass
+            r = self.sess.post(self.base + "/chat/completions", json=payload,
+                               timeout=self.timeout, stream=stream)
+        return r
+
     def chat_turn(self, system, messages, tools=None, thinking=True, max_tokens=2500,
                   stream=True, json_mode=False):
         """One model turn. Returns content/calls/usage + metrics + request hash."""
@@ -152,8 +175,7 @@ class BenchClient(object):
         first_event = first_visible = first_tool = None
         content, reasoning, calls, finish, usage = [], [], [], None, {}
         if stream:
-            r = self.sess.post(self.base + "/chat/completions", json=payload,
-                               timeout=self.timeout, stream=True)
+            r = self._post_with_fallback(payload, stream=True)
             if r.status_code != 200:
                 raise RuntimeError("LLM HTTP %s: %s" % (r.status_code, (r.text or "")[:300]))
             tool_state = {}
@@ -214,8 +236,7 @@ class BenchClient(object):
                       "name": tool_state[i]["name"], "arguments": tool_state[i]["arguments"]}
                      for i in sorted(tool_state)]
         else:
-            r = self.sess.post(self.base + "/chat/completions", json=payload,
-                               timeout=self.timeout)
+            r = self._post_with_fallback(payload, stream=False)
             if r.status_code != 200:
                 raise RuntimeError("LLM HTTP %s: %s" % (r.status_code, (r.text or "")[:300]))
             data = r.json()

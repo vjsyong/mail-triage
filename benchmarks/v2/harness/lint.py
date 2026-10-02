@@ -151,6 +151,12 @@ def lint():
             if suite == "assistant":
                 if exp.get("no_calls") and exp.get("required_calls"):
                     errors.append("%s no_calls with required_calls" % where)
+                mca = exp.get("must_call_any") or []
+                if len(mca) > 1 and all(isinstance(g, list) and len(g) == 1 for g in mca):
+                    warnings.append(
+                        "%s: must_call_any has %d singleton groups — each group is "
+                        "REQUIRED; use one group of alternatives for 'any of'"
+                        % (where, len(mca)))
 
             # near-duplicate detection
             sig = signature(c)
