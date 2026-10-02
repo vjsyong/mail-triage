@@ -147,11 +147,23 @@ Read-only Mail Desk, exercising only public contracts:
 
 ## Install locally
 
+`mt-mail-desk` is a **built-in** (the reserved `mt-` id) that ships in the app's
+`plugins/` directory. It is not copied into the user plugin directory (that
+would be rejected as a reserved id); just enable it from the Plugins page, or:
+
 ```
-cp -r plugins/mt-mail-desk ~/.mail-triage/plugins/
-python app.py --plugins validate ~/.mail-triage/plugins/mt-mail-desk
 python app.py --plugins rescan
 python app.py --plugins enable mt-mail-desk
+```
+
+To ship your **own** page plugin, use a non-`mt-` id and install it into the user
+directory:
+
+```
+cp -r my-desk ~/.mail-triage/plugins/my-desk
+python app.py --plugins validate ~/.mail-triage/plugins/my-desk
+python app.py --plugins rescan
+python app.py --plugins enable my-desk
 ```
 
 See also `docs/plugins-authoring.md` (sandbox contract) and `sdk/README.md`.

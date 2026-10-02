@@ -1,9 +1,14 @@
-/* Mail Triage browser UI SDK (page SDK v1).
+/* Mail Triage browser UI SDK (page SDK v1) - TRUSTED, approved tier.
  *
- * The host embeds this file (then the plugin's own `ui.entrypoint` bundle, then
- * a start call) inside a sandboxed, opaque-origin iframe with a nonce CSP that
- * denies network, forms, frames and workers. This file is the ONLY bridge the
- * page code gets: it talks to the host page over postMessage and exposes:
+ * The host embeds this file in the explicitly user-approved `ui.mode: trusted`
+ * browser view only: a sandboxed, opaque-origin iframe with a nonce CSP that
+ * denies network/forms/frames/workers as defence-in-depth. That CSP does not
+ * stop a page from navigating itself, so a bundle can exfiltrate what it
+ * receives (self-navigation egress is accepted and disclosed at approval).
+ *
+ * The bridge is a document-bound MessagePort, NOT global postMessage: the host
+ * transfers the port only after the hello/ack handshake, so a remote page that
+ * navigates the frame cannot inherit or re-establish it. This file exposes:
  *
  *   MTUI.call(op, args) -> Promise<{ok, data, error, summary}>
  *       Call one operation declared in the manifest's ui.operations allowlist.

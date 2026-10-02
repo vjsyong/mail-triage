@@ -4680,6 +4680,26 @@ def main():
                      data=json.dumps({"op": "ping_ui", "args": {}}),
                      content_type="application/json")
     check("a cross-site trusted RPC is refused", _r.status_code == 403)
+    for _nb in ("[]", "null", '"x"', "123", "true"):
+        _rnb = client.post("/extensions/good-trusted/main/rpc",
+                           headers={"Origin": "http://localhost", "X-MT-Session": _tsid},
+                           data=_nb, content_type="application/json")
+        check("a non-object trusted RPC body is a typed 400 (%s)" % _nb,
+              _rnb.status_code == 400
+              and (_rnb.get_json() or {}).get("error", {}).get("code") == "bad_json")
+    _rnb = client.post("/extensions/good-trusted/main/rpc",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _tsid},
+                       data="{}", content_type="application/json")
+    check("an empty trusted RPC body is a typed invalid_args 400",
+          _rnb.status_code == 400
+          and (_rnb.get_json() or {}).get("error", {}).get("code") == "invalid_args")
+    _rnb = client.post("/extensions/good-trusted/main/rpc",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _tsid,
+                                "X-MT-Op": "ping_ui"},
+                       data=json.dumps({"op": "ping_ui", "args": {"note": "post-guard"}}),
+                       content_type="application/json")
+    check("a valid object trusted RPC still runs after the guard",
+          _rnb.status_code == 200 and (_rnb.get_json() or {}).get("ok") is True)
     _tp = os.path.join(proot, "good-trusted", "ui", "page.js")
     _orig_tp = open(_tp, encoding="utf-8").read()
     with open(_tp, "a", encoding="utf-8") as fh:
@@ -4771,8 +4791,27 @@ def main():
                      data=json.dumps({"event": "search", "value": "x" * (70 * 1024),
                                       "revision": _rev}), content_type="application/json")
     check("an oversized dispatch body is refused", _r.status_code in (400, 413))
+    for _nb in ("[]", "null", '"x"', "123", "true"):
+        _rnb = client.post("/extensions/mt-mail-desk/desk/dispatch",
+                           headers={"Origin": "http://localhost", "X-MT-Session": _sid},
+                           data=_nb, content_type="application/json")
+        check("a non-object composed dispatch body is a typed 400 (%s)" % _nb,
+              _rnb.status_code == 400
+              and (_rnb.get_json() or {}).get("error", {}).get("code") == "bad_json")
+    _rnb = client.post("/extensions/mt-mail-desk/desk/dispatch",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _sid},
+                       data="{}", content_type="application/json")
+    check("an empty composed dispatch body is a typed invalid_args 400",
+          _rnb.status_code == 400
+          and (_rnb.get_json() or {}).get("error", {}).get("code") == "invalid_args")
     _r = client.get("/extensions/mt-mail-desk/desk/status", headers={"X-MT-Session": _sid})
     check("the status endpoint reports a live view", (_r.get_json() or {}).get("valid") is True)
+    _rnb = client.post("/extensions/mt-mail-desk/desk/dispatch",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _sid},
+                       data=json.dumps({"event": "search", "value": "INV-77", "revision": _rev}),
+                       content_type="application/json")
+    check("a valid object body still dispatches after the guard",
+          _rnb.status_code == 200 and (_rnb.get_json() or {}).get("ok") is True)
     _r = client.get("/extensions/mt-mail-desk/desk/status")
     check("a session-less status probe is side-effect-free",
           (_r.get_json() or {}).get("valid") is False)

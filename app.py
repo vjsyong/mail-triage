@@ -3617,13 +3617,15 @@ def _sdk_ui_src():
 
 
 def _extension_srcdoc(nonce, page_title, sdk_src, plugin_src):
-    """Trusted frame document: gated bootstrap + SDK + bundle wrapper.
+    """Trusted frame document: bootstrap + SDK + bundle wrapper.
 
-    The plugin bundle is embedded only as the BODY of a function; it does not
-    execute at parse time. The bootstrap calls it only after the host has
-    transferred a MessagePort bound to this document, so the bridge is one-shot
-    and document-bound and a synchronous self-navigation at first execution
-    cannot retain it (AR2-3). No eval / no unsafe-eval is used."""
+    The plugin bundle is embedded only as the BODY of a function (a syntactic
+    wrapper, not a security barrier); it does not execute at parse time and no
+    eval / unsafe-eval is used. The actual barrier is the document-bound
+    MessagePort: the host transfers it only after the hello/ack handshake, and
+    operational messages travel only on that port, so a synchronous
+    self-navigation at first execution cannot retain or re-establish the bridge
+    (AR2-3). A remote page that navigated the frame has no port."""
     csp = ("default-src 'none'; script-src 'nonce-%s'; style-src 'nonce-%s'; "
            "img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; "
            "object-src 'none'; frame-src 'none'; worker-src 'none'; "
@@ -3684,9 +3686,14 @@ def _read_json_capped(limit=_UI_JSON_CAP):
     if not data:
         return {}, None
     try:
-        return json.loads(data.decode("utf-8")), None
+        obj = json.loads(data.decode("utf-8"))
     except (ValueError, UnicodeDecodeError, RecursionError):
         return None, "bad_json"
+    # A valid JSON body that is not an object (array/null/string/number/bool) is
+    # a client error, not a server crash: reject it as a typed bad request.
+    if not isinstance(obj, dict):
+        return None, "bad_json"
+    return obj, None
 
 
 def _ui_envelope_status(err_code):
@@ -3976,8 +3983,10 @@ def extension_dispose(pid, page):
 
 @app.route("/extensions/<pid>/<page>/status")
 def extension_status(pid, page):
-    # Read-only validity check for the host's bounded poll; no CSRF-relevant
-    # effect (it never mutates and exposes no plugin data).
+    # Bounded-poll validity check. It has no cross-view effect: an unknown/forged
+    # caller is reported invalid and nothing is dropped; only the caller's own
+    # session is disposed (and only for a same-origin request) when it is no
+    # longer valid.
     sid = (request.headers.get("X-MT-Session") or "").strip()
     sess = plugin_ui.get_session(sid, pid, page)
     if not sess:

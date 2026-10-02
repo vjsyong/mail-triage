@@ -205,12 +205,16 @@ export function onSchedule(ctx: PluginContext,
 
 // ---- optional browser pages (`manifest.ui`) -------------------------------
 //
-// A plugin may ship one browser bundle (`ui.entrypoint`) served by the host at
-// /extensions/<id>/<page>. It runs in a sandboxed, opaque-origin frame (no
-// same-origin, no network) and reaches the backend only through the explicit
-// `ui.operations` allowlist (declared tools that are read-only). See
-// docs/plugin-pages.md. The browser bundle registers renderers on
-// globalThis.__mt_ui; the host injects sdk/ui.js (the MTUI page SDK) first.
+// Two tiers. `composed` (default, sandboxed) runs NO plugin browser JS: the
+// bundle exports uiOpen/uiDispatch/uiClose and the host renders a validated
+// component tree. `trusted` (requires explicit per-content user approval) runs
+// a browser bundle (`ui.entrypoint`) in a sandboxed, opaque-origin frame with a
+// nonce CSP as defence-in-depth; that CSP does NOT stop self-navigation, so
+// egress via self-navigation is accepted and disclosed at approval. In the
+// trusted tier operational messages travel over a document-bound MessagePort
+// (not global postMessage), and the backend is reachable only through the
+// explicit `ui.operations` allowlist. See docs/plugin-pages.md. Trusted bundles
+// register renderers on globalThis.__mt_ui; the host injects sdk/ui.js first.
 
 export type UiMode = "composed" | "trusted";
 
