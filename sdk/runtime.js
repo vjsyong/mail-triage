@@ -122,6 +122,54 @@
     return JSON.stringify(out === undefined ? null : out);
   };
 
+  globalThis.__mt_match = function (inputJson) {
+    var p = globalThis.__mt_plugin;
+    if (!p || typeof p.match !== "function") {
+      throw new Error("bundle does not export match()");
+    }
+    var out = p.match(globalThis.__mt_ctx, JSON.parse(inputJson));
+    if (out && typeof out.then === "function") {
+      throw new Error("match must be synchronous (SDK v0.1)");
+    }
+    return JSON.stringify(out === undefined ? null : out);
+  };
+
+  globalThis.__mt_draft = function (inputJson) {
+    var p = globalThis.__mt_plugin;
+    if (!p || typeof p.draft !== "function") {
+      throw new Error("bundle does not export draft()");
+    }
+    var out = p.draft(globalThis.__mt_ctx, JSON.parse(inputJson));
+    if (out && typeof out.then === "function") {
+      throw new Error("draft must be synchronous (SDK v0.1)");
+    }
+    return JSON.stringify(out === undefined ? null : out);
+  };
+
+  globalThis.__mt_rank = function (inputJson) {
+    var p = globalThis.__mt_plugin;
+    if (!p || typeof p.rank !== "function") {
+      throw new Error("bundle does not export rank()");
+    }
+    var out = p.rank(globalThis.__mt_ctx, JSON.parse(inputJson));
+    if (out && typeof out.then === "function") {
+      throw new Error("rank must be synchronous (SDK v0.1)");
+    }
+    return JSON.stringify(out === undefined ? null : out);
+  };
+
+  globalThis.__mt_event = function (eventJson) {
+    var p = globalThis.__mt_plugin;
+    if (!p || typeof p.onEvent !== "function") {
+      throw new Error("bundle does not export onEvent()");
+    }
+    var out = p.onEvent(globalThis.__mt_ctx, JSON.parse(eventJson));
+    if (out && typeof out.then === "function") {
+      throw new Error("onEvent must be synchronous (SDK v0.1)");
+    }
+    return JSON.stringify(out === undefined ? null : out);
+  };
+
   globalThis.__mt_unload = function () {
     var p = globalThis.__mt_plugin;
     if (p && typeof p.onUnload === "function") {

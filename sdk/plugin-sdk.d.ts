@@ -21,6 +21,8 @@ export interface MessageRef {
   from: string;
   date: string;          // RFC822 header string
   snippet: string;
+  category?: string | null;   // LLM category when classified
+  needs_reply?: boolean;
 }
 
 export interface Message extends MessageRef {
@@ -70,7 +72,7 @@ export interface PluginKV {
 export interface PluginMail {
   // requires permission: mailbox.read
   search(q: { query?: string; sender?: string; subject?: string;
-              folder?: string; limit?: number }): MessageRef[];
+              folder?: string; limit?: number; since_days?: number }): MessageRef[];
   read(id: number): Message;
 }
 
@@ -134,3 +136,48 @@ export function onUnload(ctx: PluginContext): void;
 export function classify(ctx: PluginContext,
                          input: { kind: string; model: unknown; feats: unknown }):
   { label: string; confidence: number; detail?: string | null } | null;
+
+/**
+ * Matcher kind: a rule/flow condition the native ops cannot express.
+ * Referenced from conditions as {"field":"subject","op":"plugin","plugin":"<id>"};
+ * gated by the "Pipeline use" opt-in on the Plugins page. Keep it fast - it
+ * runs per message in the scan.
+ */
+export function match(ctx: PluginContext,
+                      input: { fields: Record<string, string>; text: string }):
+  boolean | { match: boolean; detail?: string };
+
+/**
+ * Draft-provider kind: the reply body a flow's draft step would save. Flow
+ * steps reference it as {"type":"draft","mode":"plugin","plugin":"<id>"}.
+ * May use ctx.llm.complete; budget limits.timeout_ms accordingly (LLM calls
+ * count against the deadline).
+ */
+export function draft(ctx: PluginContext,
+                      input: { subject: string; from: string; snippet: string;
+                               instructions?: string }):
+  { text: string } | string;
+
+/**
+ * Retriever kind: re-rank semantic-search candidates. Opt-in via the
+ * "Pipeline use" checkbox (plugin_retrievers setting; first opted-in plugin
+ * wins). Return the ids in your preferred order; unknown ids are ignored and
+ * unranked candidates keep their incoming order after yours.
+ */
+export function rank(ctx: PluginContext,
+                     input: { query: string;
+                              candidates: Array<{ id: number; subject: string; from: string;
+                                                  snippet: string; tags: string[];
+                                                  needs_reply: boolean }> }):
+  { ids: number[] } | number[];
+
+/**
+ * Integration kind: react to kernel events (mail.filed, mail.classified).
+ * Delivered on a background queue - never blocks the mail pipeline; give the
+ * handler a short limits.timeout_ms. Network hosts must be listed in
+ * manifest.net.hosts or - with net.allow_config_hosts: true - in the config's
+ * allowed_hosts list (the user typed the endpoint; every call is audited).
+ */
+export function onEvent(ctx: PluginContext,
+                        event: { type: string; payload: Record<string, unknown>; ts: number }):
+  void | { sent?: boolean; reason?: string };

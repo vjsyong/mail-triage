@@ -1,0 +1,22 @@
+{
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "id": "mt-cjk-matcher",
+  "name": "CJK matcher",
+  "version": "0.1.0",
+  "description": "Rule/flow condition: matches mail whose subject, sender or body contains Chinese, Japanese or Korean text. Create a rule condition with op \"plugin\" and plugin \"mt-cjk-matcher\".",
+  "kind": [
+    "matcher"
+  ],
+  "permissions": [],
+  "limits": {
+    "memory_mb": 16,
+    "timeout_ms": 1000,
+    "kv_bytes": 1024
+  }
+}

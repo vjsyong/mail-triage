@@ -158,8 +158,11 @@ def validate_semantics(m, root_kind):
     perms = m.get("permissions") or []
     if "net.http" in perms:
         hosts = (m.get("net") or {}).get("hosts") or []
-        if not hosts:
-            errs.append("permission net.http requires net.hosts (non-empty)")
+        allow_cfg = bool((m.get("net") or {}).get("allow_config_hosts"))
+        if not hosts and not allow_cfg:
+            errs.append("permission net.http requires net.hosts (or net.allow_config_hosts)")
+    if (m.get("net") or {}).get("allow_config_hosts") and "net.http" not in perms:
+        errs.append("net.allow_config_hosts requires the net.http permission")
     req_llm = m.get("required_llm_capability") or "none"
     if req_llm != "none" and req_llm not in perms:
         errs.append("required_llm_capability '%s' must also appear in permissions" % req_llm)
@@ -374,11 +377,21 @@ def set_enabled(plugin_id, enabled, grants=None):
                          (json.dumps(wanted), int(time.time()), plugin_id))
         store.log_event("plugin", "enabled '%s' (grants: %s)"
                         % (plugin_id, ", ".join(wanted) or "none"))
+        try:
+            import plugin_rt
+            plugin_rt.event_cache_reset()
+        except Exception:
+            pass
         return {"ok": True, "id": plugin_id, "enabled": True, "grants": wanted}
     with store.db() as conn:
         conn.execute("UPDATE plugins SET enabled=0, updated_ts=? WHERE id=?",
                      (int(time.time()), plugin_id))
     store.log_event("plugin", "disabled '%s'" % plugin_id)
+    try:
+        import plugin_rt
+        plugin_rt.event_cache_reset()
+    except Exception:
+        pass
     return {"ok": True, "id": plugin_id, "enabled": False}
 
 
@@ -417,6 +430,33 @@ def default_agent_level(row):
     if worst in ("local_write", "external"):
         return "ask"
     return "auto"
+
+
+def perms_for_ui(row):
+    """Sorted permission list for display."""
+    return sorted(row["manifest"].get("permissions") or [])
+
+
+def enabled_of_kind(kind):
+    """Enabled plugins contributing a given kind (integration/matcher/...)."""
+    return [r for r in list_rows(enabled_only=True) if kind in (r["manifest"].get("kind") or [])]
+
+
+def get_config(plugin_id):
+    """Per-install plugin config values (settings key plugin_config:<id>)."""
+    vals = store.get_setting("plugin_config:" + plugin_id, {}) or {}
+    return vals if isinstance(vals, dict) else {}
+
+
+def set_config(plugin_id, values):
+    row = get(plugin_id)
+    if not row:
+        return {"ok": False, "error": "unknown plugin '%s'" % plugin_id}
+    if not isinstance(values, dict):
+        return {"ok": False, "error": "config must be a JSON object"}
+    store.set_setting("plugin_config:" + plugin_id, values)
+    store.log_event("plugin", "config updated for '%s' (%d field(s))" % (plugin_id, len(values)))
+    return {"ok": True, "id": plugin_id, "config": values}
 
 
 def set_last_error(plugin_id, message):
@@ -553,5 +593,17 @@ def cli(argv):
             return {"ok": False, "error": "args must be JSON"}
         import plugin_rt
         return plugin_rt.runtime.invoke(args[1], args[2], targs)
+    if cmd == "config":
+        if len(args) < 2:
+            return {"ok": False, "error": "usage: --plugins config <id> [json-values]"}
+        if len(args) == 2:
+            row = get(args[1])
+            return {"ok": bool(row), "id": args[1], "config": get_config(args[1]),
+                    "defaults": ((row or {}).get("manifest") or {}).get("config") or {}}
+        try:
+            values = json.loads(args[2])
+        except ValueError:
+            return {"ok": False, "error": "values must be JSON"}
+        return set_config(args[1], values)
     return {"ok": False, "error": "unknown command '%s'" % cmd,
-            "usage": "list | validate <dir> | rescan | enable|disable <id> | grant <id> <perm...>"}
+            "usage": "list | validate <dir> | rescan | enable|disable <id> | grant <id> <perm...> | invoke <id> <tool> [json] | config <id> [json]"}

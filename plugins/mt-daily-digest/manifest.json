@@ -1,0 +1,47 @@
+{
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "id": "mt-daily-digest",
+  "name": "Daily digest",
+  "version": "0.1.0",
+  "description": "Assistant tool: catch-me-up summary of recent mail - counts, categories, what needs a reply, and a short written digest.",
+  "kind": [
+    "tool"
+  ],
+  "permissions": [
+    "mailbox.read",
+    "llm.complete"
+  ],
+  "required_llm_capability": "llm.complete",
+  "limits": {
+    "memory_mb": 64,
+    "timeout_ms": 30000,
+    "kv_bytes": 4096
+  },
+  "tools": [
+    {
+      "name": "daily_digest",
+      "description": "Summarize what arrived in the mailbox recently (default: last 24 hours): totals, categories, which threads need a reply, and a brief written digest. Use when the user asks to catch up, 'what did I miss', or for a digest.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "since_days": {
+            "type": "integer",
+            "description": "look back N days (default 1)"
+          },
+          "max_read": {
+            "type": "integer",
+            "description": "how many messages to read for the digest (default 10)"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none"
+    }
+  ]
+}

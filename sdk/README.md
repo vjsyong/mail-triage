@@ -63,3 +63,25 @@ When the native heuristics abstain, the host loads heuristic #12's `kind` +
 `model`, featurizes the message, and calls your `classify()` in the sandbox.
 The mirrored heuristic is normally parked disabled (enabled=0) - the plugin
 replaces its predictions. Native heuristics always keep the first word.
+
+## The other kinds (one built-in plugin each)
+
+- **matcher** (`mt-cjk-matcher`): export `match(ctx, {fields, text})`. Rules and
+  flows reference it as `{"field":"subject","op":"plugin","plugin":"mt-cjk-matcher"}`
+  (the rule builder has a `plugin` operator). Opt in under "Pipeline use".
+- **draft-provider** (`mt-mirror-language`): export `draft(ctx, {subject, from, snippet, instructions})`
+  -> `{text}`. Flow draft steps use mode "Draft via plugin" in the builder, or
+  `{"type":"draft","mode":"plugin","plugin":"<id>"}` in a proposal.
+- **retriever** (`mt-priority-first`): export `rank(ctx, {query, candidates})` ->
+  `{ids}`. Opt in under "Pipeline use"; it re-orders the assistant's semantic search.
+- **integration** (`mt-webhook-notify`): export `onEvent(ctx, {type, payload, ts})`.
+  Fires on `mail.filed` (rule/flow moved a message) and `mail.classified`.
+  Webhooks need `"net": {"allow_config_hosts": true}` in the manifest and the
+  host listed in the config's `allowed_hosts` (the endpoint you typed is the consent).
+- **tool** (`mt-daily-digest`, `mt-invoice-finder`): plain assistant tools.
+
+## Config
+
+A manifest `config` schema renders a settings form on the Plugins page (flat
+strings / numbers / booleans / string-arrays). Plugins read the values via
+`ctx.config.get().values` (or the CLI: `python app.py --plugins config <id> '[json]'`).

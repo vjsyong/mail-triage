@@ -1,0 +1,51 @@
+{
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "id": "mt-webhook-notify",
+  "name": "Webhook notifications",
+  "version": "0.1.0",
+  "description": "Posts a JSON event to a webhook URL (ntfy, Home Assistant, your own endpoint) when mail is filed by a rule/flow or classified. Set the URL and allowed host in the plugin's settings.",
+  "kind": [
+    "integration"
+  ],
+  "permissions": [
+    "net.http"
+  ],
+  "net": {
+    "hosts": [],
+    "allow_config_hosts": true,
+    "max_requests_per_day": 100
+  },
+  "limits": {
+    "memory_mb": 32,
+    "timeout_ms": 15000,
+    "kv_bytes": 4096
+  },
+  "config": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Webhook endpoint (POST, JSON body)",
+        "default": ""
+      },
+      "events": {
+        "type": "array",
+        "description": "Event types to send: mail.filed, mail.classified",
+        "default": [
+          "mail.filed"
+        ]
+      },
+      "allowed_hosts": {
+        "type": "array",
+        "description": "Host patterns for the URL above (e.g. ntfy.sh, 127.0.0.1, *.example.com)",
+        "default": []
+      }
+    }
+  }
+}

@@ -153,14 +153,25 @@ def _mail_search(payload):
     if folder:
         clauses.append("folder = ?")
         params.append(folder)
+    since_days = payload.get("since_days")
+    if since_days:
+        try:
+            cutoff = int(time.time()) - int(float(since_days)) * 86400
+            clauses.append("COALESCE(NULLIF(date_ts,0), processed_at, 0) >= ?")
+            params.append(cutoff)
+        except (TypeError, ValueError):
+            pass
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     with store.db() as conn:
-        rows = conn.execute("SELECT id, folder, uid, subject, from_addr, date, snippet "
+        rows = conn.execute("SELECT id, folder, uid, subject, from_addr, date, snippet, "
+                            "llm_category, llm_needs_reply "
                             "FROM messages" + where + " ORDER BY id DESC LIMIT ?",
                             params + [limit]).fetchall()
     return [{"id": r["id"], "folder": r["folder"], "uid": r["uid"], "subject": r["subject"],
              "from": r["from_addr"], "date": r["date"],
-             "snippet": (r["snippet"] or "")[:160]} for r in rows]
+             "snippet": (r["snippet"] or "")[:160],
+             "category": r["llm_category"], "needs_reply": bool(r["llm_needs_reply"])}
+            for r in rows]
 
 
 def _mail_read(payload):
@@ -228,8 +239,20 @@ def _http_fetch(plugin_id, row, payload):
         elif host == p.split(":")[0]:
             ok = True
             break
+    if not ok and ((row["manifest"].get("net") or {}).get("allow_config_hosts")):
+        # user-typed endpoints (e.g. a webhook URL) extend the allowlist; the
+        # config value itself is the consent, and every call is still audited
+        for pat in (kernel.get_config(plugin_id).get("allowed_hosts") or []):
+            p = str(pat).lower()
+            if p.startswith("*."):
+                if host.endswith(p[1:]) and host != p[2:]:
+                    ok = True
+                    break
+            elif host == p.split(":")[0]:
+                ok = True
+                break
     if not ok:
-        raise _HostError("denied", "host '%s' is not in this plugin's net.hosts" % host)
+        raise _HostError("denied", "host '%s' is not allowlisted for this plugin" % host)
     cap = int((row["manifest"].get("net") or {}).get("max_requests_per_day") or 50)
     today = time.strftime("%Y-%m-%d")
     day = _kv_get(plugin_id, "__http_day") or {}
@@ -424,6 +447,112 @@ class PluginRuntime:
                 if msg.get("seq") == seq:
                     msg["_ms"] = int((time.time() - t0) * 1000)
                     return "ok", msg
+
+    def matcher(self, plugin_id, payload):
+        """Rule/flow condition evaluation (hot path). Returns True/False."""
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled"):
+            return False
+        if "matcher" not in (row["manifest"].get("kind") or []):
+            return False
+        if not self.available():
+            return False
+        status, res = self._call_worker(plugin_id, row, {"cmd": "matcher", "input": payload})
+        if status != "ok":
+            if status == "timeout":
+                self._strike(plugin_id, "timeout",
+                             "matcher timed out after %dms (worker killed)" % res)
+            elif status != "load":
+                self._strike(plugin_id, "internal", "matcher failed: %s" % str(res)[:160])
+            return False
+        if "error" in res:
+            e = res.get("error") or {}
+            self._strike(plugin_id, str(e.get("code") or "internal"),
+                         "matcher error: %s" % str(e.get("message") or "")[:200])
+            return False
+        out = res.get("result")
+        if isinstance(out, dict):
+            return bool(out.get("match"))
+        return bool(out)
+
+    def draft(self, plugin_id, payload):
+        """Draft-provider: the reply body a flow step would draft. None on failure."""
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled") \
+                or "draft-provider" not in (row["manifest"].get("kind") or []):
+            return None
+        if not self.available():
+            return None
+        status, res = self._call_worker(plugin_id, row, {"cmd": "draft", "input": payload})
+        if status != "ok":
+            if status == "timeout":
+                self._strike(plugin_id, "timeout",
+                             "draft provider timed out after %dms (worker killed)" % res)
+            elif status != "load":
+                self._strike(plugin_id, "internal", "draft provider failed: %s" % str(res)[:160])
+            return None
+        if "error" in res:
+            e = res.get("error") or {}
+            self._strike(plugin_id, str(e.get("code") or "internal"),
+                         "draft provider error: %s" % str(e.get("message") or "")[:200])
+            return None
+        out = res.get("result")
+        if isinstance(out, str):
+            out = {"text": out}
+        if not isinstance(out, dict):
+            return None
+        return {"text": str(out.get("text") or "")[:20000]}
+
+    def retriever(self, plugin_id, payload):
+        """Search re-ranker: {"ids": [...]} in the plugin's preferred order, or None."""
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled") \
+                or "retriever" not in (row["manifest"].get("kind") or []):
+            return None
+        if not self.available():
+            return None
+        status, res = self._call_worker(plugin_id, row, {"cmd": "rank", "input": payload})
+        if status != "ok":
+            if status == "timeout":
+                self._strike(plugin_id, "timeout",
+                             "retriever timed out after %dms (worker killed)" % res)
+            elif status != "load":
+                self._strike(plugin_id, "internal", "retriever failed: %s" % str(res)[:160])
+            return None
+        if "error" in res:
+            e = res.get("error") or {}
+            self._strike(plugin_id, str(e.get("code") or "internal"),
+                         "retriever error: %s" % str(e.get("message") or "")[:200])
+            return None
+        out = res.get("result")
+        if isinstance(out, dict):
+            out = out.get("ids")
+        if not isinstance(out, list):
+            return None
+        ids = []
+        for x in out[:200]:
+            try:
+                ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        return {"ids": ids} if ids else None
+
+    def call_event(self, plugin_id, event):
+        """One-way integration event delivery (dispatcher thread context)."""
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled") \
+                or "integration" not in (row["manifest"].get("kind") or []):
+            return False
+        if not self.available():
+            return False
+        status, res = self._call_worker(plugin_id, row, {"cmd": "event", "input": event})
+        if status == "ok" and "error" not in res:
+            return True
+        if status == "timeout":
+            self._strike(plugin_id, "timeout", "event handler timed out (%dms)" % res)
+        elif status not in ("load",):
+            self._strike(plugin_id, "internal", "event handler failed: %s" % str(res)[:160])
+        return False
 
     def classify(self, plugin_id, payload):
         """Run a classifier-kind plugin (mirrors a native heuristic's model).
@@ -668,6 +797,79 @@ def _validate_args(params, args):
 runtime = PluginRuntime()
 
 
+# ---------------------------------------------------------------- events
+
+_event_queue = queue.Queue(maxsize=200)
+_event_thread = None
+_event_lock = threading.Lock()
+_event_target_cache = {"ts": 0.0, "ids": []}
+
+
+def _integration_targets():
+    now = time.time()
+    age = now - _event_target_cache["ts"]
+    if _event_target_cache["ids"] and age < 10:
+        return _event_target_cache["ids"]
+    if not _event_target_cache["ids"] and age < 1:
+        return _event_target_cache["ids"]
+    try:
+        ids = [r["id"] for r in kernel.enabled_of_kind("integration")]
+    except Exception:
+        ids = []
+    _event_target_cache["ts"] = now
+    _event_target_cache["ids"] = ids
+    return ids
+
+
+def event_cache_reset():
+    """Force the next emit to re-resolve targets (called on enable/disable)."""
+    _event_target_cache["ts"] = 0.0
+    _event_target_cache["ids"] = []
+
+
+def emit_event(event_type, payload):
+    """Queue one kernel event for enabled integration plugins (non-blocking).
+
+    Dispatched on a background thread so the mail pipeline never waits on a
+    plugin's network call. Returns the number of addressed plugins."""
+    targets = _integration_targets()
+    if not targets:
+        return 0
+    _ensure_dispatcher()
+    try:
+        _event_queue.put_nowait({"type": str(event_type), "payload": payload or {},
+                                 "targets": targets, "ts": int(time.time())})
+    except queue.Full:
+        try:
+            store.log_event("warn", "plugin events: queue full; dropped %r" % event_type)
+        except Exception:
+            pass
+    return len(targets)
+
+
+def _ensure_dispatcher():
+    global _event_thread
+    with _event_lock:
+        if _event_thread is not None and _event_thread.is_alive():
+            return
+        _event_thread = threading.Thread(target=_event_loop, daemon=True,
+                                         name="plugin-events")
+        _event_thread.start()
+
+
+def _event_loop():
+    while True:
+        item = _event_queue.get()
+        if item is None:
+            return
+        for pid in item["targets"]:
+            try:
+                runtime.call_event(pid, {"type": item["type"], "payload": item["payload"],
+                                         "ts": item["ts"]})
+            except Exception:
+                pass
+
+
 def available():
     return runtime.available()
 
@@ -683,6 +885,21 @@ def invoke_tool(full_name, args, session_id=0):
 def classify(plugin_id, payload):
     """Classifier-kind plugin call (used by the heuristics fallback)."""
     return runtime.classify(plugin_id, payload)
+
+
+def matcher(plugin_id, payload):
+    """Rule/flow condition call (used by engine._cond_field)."""
+    return runtime.matcher(plugin_id, payload)
+
+
+def draft(plugin_id, payload):
+    """Draft-provider call (flow draft steps + simulator preview)."""
+    return runtime.draft(plugin_id, payload)
+
+
+def retriever(plugin_id, payload):
+    """Search re-ranker call (assistant semantic_search)."""
+    return runtime.retriever(plugin_id, payload)
 
 
 atexit.register(runtime.shutdown)

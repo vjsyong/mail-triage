@@ -32,10 +32,12 @@
                      "description": "v1 reach: read + propose; plugins cannot mutate mail" },
     "net":         { "type": "object", "additionalProperties": false,
                      "properties": {
-                       "hosts": { "type": "array", "minItems": 1,
+                       "hosts": { "type": "array",
                                   "items": { "type": "string",
                                              "pattern": "^[a-z0-9.*-]+(:\\d+)?$" },
                                   "description": "hostname or *.suffix wildcard, optional :port" },
+                       "allow_config_hosts": { "type": "boolean", "default": false,
+                                  "description": "the plugin's config may extend the host allowlist (user-typed endpoints, e.g. a webhook URL)" },
                        "max_requests_per_day": { "type": "integer", "minimum": 0,
                                                  "maximum": 10000, "default": 50 } } },
     "required_llm_capability": { "enum": ["none", "llm.complete", "llm.embed"],

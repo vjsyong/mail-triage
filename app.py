@@ -282,8 +282,10 @@ def summarize_conditions(rule):
     if not conds:
         return "(no conditions — never matches)"
     joiner = " AND " if (rule.get("match_mode") or "all") == "all" else " OR "
-    return joiner.join('%s %s "%s"' % (c.get("field", "?"), c.get("op", "?"), c.get("value", ""))
-                       for c in conds)
+    return joiner.join(
+        ('matches plugin "%s"' % c.get("plugin")) if (c.get("op") or "") == "plugin"
+        else ('%s %s "%s"' % (c.get("field", "?"), c.get("op", "?"), c.get("value", "")))
+        for c in conds)
 
 
 def summarize_actions(rule):
@@ -1380,7 +1382,7 @@ window.assistantChat = function(opts){
       } else if(simObj){
         w.appendChild(mk('div','note','⚠ Similar rule exists: #'+simObj.id+' "'+simObj.name+'" — '+actsText(simObj.actions)+'. Updating it avoids a duplicate.'));
       }
-      var conds = p.summary ? p.summary : (p.conditions||[]).map(function(c){ return c.field+' '+c.op+' "'+c.value+'"'; }).join((p.match_mode==='any')?' OR ':' AND ');
+      var conds = p.summary ? p.summary : (p.conditions||[]).map(function(c){ return (c.op==='plugin') ? ('matches plugin "'+(c.plugin||'?')+'"') : (c.field+' '+c.op+' "'+c.value+'"'); }).join((p.match_mode==='any')?' OR ':' AND ');
       w.appendChild(mk('div','mono',conds));
       w.appendChild(mk('div','sub', p.actions_summary ? p.actions_summary : actsText(p.actions)));
       if(p.rationale) w.appendChild(mk('div','sub',p.rationale));
@@ -2511,6 +2513,34 @@ PLUGINS_TMPL = """
     </div>
     <div class="savebar"><button class="btn small" type="submit">Save plugin</button></div>
   </form>
+  {% if p.config_fields or p.optin_matcher or p.optin_retriever %}
+  <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}">
+    <input type="hidden" name="action" value="config">
+    {% if p.config_fields %}
+    <div class="setrow">
+      <div class="st-l"><b>Settings</b><span class="sub">Stored per install; the plugin reads these via ctx.config.</span></div>
+      <div class="st-c" style="flex-direction:column;align-items:stretch;gap:6px">
+        {% for f in p.config_fields %}
+        <label><span class="sub">{{ f.label }}</span>
+          {% if f.type == 'boolean' %}<span class="check"><input type="checkbox" name="cfg_{{ f.name }}" value="1" {{ 'checked' if f.value else '' }}> <span>{{ f.name }}</span></span>
+          {% else %}<input type="text" name="cfg_{{ f.name }}" value="{{ f.value }}" class="mono" aria-label="{{ f.name }}">{% endif %}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% if p.optin_matcher or p.optin_retriever %}
+    <div class="setrow">
+      <div class="st-l"><b>Pipeline use</b><span class="sub">Opt-in: the kernel calls this plugin in the hot path only when ticked.</span></div>
+      <div class="st-c">
+        {% if p.optin_matcher %}<label class="check"><input type="checkbox" name="opt_in_matcher" value="1" {{ 'checked' if p.in_matchers else '' }}> <span>rule conditions</span></label>{% endif %}
+        {% if p.optin_retriever %}<label class="check"><input type="checkbox" name="opt_in_retriever" value="1" {{ 'checked' if p.in_retrievers else '' }}> <span>search re-ranking</span></label>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+    <div class="savebar"><button class="btn small" type="submit">Save settings</button></div>
+  </form>
+  {% endif %}
   {% endif %}
   {% if p.last_error %}<div class="sub" style="margin-top:6px">last note: <span class="badge warn">{{ p.last_error }}</span></div>{% endif %}
 </div>
@@ -2571,6 +2601,28 @@ CLASSIFIERS_TMPL = """
 
 
 
+def _plugin_config_fields(manifest, pid):
+    """Simple config-form fields from manifest.config.properties (flat types)."""
+    props = ((manifest.get("config") or {}).get("properties") or {})
+    vals = plugins.get_config(pid)
+    fields = []
+    for name, spec in props.items():
+        spec = spec if isinstance(spec, dict) else {}
+        t = spec.get("type") or "string"
+        label = spec.get("description") or name
+        val = vals.get(name, spec.get("default"))
+        if t == "array":
+            val = ", ".join(str(x) for x in val) if isinstance(val, list) \
+                else ("" if val is None else str(val))
+            fields.append({"name": name, "type": "array", "value": val, "label": label})
+        elif t == "boolean":
+            fields.append({"name": name, "type": "boolean", "value": bool(val), "label": label})
+        else:
+            fields.append({"name": name, "type": "text",
+                           "value": "" if val is None else str(val), "label": label})
+    return fields
+
+
 @app.route("/plugins")
 def plugins_page():
     data = []
@@ -2590,6 +2642,11 @@ def plugins_page():
             "agent_level": perms.get("plugin:" + r["id"], "auto"),
             "needs_regrant": "re-grant" in (r["last_error"] or ""),
             "last_error": r["last_error"] or "",
+            "config_fields": _plugin_config_fields(m, r["id"]),
+            "optin_matcher": "matcher" in (m.get("kind") or []),
+            "optin_retriever": "retriever" in (m.get("kind") or []),
+            "in_matchers": r["id"] in (store.get_setting("plugin_matchers", []) or []),
+            "in_retrievers": r["id"] in (store.get_setting("plugin_retrievers", []) or []),
         })
     plugins.ensure_user_root()
     return render(_render_src(PLUGINS_TMPL, px=data, sdk=plugins.HOST_SDK_VERSION,
@@ -2622,6 +2679,42 @@ def plugins_update(pid):
             lvl = (request.form.get("agent_level") or "").strip().lower()
             if lvl in ("off", "ask", "auto"):
                 store.set_setting("perm_plugin:" + pid, lvl)
+        else:
+            res = {"ok": False, "error": "unknown plugin '%s'" % pid}
+    elif action == "config":
+        row = plugins.get(pid)
+        if row:
+            props = ((row["manifest"].get("config") or {}).get("properties") or {})
+            values = {}
+            for k2, spec in props.items():
+                spec = spec if isinstance(spec, dict) else {}
+                t2 = spec.get("type") or "string"
+                if t2 == "boolean":
+                    values[k2] = request.form.get("cfg_" + k2) not in (None, "", "0")
+                elif t2 == "array":
+                    raw = request.form.get("cfg_" + k2) or ""
+                    values[k2] = [x.strip() for x in re.split(r"[,\n]", raw) if x.strip()]
+                elif t2 in ("integer", "number"):
+                    try:
+                        values[k2] = int(request.form.get("cfg_" + k2) or 0)
+                        if t2 == "number":
+                            values[k2] = float(request.form.get("cfg_" + k2) or 0)
+                    except ValueError:
+                        values[k2] = 0
+                else:
+                    values[k2] = (request.form.get("cfg_" + k2) or "").strip()
+            res = plugins.set_config(pid, values)
+            kinds = row["manifest"].get("kind") or []
+            if "matcher" in kinds:
+                lst = [x for x in (store.get_setting("plugin_matchers", []) or []) if x != pid]
+                if request.form.get("opt_in_matcher"):
+                    lst.append(pid)
+                store.set_setting("plugin_matchers", lst)
+            if "retriever" in kinds:
+                lst = [x for x in (store.get_setting("plugin_retrievers", []) or []) if x != pid]
+                if request.form.get("opt_in_retriever"):
+                    lst.append(pid)
+                store.set_setting("plugin_retrievers", lst)
         else:
             res = {"ok": False, "error": "unknown plugin '%s'" % pid}
     else:
@@ -2918,10 +3011,10 @@ RULE_EDIT_TMPL = """
           <option value="{{ f }}" {{ 'selected' if c.get('field')==f else '' }}>{{ f }}</option>{% endfor %}
         </select>
         <select name="cond_op_{{ i }}" aria-label="Condition {{ i+1 }} operator">
-          {% for o in ['contains','equals','regex'] %}
+          {% for o in ['contains','equals','regex','plugin'] %}
           <option value="{{ o }}" {{ 'selected' if c.get('op')==o else '' }}>{{ o }}</option>{% endfor %}
         </select>
-        <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') }}" placeholder="value to match" aria-label="Condition {{ i+1 }} value">
+        <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') if c.get('op') != 'plugin' else c.get('plugin','') }}" placeholder="value to match (or plugin id)" aria-label="Condition {{ i+1 }} value">
       </div>
       {% endfor %}
       <button type="button" class="btn small cond-more" onclick="this.parentNode.querySelectorAll('.cond-extra').forEach(function(e){e.classList.remove('cond-extra');}); this.remove();">Show 3 more conditions</button>
@@ -2957,8 +3050,12 @@ def _rule_from_form():
         val = (request.form.get("cond_value_%d" % i) or "").strip()
         if not val:
             continue
+        op = request.form.get("cond_op_%d" % i, "contains")
+        if op == "plugin":
+            conditions.append({"field": "subject", "op": "plugin", "plugin": val})
+            continue
         conditions.append({"field": request.form.get("cond_field_%d" % i, "subject"),
-                           "op": request.form.get("cond_op_%d" % i, "contains"),
+                           "op": op,
                            "value": val})
     actions = {}
     if (request.form.get("move_to") or "").strip():
@@ -3272,6 +3369,7 @@ var stepsInput = document.getElementById('steps_json');
 var sumEl = document.getElementById('fl-sum-text');
 var TYPES = [['move','Move to folder','⇥'],['draft','Create a draft','✎'],['tag','Tag','#'],['mark_read','Mark as read','✓'],['flag','Star / flag','★']];
 var TEMPLATES = {{ templates_json|safe }};
+var PLUGINS = {{ plugins_json|safe }};
 var CATS = {{ categories_json|safe }};
 var steps = {{ steps_json|safe }};
 steps.forEach(function(s){ s._open = false; });
@@ -3285,6 +3383,7 @@ function stepSummary(st){
   if(st.type === 'draft'){
     st.mode = st.mode || 'template';
     if(st.mode === 'fixed') return 'fixed draft "' + String(st.body || '').slice(0, 40) + '" → Drafts';
+    if(st.mode === 'plugin') return 'plugin draft (' + (st.plugin || '?') + ') → Drafts';
     if(st.mode === 'llm') return 'LLM draft' + (st.instructions ? ' guided by "' + String(st.instructions).slice(0, 40) + '"' : '') + ' → Drafts';
     var t = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
     return 'draft from ' + (t ? t.name : '(pick a template)') + ' → Drafts';
@@ -3367,7 +3466,7 @@ function fieldsFor(st){
   } else if(st.type === 'draft'){
     f.appendChild(el('label', null, 'How'));
     var m = el('select');
-    [['fixed','Fixed message'],['template','Fill a template'],['llm','Draft with the LLM']].forEach(function(t){
+    [['fixed','Fixed message'],['template','Fill a template'],['llm','Draft with the LLM'],['plugin','Draft via plugin']].forEach(function(t){
       var o = el('option', null, t[1]); o.value = t[0]; if((st.mode || 'template') === t[0]) o.selected = true; m.appendChild(o);
     });
     m.onchange = function(){ st.mode = m.value; render(); sync(); };
@@ -3378,6 +3477,17 @@ function fieldsFor(st){
       ta.placeholder = 'Thank you for your email, I will get back to you shortly';
       ta.oninput = function(){ st.body = ta.value; renderSummary(); sync(); };
       f.appendChild(ta);
+    } else if(st.mode === 'plugin'){
+      f.appendChild(el('label', null, 'Plugin'));
+      var pSel = el('select');
+      PLUGINS.forEach(function(pp){ var o = el('option', null, pp.name); o.value = pp.id; if((st.plugin || '') === pp.id) o.selected = true; pSel.appendChild(o); });
+      pSel.onchange = function(){ st.plugin = pSel.value; renderSummary(); sync(); };
+      f.appendChild(pSel);
+      f.appendChild(el('label', null, 'Extra instructions (optional)'));
+      var pa = document.createElement('textarea'); pa.rows = 2; pa.value = st.instructions || '';
+      pa.placeholder = 'e.g. keep it to three sentences';
+      pa.oninput = function(){ st.instructions = pa.value; renderSummary(); sync(); };
+      f.appendChild(pa);
     } else {
       f.appendChild(el('label', null, (st.mode === 'llm') ? 'Template (optional guidance)' : 'Template'));
       var tSel = el('select');
@@ -3532,7 +3642,9 @@ def _flow_summary(flow, tpl_names):
             acts.append("tag ‘%s’" % st.get("tag"))
         elif t == "draft":
             dmode = (st.get("mode") or "template").lower()
-            if dmode == "llm":
+            if dmode == "plugin":
+                acts.append("draft via plugin ‘%s’ and save to Drafts" % (st.get("plugin") or "?"))
+            elif dmode == "llm":
                 name = tpl_names.get(int(st.get("template_id") or 0), "")
                 ins = (st.get("instructions") or "").strip()
                 acts.append("draft with the LLM%s%s and save to Drafts"
@@ -3594,7 +3706,14 @@ def _flow_from_form():
                 tid = int(tid) if tid not in (None, "", "0") else None
             except (TypeError, ValueError):
                 tid = None
-            if dmode == "fixed":
+            if dmode == "plugin":
+                st2 = {"type": "draft", "mode": "plugin",
+                       "plugin": (st.get("plugin") or "").strip()[:80]}
+                ins = (st.get("instructions") or "").strip()
+                if ins:
+                    st2["instructions"] = ins[:1000]
+                steps.append(st2)
+            elif dmode == "fixed":
                 body = (st.get("body") or "").strip()
                 if body:
                     steps.append({"type": "draft", "mode": "fixed", "body": body[:4000]})
@@ -3630,7 +3749,10 @@ def _flow_edit_context(error, name, mode, conds, steps, enabled, is_new=False):
                                acts or "no steps yet"),
             "templates": store.list_templates(),
             "templates_json": json.dumps([{"id": x["id"], "name": x["name"]}
-                                          for x in store.list_templates()])}
+                                          for x in store.list_templates()]),
+            "plugins_json": json.dumps([{"id": r["id"],
+                                         "name": r["manifest"].get("name") or r["id"]}
+                                        for r in plugins.enabled_of_kind("draft-provider")])}
 
 
 @app.route("/flows")
@@ -7070,7 +7192,7 @@ SIMULATE_TMPL = """
               <div class="simrow-t"><b>Draft preview</b>
                 {% if dp.error %}<span class="badge err">could not build</span>
                 {% elif dp.needs_llm %}<span class="badge warn">model not asked</span>
-                {% else %}<span class="badge ok">{{ 'written by the model' if dp.by == 'model' else ('rendered from the template' if dp.by == 'template' else 'fixed text') }}</span>
+                {% else %}<span class="badge ok">{{ 'written by the model' if dp.by == 'model' else ('written by plugin' if dp.by == 'plugin' else ('rendered from the template' if dp.by == 'template' else 'fixed text')) }}</span>
                 {% endif %}
               </div>
               {% if dp.error %}<div class="simrow-d">The draft could not be built: {{ dp.error }}</div>

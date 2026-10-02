@@ -3628,6 +3628,143 @@ def main():
     check("the More tab highlights while on the Plugins page",
           b'href="/more" class="on"' in r.data)
 
+    section("T48 plugin kinds: matcher, draft provider, retriever, integration, digest")
+    for _p in ("mt-cjk-matcher", "mt-mirror-language", "mt-priority-first",
+               "mt-webhook-notify", "mt-daily-digest"):
+        shutil.copytree(os.path.join(PROJECT, "plugins", _p),
+                        os.path.join(broot, _p), dirs_exist_ok=True)
+    plugins_mod.scan()
+    # -- matcher kind: a rule condition the native ops cannot express
+    plugins_mod.set_enabled("mt-cjk-matcher", True)
+    store.set_setting("plugin_matchers", ["mt-cjk-matcher"])
+    cjk_rid = store.add_rule("CJK probe", "any",
+                             [{"field": "subject", "op": "plugin", "plugin": "mt-cjk-matcher"}],
+                             {"mark_read": True}, enabled=True)
+    row_cjk = {"from_addr": "a@b.com", "to_addr": "s@x",
+               "subject": "\u4f60\u597d\uff0c\u8bf7\u67e5\u6536\u53d1\u7968", "snippet": ""}
+    row_en = {"from_addr": "a@b.com", "to_addr": "s@x", "subject": "hello invoice", "snippet": ""}
+    check("matcher plugin condition fires through rule_matches",
+          engine.rule_matches(store.get_rule(cjk_rid), row_cjk)
+          and not engine.rule_matches(store.get_rule(cjk_rid), row_en))
+    store.set_setting("plugin_matchers", [])
+    check("matcher opt-in gates the hot path",
+          not engine.rule_matches(store.get_rule(cjk_rid), row_cjk))
+    store.set_setting("plugin_matchers", ["mt-cjk-matcher"])
+    _norm2, _errs2 = eng_mod._validate_rule({"name": "plug rule", "match_mode": "any",
+                                             "conditions": [{"field": "subject", "op": "plugin",
+                                                             "plugin": "mt-cjk-matcher"}],
+                                             "actions": {"mark_read": True}})
+    check("rule validator accepts plugin conditions",
+          bool(_norm2) and not _errs2
+          and (_norm2["conditions"][0].get("plugin") == "mt-cjk-matcher"))
+    store.update_rule(cjk_rid, enabled=0)
+    # -- draft provider kind
+    plugins_mod.set_enabled("mt-mirror-language", True)
+    fdid = store.add_flow("Lang flow", "any",
+                          [{"field": "subject", "op": "contains", "value": "langprobe"}],
+                          [{"type": "draft", "mode": "plugin", "plugin": "mt-mirror-language"}],
+                          enabled=True)
+    r = client.post("/simulate", follow_redirects=True,
+                    data={"from_addr": "x@y.com", "subject": "langprobe hello", "body": "b",
+                          "use_llm": "0"})
+    check("simulator explains a plugin draft waits for the tick",
+          b"Draft preview" in r.data and b"model not asked" in r.data
+          and b"mt-mirror-language" in r.data)
+    r = client.post("/simulate", follow_redirects=True,
+                    data={"from_addr": "x@y.com", "subject": "langprobe hello", "body": "b",
+                          "use_llm": "1"})
+    check("plugin draft provider renders through the sandbox",
+          b"Draft preview" in r.data and b"written by plugin" in r.data
+          and FAKE_DRAFT.encode() in r.data)
+    store.update_flow(fdid, enabled=0)
+    # -- retriever kind
+    plugins_mod.set_enabled("mt-priority-first", True)
+    _ranked = rt_mod.runtime.retriever("mt-priority-first", {"query": "q", "candidates": [
+        {"id": 1, "subject": "a", "needs_reply": False, "tags": []},
+        {"id": 2, "subject": "b", "needs_reply": True, "tags": []},
+        {"id": 3, "subject": "c", "needs_reply": False, "tags": ["keep"]}]})
+    check("retriever plugin orders needs-reply/tagged first",
+          bool(_ranked) and _ranked["ids"][:3] == [2, 3, 1])
+    _msgs = store.messages(limit=2)
+    import rag as _rag
+    _orig_search = _rag.search
+    try:
+        store.update_message(_msgs[1]["id"], llm_needs_reply=1)
+        _rag.search = lambda *a, **k: {"ok": True, "meta": {}, "results": [
+            {"message_id": _msgs[0]["id"], "folder": "INBOX", "from_addr": "a@x",
+             "subject": "one", "date": "", "excerpt": "e"},
+            {"message_id": _msgs[1]["id"], "folder": "INBOX", "from_addr": "b@x",
+             "subject": "two", "date": "", "excerpt": "e"}]}
+        store.set_setting("plugin_retrievers", ["mt-priority-first"])
+        _agent_r = eng_mod.AssistantAgent(session_id=0)
+        try:
+            _out = _agent_r.call_tool("semantic_search", {"query": "rank probe", "limit": 5})
+        finally:
+            _agent_r.close()
+        _ids = [i["message_id"] for i in _out["result"]["results"]]
+        check("retriever plugin re-ranks semantic search results",
+              _ids.index(_msgs[1]["id"]) < _ids.index(_msgs[0]["id"]))
+    finally:
+        _rag.search = _orig_search
+        store.set_setting("plugin_retrievers", [])
+    # -- integration kind: webhook delivery + host gating
+    import http.server as _httpd
+    _got = []
+
+    class _WHook(_httpd.BaseHTTPRequestHandler):
+        def do_POST(self):
+            _ln = int(self.headers.get("Content-Length") or 0)
+            _got.append(self.rfile.read(_ln).decode())
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *a):
+            pass
+
+    _wsrv = _httpd.HTTPServer(("127.0.0.1", 0), _WHook)
+    _wport = _wsrv.server_address[1]
+    threading.Thread(target=_wsrv.serve_forever, daemon=True).start()
+    plugins_mod.set_enabled("mt-webhook-notify", True)
+    store.set_setting("plugin_config:mt-webhook-notify",
+                      {"url": "http://127.0.0.1:%d/hook" % _wport,
+                       "events": ["mail.filed"], "allowed_hosts": ["127.0.0.1"]})
+    _n_ev = rt_mod.emit_event("mail.filed", {"subject": "probe-subject", "to_folder": "Archive"})
+    _dl2 = time.time() + 8
+    while not _got and time.time() < _dl2:
+        time.sleep(0.15)
+    check("integration plugin receives kernel events and POSTs the webhook",
+          _n_ev >= 1 and bool(_got) and "probe-subject" in _got[0]
+          and "mail.filed" in _got[0])
+    _got.clear()
+    store.set_setting("plugin_config:mt-webhook-notify",
+                      {"url": "http://127.0.0.1:%d/hook" % _wport, "events": ["mail.filed"]})
+    rt_mod.emit_event("mail.filed", {"subject": "blocked-subject"})
+    time.sleep(1.6)
+    check("config hosts gate the webhook (allowlist extends only when declared)", not _got)
+    _wsrv.shutdown()
+    # -- config form + CLI
+    client.post("/plugins/mt-webhook-notify",
+                data={"action": "config", "cfg_url": "http://example.com/x",
+                      "cfg_events": "mail.filed, mail.classified",
+                      "cfg_allowed_hosts": "example.com"},
+                follow_redirects=True)
+    _cfg2 = plugins_mod.get_config("mt-webhook-notify")
+    check("Plugins page config form persists typed values",
+          _cfg2.get("url") == "http://example.com/x"
+          and _cfg2.get("events") == ["mail.filed", "mail.classified"]
+          and _cfg2.get("allowed_hosts") == ["example.com"])
+    _clc = plugins_mod.cli(["config", "mt-daily-digest"])
+    check("CLI config read works for plugins without values", _clc.get("ok") is True)
+    # -- digest tool
+    plugins_mod.set_enabled("mt-daily-digest", True)
+    _dg = rt_mod.runtime.invoke("mt-daily-digest", "daily_digest", {"since_days": 3})
+    check("digest tool summarises recent mail via host APIs",
+          _dg["ok"] and _dg["result"].get("total", 0) >= 1
+          and "need a reply" in _dg["summary"])
+    check("digest tool returns a card", bool(_dg.get("card")))
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

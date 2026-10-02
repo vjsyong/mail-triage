@@ -825,13 +825,32 @@ bit-exactly (suite checks float equality to 1e-9). Opt in via the
 ## Files
 
 `plugins.py` (kernel: scan/validate/registry/schemas/CLI) ·
-`plugin_rt.py` (supervisor + host calls) · `plugin_worker.py` (sandbox worker) ·
+`plugin_rt.py` (supervisor + host calls + event dispatcher) ·
+`plugin_worker.py` (sandbox worker) ·
 `schemas/plugin-manifest.schema.json` · `sdk/` (d.ts, runtime.js, README) ·
-`plugins/mt-promo-fastpath`, `plugins/mt-invoice-finder` (built-ins) ·
-tests: suite sections T43-T46 + `tests/plugins_fixture/`.
+`plugins/` built-ins: `mt-promo-fastpath` (classifier), `mt-invoice-finder` (tool),
+`mt-cjk-matcher` (matcher), `mt-mirror-language` (draft-provider),
+`mt-priority-first` (retriever), `mt-webhook-notify` (integration),
+`mt-daily-digest` (tool) · tests: suite sections T43-T48 + `tests/plugins_fixture/`.
+
+## All kinds, as built (2026-10-02, second wave)
+
+| Kind | Hook | Opt-in | Built-in |
+|---|---|---|---|
+| tool | assistant inventory -> `call_tool` -> sandbox | enable + assistant gate (`plugin:<id>`) | mt-invoice-finder, mt-daily-digest |
+| classifier | `heuristics.classify()` fallback | `plugin_classifiers` | mt-promo-fastpath |
+| matcher | `_cond_field` op `plugin` in rules/flows | `plugin_matchers` (+ builder has the op) | mt-cjk-matcher |
+| draft-provider | flow draft step `mode:"plugin"` (live + simulator preview) | referenced by the step | mt-mirror-language |
+| retriever | `_tool_semantic_search` re-rank | `plugin_retrievers` | mt-priority-first |
+| integration | `mail.filed` / `mail.classified` events on a dispatcher thread | enabled integration plugins (10s target cache, reset on enable/disable) | mt-webhook-notify |
+
+Webhook hosts: `net.allow_config_hosts: true` lets the plugin's config add
+`allowed_hosts` patterns - the user-typed endpoint is the consent, every call
+still audited and rate-capped. Plugins with a `config` schema get a flat
+settings form on the Plugins page; values live in `plugin_config:<id>`.
 
 ## Deferred (explicit)
 
-Node dev-tier adapter (`--plugins dev`), plugin code signing, per-plugin config
-forms on the Plugins page (values are honored from `plugin_config:<id>` already),
-Wasm adapter swap, retire-the-native-heuristic automation for mirrored fast-paths.
+Node dev-tier adapter (`--plugins dev`), plugin code signing, Wasm adapter swap,
+retire-the-native-heuristic automation for mirrored fast-paths, nested-object
+config schemas in the form (flat types only for now).

@@ -749,6 +749,25 @@ def _cond_field(c, fields):
             return re.search(val, hay_raw, re.I) is not None
         except re.error:
             return False
+    if op == "plugin":
+        pid = str(c.get("plugin") or "").strip()
+        if not pid:
+            return False
+        try:
+            import plugins as _plugins
+            import plugin_rt
+            row = _plugins.get(pid)
+            if not row or not row.get("enabled"):
+                return False
+            if pid not in (store.get_setting("plugin_matchers", []) or []):
+                return False
+            out = plugin_rt.matcher(pid, {
+                "fields": {str(k): ("" if v is None else str(v)) for k, v in (fields or {}).items()},
+                "text": " ".join("" if v is None else str(v)
+                                 for v in (fields or {}).values())[:4000]})
+            return bool(out)
+        except Exception:
+            return False
     return False
 
 
@@ -938,6 +957,12 @@ def _apply_flow(mc, flow, row, settings, live):
                     fields["folder"], fields["uid"] = cur_folder, cur_uid
                     store.update_message(row["id"], folder=cur_folder, uid=cur_uid)
                     taken.append("move:" + dest)
+                    _emit_plugin_event("mail.filed", {
+                        "id": row.get("id"), "msgid": row.get("msgid") or "",
+                        "from_folder": row.get("folder") or "", "to_folder": dest,
+                        "from": row.get("from_addr") or "",
+                        "subject": row.get("subject") or "",
+                        "by": "flow \"%s\"" % (flow.get("name") or "")})
                 except Exception as exc:
                     taken.append("move:%s FAILED" % dest)
                     store.log_event("error", "flow '%s': move to %s failed: %r"
@@ -976,7 +1001,18 @@ def _apply_flow(mc, flow, row, settings, live):
                         tpl_id = None
                     mode = (st.get("mode") or "template").lower()
                     body = ""
-                    if mode == "llm":
+                    if mode == "plugin" and st.get("plugin"):
+                        try:
+                            import plugin_rt
+                            pd = plugin_rt.draft(str(st["plugin"]), {
+                                "subject": row_now.get("subject") or "",
+                                "from": row_now.get("from_addr") or "",
+                                "snippet": (row_now.get("snippet") or "")[:2000],
+                                "instructions": st.get("instructions") or ""})
+                            body = (pd or {}).get("text") or ""
+                        except Exception:
+                            body = ""
+                    elif mode == "llm":
                         body = generate_draft(row_now["id"], tpl_id, st.get("instructions") or "")
                     elif mode == "fixed":
                         body = render_template_text(st.get("body") or "", row_now)
@@ -995,6 +1031,15 @@ def _apply_flow(mc, flow, row, settings, live):
             else:
                 taken.append("draft")
     return taken, fields
+
+
+def _emit_plugin_event(kind, payload):
+    """Fire-and-forget kernel event for integration plugins (never blocks)."""
+    try:
+        import plugin_rt
+        plugin_rt.emit_event(kind, payload)
+    except Exception:
+        pass
 
 
 def _process_flow(mc, flow, row, meta, settings, why=""):
@@ -1433,6 +1478,13 @@ def _process_folder(mc, folder, settings, rules, flows=None):
                         mc.ensure_folder(actions["move_to"])
                         new_uid = mc.move(uid, actions["move_to"], msgid=row.get("msgid"))
                         taken.append("move:" + actions["move_to"])
+                        _emit_plugin_event("mail.filed", {
+                            "id": row.get("id"), "msgid": row.get("msgid") or "",
+                            "from_folder": row.get("folder") or "",
+                            "to_folder": actions["move_to"],
+                            "from": row.get("from_addr") or "",
+                            "subject": row.get("subject") or "",
+                            "by": "rule \"%s\"" % (rule.get("name") or "")})
                         mv_fields = {"folder": actions["move_to"]}
                         if new_uid:
                             mv_fields["uid"] = new_uid
@@ -1690,6 +1742,28 @@ def _sim_draft_preview(sim_msg, step, settings, use_llm):
     head = {"mode": mode,
             "to": sim_msg.get("from_addr") or "",
             "subject": subj if subj.lower().startswith("re:") else ("Re: " + subj)}
+    if mode == "plugin":
+        pid = str(step.get("plugin") or "")
+        if not use_llm:
+            note = "plugin '%s'" % pid
+            if step.get("instructions"):
+                note += " - " + str(step["instructions"])
+            return {"mode": mode, "needs_llm": True, "instructions": note[:400]}
+        body = ""
+        try:
+            import plugin_rt
+            pd = plugin_rt.draft(pid, {
+                "subject": sim_msg.get("subject") or "",
+                "from": sim_msg.get("from_addr") or "",
+                "snippet": (sim_msg.get("body") or "")[:2000],
+                "instructions": step.get("instructions") or ""})
+            body = (pd or {}).get("text") or ""
+        except Exception:
+            body = ""
+        if not body:
+            return {"mode": mode, "error": "plugin '%s' produced no draft" % pid}
+        head.update({"by": "plugin", "body": body.strip()[:4000]})
+        return head
     if mode == "llm":
         if not use_llm:
             return {"mode": mode, "needs_llm": True,
@@ -2273,6 +2347,10 @@ def classify_and_store(msg, settings, mc=None):
                     pass
     store.update_message(msg["id"], **fields)
     learning.observe_classification(msg, fields, res, hres, settings)
+    _emit_plugin_event("mail.classified", {
+        "id": msg.get("id"), "category": category, "confidence": round(conf, 3),
+        "needs_reply": bool(res.get("needs_reply")),
+        "from": msg.get("from_addr") or "", "subject": msg.get("subject") or ""})
     return res
 
 
@@ -2531,7 +2609,7 @@ Reply with ONE JSON object and nothing else:
  "proposed_rules": [
    {"name": "short rule name",
     "match_mode": "all" or "any",
-    "conditions": [{"field": "from|to|subject|body", "op": "contains|equals|regex", "value": "..."}],
+    "conditions": [{"field": "from|to|subject|body", "op": "contains|equals|regex|plugin", "value": "...", "plugin": "matcher plugin id when op=plugin"}],
     "actions": {"move_to": "Folder name", "mark_read": true, "flag": true},
     "placement": "top" or "bottom",
     "rationale": "one line"}]}
@@ -2709,8 +2787,9 @@ ASSISTANT_TOOLS = [
              "properties": {
                  "kind": {"type": "string", "enum": ["field", "category", "topic"]},
                  "field": {"type": "string", "enum": ["from", "to", "subject", "body"]},
-                 "op": {"type": "string", "enum": ["contains", "equals", "regex"]},
+                 "op": {"type": "string", "enum": ["contains", "equals", "regex", "plugin"]},
                  "value": {"type": "string"},
+                 "plugin": {"type": "string", "description": "op=plugin only: a matcher plugin id (mt-cjk-matcher checks for CJK text); the plugin decides by its own logic"},
                  "min_confidence": {"type": "number", "description": "category conditions: minimum classifier confidence 0-1"},
                  "threshold": {"type": "number", "description": "topic conditions: similarity threshold 0.2-0.95 (default 0.45)"}}}},
          "steps": {"type": "array", "description": "THEN steps, in order (1-10)", "items": {
@@ -2743,8 +2822,9 @@ ASSISTANT_TOOLS = [
              "type": "object",
              "properties": {
                  "field": {"type": "string", "enum": ["from", "to", "subject", "body"]},
-                 "op": {"type": "string", "enum": ["contains", "equals", "regex"]},
-                 "value": {"type": "string"}}}},
+                 "op": {"type": "string", "enum": ["contains", "equals", "regex", "plugin"]},
+                 "value": {"type": "string"},
+                 "plugin": {"type": "string", "description": "op=plugin only: a matcher plugin id (mt-cjk-matcher checks for CJK text); the plugin decides by its own logic"}}}},
          "actions": {"type": "object", "description": "what the rule does; OMIT (or {\"keep\": true}) for a guard rule that keeps matching mail in place and stops further rules",
                      "properties": {"move_to": {"type": "string"},
                                     "mark_read": {"type": "boolean"},
@@ -2975,7 +3055,10 @@ def _rules_to_text(rules):
         conds = _safe_json(r.get("conditions"), [])
         acts = _safe_json(r.get("actions"), {})
         joiner = " AND " if (r.get("match_mode") or "all") == "all" else " OR "
-        cs = joiner.join('%s %s "%s"' % (c.get("field"), c.get("op"), c.get("value")) for c in conds)
+        cs = joiner.join(
+            ('matches plugin "%s"' % c.get("plugin")) if (c.get("op") or "") == "plugin"
+            else ('%s %s "%s"' % (c.get("field"), c.get("op"), c.get("value")))
+            for c in conds)
         parts = []
         if acts.get("move_to"):
             parts.append("move to %s" % acts["move_to"])
@@ -3041,7 +3124,7 @@ def _rule_brief(r):
 
 
 ALLOWED_FIELDS = ("from", "to", "subject", "body")
-ALLOWED_OPS = ("contains", "equals", "regex")
+ALLOWED_OPS = ("contains", "equals", "regex", "plugin")
 
 
 def _flow_cond_text(c):
@@ -3058,6 +3141,8 @@ def _flow_cond_text(c):
         except (TypeError, ValueError):
             th = _TOPIC_MIN_DEFAULT
         return 'is about "%s" (>=%.2f)' % (c.get("value"), th)
+    if (c.get("op") or "").lower() == "plugin":
+        return 'matches plugin "%s"' % c.get("plugin")
     return '%s %s "%s"' % (c.get("field"), c.get("op"), c.get("value"))
 
 
@@ -3082,7 +3167,9 @@ def _flow_steps_text(steps):
             parts.append('tag "%s"' % st.get("tag"))
         elif t == "draft":
             mode = (st.get("mode") or "template").lower()
-            if mode == "fixed":
+            if mode == "plugin":
+                parts.append('draft via plugin "%s" and save to Drafts' % st.get("plugin"))
+            elif mode == "fixed":
                 body = (st.get("body") or "").strip()
                 parts.append('draft a fixed reply ("%s%s") and save to Drafts'
                              % (body[:40], "..." if len(body) > 40 else ""))
@@ -3141,6 +3228,17 @@ def _validate_rule(proposal):
             continue
         if op not in ALLOWED_OPS:
             errors.append("bad op %r (use %s)" % (op, "/".join(ALLOWED_OPS)))
+            continue
+        if op == "plugin":
+            pid = str(c.get("plugin") or "").strip()
+            if not pid:
+                errors.append("plugin op needs a plugin id")
+                continue
+            import plugins as _plugins
+            if not _plugins.get(pid):
+                errors.append("unknown plugin %r (see the Plugins page)" % pid)
+                continue
+            conditions.append({"field": field or "subject", "op": "plugin", "plugin": pid})
             continue
         if not value:
             errors.append("empty value for %s %s" % (field, op))
@@ -3242,6 +3340,17 @@ def _validate_flow(proposal):
         if op not in ALLOWED_OPS:
             errors.append("bad op %r (use %s)" % (op, "/".join(ALLOWED_OPS)))
             continue
+        if op == "plugin":
+            pid = str(c.get("plugin") or "").strip()
+            if not pid:
+                errors.append("plugin op needs a plugin id")
+                continue
+            import plugins as _plugins
+            if not _plugins.get(pid):
+                errors.append("unknown plugin %r (see the Plugins page)" % pid)
+                continue
+            conditions.append({"field": field or "subject", "op": "plugin", "plugin": pid})
+            continue
         if not value:
             errors.append("empty value for %s %s" % (field, op))
             continue
@@ -3287,8 +3396,24 @@ def _validate_flow(proposal):
                 if ins:
                     step_["instructions"] = ins[:1000]
                 steps.append(step_)
+            elif dmode == "plugin":
+                pid = str(st.get("plugin") or "").strip()
+                import plugins as _plugins
+                prow = _plugins.get(pid) if pid else None
+                if not pid:
+                    errors.append("plugin draft needs a plugin id")
+                elif not prow:
+                    errors.append("unknown plugin %r (see the Plugins page)" % pid)
+                elif "draft-provider" not in (prow["manifest"].get("kind") or []):
+                    errors.append("plugin %r is not a draft provider" % pid)
+                else:
+                    step_ = {"type": "draft", "mode": "plugin", "plugin": pid}
+                    ins = str(st.get("instructions") or "").strip()
+                    if ins:
+                        step_["instructions"] = ins[:1000]
+                    steps.append(step_)
             else:
-                errors.append("bad draft mode %r (use fixed/template/llm)" % dmode)
+                errors.append("bad draft mode %r (use fixed/template/llm/plugin)" % dmode)
         elif kind == "tag":
             tag = str(st.get("tag") or "").strip()
             if tag:
@@ -3982,6 +4107,30 @@ class AssistantAgent:
         items = [{"message_id": r["message_id"], "folder": r["folder"], "from": r["from_addr"],
                   "subject": r["subject"], "date": r["date"], "excerpt": r["excerpt"]}
                  for r in res["results"]]
+        # opt-in retriever plugins re-rank the candidates (first opt-in wins)
+        try:
+            import plugins as _plugins
+            import plugin_rt
+            for _pid in (store.get_setting("plugin_retrievers", []) or []):
+                _prow = _plugins.get(_pid)
+                if not _prow or not _prow.get("enabled"):
+                    continue
+                _cands = []
+                for _it in items:
+                    _mrow = store.get_message(_it["message_id"])
+                    _cands.append({
+                        "id": _it["message_id"], "subject": _it["subject"], "from": _it["from"],
+                        "snippet": _it["excerpt"],
+                        "tags": ([_mrow["user_tag"]] if _mrow and _mrow.get("user_tag") else []),
+                        "needs_reply": bool(_mrow.get("llm_needs_reply")) if _mrow else False})
+                _ranked = plugin_rt.retriever(_pid, {"query": q, "candidates": _cands})
+                if _ranked and _ranked.get("ids"):
+                    _order = {mid: _i for _i, mid in enumerate(_ranked["ids"])}
+                    items.sort(key=lambda _it: _order.get(_it["message_id"], len(_order)))
+                    note = ((note + "; ") if note else "") + "re-ranked by plugin %s" % _pid
+                break
+        except Exception:
+            pass
         summary = "%d semantic match(es): %s" % (
             len(items), "; ".join((i["subject"] or "")[:40] for i in items[:3]))
         if note:
