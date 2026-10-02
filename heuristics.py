@@ -406,7 +406,65 @@ def classify(msg):
     if best:
         where = (" - %s" % best["detail"]) if best["detail"] else ""
         best["reason"] = "heuristic %r (%s)%s" % (best["heuristic_name"], best["kind"], where)
-    return best
+        return best
+    return _classify_via_plugins(feats)
+
+
+def _classify_via_plugins(feats):
+    """Classifier-kind plugins, opted in via settings.plugin_classifiers
+    (a list of {"plugin": id, "heuristic_id": N}): the host feeds the plugin a
+    native heuristic's kind + model and the featurized message; the plugin
+    returns label/confidence from inside the sandbox (see mt-promo-fastpath).
+    Native heuristics always decide first; plugins get only what they abstained
+    on. Failures are quiet here (abstain) - the runtime logs and strikes."""
+    try:
+        wanted = store.get_setting("plugin_classifiers", []) or []
+    except Exception:
+        return None
+    if not wanted:
+        return None
+    import plugins
+    for entry in wanted:
+        if not isinstance(entry, dict):
+            continue
+        pid = str(entry.get("plugin") or "")
+        try:
+            hid = int(entry.get("heuristic_id") or 0)
+        except (TypeError, ValueError):
+            hid = 0
+        row = plugins.get(pid)
+        if not row or not row.get("enabled") \
+                or "classifier" not in (row["manifest"].get("kind") or []):
+            continue
+        h = store.get_heuristic(hid) if hid else None
+        if not h:
+            continue
+        try:
+            model = json.loads(h.get("model") or "{}")
+        except (TypeError, ValueError):
+            continue
+        try:
+            import plugin_rt
+            out = plugin_rt.classify(pid, {"kind": h.get("kind") or "",
+                                           "model": model, "feats": feats})
+        except Exception:
+            continue
+        if not out or not out.get("label"):
+            continue
+        try:
+            conf = float(out.get("confidence") or 0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        if conf < float(h.get("min_confidence") or DEFAULT_MIN_CONFIDENCE):
+            continue
+        return {"category": str(out["label"]), "confidence": conf,
+                "heuristic_id": hid, "heuristic_name": "plugin %s" % pid,
+                "kind": "%s+plugin" % (h.get("kind") or ""),
+                "detail": str(out.get("detail") or ""),
+                "reason": "classifier plugin '%s' (mirrors heuristic '%s')"
+                          % (pid, h.get("name") or hid),
+                "plugin": pid}
+    return None
 
 
 AUTO_REFINE_MIN_NEW = 5

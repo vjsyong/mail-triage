@@ -2188,7 +2188,8 @@ def classify_and_store(msg, settings, mc=None):
         "llm_thinking": str(res.get("_thinking") or "")[:6000],
         "llm_needs_reply": _needs_reply_effective(msg.get("id"), res.get("needs_reply")),
         "llm_suggested_folder": folder,
-        "classified_by": ("heuristic:%s %s" % (hres["heuristic_id"], hres["heuristic_name"])) if hres else "llm",
+        "classified_by": (("plugin:%s" % hres["plugin"]) if hres.get("plugin")
+                          else ("heuristic:%s %s" % (hres["heuristic_id"], hres["heuristic_name"]))) if hres else "llm",
         "status": "classified",
     }
     store.log_msg_event(msg.get("id"), "classify", json.dumps({

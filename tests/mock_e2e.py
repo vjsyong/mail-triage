@@ -510,6 +510,8 @@ class LLMHandler(BaseHTTPRequestHandler):
                 ]})
         elif "connectivity test" in system:
             content = "ok"
+        elif "extract amount and due date" in system.lower():
+            content = json.dumps({"amount": "880", "due": "2026-10-15"})
         elif "condense an ai assistant" in system.lower():
             content = "Checked the budget mail and moved it"
         else:
@@ -3448,6 +3450,69 @@ def main():
         n_rows = conn.execute("SELECT COUNT(*) AS n FROM events "
                               "WHERE message LIKE '%good-runtime%'").fetchone()["n"]
     check("runtime activity is audited in events", n_rows >= 3)
+
+    section("T45 plugin dogfood: classifier parity + invoice finder")
+    import heuristics as heur_mod
+    shutil.copytree(os.path.join(PROJECT, "plugins", "mt-promo-fastpath"),
+                    os.path.join(broot, "mt-promo-fastpath"), dirs_exist_ok=True)
+    shutil.copytree(os.path.join(PROJECT, "plugins", "mt-invoice-finder"),
+                    os.path.join(broot, "mt-invoice-finder"), dirs_exist_ok=True)
+    plugins_mod.scan()
+    rows = {r["id"]: r for r in plugins_mod.list_rows()}
+    check("built-in plugins register from the repo plugins/ dir",
+          "mt-promo-fastpath" in rows and "mt-invoice-finder" in rows
+          and rows["mt-promo-fastpath"]["root"] == "builtin")
+    plugins_mod.set_enabled("mt-promo-fastpath", True)
+    model_dl = {"conditions": [{"token": "t:zzpromo-probe", "label": "Promotions",
+                                "prob": 0.95, "precision": 0.95, "support": 10, "seen": 10}]}
+    feats = heur_mod.featurize({"from_addr": "deals@shop.example",
+                                "subject": "zzpromo-probe sale", "snippet": "big savings"})
+    nat = heur_mod.predict("decision_list", model_dl, feats)
+    pout = rt_mod.runtime.classify("mt-promo-fastpath",
+                                   {"kind": "decision_list", "model": model_dl, "feats": feats})
+    check("decision_list predictions match the native implementation",
+          bool(nat and pout) and nat[0] == pout["label"]
+          and abs(nat[1] - pout["confidence"]) < 1e-9)
+    model_nb = {"classes": {
+        "Promotions": {"log_prior": -0.7, "log_lik": {"t:zzpromo-probe": -0.2, "b:savings": -1.0}},
+        "Other": {"log_prior": -0.3, "log_lik": {"t:zzpromo-probe": -2.5, "b:savings": -0.1}}}}
+    feats_nb = heur_mod.featurize({"from_addr": "x@y.example", "subject": "zzpromo-probe",
+                                   "snippet": "savings savings"})
+    nat_nb = heur_mod.predict("naive_bayes", model_nb, feats_nb)
+    pnb = rt_mod.runtime.classify("mt-promo-fastpath",
+                                  {"kind": "naive_bayes", "model": model_nb, "feats": feats_nb})
+    check("naive_bayes confidence matches to float precision",
+          bool(nat_nb and pnb) and nat_nb[0] == pnb["label"]
+          and abs(nat_nb[1] - pnb["confidence"]) < 1e-9)
+    phid = store.add_heuristic("Promo probe", "decision_list", "Promotions",
+                               model=json.dumps(model_dl), stats="{}",
+                               min_confidence=0.8, enabled=False)
+    store.set_setting("plugin_classifiers", [{"plugin": "mt-promo-fastpath",
+                                              "heuristic_id": phid}])
+    probe_msg = {"from_addr": "deals@shop.example", "subject": "zzpromo-probe sale",
+                 "snippet": "big savings"}
+    hres = heur_mod.classify(probe_msg)
+    check("an opted-in classifier plugin decides when natives abstain",
+          bool(hres) and hres["category"] == "Promotions"
+          and hres.get("plugin") == "mt-promo-fastpath" and hres["confidence"] > 0.9)
+    store.set_setting("plugin_classifiers", [])
+    check("removing the opt-in returns the pipeline to native-only",
+          heur_mod.classify(probe_msg) is None)
+    plugins_mod.set_enabled("mt-invoice-finder", True)
+    with store.db() as conn:
+        conn.execute("INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, "
+                     "to_addr, subject, date, snippet, status, processed_at) VALUES "
+                     "('INBOX', 9901, 1, '<plug-inv-1@x>', 'billing@vendor.example', 'sean@x', "
+                     "'Your invoice INV-77', 'Fri, 02 Oct 2026 09:00:00 +0800', "
+                     "'Invoice INV-77 for October: amount 880 HKD, due 2026-10-15.', 'new', 1)")
+    inv = rt_mod.runtime.invoke("mt-invoice-finder", "find_invoices", {})
+    check("invoice finder scans the index through the sandbox",
+          inv["ok"] and inv.get("result", {}).get("considered", 0) >= 1)
+    check("invoice finder extracts the amount via the LLM host call",
+          any("880" in str(r.get("amount")) for r in inv["result"].get("invoices", [])))
+    check("invoice finder returns an action card",
+          (inv.get("card") or {}).get("title") == "Invoices found"
+          and bool(inv["card"].get("fields")))
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

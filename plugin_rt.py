@@ -384,6 +384,85 @@ class PluginRuntime:
                 continue
             return "msg", msg
 
+    def _call_worker(self, plugin_id, row, cmd):
+        """Send one command to the plugin worker and pump until its reply.
+
+        Returns (status, payload): status in ok | load | spawn | write |
+        timeout | died; payload = worker message (ok) | error text | timeout_ms.
+        """
+        limits = row["manifest"].get("limits") or {}
+        tmo = min(int(limits.get("timeout_ms") or DEFAULT_TIMEOUT_MS), MAX_TIMEOUT_MS)
+        lock = self._lock(plugin_id)
+        with lock:
+            try:
+                w = self._worker_for(row)
+            except _LoadError as exc:
+                store.log_event("warn", "plugin '%s' load failed: %s" % (plugin_id, exc))
+                kernel.set_last_error(plugin_id, "load failed: %s" % str(exc)[:200])
+                return "load", str(exc)[:200]
+            except Exception as exc:
+                return "spawn", "runtime spawn failed: %r" % exc
+            seq = w.next_seq()
+            t0 = time.time()
+            deadline = t0 + (tmo + GRACE_MS) / 1000.0
+            out_cmd = dict(cmd)
+            out_cmd["seq"] = seq
+            out_cmd["deadline_ms"] = tmo
+            try:
+                w.send(out_cmd)
+            except Exception as exc:
+                self.invalidate(plugin_id)
+                return "write", "worker write failed: %r" % exc
+            while True:
+                kind, msg = self._read_until(plugin_id, w, deadline)
+                if kind == self._DEADLINE:
+                    self.invalidate(plugin_id)
+                    return "timeout", tmo
+                if kind == self._EOF:
+                    self.invalidate(plugin_id)
+                    return "died", "plugin worker died unexpectedly"
+                if msg.get("seq") == seq:
+                    msg["_ms"] = int((time.time() - t0) * 1000)
+                    return "ok", msg
+
+    def classify(self, plugin_id, payload):
+        """Run a classifier-kind plugin (mirrors a native heuristic's model).
+
+        Returns {"label", "confidence", "detail"} or None (abstain/failure).
+        Timeouts and interpreter errors count as strikes like tool calls do.
+        """
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled"):
+            return None
+        if "classifier" not in (row["manifest"].get("kind") or []):
+            return None
+        if not self.available():
+            return None
+        status, res = self._call_worker(plugin_id, row, {"cmd": "classify", "input": payload})
+        if status == "ok":
+            if "error" in res:
+                e = res.get("error") or {}
+                self._strike(plugin_id, str(e.get("code") or "internal"),
+                             "classifier error: %s" % str(e.get("message") or "")[:200])
+                return None
+            out = res.get("result")
+            if not isinstance(out, dict):
+                return None
+            try:
+                conf = float(out.get("confidence") or 0)
+            except (TypeError, ValueError):
+                conf = 0.0
+            return {"label": str(out.get("label") or ""), "confidence": conf,
+                    "detail": str(out.get("detail") or "")}
+        if status == "load":
+            return None  # recorded in last_error by _call_worker
+        if status == "timeout":
+            self._strike(plugin_id, "timeout",
+                         "classifier timed out after %dms (worker killed)" % res)
+        else:
+            self._strike(plugin_id, "internal", "classifier call failed: %s" % str(res)[:160])
+        return None
+
     def _worker_for(self, row):
         pid = row["id"]
         key = (row["dir"], (row["manifest"].get("entrypoint") or ""), row["entry_sha256"],
@@ -552,40 +631,17 @@ class PluginRuntime:
         if not self.available():
             return {"ok": False, "summary": "plugin runtime unavailable (quickjs not installed)",
                     "result": {"error": {"code": "internal", "message": "runtime unavailable"}}}
-        limits = row["manifest"].get("limits") or {}
-        tmo = min(int(limits.get("timeout_ms") or DEFAULT_TIMEOUT_MS), MAX_TIMEOUT_MS)
-        lock = self._lock(plugin_id)
-        with lock:
-            try:
-                w = self._worker_for(row)
-            except _LoadError as exc:
-                store.log_event("warn", "plugin '%s' load failed: %s" % (plugin_id, exc))
-                kernel.set_last_error(plugin_id, "load failed: %s" % str(exc)[:200])
-                return {"ok": False, "summary": "plugin failed to load: %s" % str(exc)[:200],
-                        "result": {"error": {"code": "internal", "message": str(exc)[:300]}}}
-            except Exception as exc:
-                return self._strike(plugin_id, "internal", "runtime spawn failed: %r" % exc)
-            seq = w.next_seq()
-            t0 = time.time()
-            deadline = t0 + (tmo + GRACE_MS) / 1000.0
-            try:
-                w.send({"cmd": "invoke", "seq": seq, "tool": tool,
-                        "args": args or {}, "deadline_ms": tmo})
-            except Exception as exc:
-                self.invalidate(plugin_id)
-                return self._strike(plugin_id, "internal", "worker write failed: %r" % exc)
-            while True:
-                kind, msg = self._read_until(plugin_id, w, deadline)
-                if kind == self._DEADLINE:
-                    self.invalidate(plugin_id)
-                    return self._strike(plugin_id, "timeout",
-                                        "plugin timed out after %dms (worker killed)" % tmo)
-                if kind == self._EOF:
-                    self.invalidate(plugin_id)
-                    return self._strike(plugin_id, "internal", "plugin worker died unexpectedly")
-                if msg.get("seq") == seq:
-                    return self._finish(plugin_id, tool, msg,
-                                        int((time.time() - t0) * 1000))
+        status, payload = self._call_worker(plugin_id, row,
+                                            {"cmd": "invoke", "tool": tool, "args": args or {}})
+        if status == "ok":
+            return self._finish(plugin_id, tool, payload, payload.get("_ms") or 0)
+        if status == "load":
+            return {"ok": False, "summary": "plugin failed to load: %s" % payload,
+                    "result": {"error": {"code": "internal", "message": payload}}}
+        if status == "timeout":
+            return self._strike(plugin_id, "timeout",
+                                "plugin timed out after %dms (worker killed)" % payload)
+        return self._strike(plugin_id, "internal", str(payload))
 
 
 def _validate_args(params, args):
@@ -622,6 +678,11 @@ def invoke_tool(full_name, args, session_id=0):
     if not sp:
         return None
     return runtime.invoke(sp[0], sp[1], args or {}, session_id)
+
+
+def classify(plugin_id, payload):
+    """Classifier-kind plugin call (used by the heuristics fallback)."""
+    return runtime.classify(plugin_id, payload)
 
 
 atexit.register(runtime.shutdown)

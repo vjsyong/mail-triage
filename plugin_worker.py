@@ -106,6 +106,11 @@ def main():
                 send({"seq": cmd.get("seq"),
                       "result": result if isinstance(result, dict) else
                       {"ok": False, "summary": "plugin returned a non-object result"}})
+            elif c == "classify":
+                raw = ctx.eval("__mt_classify(%s)" % json.dumps(json.dumps(cmd.get("input") or {})))
+                result = json.loads(raw) if isinstance(raw, str) else raw
+                send({"seq": cmd.get("seq"),
+                      "result": result if isinstance(result, dict) else None})
             elif c == "unload":
                 ctx = None
                 send({"unloaded": True})

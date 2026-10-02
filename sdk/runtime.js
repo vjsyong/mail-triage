@@ -110,6 +110,18 @@
     return JSON.stringify(result === undefined ? null : result);
   };
 
+  globalThis.__mt_classify = function (inputJson) {
+    var p = globalThis.__mt_plugin;
+    if (!p || typeof p.classify !== "function") {
+      throw new Error("bundle does not export classify()");
+    }
+    var out = p.classify(globalThis.__mt_ctx, JSON.parse(inputJson));
+    if (out && typeof out.then === "function") {
+      throw new Error("classify must be synchronous (SDK v0.1)");
+    }
+    return JSON.stringify(out === undefined ? null : out);
+  };
+
   globalThis.__mt_unload = function () {
     var p = globalThis.__mt_plugin;
     if (p && typeof p.onUnload === "function") {

@@ -1,0 +1,47 @@
+{
+  "id": "mt-invoice-finder",
+  "name": "Invoice finder",
+  "version": "0.1.0",
+  "description": "Finds invoices in the local index and extracts amount + due date with the LLM.",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": [
+    "tool"
+  ],
+  "permissions": [
+    "mailbox.read",
+    "llm.complete"
+  ],
+  "required_llm_capability": "llm.complete",
+  "limits": {
+    "memory_mb": 64,
+    "timeout_ms": 20000,
+    "kv_bytes": 4096
+  },
+  "tools": [
+    {
+      "name": "find_invoices",
+      "description": "Look for invoices in the mailbox and list amount and due date per invoice. Use when the user asks about bills, invoices or payments.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "since_days": {
+            "type": "integer",
+            "description": "look back N days (local index)"
+          },
+          "min_amount": {
+            "type": "number",
+            "description": "only invoices at or above this amount"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none"
+    }
+  ]
+}

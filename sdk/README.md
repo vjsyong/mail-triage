@@ -49,3 +49,17 @@ python app.py --plugins enable my-plugin
 ```
 
 Full design: `docs/plugin-architecture.md`.
+
+## Classifier kind
+
+A plugin with `"kind": ["classifier"]` can stand in for a native heuristic
+(fast-path). Opt in via the `plugin_classifiers` setting:
+
+```json
+[{"plugin": "mt-promo-fastpath", "heuristic_id": 12}]
+```
+
+When the native heuristics abstain, the host loads heuristic #12's `kind` +
+`model`, featurizes the message, and calls your `classify()` in the sandbox.
+The mirrored heuristic is normally parked disabled (enabled=0) - the plugin
+replaces its predictions. Native heuristics always keep the first word.

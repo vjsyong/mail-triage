@@ -1,0 +1,29 @@
+{
+  "id": "mt-promo-fastpath",
+  "name": "Promo fast-path",
+  "version": "0.1.0",
+  "description": "Mirrors a trained promo heuristic inside the sandbox: given its model + a featurized message it returns the same label and confidence as the native decision_list / naive_bayes prediction.",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": [
+    "classifier"
+  ],
+  "classifier": {
+    "outputs": [
+      "Promotions",
+      "Newsletters",
+      "Other"
+    ]
+  },
+  "permissions": [],
+  "limits": {
+    "memory_mb": 32,
+    "timeout_ms": 2000,
+    "kv_bytes": 4096
+  }
+}

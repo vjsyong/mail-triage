@@ -121,3 +121,16 @@ export function execute(ctx: PluginContext, call: ToolCall): ToolResult;
 
 /** Called before unload/disable/reload. Best-effort; must not throw. */
 export function onUnload(ctx: PluginContext): void;
+
+/**
+ * Classifier kind: mirror a native heuristic's model. Wired from
+ * heuristics.classify() when the plugin is opted in via
+ * settings.plugin_classifiers ([{plugin, heuristic_id}]); the mirrored
+ * heuristic is usually parked disabled - the plugin stands in for its
+ * predictions. The host feeds the heuristic's kind + model and the featurized
+ * message ({tokens, from, domain, subject, body}). Return label/confidence,
+ * or null to abstain.
+ */
+export function classify(ctx: PluginContext,
+                         input: { kind: string; model: unknown; feats: unknown }):
+  { label: string; confidence: number; detail?: string | null } | null;
