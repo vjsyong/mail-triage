@@ -60,7 +60,9 @@ globalThis.__mt_plugin = {
 
 function norm(s) {
   s = (s && typeof s === "object") ? s : {};
-  return { q: String(s.q || "").slice(0, 200), selected: parseInt(s.selected, 10) || 0 };
+  var sel = parseInt(s.selected, 10);
+  if (isNaN(sel)) sel = parseInt(s.message, 10);
+  return { q: String(s.q || "").slice(0, 200), selected: sel || 0 };
 }
 
 function search(ctx, query, limit) {

@@ -3542,12 +3542,12 @@ _UI_COMPONENT_CSS = (
     "border:1px solid var(--line);background:var(--card);min-height:420px}"
     ".mtc-split>*{min-width:0;overflow:auto}"
     ".mtc-pane-list{border-right:1px solid var(--line)}"
-    ".mtc-mobile-back{display:none}"
+    ".mtc-btn.mtc-mobile-back{display:none}"
     "@media(max-width:767px){.mtc-split{display:block}"
     ".mtc-split .mtc-pane-list,.mtc-split .mtc-pane-reader{display:none;border:0}"
     ".mtc-split.mtc-view-list .mtc-pane-list{display:block}"
     ".mtc-split.mtc-view-reader .mtc-pane-reader{display:block}"
-    ".mtc-mobile-back{display:inline-flex}}"
+    ".mtc-btn.mtc-mobile-back{display:inline-flex}}"
     ".mtc-text.mtc-title{font-size:1.1rem;font-weight:700;letter-spacing:-.02em}"
     ".mtc-text.mtc-caption{color:var(--dim);font-size:.82rem}"
     ".mtc-text.mtc-mono{font-family:var(--mono);font-size:.84rem}"
@@ -3844,6 +3844,11 @@ def extension_dispatch(pid, page):
                                                    "message": str(exc)}}), 400
         plugin_ui.set_tree(sid, tree, plugin_ui.tree_events(tree), state)
         newrev = plugin_ui.bump_revision(sid)
+        try:
+            store.log_event("plugin", "ui[%s] %s.%s dispatch ok (rev %d)"
+                            % (plugin_ui.view_id(sid), pid, ev, newrev))
+        except Exception:
+            pass
         return jsonify({"ok": True, "html": plugin_ui.render_tree(tree),
                         "revision": newrev, "view": _composed_view(result),
                         "url": _ext_url(pid, page, result.get("url"))})
@@ -3883,6 +3888,12 @@ def extension_rpc(pid, page):
             return jsonify({"ok": False, "error": {"code": "busy",
                                                    "message": "too many concurrent calls"}}), 429
         res = plugin_rt.runtime.invoke_ui(pid, page, op, args)
+    try:
+        store.log_event("plugin", "ui[%s] %s.%s %s"
+                        % (plugin_ui.view_id(sid), pid, op,
+                           "ok" if res.get("ok") else "error"))
+    except Exception:
+        pass
     code = (res.get("error") or {}).get("code") if not res.get("ok") else ""
     return jsonify(res), (200 if res.get("ok") else _ui_envelope_status(code))
 
@@ -3994,7 +4005,8 @@ padding:9px 12px;font-size:.84rem}
   function clearTree(){ var t=document.getElementById('mt-tree'); if(t) t.textContent=''; }
   function poll(){
     if(disposed) return;
-    fetch(cfg.base + '/status', {credentials:'same-origin'}).then(function(r){ return r.json(); })
+    fetch(cfg.base + '/status', {credentials:'same-origin',
+      headers:{'X-MT-Session': cfg.sid}}).then(function(r){ return r.json(); })
       .then(function(j){
         if(disposed) return;
         if(j && j.ok && j.valid) return;
@@ -4088,6 +4100,7 @@ padding:9px 12px;font-size:.84rem}
       if(wrap){ wrap.querySelectorAll('.mtc-tabpanel').forEach(function(p, i){ p.hidden = i !== idx; }); }
     }); }
     applyView(cfg.view);
+    window.addEventListener('popstate', function(){ if(!disposed) location.reload(); });
     setStatus('');
   } else {
     var frame = document.getElementById('mt-ext-frame');

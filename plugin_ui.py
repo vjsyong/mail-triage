@@ -80,8 +80,8 @@ _TYPES = {
 
 _EVENT_KEYS = ("event", "retryEvent")
 _ALLOWED_NODE_KEYS = {"type", "props", "children", "event", "retryEvent", "items", "message"}
-_MSG_PROPS = ("id", "folder", "uid", "subject", "from", "date", "snippet",
-              "category", "tags", "needs_reply")
+_MSG_PROPS = ("id", "folder", "uid", "subject", "from", "to", "date", "snippet",
+              "body_text", "category", "tags", "needs_reply")
 
 
 def _scalar_ok(kind, value):
@@ -410,6 +410,13 @@ def open_session(pid, page, mode, generation=0):
                           "revision": 0, "generation": generation, "events": {},
                           "tree": None, "created": now, "last": now, "disposed": False}
     return sid
+
+
+def view_id(sid):
+    """Short, non-secret view id for audit lines (never the session token)."""
+    if not isinstance(sid, str) or len(sid) < 8:
+        return "view-unknown"
+    return "view-" + sid[:8]
 
 
 def get_session(sid, pid=None, page=None):

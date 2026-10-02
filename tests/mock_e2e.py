@@ -4565,6 +4565,16 @@ def main():
                 headers={"Origin": "http://localhost"}, follow_redirects=True)
     check("revoking approval blocks the view again",
           not ui_mod.is_approved(plugins_mod.get("good-trusted")))
+    client.post("/plugins/good-trusted/ui-approve",
+                headers={"Origin": "http://localhost"}, follow_redirects=False)
+    check("re-approval after revoke works", ui_mod.is_approved(plugins_mod.get("good-trusted")))
+    _gp = os.path.join(proot, "good-trusted")
+    _mf = json.load(open(os.path.join(_gp, "manifest.json")))
+    _mf["version"] = "0.1.1"
+    json.dump(_mf, open(os.path.join(_gp, "manifest.json"), "w"))
+    plugins_mod.scan()
+    check("a version/content upgrade invalidates a prior approval",
+          not ui_mod.is_approved(plugins_mod.get("good-trusted")))
     plugins_mod.set_enabled("good-trusted", False)
 
     section("T56 composed UI: tree pipeline, injection, effects, staleness")
@@ -4598,7 +4608,7 @@ def main():
                            data=json.dumps({"event": event, "value": value, "revision": revision}),
                            content_type="application/json")
 
-    _r = _disp("mt-mail-desk", "desk", "search", "invoice", 0, _sid)
+    _r = _disp("mt-mail-desk", "desk", "search", "INV-77", 0, _sid)
     _j = _r.get_json() or {}
     _html = _j.get("html") or ""
     check("a search event runs the controller and returns a validated tree",
@@ -4614,6 +4624,11 @@ def main():
           and ("message=" + _mid) in (_j2.get("url") or ""))
     check("a select view hint drives the mobile pane and the back control",
           _j2.get("view") == "reader" and 'data-mt-event="back"' in (_j2.get("html") or ""))
+    _dl = client.get("/extensions/mt-mail-desk/desk?q=INV-77&message=%s" % _mid)
+    _dl_body = _dl.data.split(b'mtc-reader-body">', 1)[1][:500] \
+        if b'mtc-reader-body">' in _dl.data else b""
+    check("a q/message deep link reopens the reader with the indexed body",
+          _dl.status_code == 200 and b"880 HKD" in _dl_body)
     _rev = _j2.get("revision")
     _r = _disp("mt-mail-desk", "desk", "nuke", "x", _rev, _sid)
     check("an event absent from the rendered tree is refused", _r.status_code == 403)
@@ -4628,6 +4643,10 @@ def main():
     check("an oversized dispatch body is refused", _r.status_code in (400, 413))
     _r = client.get("/extensions/mt-mail-desk/desk/status", headers={"X-MT-Session": _sid})
     check("the status endpoint reports a live view", (_r.get_json() or {}).get("valid") is True)
+    with store.db() as conn:
+        _na = conn.execute("SELECT COUNT(*) AS n FROM events "
+                           "WHERE message LIKE 'ui[view-%mt-mail-desk%'").fetchone()["n"]
+    check("UI calls are audited with a non-secret view id", _na >= 1)
     plugins_mod.set_enabled("mt-mail-desk", False)
     _r = client.get("/extensions/mt-mail-desk/desk/status", headers={"X-MT-Session": _sid})
     check("disabling invalidates the composed view", (_r.get_json() or {}).get("valid") is False)
