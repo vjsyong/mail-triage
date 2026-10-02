@@ -140,3 +140,21 @@ block ("the user is on the simulator") taught it nothing. Fixes:
   or a single-slash path renders).
 - Checks: simulator chips replace the default set on /simulate; the context block
   names the prefill path; relative links render in-app while `//evil.com` does not.
+
+### Every page self-describes (2026-10-02)
+Report: on /learning, "How do I use this page?" was answered with the assistant's own
+capabilities ("you can use this page by talking to me...") - the page had no context
+block at all and nothing mapped page questions to the page. Fixes:
+- Every page the drawer can sit on now returns a self-describing block from
+  engine.assistant_page_context(): dashboard (sections + live needs-reply / queued
+  counts), messages list (+ affordances), rules (incl. the tester), flows,
+  classifiers, classifier DATASET review, templates (+ new), settings (+ live
+  dry-run/live mode summary), accounts, log, proxy log, more, learning (+ live model
+  status brief), learning eval (labeling), simulator (own block); message / flow /
+  rule / classifier / template entity pages were already rich.
+- ASSISTANT_SYSTEM now states that the CURRENT PAGE block is what the user sees:
+  "what is this page / how do I use this / what does X mean" are about THAT page -
+  explain its sections and controls by name and the concrete next click; fall back
+  to self-description only for assistant questions.
+- Checks: a table-driven test asserts every page block mentions its subject (no bare
+  one-liners) and that the system prompt maps page questions to the page context.

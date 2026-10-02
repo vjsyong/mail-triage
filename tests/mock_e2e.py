@@ -2394,6 +2394,24 @@ def main():
     _ck, _cd, _cblk, _ckey = engine.assistant_page_context("/simulate")
     check("simulator page context teaches the prefill path",
           "Prefill from" in _cblk and "/simulate?flow=" in _cblk and "dry-run" in _cblk)
+
+    _hl = store.list_heuristics()
+    _hid = _hl[0]["id"] if _hl else None
+    page_cases = [("/", "dashboard"), ("/messages", "messages list"), ("/rules", "rules page"),
+                  ("/flows", "flows page"), ("/classifiers", "classifiers page"),
+                  ("/templates", "templates page"), ("/settings", "settings"),
+                  ("/accounts", "accounts"), ("/log", "log page"), ("/more", "more page"),
+                  ("/learning", "learning page"), ("/learning/eval", "labeling page"),
+                  ("/simulate", "simulator")]
+    if _hid:
+        page_cases.append(("/classifiers/%d/dataset" % _hid, "dataset review"))
+    _missing = [p2 for p2, nd in page_cases
+                if nd not in (engine.assistant_page_context(p2)[2] or "").lower()]
+    check("every page self-describes for the assistant (no bare one-liner)", not _missing)
+    if _missing:
+        print("     missing:", _missing)
+    check("system prompt maps 'how do I use this page' to the page context",
+          "CURRENT PAGE block" in engine.ASSISTANT_SYSTEM)
     client.post("/assistant/session/%d/delete" % esid29, data={"json": "1"})
 
     section("T31 assistant: repetition guard + rule housekeeping tools")

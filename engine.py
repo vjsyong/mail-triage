@@ -2539,6 +2539,7 @@ def propose_rules_from_tags():
 ASSISTANT_SYSTEM = """You are the mail operations assistant for "Mail Triage", a local app that sorts the mailbox of %(user)s. You inspect the mailbox and act on it through tools, and you design the filter rules the app executes.
 
 How to work
+- The CURRENT PAGE block (appended below when the app knows what the user is looking at) describes what is on their screen right now, section by section, with the controls by name. Questions like "what is this page", "how do I use this", "what does X mean here" refer to THAT page: explain its sections, what the numbers mean, and the concrete next click. Only when the user is asking about the assistant itself (or no page is known) fall back to describing your own capabilities.
 - Ground every answer with tools instead of guessing. semantic_search finds mail by MEANING across every indexed folder and years of history (paraphrases welcome) — use it first for content questions ("what did the landlord want", "the trip itinerary email"). search_messages reads the app's local index; search_mail runs a live IMAP search for exact tokens or folders outside the index. For any question about the user's mail, search first.
 - Reference specific messages in your answers as [msg:ID] (the message_id from tool results); the UI turns those into links. Use read_message for the full text of anything you quote.
 - Capability permissions are enforced by the app. Current grants: %(permissions)s. Honour them: tools under "may do directly" you may call; tools under "requires the user's approval" you may still call - the app turns them into a pending approval card the user clicks (say it is waiting; never claim it happened); tools under "disabled" are refused - tell the user the capability is off and where to enable it (Settings, AI settings, Agent permissions).
@@ -3318,6 +3319,17 @@ def assistant_page_context(path):
         return ("rule", "new rule editor",
                 "CURRENT PAGE: the user is in the NEW RULE editor. A bare \u201cthis rule\u201d refers to "
                 "that draft.", "rule:new")
+    m = re.match(r"^/classifiers/(\d+)/dataset", p)
+    if m:
+        h = store.get_heuristic(int(m.group(1)))
+        if h:
+            block = ("CURRENT PAGE: the user is on the DATASET REVIEW page for classifier #%d %r - "
+                     "the exact training samples (positives plus sampled negatives), each with its "
+                     "label source. Samples can be removed / re-included (applies to every future "
+                     "training run) and reclassified with the dropdown (rewrites the underlying "
+                     "label; the sample then moves in or out of the set)."
+                     % (h["id"], h.get("name")))
+            return "classifier", "dataset \u00b7 %s" % ((h.get("name") or ("#%d" % h["id"]))[:60]), block, "classifier:%d/dataset" % h["id"]
     m = re.match(r"^/classifiers/(\d+)", p)
     if m:
         h = store.get_heuristic(int(m.group(1)))
@@ -3327,6 +3339,10 @@ def assistant_page_context(path):
                      % (h["id"], h.get("name"), h.get("kind"), h.get("category"),
                         "yes" if h.get("enabled") else "no"))
             return "classifier", "classifier \u00b7 %s" % ((h.get("name") or ("#%d" % h["id"]))[:70]), block, "classifier:%d" % h["id"]
+    if p == "/templates/new":
+        return ("template", "new template editor",
+                "CURRENT PAGE: the user is creating a NEW reply template. A bare \u201cthis "
+                "template\u201d refers to it.", "template:new")
     m = re.match(r"^/templates/(\d+)", p)
     if m:
         t2 = store.get_template(int(m.group(1)))
@@ -3342,7 +3358,11 @@ def assistant_page_context(path):
             n = 0
         return ("messages", "messages list%s" % filt_note(),
                 "CURRENT PAGE: the user is on the messages list%s (%d matching). No single message "
-                "is selected." % (filt_note(), n), "messages")
+                "is selected. Rows show sender, subject with a one-line AI summary, tag and status "
+                "badges; clicking a row opens the reader. The chips at the top pick the filter "
+                "(All / needs reply / queued / moved / tagged / snoozed); the toolbar holds bulk "
+                "actions (Tag, Untag, Classify selected, Classify all, Learn rules from tags); the "
+                "pager controls page size." % (filt_note(), n), "messages")
     if p == "/simulate":
         return ("simulator", "simulator (dry run)",
                 "CURRENT PAGE: the user is on the SIMULATOR \u2014 a dry-run page where a drafted "
@@ -3359,14 +3379,136 @@ def assistant_page_context(path):
                 "NOT search the mailbox, drafts or messages, and do not ask which email they mean. "
                 "Reply with the draft values or a line of guidance, not a play-by-play of tools.",
                 "page:simulate")
-    lists = {"/flows": "flows list", "/rules": "rules list", "/classifiers": "classifiers list",
-             "/templates": "templates list", "/settings": "settings", "/more": "more",
-             "/accounts": "accounts", "/log": "activity log",
-             "/proxy/log": "proxy log"}
-    if p in lists:
-        return ("page", lists[p],
-                "CURRENT PAGE: the user is on the %s. No specific item is selected." % lists[p],
-                "page:" + p.strip("/"))
+    if p == "/":
+        try:
+            _nr = store.count_messages("needs_reply")
+            _q = store.count_messages("queued")
+        except Exception:
+            _nr = _q = 0
+        return ("dashboard", "dashboard",
+                "CURRENT PAGE: the user is on the DASHBOARD. Top to bottom: the system status strip "
+                "(Triage / Proxy / Search index / LLM, expandable on phones); the needs-reply hero "
+                "count; triage metrics (sorted by rules / LLM classified / rules / flows / "
+                "classifiers) with the live-mode chips; recent filings - machine moves with Undo "
+                "buttons; the Recent mail feed (newest first, click a row to open it); the Search "
+                "index card (Index now / Rebuild) and the Activity feed (Full log link). Buttons: "
+                "Check now, Open messages. Right now: %d need a reply, %d waiting for the LLM."
+                % (_nr, _q), "page:dashboard")
+    if p == "/rules":
+        try:
+            _n = len(store.list_rules())
+        except Exception:
+            _n = 0
+        return ("page", "rules list",
+                "CURRENT PAGE: the user is on the RULES page - the ordered list of deterministic "
+                "rules, checked top to bottom, first match wins. Rows show each rule's conditions "
+                "and actions in plain words with enable/disable, edit, delete and move-to-top "
+                "controls; guard rules (no actions) are labelled; there is a rule tester box: type "
+                "a sample sender/subject and it shows which rule would catch it. New rule opens "
+                "the editor. Rules act on live mail. There are %d rule(s) right now." % _n,
+                "page:rules")
+    if p == "/flows":
+        try:
+            _n = len(store.list_flows())
+        except Exception:
+            _n = 0
+        return ("page", "flows list",
+                "CURRENT PAGE: the user is on the FLOWS page - multi-step automations that run "
+                "after rules (first matching flow wins). Each flow card shows its WHEN filters "
+                "and its steps in plain English; controls: enable/disable, edit (the canvas "
+                "builder), delete, and a test-it-in-the-simulator link. New flow opens the "
+                "builder. There are %d flow(s) right now." % _n, "page:flows")
+    if p == "/classifiers":
+        return ("page", "classifiers list",
+                "CURRENT PAGE: the user is on the CLASSIFIERS page - the deep management list of "
+                "fast-path classifiers (small deterministic models trained from tags or the AI's "
+                "verdicts; they answer BEFORE the LLM). Columns: name, kind, category, samples, "
+                "labels, matches, updated. Row controls: toggle, retrain, open the dataset "
+                "review, delete. The Learning page is the friendlier overview of the same "
+                "models.", "page:classifiers")
+    if p == "/templates":
+        return ("page", "templates list",
+                "CURRENT PAGE: the user is on the TEMPLATES page - reusable reply templates "
+                "(name + body; placeholders allowed) used by flows' draft steps and the message "
+                "viewer's draft button. Row actions: edit, delete; New template opens the "
+                "editor.", "page:templates")
+    if p == "/settings":
+        try:
+            _modes = "rules %s / LLM %s / auto-filing %s" % (
+                "live" if store.get_setting("rules_apply", True) else "dry-run",
+                "on" if store.get_setting("llm_suggest", True) else "off",
+                "ON" if store.get_setting("llm_apply") else "off")
+        except Exception:
+            _modes = ""
+        return ("page", "settings",
+                "CURRENT PAGE: the user is on SETTINGS - task-grouped cards (Mailbox; Sorting & "
+                "classification; Filing & drafts; Search; General; Status), each saved on its "
+                "own. Here live the LLM endpoint + thinking mode, categories and the category-to-"
+                "folder map, watch folders and poll interval, auto-filing (llm_apply), the "
+                "search backend, display timezone and the AGENT PERMISSIONS. The Status card has "
+                "Test buttons (LLM / embeddings / rerank). Currently %s." % _modes,
+                "page:settings")
+    if p == "/accounts" or p.startswith("/accounts/"):
+        return ("page", "accounts",
+                "CURRENT PAGE: the user is on ACCOUNTS - the mail connection page: a proxy "
+                "status strip (listener ports, log link, restart) and one card per mail account "
+                "showing its sign-in state with Authorise / Re-authorise buttons, a More menu "
+                "(reset tokens, delete) and a reading badge on the account in use. This is the "
+                "fix for \u201clogin failed\u201d or expired tokens - point at the buttons; "
+                "never handle or ask for credentials.", "page:accounts")
+    if p == "/log":
+        return ("page", "activity log",
+                "CURRENT PAGE: the user is on the LOG page - the app's event feed, newest first, "
+                "with level badges (info / warn / error), a text filter and a minutes window, "
+                "and a pauseable live refresh. The place to look for \u201cwhy did this "
+                "happen\u201d or error questions.", "page:log")
+    if p == "/proxy/log":
+        return ("page", "proxy log",
+                "CURRENT PAGE: the user is on the RAW PROXY LOG - the embedded mail proxy's own "
+                "output for connection-level debugging (IMAP / OAuth). Relevant when accounts "
+                "show sign-in trouble.", "page:proxy/log")
+    if p == "/more":
+        return ("page", "more",
+                "CURRENT PAGE: the user is on the MORE page - the directory of all sections "
+                "(Rules, Simulator, Flows, Learning, Templates, Accounts, Log, Settings) with a "
+                "one-line description of each; the user lands here to find a page by name.",
+                "page:more")
+    if p == "/learning":
+        try:
+            _rep = learning.status_report()
+            _cl = _rep.get("classifiers") or []
+            _bits = ["%d fast-path(s), %d deciding live"
+                     % (len(_cl), sum(1 for c in _cl if c.get("status") == "live"))] if _cl else []
+            _sh = [s2 for s2 in (_rep.get("specialists") or []) if s2.get("status") == "shadow"]
+            if _sh:
+                _bits.append("%d learner(s) watching" % len(_sh))
+            _pr = ((_rep.get("eval") or {}).get("progress") or {})
+            _bits.append(("test set %d/%d labeled" % (_pr.get("done", 0), _pr.get("total", 0)))
+                         if _pr.get("total") else "no test set yet")
+            _brief = " Right now: " + "; ".join(_bits) + "."
+        except Exception:
+            _brief = ""
+        return ("page", "learning",
+                "CURRENT PAGE: the user is on the LEARNING page - the home of the small models "
+                "that handle mail so the AI does not have to. Sections: \u201cWorking on your "
+                "mail\u201d (cards for fast-paths - status deciding live / paused, self-check "
+                "accuracy, examples learned - and for learners - watching quietly / live, "
+                "agreement with the AI; controls: pause, retrain, review dataset, let it take "
+                "over, retire); \u201cTest sets\u201d (build a ~50-email set the user labels by "
+                "hand - the only truth-based score); \u201cThe newest learner\u201d (its "
+                "lifecycle steps and recorded checks).%s" % _brief, "page:learning")
+    if p == "/learning/eval":
+        try:
+            _pg = learning.eval_progress()
+        except Exception:
+            _pg = {}
+        return ("page", "test-set labeling",
+                "CURRENT PAGE: the user is on the TEST-SET LABELING page - one real email at a "
+                "time, blind (no model's opinion is shown), and the user answers 1-2 questions "
+                "per message (needs reply? category?; \u201cnot sure\u201d is allowed). "
+                "Progress: %d of %d labeled. These hand answers are the frozen benchmark every "
+                "model is scored against." % (_pg.get("done", 0), _pg.get("total", 0)),
+                "page:learning/eval")
     if p:
         return ("page", (p.rstrip("/")[:60] or "/"),
                 "CURRENT PAGE: the user is on %s. No specific item is selected." % p,
