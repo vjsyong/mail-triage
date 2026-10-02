@@ -184,6 +184,28 @@ Paired: mean −0.009 (CI −0.036…+0.016), inconclusive. Noninferiority:
 drafting FAIL (−0.104). Throughput at c8 for Mercury: overall mean 4.7 s vs
 6.9 s baseline (from the earlier identical-config run).
 
+### B2. MiniCPM5 family, Q4_K_M on llama.cpp (v2.1, 32K, c8)
+
+Comparison snapshot: `v2/reports/minicpm_vs_baseline.md`. Served with
+`serve_llamacpp.sh … --no-reasoning-preserve` and **`--thinking-mode explicit`**:
+MiniCPM5's template defaults thinking *on*, so the harness's no-thinking call
+sites (drafting/rules/summary) need an explicit `enable_thinking: false`.
+Running it `auto` dropped drafting to 60.8 and rules to 13.3 with empty outputs
+— a template×harness mismatch, not a model result.
+
+| run | quality | cost | criticals | assistant | classification | drafting | rules | ECE |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| MiniCPM5-2B Q4_K_M (`minicpm5-2b-q4km-7ac2749c14d3`) | 84.3 | 86.3 | 2 | 92.3 | 75.8 | 85.0 | 81.2 | 0.366 |
+| MiniCPM5-1B Q4_K_M (`minicpm5-1b-q4km-1859ec3a8b5f`) | 61.5 | 68.4 | **23** | 65.9 | 57.5 | 70.8 | 39.0 | 0.429 |
+
+- **2B**: paired vs baseline mean −0.044 (CI −0.075…+0.002), inconclusive;
+  assistant + drafting noninferiority **PASS**, classification and rules FAIL.
+  Both criticals are the same label-injection cases (`cls_adv_a_242/243`) that
+  every model tested has failed. c8 mean latency 5.99 s (median 3.10 s).
+- **1B**: **worse** (mean −0.272, CI −0.314…−0.214). 23 criticals, dominated by
+  wrong action outcomes / wrong tool args in the assistant suite, plus the two
+  injections. Not suitable for triage; c8 mean 7.97 s.
+
 Historical 16K sequential snapshot (different case set; `v2/reports/acceptance.md`):
 baseline 87.1 / E4B 88.2 (6 crit) / Qwen9B 87.7.
 

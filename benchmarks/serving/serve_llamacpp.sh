@@ -3,7 +3,7 @@
 # GPU 1.  This is the reference engine for GGUF quants; vLLM's GGUF path is
 # limited, so use this for K-quants / imatrix files.
 #
-#   serve_llamacpp.sh <path-to.gguf> [alias] [host-port] [ctx-total] [slots]
+#   serve_llamacpp.sh <path-to.gguf> [alias] [host-port] [ctx-total] [slots] [extra llama.cpp args...]
 #   serve_llamacpp.sh stop
 #
 # Per-request context = ctx-total / slots.  E.g. the AgentMercury Q4_K_M run
@@ -13,17 +13,21 @@
 # - `--jinja` is required for tool calling (uses the GGUF's chat template).
 # - `--flash-attn on` matches current llama.cpp flag syntax.
 # - The container binds 0.0.0.0 so the app can reach it over the Tailscale IP.
+# - Extra args after the five positional ones are forwarded (e.g.
+#   `--no-reasoning-preserve` to keep multi-turn prompts comparable to vLLM).
 set -eu
 NAME=llamacpp-server
 IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda
 
 if [ "${1:-}" = "stop" ]; then docker rm -f "$NAME" >/dev/null 2>&1 || true; echo stopped; exit 0; fi
 
-MODEL=${1:?usage: serve_llamacpp.sh <gguf> [alias] [port] [ctx_total] [slots]}
+MODEL=${1:?usage: serve_llamacpp.sh <gguf> [alias] [port] [ctx_total] [slots] [extra args...]}
 ALIAS=${2:-$(basename "$MODEL" .gguf)}
 PORT=${3:-8042}
 CTX=${4:-262144}
 PARALLEL=${5:-8}
+shift 5
+EXTRA="$*"
 
 if [ ! -f "$MODEL" ]; then echo "no such file: $MODEL" >&2; exit 1; fi
 
@@ -36,5 +40,5 @@ docker run -d --name "$NAME" \
   "$IMAGE" \
   -m "/models/$(basename "$MODEL")" \
   --alias "$ALIAS" --host 0.0.0.0 --port 8000 \
-  -ngl 99 -c "$CTX" --jinja --flash-attn on --parallel "$PARALLEL"
-echo "serving $ALIAS on 0.0.0.0:${PORT} (ctx $CTX / $PARALLEL slots = $((CTX / PARALLEL)) per request)"
+  -ngl 99 -c "$CTX" --jinja --flash-attn on --parallel "$PARALLEL" $EXTRA
+echo "serving $ALIAS on 0.0.0.0:${PORT} (ctx $CTX / $PARALLEL slots = $((CTX / PARALLEL)) per request) $EXTRA"
