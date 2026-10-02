@@ -1,175 +1,226 @@
 # Mail Triage
 
-Self-hosted triage for a single mailbox. Deterministic rules sort most mail, a local
-LLM classifies the rest, and a learning loop compiles the LLM's repeated reasoning
-into small auditable models that answer before the LLM is ever called.
+**Your mailbox. Your machine. Your rules.**
 
-![The dashboard: system status, triage metrics, recent filings, recent mail](docs/img/dashboard.png)
+Mail Triage is a self-hosted email assistant that turns a busy inbox into a
+manageable workflow. Connect your institutional OAuth2 account, let a local AI
+agent help you find and organize mail, and build automations that handle the
+repetitive work. Keep using your usual email client.
 
-One container on one host: Flask UI + worker + embedded OAuth mail proxy. Mail stays
-on the machine; the LLM defaults to a local model, and a cloud fallback is optional.
+It combines **local-first AI, a visual flow builder, natural-language actions,
+and an extensible plugin system** in one app.
 
-## Features
+![Mail Triage dashboard: system status, triage metrics, recent filings, and recent mail](docs/img/dashboard.png)
 
-- **Rules first.** Match from / to / subject / body (contains, equals, regex; ALL or
-  ANY), then move, mark read, flag. First match wins; a rule with no actions is a
-  guard that pins matching mail in place so nothing else can move it. Folders are
-  created if missing; tokens of 3 characters or fewer match whole words only.
-- **LLM classification.** Whatever no rule matched is classified into your
-  categories with a confidence, a one-line summary, and a short reason. Auto-filing
-  starts off; per-hour call cap.
-- **Fast-path classifiers.** Deterministic models (decision lists, naive Bayes)
-  trained from your tags or the LLM's own verdicts. A confident hit skips the LLM,
-  runs identically every time, and can't be steered by instructions hidden inside
-  email content. Every classifier has a dataset page for reviewing and correcting
-  the exact samples it learns from.
-- **Learning loop.** Small specialists train on mailbox history in seconds (reply
-  detector, category sorter), watch in shadow mode first (recording what they would
-  do, changing nothing), get scored against a hand-labeled test set, and only take
-  over when you promote them. Models are plain JSON; every decision keeps its
-  evidence. See `docs/mail-intelligence/design.md`.
-- **Flows.** Multi-step automations: WHEN a message matches (exact fields, AI
-  category, or topic by meaning) then run steps in order - move, tag, flag, mark
-  read, draft from a template or with the LLM into Drafts.
-- **Assistant.** A streaming tool-calling chat over your whole mailbox (live IMAP,
-  any folder): search, read, move, flag, create folders, propose rules. Thinking and
-  every tool step are visible; actions can run dry-run; every action is logged.
-- **Plugins.** Sandboxed extensions with per-plugin enable, permissions and
-  settings: assistant tools (invoice finder, daily digest, model bench), classification
-  fast-paths (promo fast-path), rule conditions (CJK matcher), draft providers,
-  search re-rankers and event integrations (webhook notifications on filed /
-  classified events). Each plugin runs in its own worker process with hard
-  memory, time and host-call limits; the Plugins page gives every plugin a detail
-  view with a plain-language permission list. Write your own from
-  `docs/plugins-authoring.md`.
-- **Semantic search.** Hybrid local index: fielded FTS5 + sqlite-vec dense
-  retrieval, RRF fusion, small CPU cross-encoder reranker. No GPU needed.
-- **Message viewer and triage queue.** Sanitized HTML rendering, one-click
-  file-and-next, undo trail, snooze that resurfaces, tagging, clearing the
-  needs-reply flag (bulk or per message), bulk "classify selected" / "classify all
-  unclassified".
-- **Templates and drafting.** Reply templates with placeholders; draft with the LLM
-  and save straight into Drafts to send from your normal client.
-- **Accounts.** Mailbox sign-in via OAuth handled in the UI through the embedded
-  email-oauth2-proxy; token status live, restart/remove managed there.
+[Quick start](#quick-start) · [Features](#why-mail-triage) · [Documentation](docs/README.md) · [Write a plugin](docs/plugins-authoring.md)
 
-Full detail on every feature: [docs/features.md](docs/features.md).
+## Why Mail Triage?
+
+### Connect institutional email with built-in OAuth2
+
+Mail Triage bundles [simonrob/email-oauth2-proxy](https://github.com/simonrob/email-oauth2-proxy)
+to connect OAuth2-enabled mailboxes, including institutional accounts. Add an
+account, authorize it, and check its token status from the **Accounts** page—the
+proxy runs inside the app's container, so there is no separate proxy service to
+manage.
+
+Your provider's OAuth app registration and access policies still apply. The setup
+guide walks through the connection process.
+
+### Privacy first, powered by a local agent
+
+Run classification, mailbox chat, and drafting against a **local LLM**. The
+database and search index live on your host, and the default semantic search
+backend runs locally on CPU. You do not need a cloud AI service to use the app.
+
+You choose the model endpoint. If you configure a hosted model or cloud fallback,
+the email content included in those requests goes to that provider. Use local
+endpoints to keep AI processing on your own machine.
+
+### Build powerful flows visually
+
+Turn inbox habits into repeatable, multi-step automations with a visual
+**trigger → filters → steps** builder. Match exact message fields, an AI-assigned
+category, or a topic by meaning, then chain actions in order:
+
+- Move messages into folders.
+- Tag, star, or mark them read.
+- Create drafts from fixed text, saved templates, or AI instructions.
+
+For example: **when a message is about a project deadline, tag it, star it, and
+draft an acknowledgment.** Drafts land in your mailbox's Drafts folder for review.
+You can build a flow on the canvas or describe it to the assistant and approve
+its proposal with one click.
+
+### Go from natural language to action
+
+The assistant is an action interface across the app, with broad coverage of
+everyday mailbox and automation tasks. Search and read mail, organize messages,
+classify and tag them, draft replies, create folders, propose or update rules and
+flows, and train or evaluate classifiers—all through conversation.
+
+Try requests like:
+
+> “Find the email about my tax refund.”
+>
+> “Move this message to Receipts and mark it read.”
+>
+> “When mail is about a project deadline, tag it and draft an acknowledgment.”
+>
+> “Train a classifier from the messages I've tagged.”
+
+Responses stream live, tool calls and results are visible, and actions are logged.
+Per-capability permissions let you choose **Off**, **Ask me**, or **Auto** for
+supported actions; rule and flow proposals have one-click approval.
+
+### Extend it with plugins
+
+Add capabilities without changing the core app. Plugins can provide **assistant
+tools, classifiers, rule conditions, draft providers, search re-rankers, and event
+integrations**.
+
+Built-in examples include an invoice finder, a daily digest, language-aware drafts,
+and webhook notifications. Manage each plugin's settings and permissions in the
+UI. Plugins run in separate sandboxed worker processes with memory, time, and
+host-call limits; access to mail, models, and the network is permission-gated and
+audited.
+
+Start with the [plugin authoring guide](docs/plugins-authoring.md) and
+[SDK](sdk/README.md) to build your own.
+
+## More than an AI chat window
+
+- **Rules first.** Deterministic filters handle predictable mail before AI is
+  called. Guard rules keep important messages in place.
+- **Classification with context.** Get a category, confidence, summary, and reason
+  for messages that rules do not catch. AI auto-filing starts off.
+- **Learning that reduces AI calls.** Train small, auditable classifiers from your
+  tags or previous verdicts. Confident matches skip the LLM; learning-loop
+  specialists run in shadow mode until you promote them.
+- **Search by meaning or exact detail.** Find a topic even when you cannot remember
+  the wording, or narrow results by sender, date, and exact terms. The default
+  search backend needs no GPU.
+- **A practical triage workspace.** Sanitized message viewing, file-and-next,
+  snooze, tags, bulk classification, an undo trail, and a responsive mobile UI.
+
+See the [full feature tour](docs/features.md) for details.
 
 ## Quick start
 
-Docker + Compose. No GPU needed to start: rules and search run on CPU, and any
-OpenAI-compatible LLM endpoint works for classification and drafting. Pick an
-endpoint for your hardware in [docs/getting-started.md](docs/getting-started.md)
-(after boot, `python app.py --doctor` auto-detects what this machine can host).
+You need **Docker and Compose**, a mailbox, and—if you want AI features—an
+OpenAI-compatible model endpoint. Rules and local search run on CPU; LLM hardware
+requirements depend on the model you choose.
+
+Clone this repository, open its directory, then run:
 
 ```bash
-git clone <this repo> && cd mail-triage
-cp .env.example .env        # set LLM_BASE_URL / LLM_MODEL (blank = rules-only mode)
+cp .env.example .env
+# Set LLM_BASE_URL and LLM_MODEL for your local model.
+# Leave them blank to start in rules-only mode.
 docker compose up -d --build
-# open http://localhost:8097 - the Get started checklist walks through the rest
 ```
 
-First run: the app lands on a **Get started** checklist that walks through
-connecting your mailbox (OAuth, driven in the UI), pointing at an LLM and testing
-it, and building the search index. Without an LLM the app still sorts by rules
-and searches; classification and drafting stay idle until an endpoint answers.
-Tags and corrections you make now feed the learning loop; train your first
-specialist from **Learning**.
+Open **http://localhost:8097**. The **Get started** checklist walks you through:
+
+1. Connecting and authorizing your mailbox.
+2. Configuring and testing your model endpoint.
+3. Building your search index.
+
+Then create a rule, build a flow, or ask the assistant to help organize your mail.
+Without an LLM, rules and search still work; AI classification and drafting wait
+until an endpoint is available.
+
+See [Getting started](docs/getting-started.md) for hardware tiers, local model
+options, and account setup. See [Deployment](docs/deployment.md) for remote access,
+TLS, backups, and upgrades.
 
 ## How it works
 
+One container runs the web UI, background worker, and embedded OAuth mail proxy.
+The database and search index persist on your host; the model endpoint is configured
+separately.
+
+```text
+Your email provider
+        ↕ OAuth2 / TLS
+┌──────────────────────────────────────────────┐
+│ Mail Triage container                        │
+│                                              │
+│ email-oauth2-proxy ↔ worker ↔ web UI :8097     │
+└──────────────────────┬───────────────────────┘
+                       ├── Local database + search index
+                       └── Your LLM endpoint (local recommended)
 ```
-+-------------------------------------------- mail-triage container --------------+
-|   email-oauth2-proxy (child process)          Flask UI :8097 + worker loop      |
-|   OAuth 2.0 / TLS  ==========> provider      accounts: Accounts page (SQLite)   |
-|   127.0.0.1:1993 plain IMAP <---- reads <---- MailClient                        |
-+-------------------------------|--------------------------|----------------------+
-                                  |                          |
-                    +-------------v------------+   +---------v------------------+
-                    |  LLM (any OpenAI-compat) |   |  semantic search index     |
-                    |  local vLLM/ollama, or   |   |  FTS5 + sqlite-vec (CPU)   |
-                    |  a hosted API - optional |   |  lite backend, no GPU      |
-                    +--------------------------+   +----------------------------+
-```
 
-Cycle: poll inbox -> rules -> fast-path classifiers -> LLM for the rest -> file or
-suggest. Each stage records what it decided and why (per-message audit trail).
+The triage pipeline applies **rules → fast-path classifiers → LLM for the rest**,
+then files or suggests according to your settings. Flows add ordered actions when
+their conditions match. Each decision keeps an audit trail so you can see what
+happened and why.
 
-## Safety model
+## Stay in control
 
-- **Never deletes mail.** Worst case it files something into a folder; Undo puts it
-  back and keeps automation off that message.
-- Rules act live by default (dry-run toggle in Settings); LLM auto-filing starts off.
-- The assistant can move/flag/create folders - never delete or send - and can be
-  switched to dry-run.
-- **Plugins are sandboxed and read-only over mail.** Each runs in its own worker
-  process with hard memory/time limits; host calls (mailbox reads, the LLM,
-  network) are permission-gated, rate-capped and audited; the assistant needs the
-  plugin's off/ask/auto gate before it can call its tools; disabling a plugin
-  stops it everywhere.
-- The learning loop changes nothing until you promote it: shadow first, human
-  promotion, plain-JSON models, hand-labeled test sets, full decision provenance.
-- LLM calls are capped per hour; every automation and agent action is logged on the
-  Log page.
+- **AI auto-filing is opt-in.** Rules act live by default; use dry-run mode to
+  preview automation.
+- **Assistant permissions are explicit.** Choose which capabilities may run
+  automatically and which need approval. Sending and moving mail to Trash are
+  disabled by default.
+- **Draft before sending.** Flow-generated replies go to Drafts for review in
+  your normal email client.
+- **Protect and undo.** Guard rules pin matching mail in place; Undo restores
+  filed messages and keeps automation off those messages.
+- **Review before promoting.** Learning-loop specialists start in shadow mode
+  and only take over when you promote them.
+- **Inspect what happened.** Classification reasons, tool results, automation
+  events, and plugin activity are visible and logged. LLM calls are capped per hour.
 
 ## Operations
 
-All commands from the repo root:
+Run these commands from the repository root:
 
 ```bash
-docker compose ps                     # status
-docker logs -f mail-triage            # live logs
-docker compose up -d --build          # rebuild after code changes (image bakes the app)
-docker restart mail-triage            # simple restart
-docker exec mail-triage python app.py --check          # read-only health JSON
-docker exec mail-triage python app.py --doctor         # hardware + LLM endpoint check with setup advice
-docker exec mail-triage python app.py --index          # run the search indexer (resumable)
-docker exec mail-triage python app.py --reindex        # wipe + rebuild the index
-docker exec mail-triage python app.py --heal-snippets  # repair legacy raw-MIME snippets
-docker exec mail-triage python app.py --plugins list   # plugin registry (list|enable|disable|grant|config|invoke)
-docker exec mail-triage python learning.py report      # learning loop state
-.venv/bin/python tests/mock_e2e.py                     # E2E suite (mock IMAP + LLM; 600+ checks)
-.venv/bin/python tests/proxy_e2e.py                    # embedded-proxy E2E (mock OAuth + IMAP)
+docker compose ps                                      # status
+docker logs -f mail-triage                              # live logs
+docker compose up -d --build                            # rebuild after code changes
+docker restart mail-triage                              # restart
+docker exec mail-triage python app.py --check            # read-only health report
+docker exec mail-triage python app.py --doctor           # hardware + model setup advice
+docker exec mail-triage python app.py --index            # resumable search indexing
+docker exec mail-triage python app.py --plugins list     # installed plugins
+docker exec mail-triage python learning.py report        # learning loop state
 ```
 
-Data lives in `data/`: `triage.db` (messages, rules, templates, chat, learning
-tables) and `data/emailproxy/` (generated config, encrypted token cache, proxy log).
+Persistent state lives in `data/`: `triage.db` holds app data, and
+`data/emailproxy/` holds the generated proxy configuration, encrypted token cache,
+and proxy log. Back up this directory; see the
+[deployment guide](docs/deployment.md).
 
-## Docs
+## Documentation and development
 
-- [docs/](docs/README.md) - index of everything, sorted by purpose (start here /
-  design records / research / history)
-- [docs/getting-started.md](docs/getting-started.md) - install, hardware tiers,
-  choosing an LLM (including no-GPU setups), first-run checklist
-- [docs/deployment.md](docs/deployment.md) - running it for real: ports, TLS and
-  reverse proxies, backups, upgrades, resource notes
-- [docs/features.md](docs/features.md) - the full feature tour
-- [docs/plugin-architecture.md](docs/plugin-architecture.md) - the plugin system
-  as built: kernel, sandbox, kinds, assistant integration
-- [docs/plugins-authoring.md](docs/plugins-authoring.md) and
-  [sdk/README.md](sdk/README.md) - writing, installing and testing plugins
-- [docs/plugins-ui.md](docs/plugins-ui.md) - the Plugins page design (research +
-  applied patterns)
-- [docs/mail-intelligence/design.md](docs/mail-intelligence/design.md) - learning
-  loop design and safety invariants
-- [docs/mail-intelligence/improvement-roadmap.md](docs/mail-intelligence/improvement-roadmap.md) -
-  test sets, retraining triggers, where it goes next
+| Guide | What you'll find |
+| --- | --- |
+| [Getting started](docs/getting-started.md) | Installation, hardware, models, and first-run setup |
+| [Feature tour](docs/features.md) | Detailed coverage of the app's capabilities |
+| [Deployment](docs/deployment.md) | Ports, TLS, backups, and upgrades |
+| [Plugin authoring](docs/plugins-authoring.md) · [SDK](sdk/README.md) | Write, install, and test extensions |
+| [Plugin architecture](docs/plugin-architecture.md) | Extension types, sandboxing, and assistant integration |
+| [Learning loop](docs/mail-intelligence/design.md) | Model lifecycle, evaluation, and decision provenance |
+| [Docs index](docs/README.md) | All guides, design records, and research |
 
-## Layout
+The core lives in `app.py` (UI), `engine.py` (mail and automation), `store.py`
+(SQLite), and `proxy.py` (OAuth proxy management). Search lives in `rag.py` /
+`rag_lite.py`; learning in `learning.py` / `heuristics.py`; the plugin system in
+`plugins.py`, `plugin_rt.py`, and `plugin_worker.py`.
 
-```
-app.py            Flask UI + routes + worker start      Dockerfile
-engine.py         IMAP client, rules, LLM, assistant    docker-compose.yml
-store.py          SQLite schema + queries               .env (secrets fallback, 600)
-config.py         env fallbacks for deployments         tests/
-proxy.py          embedded email-oauth2-proxy manager   docs/
-rag.py, rag_lite.py   semantic search (legacy GPU, CPU) gemma/ (local model server, GPU 0)
-learning.py       learning loop (specialists, decisions, test sets)
-heuristics.py     fast-path classifiers                 static/, fonts/, icons/
-plugins.py        plugin kernel (manifest, registry, grants)    sdk/, schemas/
-plugin_rt.py      sandbox supervisor, host calls, events        plugins/ (built-ins)
-plugin_worker.py  sandboxed QuickJS interpreter per plugin
+Run the mock end-to-end suites with the project's Python environment:
+
+```bash
+.venv/bin/python tests/mock_e2e.py     # app suite: mock IMAP, LLM, and embeddings
+.venv/bin/python tests/proxy_e2e.py    # proxy suite: mock OAuth and IMAP
 ```
 
-MIT licensed - see [LICENSE](LICENSE). Times in the UI follow the display
-timezone setting (default UTC+8).
+## License and acknowledgments
+
+Mail Triage is [MIT licensed](LICENSE).
+
+OAuth2 mailbox connectivity is powered by
+[email-oauth2-proxy](https://github.com/simonrob/email-oauth2-proxy) by Simon Robinson.
