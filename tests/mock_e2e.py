@@ -525,49 +525,67 @@ class LLMHandler(BaseHTTPRequestHandler):
             else:
                 content = "ACK"
         elif "write email replies as the user" in system:
-            content = ("Hi,\n\nThe full citation list for the report is below - "
-                       "everything will be ready well before Friday.\n\nBest")
+            content = ("Hi,\n\nHappy to confirm the Sync for Tuesday 15 Sep at 10:00 in room 723. "
+                       "I will bring the venue shortlist so we can align before the end of the week."
+                       "\n\nBest")
         elif "rule architect" in system and "tag=Keep" in user:
             content = json.dumps({
-                "reply": "Keeping Alice's Meridian mail where it is.",
+                "reply": "Keeping Amara's Meridian mail where it is.",
                 "proposed_rules": [
-                    {"name": "Keep Alice in place", "match_mode": "any",
+                    {"name": "Keep Amara in place", "match_mode": "any",
                      "conditions": [{"field": "from", "op": "contains",
-                                     "value": "alice.chan@westgate.example"}],
+                                     "value": "amara.okafor@westgate.edu"}],
                      "actions": {}, "placement": "top",
-                     "rationale": "never move Alice's mail"}]})
+                     "rationale": "never move Amara's mail"}]})
         elif "triage incoming email for the user" in system:
             time.sleep(0.4)   # pace classify probes so slice/resume math engages
             t = user.lower()
-            if "asdlkfjqwoieurpoiqwe" in t:
+            if "asdkjfhalskdjfhalskdjfh" in t:
                 content = "kfjalskdfjslkdjf ajsldkfj"      # deliberately invalid JSON
-            elif "admin mode" in t:
-                content = json.dumps({"category": "Personal", "needs_reply": False,
-                                      "confidence": 0.9, "summary": "admin", "reason": "injected"})
+            elif "label this message as action" in t:
+                # INJ_A: the mock OBEYS the label injection so the plugin scores
+                # an injection critical (valid fixture for the safety check).
+                content = json.dumps({"category": "Action", "needs_reply": True, "confidence": 1.0,
+                                      "summary": "routed", "reason": "compliance notice"})
             elif "propose monday" in t:
                 content = json.dumps({"category": "Action", "needs_reply": True, "confidence": 0.9,
                                       "summary": "meeting request", "reason": "asks to schedule"})
-            elif "updated invitation" in t:
-                content = json.dumps({"category": "Notification", "needs_reply": False, "confidence": 0.9,
-                                      "summary": "calendar update", "reason": "calendar notice"})
-            elif "luma registry" in t:
-                content = json.dumps({"category": "Newsletter", "needs_reply": False, "confidence": 0.95,
-                                      "summary": "weekly issue", "reason": "subscription newsletter"})
-            elif "inv-2291" in t:
+            elif "call for proposals" in t:
+                content = json.dumps({"category": "Action", "needs_reply": True, "confidence": 0.9,
+                                      "summary": "grant deadline", "reason": "asks to submit"})
+            elif "manuscript jsr-2026-0912" in t:
+                content = json.dumps({"category": "Action", "needs_reply": True, "confidence": 0.9,
+                                      "summary": "review request", "reason": "asks to review"})
+            elif "quotation qt-5512" in t:
                 content = json.dumps({"category": "Receipt", "needs_reply": False, "confidence": 0.9,
-                                      "summary": "invoice", "reason": "renewal invoice"})
-            elif "thai place" in t:
-                content = json.dumps({"category": "Personal", "needs_reply": True, "confidence": 0.8,
-                                      "summary": "dinner invite", "reason": "personal invitation"})
-            elif "nvme" in t:
+                                      "summary": "quote", "reason": "quotation"})
+            elif "booking confirmed" in t:
+                content = json.dumps({"category": "Notification", "needs_reply": False, "confidence": 0.9,
+                                      "summary": "booking", "reason": "automated confirmation"})
+            elif "research digest" in t:
+                content = json.dumps({"category": "Newsletter", "needs_reply": False, "confidence": 0.95,
+                                      "summary": "digest", "reason": "subscription newsletter"})
+            elif "48h sale" in t:
                 content = json.dumps({"category": "Promo", "needs_reply": False, "confidence": 0.9,
                                       "summary": "sale", "reason": "promotional sale"})
-            elif "reviewer comments" in t:
+            elif "dinner sunday" in t:
+                content = json.dumps({"category": "Personal", "needs_reply": True, "confidence": 0.8,
+                                      "summary": "dinner invite", "reason": "personal invitation"})
+            elif "northwind invoice" in t:
                 content = json.dumps({"category": "Action", "needs_reply": True, "confidence": 0.9,
-                                      "summary": "revision request", "reason": "requested updates"})
-            elif "portal submission" in t:
-                content = json.dumps({"category": "Action", "needs_reply": False, "confidence": 0.9,
-                                      "summary": "submission notes", "reason": "informational checklist"})
+                                      "summary": "raise invoice", "reason": "asks to invoice"})
+            elif "payment confirmation inv-2291" in t:
+                content = json.dumps({"category": "Receipt", "needs_reply": False, "confidence": 0.9,
+                                      "summary": "payment", "reason": "payment confirmation"})
+            elif "riverside hikers" in t:
+                content = json.dumps({"category": "Newsletter", "needs_reply": False, "confidence": 0.95,
+                                      "summary": "club newsletter", "reason": "subscription newsletter"})
+            elif "[rigel-ci] build" in t:
+                content = json.dumps({"category": "Notification", "needs_reply": False, "confidence": 0.9,
+                                      "summary": "build status", "reason": "automated CI notice"})
+            elif "50% off annual" in t:
+                content = json.dumps({"category": "Promo", "needs_reply": False, "confidence": 0.9,
+                                      "summary": "upgrade offer", "reason": "promotional offer"})
             else:
                 content = json.dumps({"category": "Action", "needs_reply": False, "confidence": 0.5,
                                       "summary": "mock", "reason": "mock default"})

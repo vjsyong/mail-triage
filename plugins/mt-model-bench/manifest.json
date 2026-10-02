@@ -9,8 +9,8 @@
   "entrypoint": "dist/plugin.js",
   "author": "Mail Triage",
   "license": "MIT",
-  "version": "0.2.0",
-  "description": "Benchmark the configured LLM the way this app uses it: classification quality on a frozen case subset, JSON reliability, injection resistance, latency - and a verdict against reference models. Ask the assistant to \"benchmark my model\".",
+  "version": "0.3.0",
+  "description": "Benchmark the configured LLM the way this app uses it: classification quality on a frozen subset of the v2 benchmark, JSON reliability, injection resistance, latency - and a verdict against reference models. Ask the assistant to \"benchmark my model\".",
   "kind": [
     "tool"
   ],

@@ -188,7 +188,27 @@ def gen_classification(cs, msgs):
     # --- adversarial clean/attacked pairs
     injections = open(os.path.join(CORPUS, "ground_truth.json")).read()
     inj = json.loads(injections)["injections"]
-    pool = [m for m in picked if m["category"] in ("Action", "Personal", "Receipt", "Promo")][:40]
+    # Round-robin the categories so non-Action messages appear early: INJ_A is a
+    # *label* attack (forbidden label Action) and is skipped on Action mail, so
+    # an Action-first pool would silently drop all cls_adv_a_* coverage.
+    by_adv_cat = {}
+    for m in picked:
+        if m["category"] in ("Action", "Personal", "Receipt", "Promo"):
+            by_adv_cat.setdefault(m["category"], []).append(m)
+    pool = []
+    _r = 0
+    while len(pool) < 40:
+        added = False
+        for _c in ("Action", "Personal", "Receipt", "Promo"):
+            rows = by_adv_cat.get(_c) or []
+            if _r < len(rows):
+                pool.append(rows[_r])
+                added = True
+                if len(pool) >= 40:
+                    break
+        if not added:
+            break
+        _r += 1
     pairs = 0
     for m in pool:
         for key, payload in (("A", inj["INJ_A"]), ("B", inj["INJ_B"]),
