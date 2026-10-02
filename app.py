@@ -2561,6 +2561,8 @@ PLUGIN_DETAIL_TMPL = """
  .pxd-set .st-l b{display:block;font-size:.87rem;font-weight:600}
  .pxd-set .st-l .sub{display:block}
  @media(max-width:900px){ .pxd-set{grid-template-columns:1fr} }
+ .pxd-tn{flex:0 0 150px}
+ @media(max-width:640px){ .pxd-ev{flex-direction:column;align-items:flex-start;gap:3px} .pxd-tn{flex:0 0 auto} }
  @media (max-width:640px){ .pxd-dl{grid-template-columns:1fr;gap:1px} .pxd-dl dt{margin-top:8px} }
 </style>
 <div class="page-head">
@@ -2588,7 +2590,7 @@ PLUGIN_DETAIL_TMPL = """
   {% if p.tools %}
   <div class="sub" style="margin-top:14px;font-weight:600">Assistant tools</div>
   {% for t in p.tools %}
-  <div class="pxd-ev"><span class="mono" style="flex:0 0 150px">{{ t.name }}</span><span class="sub">{{ t.description }}</span></div>
+  <div class="pxd-ev"><span class="mono pxd-tn">{{ t.name }}</span><span class="sub" style="min-width:0">{{ t.description }}</span></div>
   {% endfor %}
   {% endif %}
 </div>
