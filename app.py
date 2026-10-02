@@ -775,7 +775,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .bubble{max-width:75%;padding:10px 14px;font-size:.92rem;line-height:1.55;overflow-wrap:anywhere}
 .bubble.user{background:#000;border:1px solid #000;color:#fff}
 .bubble.user .meta{color:#aaa}
-.bubble.ai{background:#fff;border:1px solid var(--line);min-width:180px}
+.bubble.ai{background:#fff;border:1px solid #000;min-width:180px}
 .bubble .meta{font-size:.72rem;color:var(--dim);margin-top:8px;display:flex;gap:10px;align-items:center;justify-content:flex-end}
 .bubble.user .meta{justify-content:flex-start}
 .status{font-size:.78rem;color:var(--dim);margin-bottom:6px}
@@ -805,14 +805,16 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .tools>summary{cursor:pointer;list-style:none;font-size:.75rem;font-family:var(--mono);color:var(--dim);border:1px solid var(--line);background:#fff;padding:2px 22px 2px 10px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;position:relative}
 .tools>summary::-webkit-details-marker{display:none}
 .tools>summary:hover{color:#000;border-color:#000}
-.tools>summary::after{content:'\u25b8';position:absolute;right:8px;top:1px;font-size:.7rem}
-.tools[open]>summary::after{content:'\u25be'}
+.tools>summary::after{content:'\25B8';position:absolute;right:8px;top:1px;font-size:.7rem}
+.tools[open]>summary::after{content:'\25BE'}
 .tools-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .tools[open] .tool-chip{white-space:normal;overflow-wrap:anywhere}
 .tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-chip.ok{color:var(--ok);border-color:var(--ok)}
 .tool-chip.err{color:var(--err);border-color:var(--err)}
 .copy{cursor:pointer;background:#fff;border:1px solid var(--line);color:var(--dim);font-size:.7rem;padding:1px 7px}
+.regen{cursor:pointer;background:#fff;border:1px solid var(--line);color:var(--dim);font-size:.85rem;line-height:1;padding:2px 8px;font-family:inherit}
+.regen:hover{color:#000;border-color:#000}
 .copy:hover{color:#000;border-color:#000}
 .proposal{background:#fff;border:1px solid var(--line);padding:10px 12px;margin:10px 0 2px}
 .p-tag{display:block;font-size:.64rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--acc);margin:0 0 7px}
@@ -935,9 +937,8 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   body.kb-open:has(.assistant-main){overflow:hidden}
   body.kb-open:has(.assistant-main) .assistant-main{height:var(--kb-h, calc(100dvh - 115px))}
   .crow .avatar{display:none}
-  .crow.user{justify-content:flex-end}
   .bubble{max-width:88%}
-  .bubble.ai{border:none;background:transparent;padding:2px 0;min-width:0}
+  .bubble.ai{background:#fff;border:1px solid #000;padding:9px 12px;min-width:0}
   .sheet-ov{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:190}
   .sheet{position:absolute;top:0;bottom:0;left:0;width:min(86vw,340px);background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column}
   .sheet-h{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--line)}
@@ -1322,6 +1323,17 @@ document.addEventListener('click', function(e){
   else { c.textContent='n/a'; }
 });
 }
+if(!window.__mtRegen){ window.__mtRegen = 1;
+document.addEventListener('click', function(e){
+  var b=e.target.closest('.regen');
+  if(!b) return;
+  e.preventDefault();
+  var scope=b.closest('.assistant-main, #asb')||document;
+  var f=scope.querySelector('form.composer');
+  var inst=f&&f.__chat;
+  if(inst && inst.regen) inst.regen(b);
+});
+}
 
 window.assistantChat = function(opts){
   var root=opts.root, form=opts.form, ta=opts.ta, btn=opts.sendBtn, stopBtn=opts.stopBtn,
@@ -1352,15 +1364,19 @@ window.assistantChat = function(opts){
     e.preventDefault();
     run(text);
   });
-  function run(text){
+  function run(text, regen){
+    regen = regen || null;
+    if(regen && regen.row && regen.row.parentNode) regen.row.remove();
     if(currentAbort) currentAbort.abort();
     currentAbort=new AbortController();
     if(btn) btn.disabled=true; if(stopBtn) stopBtn.style.display='';
-    ta.value=''; ta.style.height='auto';
+    if(!regen){ ta.value=''; ta.style.height='auto'; }
+    if(!regen){
     var urow=mk('div','crow user');
     urow.appendChild(mk('div','avatar you','You'));
     var ub=mk('div','bubble user'); ub.textContent=text;
     urow.appendChild(ub); live.appendChild(urow);
+    }
     var arow=mk('div','crow ai');
     arow.appendChild(mk('div','avatar ai','AI'));
     var box=mk('div','bubble ai');
@@ -1527,6 +1543,7 @@ window.assistantChat = function(opts){
       var cp=mk('button','copy','copy'); cp.type='button'; cp.dataset.copy=rawText||content.textContent;
       meta.appendChild(cp);
       meta.appendChild(mk('span','',new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})));
+      if(doneMsgId!=null){ var rg=mk('button','regen','\u21bb'); rg.type='button'; rg.dataset.mid=doneMsgId; rg.title='Regenerate reply'; meta.appendChild(rg); }
       if(proposals.length && doneMsgId!=null) proposals.forEach(function(p,i){ addProposal(p,i,doneMsgId); });
       if(pendingActions.length) pendingActions.forEach(function(a){ addPendingAction(a); });
       if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null;
@@ -1568,10 +1585,15 @@ window.assistantChat = function(opts){
       else if(ev==='error'){ fail(d.message||'unknown error'); }
       scrollBottom();
     }
-    fetch('/assistant/stream', { method:'POST',
+    var _ep = regen ? '/assistant/regenerate' : '/assistant/stream';
+    var _body = regen
+        ? ('session='+encodeURIComponent(sid)+'&mid='+encodeURIComponent(regen.mid||0)
+           +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : ''))
+        : ('message='+encodeURIComponent(text)+'&session='+encodeURIComponent(sid)
+           +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : ''));
+    fetch(_ep, { method:'POST',
         headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: 'message='+encodeURIComponent(text)+'&session='+encodeURIComponent(sid)
-              +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : ''),
+        body: _body,
         signal: currentAbort.signal
     }).then(function(resp){
       if(!resp.ok || !resp.body) throw new Error('HTTP '+resp.status);
@@ -1601,6 +1623,7 @@ window.assistantChat = function(opts){
   var inst = { liveEl: live, setSession: function(ns){ sid=ns; }, refreshLive: function(){ if(!live.parentNode) root.appendChild(live); },
                isBusy: function(){ return !!currentAbort; },
                abort: function(){ if(currentAbort) currentAbort.abort(); },
+               regen: function(b){ if(currentAbort) return; var row=b.closest('.crow'); var m=b.getAttribute('data-mid')||'0'; run('', {mid: m, row: row}); },
                clearLive: function(){ live.innerHTML=''; } };
   form.__chat = inst;
   return inst;
@@ -5738,7 +5761,7 @@ CONVO_TMPL = r"""
         </details>
         {% endif %}
         <div class="md">{{ md(m.content)|safe }}</div>
-        <div class="meta"><button type="button" class="copy" data-copy="{{ m.content|e }}">copy</button><span>{{ m.when }}</span></div>
+        <div class="meta"><button type="button" class="copy" data-copy="{{ m.content|e }}">copy</button><span>{{ m.when }}</span>{% if m.regen %}<button type="button" class="regen" data-mid="{{ m.id }}" title="Regenerate reply">↻</button>{% endif %}</div>
         {% for p in m.proposals_list %}
         <div class="proposal">
           <div class="p-tag">✦ Proposed {{ 'flow' if p.kind == 'flow' else 'rule' }}</div>
@@ -6141,6 +6164,8 @@ def _assistant_prep(convo):
                 m["tool_steps"] = meta.get("tools") or []
             except (TypeError, ValueError):
                 pass
+    if convo and convo[-1].get("role") == "assistant":
+        convo[-1]["regen"] = True
     return convo
 
 
@@ -6270,6 +6295,50 @@ def assistant_stream():
         except Exception as exc:  # agent.stream handles its own errors; belt & braces
             try:
                 store.log_event("error", "assistant stream failed: %r" % exc)
+            except Exception:
+                pass
+            yield _sse("error", {"message": "assistant failed: %r" % exc})
+        finally:
+            agent.close()
+
+    resp = Response(gen(), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+@app.route("/assistant/regenerate", methods=["POST"])
+def assistant_regenerate():
+    """SSE stream that regenerates the last assistant reply: the trailing reply
+    is replaced by a fresh run of the same user turn (no duplicate user row)."""
+    sid = _assistant_sid_from_form()
+    page_path = request.form.get("path") or ""
+    try:
+        mid = int(request.form.get("mid") or 0)
+    except (TypeError, ValueError):
+        mid = 0
+
+    def gen():
+        yield _sse("session", {"sid": sid})
+        msgs = store.session_messages(sid)
+        last = msgs[-1] if msgs else None
+        prev = msgs[-2] if len(msgs) > 1 else None
+        if (not last or last.get("role") != "assistant"
+                or (mid and mid != last.get("id"))
+                or not prev or prev.get("role") != "user"):
+            yield _sse("error", {"message": "nothing to regenerate"})
+            return
+        store.delete_assistant_message(last["id"])
+        agent = engine.AssistantAgent(session_id=sid, page_path=page_path)
+        try:
+            for ev in agent.stream(prev["content"], store_user=False):
+                etype = ev.pop("type")
+                if etype == "proposals":
+                    ev["proposals"] = [_proposal_view(pp) for pp in ev.get("proposals") or []]
+                yield _sse(etype, ev)
+        except Exception as exc:  # agent.stream handles its own errors; belt & braces
+            try:
+                store.log_event("error", "assistant regenerate failed: %r" % exc)
             except Exception:
                 pass
             yield _sse("error", {"message": "assistant failed: %r" % exc})

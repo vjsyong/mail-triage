@@ -4709,13 +4709,17 @@ class AssistantAgent:
 
     # ---- the main loop
 
-    def stream(self, user_text):
-        """One assistant turn, as a generator of UI events."""
+    def stream(self, user_text, store_user=True):
+        """One assistant turn, as a generator of UI events.
+
+        store_user=False regenerates an existing turn: the user message is
+        already stored and must not be duplicated."""
         user_text = (user_text or "").strip()
         if not user_text:
             yield {"type": "error", "message": "empty message"}
             return
-        store.add_assistant_message("user", user_text[:4000], session_id=self.session_id)
+        if store_user:
+            store.add_assistant_message("user", user_text[:4000], session_id=self.session_id)
         today = time.strftime("%Y-%m-%d (%a)", time.gmtime(time.time() + 8 * 3600))
         system = (ASSISTANT_SYSTEM % {"user": imap_config()["user"], "today": today,
                                       "max_calls": self.MAX_CALLS_PER_TURN,

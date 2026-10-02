@@ -1412,6 +1412,44 @@ def main():
     check("clear empties only this chat", len(store.session_messages(t9_sid)) == 0
           and store.get_session(t9_sid) is not None)
 
+    section("T9c2 assistant regenerate: swaps the newest reply in place")
+    _rsid = store.find_or_create_session()
+    _ruid = store.add_assistant_message("user", "Build this multi-step regen flow for me please",
+                                        session_id=_rsid)
+    _rmid = store.add_assistant_message("assistant", "old reply to replace", session_id=_rsid)
+    _rp0 = client.get("/assistant/s/%d" % _rsid)
+    check("newest reply carries the regenerate control",
+          (b'class="regen" data-mid="%d"' % _rmid) in _rp0.data
+          and _rp0.data.count(b'class="regen"') == 1)
+    _rrg = client.post("/assistant/regenerate", data={"session": _rsid, "mid": _rmid})
+    check("regenerate streams a full run",
+          _rrg.status_code == 200 and b"event: done" in _rrg.data
+          and b"event: error" not in _rrg.data)
+    _rp1 = store.session_messages(_rsid)
+    check("regenerate replaces the reply and keeps the user row",
+          [m["role"] for m in _rp1] == ["user", "assistant"]
+          and _rp1[0]["id"] == _ruid
+          and all(m["id"] != _rmid for m in _rp1))
+    _rp2 = client.get("/assistant/s/%d" % _rsid)
+    check("regenerated reply carries a fresh regenerate control",
+          (b'data-mid="%d"' % _rp1[-1]["id"]) in _rp2.data
+          and _rp2.data.count(b'class="regen"') == 1)
+    _rneg = store.find_or_create_session()
+    store.add_assistant_message("user", "nothing to redo here", session_id=_rneg)
+    _rn = client.post("/assistant/regenerate", data={"session": _rneg})
+    check("regenerate refuses when the last message is the user's",
+          b"nothing to regenerate" in _rn.data)
+    _ro = store.find_or_create_session()
+    store.add_assistant_message("user", "first ask", session_id=_ro)
+    _omid = store.add_assistant_message("assistant", "first reply", session_id=_ro)
+    store.add_assistant_message("user", "second ask", session_id=_ro)
+    _nmid = store.add_assistant_message("assistant", "second reply", session_id=_ro)
+    _rpo = client.get("/assistant/s/%d" % _ro)
+    check("regenerate control only on the newest reply",
+          _rpo.data.count(b'class="regen"') == 1
+          and (b'data-mid="%d"' % _nmid) in _rpo.data
+          and (b'data-mid="%d"' % _omid) not in _rpo.data)
+
     section("T9d assistant failure is visible, not silent")
     r = client.post("/assistant/stream", data={"message": "streamfail please"})
     check("error event streamed, no done", b"event: error" in r.data and b"event: done" not in r.data)
@@ -4118,6 +4156,8 @@ def main():
     check("plugin action labels fall back to the plugin id",
           plugins_mod.action_label(plugins_mod.get("good-demo")) == "Ping demo"
           and plugins_mod.action_label({"id": "plain-demo", "manifest": {}}) == "plain-demo")
+    check("tool-call arrow uses a valid CSS escape (raw template)",
+          b"content:'\\25B8'" in r.data and b"content:'\\u25b8'" not in r.data)
     check("rail ships a filter box", b'id="chatfilter"' in r.data)
     check("rail groups sessions by day",
           b'class="rgroup"' in r.data or b"No chats yet" in r.data)
