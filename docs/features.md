@@ -110,7 +110,9 @@ ships as a working reference:
 - **Rule condition**: CJK matcher - matches Chinese/Japanese/Korean text, which the
   native operators cannot express.
 - **Draft provider**: mirror-language drafts - flow draft steps whose reply
-  mirrors the incoming mail's language.
+  mirrors the incoming mail's language - and LLM Draft Infill, which writes only
+  the template blocks tagged `{llm-infill}...{/llm-infill}` and keeps the rest
+  of the template exactly as typed.
 - **Retriever**: priority-first ranking - reorders semantic search so needs-reply
   and tagged mail float up.
 - **Integration**: webhook notifications on `mail.filed` / `mail.classified`

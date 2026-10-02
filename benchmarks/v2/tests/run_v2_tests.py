@@ -15,7 +15,7 @@ sys.path.insert(0, V2)
 sys.path.insert(0, HERE)
 
 MODULES = ["test_scoring", "test_integrity", "test_lint", "test_stats",
-           "test_runner_offline", "test_end_to_end"]
+           "test_runner_offline", "test_end_to_end", "test_plugin_data"]
 
 
 def main():

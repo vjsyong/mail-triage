@@ -4839,7 +4839,10 @@ function stepSummary(st){
   if(st.type === 'draft'){
     st.mode = st.mode || 'template';
     if(st.mode === 'fixed') return 'fixed draft "' + String(st.body || '').slice(0, 40) + '" → Drafts';
-    if(st.mode === 'plugin') return 'plugin draft (' + (st.plugin || '?') + ') → Drafts';
+    if(st.mode === 'plugin'){
+      var pt = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
+      return 'plugin draft (' + (st.plugin || '?') + ')' + (pt ? ' using "' + pt.name + '"' : '') + ' → Drafts';
+    }
     if(st.mode === 'llm') return 'LLM draft' + (st.instructions ? ' guided by "' + String(st.instructions).slice(0, 40) + '"' : '') + ' → Drafts';
     var t = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
     return 'draft from ' + (t ? t.name : '(pick a template)') + ' → Drafts';
@@ -4939,6 +4942,13 @@ function fieldsFor(st){
       PLUGINS.forEach(function(pp){ var o = el('option', null, pp.name); o.value = pp.id; if((st.plugin || '') === pp.id) o.selected = true; pSel.appendChild(o); });
       pSel.onchange = function(){ st.plugin = pSel.value; renderSummary(); sync(); };
       f.appendChild(pSel);
+      f.appendChild(el('label', null, 'Template (optional)'));
+      var ptSel = el('select');
+      var ptnone = el('option', null, '(none)'); ptnone.value = ''; ptSel.appendChild(ptnone);
+      TEMPLATES.forEach(function(t){ var o = el('option', null, t.name); o.value = String(t.id); if(String(st.template_id || '') === String(t.id)) o.selected = true; ptSel.appendChild(o); });
+      ptSel.onchange = function(){ st.template_id = ptSel.value; renderSummary(); sync(); };
+      f.appendChild(ptSel);
+      f.appendChild(el('div', 'sub', 'Plugins that support it fill only the blocks wrapped in {llm-infill}...{/llm-infill}.'));
       f.appendChild(el('label', null, 'Extra instructions (optional)'));
       var pa = document.createElement('textarea'); pa.rows = 2; pa.value = st.instructions || '';
       pa.placeholder = 'e.g. keep it to three sentences';
@@ -5099,7 +5109,10 @@ def _flow_summary(flow, tpl_names):
         elif t == "draft":
             dmode = (st.get("mode") or "template").lower()
             if dmode == "plugin":
-                acts.append("draft via plugin ‘%s’ and save to Drafts" % (st.get("plugin") or "?"))
+                name = tpl_names.get(int(st.get("template_id") or 0), "")
+                acts.append("draft via plugin ‘%s’%s and save to Drafts"
+                            % (st.get("plugin") or "?",
+                               (" using ‘%s’" % name) if name else ""))
             elif dmode == "llm":
                 name = tpl_names.get(int(st.get("template_id") or 0), "")
                 ins = (st.get("instructions") or "").strip()
@@ -5165,6 +5178,8 @@ def _flow_from_form():
             if dmode == "plugin":
                 st2 = {"type": "draft", "mode": "plugin",
                        "plugin": (st.get("plugin") or "").strip()[:80]}
+                if tid:
+                    st2["template_id"] = tid
                 ins = (st.get("instructions") or "").strip()
                 if ins:
                     st2["instructions"] = ins[:1000]
@@ -5302,7 +5317,7 @@ TEMPLATES_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Reply templates</h1>
-    <div class="page-desc">Used as guidance when the LLM drafts a reply — placeholders: {sender} {subject} {date} {my_name}</div>
+    <div class="page-desc">Used as guidance when the LLM drafts a reply — placeholders: {sender} {subject} {date} {my_name}{% if infill %}; blocks tagged {llm-infill}...{/llm-infill} are filled by the LLM Draft Infill plugin{% endif %}</div>
   </div>
   <div class="row"><a class="btn primary" href="{{ url_for('template_new') }}">New template</a></div>
 </div>
@@ -5352,7 +5367,7 @@ TEMPLATE_EDIT_TMPL = """
   </div>
   <div class="card">
     <div class="card-h"><h3 id="t-body-h">Body</h3><span class="sub">keep it short — the LLM adapts it to the actual email</span></div>
-    <div class="sub" id="t-body-help" style="margin-bottom:6px">Placeholders: <span class="mono">{sender}</span> <span class="mono">{subject}</span> <span class="mono">{date}</span> <span class="mono">{my_name}</span> are filled in from the message.</div>
+    <div class="sub" id="t-body-help" style="margin-bottom:6px">Placeholders: <span class="mono">{sender}</span> <span class="mono">{subject}</span> <span class="mono">{date}</span> <span class="mono">{my_name}</span> are filled in from the message.{% if infill %}<br id="t-infill-help">With the <b>LLM Draft Infill</b> plugin (flow draft step &rarr; plugin), <span class="mono">{llm-infill}what the LLM should write here{/llm-infill}</span> blocks are written by the LLM and everything around them stays exactly as typed.{% endif %}</div>
     <textarea id="t-body" name="body" rows="10" aria-labelledby="t-body-h" aria-describedby="t-body-help">{{ template.body if template else '' }}</textarea>
   </div>
   <div class="savebar"><button class="btn primary" type="submit">Save template</button><a class="btn" href="{{ url_for('templates') }}">Cancel</a></div>
@@ -5364,9 +5379,20 @@ TEMPLATE_EDIT_TMPL = """
 
 
 
+def _infill_plugin_enabled():
+    """True when the bundled LLM Draft Infill plugin is enabled; drives the
+    {llm-infill} hint on the templates pages."""
+    try:
+        row = plugins.get("mt-llm-infill")
+        return bool(row and row.get("enabled"))
+    except Exception:
+        return False
+
+
 @app.route("/templates")
 def templates():
-    return render(_render_src(TEMPLATES_TMPL, templates=store.list_templates()))
+    return render(_render_src(TEMPLATES_TMPL, templates=store.list_templates(),
+                              infill=_infill_plugin_enabled()))
 
 
 @app.route("/templates/new", methods=["GET", "POST"])
@@ -5377,7 +5403,8 @@ def template_new():
                            request.form.get("body") or "")
         flash("Template added.", "ok")
         return redirect(url_for("templates"))
-    return render(_render_src(TEMPLATE_EDIT_TMPL, template=None))
+    return render(_render_src(TEMPLATE_EDIT_TMPL, template=None,
+                              infill=_infill_plugin_enabled()))
 
 
 @app.route("/templates/<int:tid>/edit", methods=["GET", "POST"])
@@ -5392,7 +5419,8 @@ def template_edit(tid):
                               request.form.get("body") or "")
         flash("Template saved.", "ok")
         return redirect(url_for("templates"))
-    return render(_render_src(TEMPLATE_EDIT_TMPL, template=t))
+    return render(_render_src(TEMPLATE_EDIT_TMPL, template=t,
+                              infill=_infill_plugin_enabled()))
 
 
 @app.route("/templates/<int:tid>/delete", methods=["POST"])
@@ -7482,6 +7510,7 @@ SETTINGS_TMPL = """
 .model-picker{display:flex;flex-direction:column;gap:5px}
 .model-picker .model-custom[hidden]{display:none}
 .model-picker .model-status{font-size:.74rem;color:var(--dim)}
+.setrow .st-c input:disabled,.setrow .st-c select:disabled{background:var(--hover);color:var(--dim);opacity:.7;cursor:not-allowed}
 @media(max-width:900px){.settings-grid{grid-template-columns:1fr}.setnav{flex-direction:row;flex-wrap:wrap;position:static;gap:4px;margin-bottom:6px}.setnav .sn-h{display:none}.setrow{grid-template-columns:1fr}}
 @media(max-width:767px){.setnav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}.setnav::-webkit-scrollbar{display:none}.setnav a{flex:none;border:1px solid var(--line);white-space:nowrap;padding:5px 10px}}
 </style>
@@ -7545,7 +7574,7 @@ SETTINGS_TMPL = """
         <div class="st-c"><input id="llm-base-url" type="text" name="llm_base_url" value="{{ s.llm_base_url }}" placeholder="{{ llm.base or 'http://host:8000/v1' }}" aria-label="LLM base URL"></div></div>
       <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Choices come from the endpoint; Custom lets you type one.</span></div>
         <div class="st-c">
-          <div class="model-picker" data-which="primary" data-base="llm_base_url" data-effective="{{ llm.model }}">
+          <div class="model-picker" data-url="{{ url_for('settings_llm_models') }}" data-which="primary" data-base="llm_base_url" data-effective="{{ llm.model }}">
             <select class="model-select" aria-label="LLM model">
               {% if s.llm_model %}<option value="{{ s.llm_model }}" selected>{{ s.llm_model }}</option>{% endif %}
               <option value="__custom__">Custom&hellip;</option>
@@ -7573,7 +7602,7 @@ SETTINGS_TMPL = """
         <div class="st-c"><input id="llm-fallback-base-url" type="text" name="llm_fallback_base_url" value="{{ s.llm_fallback_base_url }}" placeholder="{{ (llm.fallback.base if llm.fallback else '') or 'none' }}" aria-label="Fallback base URL"></div></div>
       <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Blank = same as primary.</span></div>
         <div class="st-c">
-          <div class="model-picker" data-which="fallback" data-base="llm_fallback_base_url" data-effective="{{ (llm.fallback.model if llm.fallback else '') or '' }}">
+          <div class="model-picker" data-url="{{ url_for('settings_llm_models') }}" data-which="fallback" data-base="llm_fallback_base_url" data-effective="{{ (llm.fallback.model if llm.fallback else '') or '' }}">
             <select class="model-select" aria-label="Fallback model">
               {% if s.llm_fallback_model %}<option value="{{ s.llm_fallback_model }}" selected>{{ s.llm_fallback_model }}</option>{% endif %}
               <option value="__custom__">Custom&hellip;</option>
@@ -7649,10 +7678,19 @@ SETTINGS_TMPL = """
         <div class="st-c"><input type="number" name="local_embed_threads" min="1" value="{{ s.local_embed_threads or '' }}" placeholder="8" aria-label="Local model threads"></div></div>
       <div class="hr"></div>
       <h4>Embeddings</h4>
-      <div class="setrow"><div class="st-l"><b>Base URL</b></div>
-        <div class="st-c"><input type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}" aria-label="Embed base URL"></div></div>
-      <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Local protocol takes a FastEmbed id, e.g. Qwen/Qwen3-Embedding-0.6B.</span></div>
-        <div class="st-c"><input type="text" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model or 'Qwen/Qwen3-Embedding-0.6B' }}" aria-label="Embed model"></div></div>
+      <div class="setrow"><div class="st-l"><b>Base URL</b><span class="sub">Not used by the local protocol.</span></div>
+        <div class="st-c"><input id="embed-base-url" type="text" name="embed_base_url" value="{{ s.embed_base_url }}" placeholder="{{ ecfg.base or 'http://host:8080' }}" aria-label="Embed base URL"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Local lists FastEmbed ids; other protocols list the endpoint's models.</span></div>
+        <div class="st-c">
+          <div class="model-picker" data-url="{{ url_for('settings_rag_models') }}" data-which="embed" data-protocol="embed_protocol" data-base="embed_base_url" data-effective="{{ s.embed_model or (lembed if ecfg.protocol == 'local' else ecfg.model) }}">
+            <select class="model-select" aria-label="Embed model">
+              {% if s.embed_model %}<option value="{{ s.embed_model }}" selected>{{ s.embed_model }}</option>{% endif %}
+              <option value="__custom__">Custom&hellip;</option>
+            </select>
+            <input type="text" class="model-custom" name="embed_model" value="{{ s.embed_model }}" placeholder="{{ ecfg.model or 'Qwen/Qwen3-Embedding-0.6B' }}" aria-label="Embed model"{% if s.embed_model %} hidden{% endif %}>
+            <span class="model-status sub"></span>
+          </div>
+        </div></div>
       <div class="setrow"><div class="st-l"><b>Protocol</b><span class="sub">TEI /embed vs OpenAI /embeddings (OpenAI, Ollama, LM Studio, TEI /v1).</span></div>
         <div class="st-c"><select name="embed_protocol" aria-label="Embed protocol">
           <option value="tei" {{ 'selected' if s.embed_protocol not in ('openai', 'local') else '' }}>TEI — POST /embed</option>
@@ -7669,10 +7707,19 @@ SETTINGS_TMPL = """
         <div class="st-c"><textarea name="embed_query_prefix" rows="3" aria-label="Query prefix">{{ s.embed_query_prefix }}</textarea></div></div>
       <div class="hr"></div>
       <h4>Reranker</h4>
-      <div class="setrow"><div class="st-l"><b>Base URL</b></div>
-        <div class="st-c"><input type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}" aria-label="Rerank base URL"></div></div>
-      <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Local protocol takes a FastEmbed cross-encoder, e.g. jinaai/jina-reranker-v1-turbo-en.</span></div>
-        <div class="st-c"><input type="text" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model or 'jinaai/jina-reranker-v1-turbo-en' }}" aria-label="Rerank model"></div></div>
+      <div class="setrow"><div class="st-l"><b>Base URL</b><span class="sub">Not used by the local protocol.</span></div>
+        <div class="st-c"><input id="rerank-base-url" type="text" name="rerank_base_url" value="{{ s.rerank_base_url }}" placeholder="{{ rcfg.base or 'http://host:8081' }}" aria-label="Rerank base URL"></div></div>
+      <div class="setrow"><div class="st-l"><b>Model</b><span class="sub">Local lists FastEmbed cross-encoders; other protocols list the endpoint's models.</span></div>
+        <div class="st-c">
+          <div class="model-picker" data-url="{{ url_for('settings_rag_models') }}" data-which="rerank" data-protocol="rerank_protocol" data-base="rerank_base_url" data-effective="{{ s.rerank_model or (lrerank if rcfg.protocol == 'local' else rcfg.model) }}">
+            <select class="model-select" aria-label="Rerank model">
+              {% if s.rerank_model %}<option value="{{ s.rerank_model }}" selected>{{ s.rerank_model }}</option>{% endif %}
+              <option value="__custom__">Custom&hellip;</option>
+            </select>
+            <input type="text" class="model-custom" name="rerank_model" value="{{ s.rerank_model }}" placeholder="{{ rcfg.model or 'jinaai/jina-reranker-v1-turbo-en' }}" aria-label="Rerank model"{% if s.rerank_model %} hidden{% endif %}>
+            <span class="model-status sub"></span>
+          </div>
+        </div></div>
       <div class="setrow"><div class="st-l"><b>Protocol</b></div>
         <div class="st-c"><select name="rerank_protocol" aria-label="Rerank protocol">
           <option value="tei" {{ 'selected' if s.rerank_protocol not in ('cohere', 'local') else '' }}>TEI — {"query", "texts"}</option>
@@ -7893,54 +7940,81 @@ SETTINGS_TMPL = """
 
 <script>
 (function(){
-  function load(picker){
+  function init(picker){
     var select = picker.querySelector('.model-select');
     var input = picker.querySelector('.model-custom');
     var status = picker.querySelector('.model-status');
+    var endpoint = picker.getAttribute('data-url');
     var which = picker.getAttribute('data-which') || 'primary';
+    var protocolName = picker.getAttribute('data-protocol');
+    var protocolInput = protocolName ? document.querySelector('select[name="' + protocolName + '"]') : null;
     var baseName = picker.getAttribute('data-base');
     var baseInput = baseName ? document.querySelector('input[name="' + baseName + '"]') : null;
     var effective = picker.getAttribute('data-effective') || '';
-    var url = '{{ url_for("settings_llm_models") }}?which=' + encodeURIComponent(which);
-    if(baseInput && baseInput.value.trim()){
-      url += '&base_url=' + encodeURIComponent(baseInput.value.trim());
-    }
     function custom(focus){
       select.value = '__custom__';
       input.hidden = false;
       if(focus){ input.focus(); }
     }
-    fetch(url, {headers:{'Accept':'application/json'}})
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        var models = (d && d.ok && d.models) ? d.models : [];
-        if(!models.length){
-          if(d && d.error){ status.textContent = 'Could not list models - type below.'; custom(false); }
-          return;
-        }
-        var customOpt = select.querySelector('option[value="__custom__"]');
-        var have = {};
-        Array.prototype.forEach.call(select.options, function(o){ have[o.value] = true; });
-        models.forEach(function(m){
-          if(have[m]){ return; }
-          have[m] = true;
-          var o = document.createElement('option');
-          o.value = m; o.textContent = m;
-          select.insertBefore(o, customOpt);
-        });
-        var current = input.value || effective;
-        if(models.indexOf(current) >= 0){ select.value = current; input.hidden = true; }
-        else { custom(false); }
-        status.textContent = models.length + ' models';
-      })
-      .catch(function(){ status.textContent = 'Could not list models - type below.'; });
+    function refresh(){
+      if(!endpoint){ return; }
+      var url = endpoint + '?which=' + encodeURIComponent(which);
+      if(protocolInput && protocolInput.value){ url += '&protocol=' + encodeURIComponent(protocolInput.value); }
+      if(baseInput && baseInput.value.trim()){ url += '&base_url=' + encodeURIComponent(baseInput.value.trim()); }
+      fetch(url, {headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          var models = (d && d.ok && d.models) ? d.models : [];
+          if(!models.length){
+            status.textContent = (d && d.error) ? 'Could not list models - type below.' : '';
+            if(d && d.error){ custom(false); }
+            return;
+          }
+          var customOpt = select.querySelector('option[value="__custom__"]');
+          Array.prototype.slice.call(select.options).forEach(function(o){
+            if(o !== customOpt){ select.removeChild(o); }
+          });
+          var have = {};
+          models.forEach(function(m){
+            if(have[m]){ return; }
+            have[m] = true;
+            var o = document.createElement('option');
+            o.value = m; o.textContent = m;
+            select.insertBefore(o, customOpt);
+          });
+          var current = input.value || effective;
+          if(models.indexOf(current) >= 0){ select.value = current; input.hidden = true; }
+          else { custom(false); }
+          status.textContent = models.length + ' models';
+        })
+        .catch(function(){ status.textContent = 'Could not list models - type below.'; });
+    }
+    picker._reload = refresh;
     select.addEventListener('change', function(){
       if(select.value === '__custom__'){ input.hidden = false; input.focus(); }
       else { input.value = select.value; input.hidden = true; }
     });
-    if(baseInput){ baseInput.addEventListener('change', function(){ load(picker); }); }
+    if(baseInput){ baseInput.addEventListener('change', refresh); }
+    refresh();
   }
-  Array.prototype.forEach.call(document.querySelectorAll('.model-picker'), load);
+  Array.prototype.forEach.call(document.querySelectorAll('.model-picker'), init);
+
+  [['embed_protocol','embed-base-url'],['rerank_protocol','rerank-base-url']].forEach(function(pair){
+    var sel = document.querySelector('select[name="' + pair[0] + '"]');
+    var inp = document.getElementById(pair[1]);
+    if(!sel){ return; }
+    var orig = inp ? inp.placeholder : '';
+    function upd(reload){
+      var local = sel.value === 'local';
+      if(inp){ inp.disabled = local; inp.placeholder = local ? 'not used for local models' : orig; }
+      if(reload){
+        var picker = document.querySelector('.model-picker[data-protocol="' + pair[0] + '"]');
+        if(picker && picker._reload){ picker._reload(); }
+      }
+    }
+    sel.addEventListener('change', function(){ upd(true); });
+    upd(false);
+  });
 })();
 </script>"""
 
@@ -7997,7 +8071,8 @@ def settings():
         SETTINGS_TMPL, s=store.all_settings(), engine_state=worker.state, cfg=config,
         tz=tz_label(), agcaps=engine.AGENT_CAPS,
         llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config(),
-        icfg=engine.imap_config()))
+        icfg=engine.imap_config(), lembed=rag.LOCAL_EMBED_DEFAULT,
+        lrerank=rag.LOCAL_RERANK_DEFAULT))
 
 
 @app.route("/settings/llm-models")
@@ -8017,6 +8092,28 @@ def settings_llm_models():
         return jsonify({"ok": False, "error": "no endpoint configured", "models": []})
     try:
         models = client.list_models(base, key)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc), "models": []})
+    return jsonify({"ok": True, "models": models})
+
+
+@app.route("/settings/rag-models")
+def settings_rag_models():
+    """Model ids for the embed/rerank dropdowns: FastEmbed's list for the local
+    protocol, otherwise the endpoint's OpenAI-compatible /models."""
+    which = (request.args.get("which") or "embed").lower()
+    kind = "rerank" if which == "rerank" else "embed"
+    if (request.args.get("protocol") or "").lower() == "local":
+        try:
+            return jsonify({"ok": True, "models": rag.local_model_ids(kind), "local": True})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc), "models": []})
+    cfg = rag.rerank_config() if kind == "rerank" else rag.embed_config()
+    base = (request.args.get("base_url") or "").strip().rstrip("/") or cfg["base"]
+    if not base:
+        return jsonify({"ok": False, "error": "no endpoint configured", "models": []})
+    try:
+        models = engine.fetch_model_ids(base, cfg["key"])
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc), "models": []})
     return jsonify({"ok": True, "models": models})

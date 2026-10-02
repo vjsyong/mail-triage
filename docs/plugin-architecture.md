@@ -884,7 +884,7 @@ pending actions); only link actions render inline today.
 | tool | assistant inventory -> `call_tool` -> sandbox | enable + assistant gate (`plugin:<id>`) | mt-invoice-finder, mt-daily-digest, mt-model-bench, mt-unsubscribe, mt-commitments, mt-subscription-watch |
 | classifier | `heuristics.classify()` fallback | `plugin_classifiers` | mt-promo-fastpath |
 | matcher | `_cond_field` op `plugin` in rules/flows | `plugin_matchers` (+ builder has the op) | mt-cjk-matcher |
-| draft-provider | flow draft step `mode:"plugin"` (live + simulator preview) | referenced by the step | mt-mirror-language |
+| draft-provider | flow draft step `mode:"plugin"` (live + simulator preview); payload carries the step's raw `template` + `fields` | referenced by the step | mt-mirror-language, mt-llm-infill |
 | retriever | `_tool_semantic_search` re-rank | `plugin_retrievers` | mt-priority-first |
 | integration | `mail.filed` / `mail.classified` events on a dispatcher thread | enabled integration plugins (10s target cache, reset on enable/disable) | mt-webhook-notify |
 | schedule | `onSchedule` on the `PluginScheduler` thread (~30s tick) | `schedule.every_minutes` (+ `plugin_schedules_enabled`) | mt-commitments, mt-subscription-watch |

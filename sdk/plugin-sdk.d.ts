@@ -149,13 +149,20 @@ export function match(ctx: PluginContext,
 
 /**
  * Draft-provider kind: the reply body a flow's draft step would save. Flow
- * steps reference it as {"type":"draft","mode":"plugin","plugin":"<id>"}.
- * May use ctx.llm.complete; budget limits.timeout_ms accordingly (LLM calls
- * count against the deadline).
+ * steps reference it as {"type":"draft","mode":"plugin","plugin":"<id>"} and
+ * may name a saved template. `input.template` is the RAW template (not
+ * placeholder-rendered), which lets a plugin define its own tags;
+ * `input.fields` holds the values for {sender} {subject} {date} {my_name}.
+ * Return {text: ""} to draft nothing. May use ctx.llm.complete; budget
+ * limits.timeout_ms accordingly (LLM calls count against the deadline).
  */
 export function draft(ctx: PluginContext,
                       input: { subject: string; from: string; snippet: string;
-                               instructions?: string }):
+                               date?: string; instructions?: string;
+                               template?: { id?: number; name?: string;
+                                            subject?: string; body?: string } | null;
+                               fields?: { sender?: string; subject?: string;
+                                          date?: string; my_name?: string } }):
   { text: string } | string;
 
 /**
