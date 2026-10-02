@@ -1184,6 +1184,8 @@ def main():
     rp = client.get("/assistant", follow_redirects=True)
     check("assistant page renders the approval panel",
           rp.status_code == 200 and b"Awaiting your approval" in rp.data)
+    check("approval cards share the proposal card template",
+          b'class="p-tag warn"' in rp.data and b"Nothing happens until you click Approve." in rp.data)
     store.set_agent_action(r["action_id"], "dismissed")
     store.set_setting("perm_delete", "off")
     a4.close()
@@ -1304,6 +1306,11 @@ def main():
     check("assistant session page renders", r.status_code == 200)
     check("page shows the thinking transcript", b"thinking" in r.data)
     check("page shows the proposal", "Budget mail to Budget".encode() in r.data)
+    check("tool calls collapse into one expandable line",
+          b'<details class="tools">' in r.data and b"3 tool calls" in r.data
+          and b'class="tools-list"' in r.data and r.data.count(b'class="tool-chip') == 3)
+    check("proposal cards carry the shared PROPOSED tag",
+          b'class="p-tag"' in r.data and b"Proposed rule" in r.data)
     check("page shows the session rail", b"assistant-rail" in r.data)
     r = client.post("/assistant/apply", data={"msg_id": row["id"], "idx": 0,
                                               "session": str(t9_sid)})
@@ -1578,6 +1585,8 @@ def main():
           len(props) == 1 and props[0]["rule_obj"]["name"] == "Tagged receipts")
     r = client.get("/messages")
     check("proposals render on the messages page", b"Tagged receipts" in r.data)
+    check("tag proposals use the shared card template",
+          b'class="p-tag"' in r.data and b"from your tags" in r.data)
     rules_before = len(store.list_rules())
     r = client.post("/proposals/%d/apply" % props[0]["id"])
     check("proposal apply adds the rule",
@@ -2378,6 +2387,9 @@ def main():
     check("streamed proposal cards label flows correctly (kind-aware JS)",
           b"isFlow?'Add flow':'Add rule'" in r.data
           and b"isFlow?'Update flow #':'Update rule #'" in r.data)
+    check("live chat: collapsed tool calls + tagged proposal cards shipped",
+          b"tools-list" in r.data and b"cardOrder" in r.data
+          and b"Needs your approval" in r.data and b"p-tag" in r.data)
     r = client.get("/assistant/s/%d" % sid29)
     check("no assistant sidebar on the assistant page itself",
           b'id="asb"' not in r.data and b'id="asb-toggle"' not in r.data

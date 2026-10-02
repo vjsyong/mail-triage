@@ -158,3 +158,22 @@ block at all and nothing mapped page questions to the page. Fixes:
   to self-description only for assistant questions.
 - Checks: a table-driven test asserts every page block mentions its subject (no bare
   one-liners) and that the system prompt maps page questions to the page context.
+
+### One card for every AI action + collapsed tool calls (2026-10-02)
+- **Single action-card template.** Every assistant-proposed action now uses the
+  same `.proposal` card with a ✦ kind tag as its first line: chat rule/flow
+  proposals ("✦ Proposed rule/flow"), live approval cards ("✦ Needs your
+  approval", warn colour), the assistant page's approval panel rows, and the
+  Messages page tag proposals ("✦ Proposed rule · from your tags"). Same skeleton
+  everywhere: kind tag -> name + match/badges with the action buttons -> optional
+  overlap note -> mono evidence line -> sub description. Buttons and states are
+  unchanged (Add / Add (disabled) / Update # / ✓ Added / Approve / Dismiss).
+- **Tool calls collapse.** Each assistant turn renders its tool calls as ONE
+  collapsed `<details class="tools">` line: "⚙ N tool calls · ✓ <last name> →
+  <summary>", clicking expands the full chip list. Both renderers changed together
+  (server CONVO_TMPL + live JS); the summary tracks the newest tool live ("running
+  X..." -> "✓ X -> ..."). Thinking fold, status line and empty-state chips are
+  unchanged.
+- Checks: stored convo renders the collapsed details with all chips inside;
+  proposal cards carry the p-tag; approval cards and tag proposals match the
+  template; live JS markers present.

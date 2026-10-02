@@ -743,13 +743,21 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .dsk{color:var(--dim)}
 .dsv{font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
 .dsv .dsp{font-weight:400;color:var(--dim);font-size:.78rem;margin-left:3px}
-.tools{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
+.tools{margin:2px 0 8px}
+.tools>summary{cursor:pointer;list-style:none;font-size:.75rem;font-family:var(--mono);color:var(--dim);border:1px solid var(--line);background:#fff;padding:2px 22px 2px 10px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;position:relative}
+.tools>summary::-webkit-details-marker{display:none}
+.tools>summary:hover{color:#000;border-color:#000}
+.tools>summary::after{content:'\u25b8';position:absolute;right:8px;top:1px;font-size:.7rem}
+.tools[open]>summary::after{content:'\u25be'}
+.tools-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .tool-chip{font-size:.75rem;font-family:var(--mono);border:1px solid var(--line);padding:2px 10px;color:var(--dim);background:#fff;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-chip.ok{color:var(--ok);border-color:var(--ok)}
 .tool-chip.err{color:var(--err);border-color:var(--err)}
 .copy{cursor:pointer;background:#fff;border:1px solid var(--line);color:var(--dim);font-size:.7rem;padding:1px 7px}
 .copy:hover{color:#000;border-color:#000}
 .proposal{background:#fff;border:1px solid var(--line);padding:10px 12px;margin:10px 0 2px}
+.p-tag{display:block;font-size:.64rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--acc);margin:0 0 7px}
+.p-tag.warn{color:var(--warn)}
 .composer{background:#fff;border:1px solid var(--line);padding:10px 12px 8px;margin-top:10px}
 .composer:focus-within{border-color:#000}
 .composer textarea{width:100%;border:none;background:transparent;color:var(--fg);font:inherit;resize:none;outline:none;min-height:26px;max-height:190px;display:block}
@@ -1273,7 +1281,10 @@ window.assistantChat = function(opts){
     var det=document.createElement('details'); det.className='think'; det.open=false; det.style.display='none';
     var detSum=mk('summary','','Thinking\u2026'); det.appendChild(detSum);
     var pre=mk('pre'); det.appendChild(pre);
-    var toolsBox=mk('div','tools'); toolsBox.style.display='none';
+    var toolsBox=document.createElement('details'); toolsBox.className='tools'; toolsBox.style.display='none';
+    var toolsSum=mk('summary');
+    var toolsList=mk('div','tools-list');
+    toolsBox.appendChild(toolsSum); toolsBox.appendChild(toolsList);
     var content=mk('div','md'); content.style.whiteSpace='pre-wrap'; var rawText='';
     var meta=mk('div','meta'); meta.style.display='none';
     box.appendChild(status); box.appendChild(det); box.appendChild(toolsBox);
@@ -1287,21 +1298,31 @@ window.assistantChat = function(opts){
     timer=setInterval(function(){ if(!document.body.contains(status)){ clearInterval(timer); return; } if(!finished && status.dataset.label) status.textContent=status.dataset.label+' \u00b7 '+secs()+'s'; }, 500);
     function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
     function label(x){ if(!finished){ status.dataset.label=x; status.textContent=x+' \u00b7 '+secs()+'s'; } }
-    var cards=[];
+    var cards=[], cardOrder=[];
+    function toolsLabel(){
+      var n=cardOrder.length;
+      var txt='\u2699 '+n+' tool call'+(n===1?'':'s');
+      var last=cards[cardOrder[n-1]];
+      if(last) txt+=' \u00b7 '+last.textContent;
+      toolsSum.textContent=txt;
+    }
     function toolCard(id,name,args){
       var c=mk('span','tool-chip');
       var a='';
       try{ a=JSON.stringify(args||{}); }catch(err){ a=''; }
       if(a.length>90) a=a.slice(0,90)+'\u2026';
       c.textContent='\u23f3 '+name+' '+a;
+      if(!cards[id]) cardOrder.push(id);
       cards[id]=c;
-      toolsBox.style.display=''; toolsBox.appendChild(c);
+      toolsBox.style.display=''; toolsList.appendChild(c);
+      toolsLabel();
     }
     function toolDone(id,ok,summary,dry,pending){
       var c=cards[id]; if(!c) return;
       c.className='tool-chip '+(ok?'ok':'err');
       var tx=c.textContent.replace(/^[\u23f3\u2713\u2717]\s*/,'');
       c.textContent=(ok?'\u2713 ':'\u2717 ')+tx+' \u2192 '+(pending?'[awaiting approval] ':(dry?'[dry-run] ':''))+summary;
+      toolsLabel();
     }
     function actsText(a){
       a=a||{}; var out=[];
@@ -1326,6 +1347,7 @@ window.assistantChat = function(opts){
       var simObj=p.similar||p.similar_rule||null;
       var tgt=updObj||simObj||null;
       var w=mk('div','proposal');
+      w.appendChild(mk('div','p-tag','\u2726 Proposed '+(isFlow?'flow':'rule')));
       var h=mk('div','spread');
       var left=mk('div');
       left.appendChild(mk('b','',p.name));
@@ -1361,10 +1383,11 @@ window.assistantChat = function(opts){
     
     function addPendingAction(a){
       var w=mk('div','proposal');
+      w.appendChild(mk('div','p-tag warn','\u2726 Needs your approval'));
       var h=mk('div','spread');
       var left=mk('div');
-      left.appendChild(mk('b','','Awaiting approval: '));
-      left.appendChild(document.createTextNode(a.preview||a.tool||'action'));
+      left.appendChild(mk('b','',a.preview||a.tool||'action'));
+      if(a.capability){ left.appendChild(mk('span','sub',' · '+a.capability)); }
       if(a.capability==='send'||a.capability==='delete'){ var bd=mk('span','badge err',' dangerous'); bd.style.marginLeft='6px'; left.appendChild(bd); }
       h.appendChild(left);
       var fa=mk('form'); fa.method='post'; fa.action='/agent/actions/'+a.id+'/apply'; fa.className='inline';
@@ -1375,7 +1398,7 @@ window.assistantChat = function(opts){
       var bd2=mk('button','btn small','Dismiss'); bd2.type='submit'; fd.appendChild(bd2);
       var row=mk('div','row'); row.appendChild(fa); row.appendChild(fd); h.appendChild(row);
       w.appendChild(h);
-      w.appendChild(mk('div','note','This action only happens when you click Approve.'));
+      w.appendChild(mk('div','note','Nothing happens until you click Approve.'));
       box.appendChild(w);
     }
     var proposals=[], pendingActions=[], doneMsgId=null;
@@ -3663,7 +3686,8 @@ MESSAGES_TMPL = """
 <div class="card">
   <div class="card-h"><h3>Rules proposed from your tags <span class="sub">— review, then add with one click</span></h3></div>
   {% for p in proposals %}
-  <div style="border:1px solid var(--line);padding:12px;margin:8px 0">
+  <div class="proposal" style="margin:8px 0">
+    <div class="p-tag">✦ Proposed rule · from your tags</div>
     <div class="spread">
       <div><b>{{ p.rule_obj.name }}</b> <span class="sub">({{ p.rule_obj.match_mode }})</span>{% if p.rule_obj.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}{% if p.similar %} <span class="badge warn">overlaps #{{ p.similar.id }}</span>{% endif %}</div>
       <div class="row" style="white-space:nowrap">
@@ -4700,14 +4724,19 @@ CONVO_TMPL = r"""
         <details class="think"><summary>{{ m.reasoning_summary or 'Reasoning' }}</summary><pre>{{ m.reasoning }}</pre></details>
         {% endif %}
         {% if m.tool_steps %}
-        <div class="tools">
+        {% set _tl = m.tool_steps|last %}
+        <details class="tools">
+          <summary>⚙ {{ m.tool_steps|length }} tool call{{ 's' if m.tool_steps|length != 1 else '' }}{% if _tl %} · {{ '✓' if _tl.ok else '✗' }} {{ _tl.name }} → {{ _tl.summary }}{% endif %}</summary>
+          <div class="tools-list">
           {% for t in m.tool_steps %}<span class="tool-chip {{ 'ok' if t.ok else 'err' }}">{{ '✓' if t.ok else '✗' }} {{ t.name }}{% if t.dry_run %} · dry-run{% endif %}{% if t.pending %} · awaiting approval{% endif %} → {{ t.summary }}</span>{% endfor %}
-        </div>
+          </div>
+        </details>
         {% endif %}
         <div class="md">{{ md(m.content)|safe }}</div>
         <div class="meta"><button type="button" class="copy" data-copy="{{ m.content|e }}">copy</button><span>{{ m.when }}</span></div>
         {% for p in m.proposals_list %}
         <div class="proposal">
+          <div class="p-tag">✦ Proposed {{ 'flow' if p.kind == 'flow' else 'rule' }}</div>
           <div class="spread">
             <div><b>{{ p.name }}</b> <span class="sub">({{ p.match_mode }})</span>{% if p.placement == 'top' %} <span class="badge acc">added at top</span>{% endif %}{% if p.updates %} <span class="badge warn">updates #{{ p.updates.id }} "{{ p.updates.name }}"</span>{% elif p.similar %} <span class="badge warn">overlaps #{{ p.similar.id }}</span>{% endif %}</div>
             <div class="row" style="white-space:nowrap">
@@ -4813,12 +4842,16 @@ ASSISTANT_TMPL = r"""
         <div class="card-h"><h3>Awaiting your approval ({{ pending|length }})</h3>
           <span class="sub">The assistant queued these — nothing happens until you click.</span></div>
         {% for a in pending %}
-        <div class="setrow">
-          <div class="st-l"><b>{{ a.preview }}</b><span class="sub">{{ a.capability }} · queued {{ a.when_h }}</span></div>
-          <div class="st-c row">
-            <form class="inline" method="post" action="{{ url_for('agent_action_apply', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small primary" type="submit">Approve</button></form>
-            <form class="inline" method="post" action="{{ url_for('agent_action_dismiss', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small" type="submit">Dismiss</button></form>
+        <div class="proposal" style="margin:8px 0">
+          <div class="p-tag warn">✦ Needs your approval</div>
+          <div class="spread">
+            <div><b>{{ a.preview }}</b> <span class="sub">{{ a.capability }} · queued {{ a.when_h }}</span></div>
+            <div class="row" style="white-space:nowrap">
+              <form class="inline" method="post" action="{{ url_for('agent_action_apply', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small primary" type="submit">Approve</button></form>
+              <form class="inline" method="post" action="{{ url_for('agent_action_dismiss', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small" type="submit">Dismiss</button></form>
+            </div>
           </div>
+          <div class="note">Nothing happens until you click Approve.</div>
         </div>
         {% endfor %}
       </div>
