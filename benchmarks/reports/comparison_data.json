@@ -283,12 +283,18 @@
    }
   },
   "server": {
-   "thinking_mode": "falsekw"
+   "thinking_mode": "falsekw",
+   "key": "qwen9b",
+   "model": "qwen3.5-9b",
+   "boot_s": 280,
+   "adaptation_note": "falsekw: enable_thinking=false everywhere (unmodified temp-0 thinking runaways in 4/8 probe cases, median 99s)",
+   "enforce_eager": true,
+   "gpu_memory_utilization": 0.9
   },
   "resources": {
    "peak_vram_mib": 23322,
-   "last_vram_mib": 1,
-   "samples": 1730
+   "last_vram_mib": 22456,
+   "samples": 2025
   },
   "file_bytes": 19329398399
  },
@@ -419,27 +425,28 @@
    "classify": {
     "n": 20,
     "median_wall_s": 0.74,
-    "p95_wall_s": 0.82,
+    "p95_wall_s": 1.53,
     "min_s": 0.65,
-    "max_s": 0.84,
-    "median_gen_tok_s": 74.4
+    "max_s": 4.3,
+    "median_gen_tok_s": 74.5
    },
    "assistant": {
     "n": 6,
-    "median_wall_s": 3.1,
-    "median_ttft_s": 2.0
+    "median_wall_s": 2.27,
+    "median_ttft_s": 0.89
    }
   },
   "server": {
    "key": "qwen4b",
    "model": "qwen3.5-4b",
    "thinking_mode": "falsekw",
-   "adaptation_note": "app-verbatim payload caused temp-0 CoT runaways (5/8 probe cases, 28K-char CoT, no JSON); adaptation = enable_thinking explicitly false on every call"
+   "adaptation_note": "falsekw: enable_thinking=false everywhere (unmodified temp-0 thinking runaways 5/8 probe cases, ~154s each)",
+   "boot_s": 280
   },
   "resources": {
    "peak_vram_mib": 23322,
    "last_vram_mib": 22304,
-   "samples": 4177
+   "samples": 4472
   },
   "file_bytes": 9342911290
  },
@@ -586,8 +593,8 @@
   },
   "resources": {
    "peak_vram_mib": 23322,
-   "last_vram_mib": 1,
-   "samples": 1283
+   "last_vram_mib": 22456,
+   "samples": 1578
   },
   "file_bytes": 16024826247
  },
@@ -739,8 +746,8 @@
   },
   "resources": {
    "peak_vram_mib": 23322,
-   "last_vram_mib": 1,
-   "samples": 1361
+   "last_vram_mib": 22456,
+   "samples": 1951
   },
   "file_bytes": 7329316179
  },
@@ -891,8 +898,8 @@
   },
   "resources": {
    "peak_vram_mib": 22722,
-   "last_vram_mib": 1,
-   "samples": 334
+   "last_vram_mib": 22456,
+   "samples": 629
   },
   "file_bytes": 16953950867
  },
@@ -1042,9 +1049,9 @@
    "thinking_mode": "explicit"
   },
   "resources": {
-   "peak_vram_mib": 22400,
-   "last_vram_mib": 1,
-   "samples": 383
+   "peak_vram_mib": 22456,
+   "last_vram_mib": 22456,
+   "samples": 1266
   },
   "file_bytes": 15801196752
  }

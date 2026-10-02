@@ -2,14 +2,14 @@
  "classify": {
   "n": 20,
   "median_wall_s": 0.74,
-  "p95_wall_s": 0.82,
+  "p95_wall_s": 1.53,
   "min_s": 0.65,
-  "max_s": 0.84,
-  "median_gen_tok_s": 74.4
+  "max_s": 4.3,
+  "median_gen_tok_s": 74.5
  },
  "assistant": {
   "n": 6,
-  "median_wall_s": 3.1,
-  "median_ttft_s": 2.0
+  "median_wall_s": 2.27,
+  "median_ttft_s": 0.89
  }
 }

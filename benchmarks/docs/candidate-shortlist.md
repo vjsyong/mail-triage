@@ -62,3 +62,10 @@ architectural points. Baseline does not count against the 5-candidate limit.
   json_object mode, tools, streaming) with the app's per-field 4xx stripping.
 - Per-model tool parsers: hermes (Qwen), gemma4 (Gemma), granite4 (Granite),
   lfm2 (LFM). Reasoning parsers set where the family defines one.
+
+## Post-shortlist addition (owner request, 2026-10-02)
+`inclusionAI/Ling-3.0-tiny` was added as a 6th candidate mid-evaluation at the
+owner's request (15.8 GB bf16, MoE 128 experts top-8, MIT license, custom
+BailingMoeV3 architecture; served on the vLLM 0.26.1rc "muse-glimmer" image with
+its dedicated ling3 tool/reasoning parsers). Result: 83.4 raw / 77.6 sev-adj,
+5 critical (3 injection-compliance). Full numbers in reports/final-report.md.
