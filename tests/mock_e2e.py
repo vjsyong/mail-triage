@@ -2612,9 +2612,19 @@ def main():
                              [{"field": "subject", "op": "contains", "value": "zzz-not-real"}],
                              {"move_to": "Nowhere"})
     r = ag.call_tool("delete_rule", {"rule_id": rid_del})
-    check("delete_rule removes the rule", r["ok"] and store.get_rule(rid_del) is None)
+    _aid_del = r.get("action_id")
+    check("delete_rule queues a pending card by default",
+          r.get("pending_approval") and _aid_del and store.get_rule(rid_del) is not None)
+    check("the pending card previews the deletion",
+          any(pa["id"] == _aid_del and "Delete rule" in (pa.get("preview") or "")
+              for pa in store.pending_agent_actions()))
     r = ag.call_tool("delete_rule", {"rule_id": 99999})
-    check("delete_rule reports unknown ids", not r["ok"] and "no rule" in r["summary"])
+    check("delete_rule rejects unknown ids without queueing",
+          not r["ok"] and "not found" in r["summary"] and not r.get("pending_approval"))
+    _rapp = client.post("/agent/actions/%d/apply" % _aid_del)
+    check("applying the card executes the deletion",
+          _rapp.status_code == 302 and store.get_rule(rid_del) is None
+          and (store.get_agent_action(_aid_del) or {}).get("status") == "applied")
     rid_tog = store.add_rule("Tool toggle me", "all",
                              [{"field": "subject", "op": "contains", "value": "qqq-not-real"}], {})
     r = ag.call_tool("set_rule_enabled", {"rule_id": rid_tog, "enabled": False})
@@ -2623,8 +2633,13 @@ def main():
     check("set_rule_enabled resumes it", r["ok"] and store.get_rule(rid_tog)["enabled"] == 1)
     store.delete_rule(rid_tog)
     ag.close()
-    check("rules capability defaults to auto (caution risk)",
-          engine.agent_permissions().get("rules") == "auto")
+    check("rule deletion defaults to ask; pause/resume stays auto",
+          engine.agent_permissions().get("rules") == "ask"
+          and engine.agent_permissions().get("rules_toggle") == "auto")
+    _rstg = client.get("/settings").data
+    check("settings expose the split rule permissions",
+          b'name="perm_rules" data-risk="caution"' in _rstg
+          and b'name="perm_rules_toggle" data-risk="caution"' in _rstg)
     store.set_setting("perm_rules", "off")
     ag2 = engine.AssistantAgent()
     r = ag2.call_tool("delete_rule", {"rule_id": 1})
@@ -2638,8 +2653,12 @@ def main():
     r = ag3.call_tool("delete_rule", {"rule_id": rid_pend})
     check("rules 'ask' level queues a pending action",
           r.get("pending_approval") and store.get_rule(rid_pend) is not None)
+    _rdism = client.post("/agent/actions/%d/dismiss" % r.get("action_id"))
+    check("dismissing the card keeps the rule",
+          _rdism.status_code == 302 and store.get_rule(rid_pend) is not None
+          and (store.get_agent_action(r.get("action_id")) or {}).get("status") == "dismissed")
     ag3.close()
-    store.set_setting("perm_rules", "auto")
+    store.set_setting("perm_rules", "ask")
     store.delete_rule(rid_pend)
 
     section("T32 flows from the assistant: propose -> approve -> execute (fixed draft)")
@@ -2705,8 +2724,10 @@ def main():
           not r["ok"] and r.get("permission_denied") == "rules")
     ag2.close()
     store.set_setting("perm_rules", "auto")
-    r = ag.call_tool("delete_flow", {"flow_id": fid32})
+    ag4 = engine.AssistantAgent()   # perms are read at construction
+    r = ag4.call_tool("delete_flow", {"flow_id": fid32})
     check("delete_flow removes it", r["ok"] and store.get_flow(fid32) is None)
+    ag4.close()
     ag.close()
     r = engine.AssistantAgent()
     bad = r.call_tool("propose_flow", {"name": "bad flow",

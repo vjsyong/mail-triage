@@ -2998,9 +2998,12 @@ AGENT_CAPS = [
      "Create new (empty) folders."),
     ("classifiers", "Manage classifiers", "caution", ["train_classifier", "manage_classifier"],
      "Train, enable or delete heuristic classifiers."),
-    ("rules", "Manage rules & flows", "caution",
-     ["delete_rule", "set_rule_enabled", "delete_flow", "set_flow_enabled"],
-     "Delete a rule/flow, or pause/resume one without deleting (proposals stay one-click)."),
+    ("rules", "Delete rules & flows", "caution",
+     ["delete_rule", "delete_flow"],
+     "Remove a rule or flow for good. Deletion needs your click by default; proposals to create stay one-click."),
+    ("rules_toggle", "Pause or resume rules & flows", "caution",
+     ["set_rule_enabled", "set_flow_enabled"],
+     "Turn a rule or flow off or on without deleting anything."),
     ("draft", "Draft replies", "safe", ["draft_reply"],
      "Write a reply and save it to Drafts for review."),
     ("delete", "Delete messages", "dangerous", ["delete_message"],
@@ -3010,6 +3013,7 @@ AGENT_CAPS = [
 ]
 AGENT_CAP_OF_TOOL = {t: cap for cap, _l, _r, tools, _d in AGENT_CAPS for t in tools}
 AGENT_PERM_LEVELS = ("off", "ask", "auto")
+AGENT_ASK_DEFAULT = ("rules",)   # destructive rule/flow removals ask by default
 
 
 def agent_permissions():
@@ -3018,7 +3022,8 @@ def agent_permissions():
     for cap, _label, risk, _tools, _desc in AGENT_CAPS:
         lvl = store.get_setting("perm_" + cap, None)
         if lvl not in AGENT_PERM_LEVELS:
-            lvl = "off" if risk == "dangerous" else "auto"
+            lvl = ("ask" if cap in AGENT_ASK_DEFAULT
+                   else ("off" if risk == "dangerous" else "auto"))
         out[cap] = lvl
     # plugin capabilities: one per enabled plugin, keyed "plugin:<id>"; the
     # default level follows the plugin's declared tool side effects

@@ -39,10 +39,15 @@ always allowed — they are required for the product to function and mutate noth
 | move | `move_message` | caution | auto | Moves mail between folders (never deletes). |
 | create_folder | `create_folder` | safe | auto | Empty folder creation. |
 | classify-management | `train_classifier`, `manage_classifier` | caution | auto | Heuristics pipeline (currently ungated → bring under the matrix). |
-| rules | `delete_rule`, `set_rule_enabled` | caution | auto | Deletes a filter rule, or pauses/resumes one without deleting. Rule *proposals* (one-click cards) stay outside the matrix. |
+| rules | `delete_rule`, `delete_flow` | caution | **ask** | Removing a rule or flow needs the user's click (approval card). Rule *proposals* (one-click cards) stay outside the matrix. |
+| rules_toggle | `set_rule_enabled`, `set_flow_enabled` | caution | auto | Pause or resume without deleting anything. |
 | draft | `draft_reply` *(new)* | safe | auto | Generates a reply and saves it into Drafts; nothing leaves the mailbox. |
 | delete | `delete_message` *(new)* | **dangerous** | **off** | Soft delete: moves mail to the Trash folder (recoverable until the server purges). Warning shown; default off. |
 | send | `send_message` *(new)* | **dangerous** | **off** | Sends new mail / replies via the embedded OAuth proxy's SMTP listener; appends a copy to Sent. Hourly cap `sends_per_hour` (default 5, 0 = unlimited). Warning shown; default off. |
+
+Deletion asks by default (2026-10-02): destructive rule/flow removal has its own
+capability with an `ask` default, so the assistant queues a card instead of
+deleting on its own.
 
 ## Enforcement
 

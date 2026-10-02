@@ -42,6 +42,8 @@ DEFAULT_SETTINGS = {
     "perm_move": "auto",           # move messages between folders
     "perm_create_folder": "auto",  # create folders
     "perm_classifiers": "auto",    # train / enable / delete heuristic classifiers
+    "perm_rules": "ask",           # delete a rule/flow (destructive - needs a click; see rules_toggle)
+    "perm_rules_toggle": "auto",   # pause/resume a rule/flow without deleting
     "perm_draft": "auto",          # generate a reply draft and save it to Drafts
     "perm_delete": "off",          # DANGEROUS - move mail to Trash (recoverable until the server purges)
     "perm_send": "off",            # DANGEROUS - send mail through the account via the proxy
