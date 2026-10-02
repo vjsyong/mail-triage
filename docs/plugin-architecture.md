@@ -834,7 +834,18 @@ bit-exactly (suite checks float equality to 1e-9). Opt in via the
 `plugins/` built-ins: `mt-promo-fastpath` (classifier), `mt-invoice-finder` (tool),
 `mt-cjk-matcher` (matcher), `mt-mirror-language` (draft-provider),
 `mt-priority-first` (retriever), `mt-webhook-notify` (integration),
-`mt-daily-digest` (tool), `mt-model-bench` (tool) · tests: suite sections T43-T50 + `tests/plugins_fixture/`.
+`mt-daily-digest` (tool), `mt-model-bench` (tool), `mt-unsubscribe` (tool) · tests:
+suite sections T43-T50 + `tests/plugins_fixture/`.
+
+## Plugin cards in the assistant, as built (2026-10-02)
+
+A tool's `ToolResult.card` now travels on the `tool_end` SSE event (engine.py) and
+renders in the assistant transcript by `renderToolCard` (app.py, `BASE_TMPL`
+script): title, markdown, label/value fields, and `kind:"link"` actions as
+clickable buttons. That is what gives `mt-unsubscribe` its one-click opt-out list.
+`kind:"apply"`/`kind:"dismiss"` actions are still kernel-side (`ctx.action.propose`,
+pending actions); only link actions render inline today.
+
 
 ## All kinds, as built (2026-10-02, second wave)
 
