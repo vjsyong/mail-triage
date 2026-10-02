@@ -2874,11 +2874,11 @@ body.setup .bottom-nav{display:none !important}
           </div>
           <div class="wz-actions">
             <button type="submit" class="btn">Save &amp; continue &#8594;</button>
-            <button type="submit" class="wz-linkbtn" formaction="{{ url_for('settings_test_llm', next='/welcome?s=2') }}" formnovalidate>Test connection</button>
+            <button type="submit" class="wz-linkbtn" formaction="{{ url_for('welcome_test_llm') }}" formnovalidate>Save &amp; test</button>
             <button type="button" class="wz-linkbtn" data-go="3">Do this later</button>
             <button type="button" class="wz-linkbtn" data-go="1">&#8592; Back</button>
           </div>
-          <div class="wz-note">The connection test uses saved settings - save first to test a new endpoint.</div>
+          <div class="wz-note">Save &amp; test stores the endpoint above and checks it from this machine.</div>
         </form>
         <details>
           <summary class="sub" style="cursor:pointer;margin-top:14px">Choosing an LLM for this machine</summary>
@@ -3244,6 +3244,28 @@ def welcome():
     return render(_render_src(WELCOME_TMPL, st=st, hw=engine.detect_hardware(),
                               s=store.all_settings(), llm=engine.llm_config(),
                               start=start), setup=True)
+
+
+@app.route("/welcome/test-llm", methods=["POST"])
+def welcome_test_llm():
+    """Wizard: save the endpoint above AND test it in one step."""
+    _save_llm_settings()
+    started = time.time()
+    client = engine.LLMClient()
+    base, key, model = client.base, client.key, client.model
+    if not base:
+        flash("No LLM endpoint configured yet - add a base URL first.", "err")
+        return redirect(url_for("welcome") + "?s=2")
+    try:
+        out = client._chat_once(base, key, model,
+                                "You are a connectivity test. Reply with the single word ok.",
+                                [{"role": "user", "content": "Reply with the single word ok."}],
+                                json_mode=False)
+        flash("LLM OK in %.1fs - %s @ %s - replied: %s"
+              % (time.time() - started, model, base, (out or "").strip()[:60]), "ok")
+    except Exception as exc:
+        flash("LLM test failed: %s" % repr(exc)[:200], "err")
+    return redirect(url_for("welcome") + "?s=2")
 
 
 @app.route("/welcome/state.json")

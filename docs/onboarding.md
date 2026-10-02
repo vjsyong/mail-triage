@@ -52,8 +52,9 @@ Living examples (self-hosted products):
    out-of-band (e.g. OAuth finished on the Accounts page). No half-filled state
    is ever lost because none is kept - re-entry is always safe.
 4. **Work happens in place where possible.** The LLM step edits the same
-   settings the Settings page would (same POST endpoint + a `next` redirect
-   back into the wizard, `Test connection` posts the existing test endpoint).
+   settings the Settings page would (same save path + a `next` redirect back
+   into the wizard); its `Save & test` button saves the typed values and probes
+   the endpoint in one step, so testing never checks a stale configuration.
    The index step triggers the real indexer and polls live counts. Only the
    mailbox step links out (the OAuth dance owns the Accounts page).
 5. **Language.** Plain words, no internal jargon; each step answers "what is
@@ -72,7 +73,8 @@ Living examples (self-hosted products):
 ## Implementation map
 
 - `app.py`: `WELCOME_TMPL` (the wizard), route `/welcome` (`?s=N` deep links,
-  POST `dismiss`/`reset`), `GET /welcome/state.json` (live step/state polling
+  POST `dismiss`/`reset`), `POST /welcome/test-llm` (save + probe in one step),
+  `GET /welcome/state.json` (live step/state polling
   for the index step), `render(..., setup=True)` (chrome-free shell),
   `setup_state()` (3 steps), `_fresh_install()` + dashboard redirect, `next`
   redirects on the settings / test-llm / index endpoints.
