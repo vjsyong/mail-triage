@@ -49,9 +49,14 @@ class BenchClient:
         off:  never send (app behavior when llm_thinking=off).
         falsekw: always send {enable_thinking: False} — the model defaults thinking ON
                  when unset, so the adaptation must pin it off on EVERY call site
-                 (classify, assistant, draft, rules, simulate, summary)."""
+                 (classify, assistant, draft, rules, simulate, summary).
+        explicit: always pass {"enable_thinking": bool(thinking)} — the app's INTENT
+                 (true where it requests thinking, false where it does not) stated
+                 explicitly so templates that default ON respect it."""
         if self.thinking_mode == "falsekw":
             return {"enable_thinking": False}
+        if self.thinking_mode == "explicit":
+            return {"enable_thinking": bool(thinking)}
         if self.thinking_mode == "off":
             return None
         return {"enable_thinking": True} if thinking else None
@@ -562,7 +567,7 @@ def main():
     ap.add_argument("--sleep", type=float, default=0.0)
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--top-p", type=float, default=None)
-    ap.add_argument("--thinking-mode", default="auto", choices=["auto", "off", "falsekw"])
+    ap.add_argument("--thinking-mode", default="auto", choices=["auto", "off", "falsekw", "explicit"])
     ap.add_argument("--assistant-no-stream", action="store_true",
                     help="run the assistant suite with non-streaming requests "
                          "(for models whose tool output fails the streaming parser)")

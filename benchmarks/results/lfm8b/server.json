@@ -1,0 +1,6 @@
+{
+ "key": "lfm8b",
+ "model": "lfm2.5-8b-a1b",
+ "boot_s": 255,
+ "thinking_mode": "auto"
+}
