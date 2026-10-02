@@ -7,9 +7,9 @@
  },
  "classification": {
   "count": 240,
-  "sha256": "d79f09191b65d3a900e4221bd90c2afa300b3568b68d9ae8b138a67ab30302a7",
-  "dev": 136,
-  "acceptance": 104
+  "sha256": "b38e5316a638492f0f299319fa74ed8a226523b98c489939ae3d7b0e8e8d4d0a",
+  "dev": 134,
+  "acceptance": 106
  },
  "drafting": {
   "count": 60,
@@ -37,8 +37,8 @@
  },
  "total": {
   "count": 600,
-  "dev": 342,
-  "acceptance": 258,
+  "dev": 340,
+  "acceptance": 260,
   "frozen_at": "2026-09-30 (Wed)"
  },
  "corpus_messages_sha256": "7444cba0f25e691ff7e4d61710c8985322559bc9fef1003b869fb1a98b2c2c93"
