@@ -28,11 +28,15 @@ How this folder is organised: by what you need, not by when it was written.
   pipeline (what data exists, what was missing)
 - [agent-permissions.md](agent-permissions.md) - enforced permission boundaries for
   the assistant
-- [plugin-architecture.md](plugin-architecture.md) - microkernel / plugin system
-  blueprint: core vs plugin split, SDK contract (manifest schema + plugin-sdk.d.ts),
-  Wasm sandbox strategy, 4-phase rollout (draft, 2026-10-02)
+- [plugin-architecture.md](plugin-architecture.md) - the plugin system as built
+  (2026-10-02): core vs plugin split, SDK contract (manifest schema +
+  plugin-sdk.d.ts), sandbox strategy (supervised worker process per plugin), all
+  six kinds, assistant integration, and as-built notes
 - [plugins-authoring.md](plugins-authoring.md) - how to write, install and test a
-  plugin (manifest, bundle contract, ctx API, grants, classifier kind)
+  plugin (manifest, bundle contract, ctx API, grants; every kind)
+- [plugins-ui.md](plugins-ui.md) - the Plugins page: the research (progressive
+  disclosure, toggle patterns, VS Code / Chrome / Home Assistant precedents) and
+  the applied list + detail redesign
 - [flows-builder-v2.md](flows-builder-v2.md) - flow canvas (trigger -> filters -> steps)
 - [flows-fuzzy-classifier.md](flows-fuzzy-classifier.md) - AI category + about-topic
   conditions for flows

@@ -34,6 +34,14 @@ on the machine; the LLM defaults to a local model, and a cloud fallback is optio
 - **Assistant.** A streaming tool-calling chat over your whole mailbox (live IMAP,
   any folder): search, read, move, flag, create folders, propose rules. Thinking and
   every tool step are visible; actions can run dry-run; every action is logged.
+- **Plugins.** Sandboxed extensions with per-plugin enable, permissions and
+  settings: assistant tools (invoice finder, daily digest), classification
+  fast-paths (promo fast-path), rule conditions (CJK matcher), draft providers,
+  search re-rankers and event integrations (webhook notifications on filed /
+  classified events). Each plugin runs in its own worker process with hard
+  memory, time and host-call limits; the Plugins page gives every plugin a detail
+  view with a plain-language permission list. Write your own from
+  `docs/plugins-authoring.md`.
 - **Semantic search.** Hybrid local index: fielded FTS5 + sqlite-vec dense
   retrieval, RRF fusion, small CPU cross-encoder reranker. No GPU needed.
 - **Message viewer and triage queue.** Sanitized HTML rendering, one-click
@@ -101,6 +109,11 @@ suggest. Each stage records what it decided and why (per-message audit trail).
 - Rules act live by default (dry-run toggle in Settings); LLM auto-filing starts off.
 - The assistant can move/flag/create folders - never delete or send - and can be
   switched to dry-run.
+- **Plugins are sandboxed and read-only over mail.** Each runs in its own worker
+  process with hard memory/time limits; host calls (mailbox reads, the LLM,
+  network) are permission-gated, rate-capped and audited; the assistant needs the
+  plugin's off/ask/auto gate before it can call its tools; disabling a plugin
+  stops it everywhere.
 - The learning loop changes nothing until you promote it: shadow first, human
   promotion, plain-JSON models, hand-labeled test sets, full decision provenance.
 - LLM calls are capped per hour; every automation and agent action is logged on the
@@ -119,8 +132,9 @@ docker exec mail-triage python app.py --check          # read-only health JSON
 docker exec mail-triage python app.py --index          # run the search indexer (resumable)
 docker exec mail-triage python app.py --reindex        # wipe + rebuild the index
 docker exec mail-triage python app.py --heal-snippets  # repair legacy raw-MIME snippets
+docker exec mail-triage python app.py --plugins list   # plugin registry (list|enable|disable|grant|config|invoke)
 docker exec mail-triage python learning.py report      # learning loop state
-.venv/bin/python tests/mock_e2e.py                     # E2E suite (mock IMAP + LLM; 500+ checks)
+.venv/bin/python tests/mock_e2e.py                     # E2E suite (mock IMAP + LLM; 600+ checks)
 .venv/bin/python tests/proxy_e2e.py                    # embedded-proxy E2E (mock OAuth + IMAP)
 ```
 
@@ -132,6 +146,12 @@ tables) and `data/emailproxy/` (generated config, encrypted token cache, proxy l
 - [docs/](docs/README.md) - index of everything, sorted by purpose (start here /
   design records / research / history)
 - [docs/features.md](docs/features.md) - the full feature tour
+- [docs/plugin-architecture.md](docs/plugin-architecture.md) - the plugin system
+  as built: kernel, sandbox, kinds, assistant integration
+- [docs/plugins-authoring.md](docs/plugins-authoring.md) and
+  [sdk/README.md](sdk/README.md) - writing, installing and testing plugins
+- [docs/plugins-ui.md](docs/plugins-ui.md) - the Plugins page design (research +
+  applied patterns)
 - [docs/mail-intelligence/design.md](docs/mail-intelligence/design.md) - learning
   loop design and safety invariants
 - [docs/mail-intelligence/improvement-roadmap.md](docs/mail-intelligence/improvement-roadmap.md) -
@@ -148,6 +168,9 @@ proxy.py          embedded email-oauth2-proxy manager   docs/
 rag.py, rag_lite.py   semantic search (legacy GPU, CPU) gemma/ (local model server, GPU 0)
 learning.py       learning loop (specialists, decisions, test sets)
 heuristics.py     fast-path classifiers                 static/, fonts/, icons/
+plugins.py        plugin kernel (manifest, registry, grants)    sdk/, schemas/
+plugin_rt.py      sandbox supervisor, host calls, events        plugins/ (built-ins)
+plugin_worker.py  sandboxed QuickJS interpreter per plugin
 ```
 
 Private personal project; no license granted. Times in the UI follow the display

@@ -86,6 +86,36 @@ Design, audits and the research-backed roadmap:
 [docs/mail-intelligence/design.md](mail-intelligence/design.md),
 [docs/mail-intelligence/improvement-roadmap.md](mail-intelligence/improvement-roadmap.md).
 
+## Plugins (Plugins page)
+
+Sandboxed extensions that add capabilities without touching the core. A plugin is
+a folder (a `manifest.json` plus one JS bundle) discovered from `plugins/`
+(built-ins) and the app data dir (user plugins). The list gives every plugin a row
+with an on/off toggle; opening a row leads to its detail page: what it does, its
+access permissions in plain language, the assistant permission (off / ask / auto),
+pipeline opt-ins, per-plugin settings and recent activity.
+
+Each plugin runs in its own worker process with hard memory and time limits; host
+calls (mailbox reads, the LLM, network) are permission-gated, rate-capped and
+audited. Plugins read and propose - they never mutate mail. One built-in per kind
+ships as a working reference:
+
+- **Assistant tools**: invoice finder (finds invoices in the index and extracts
+  amount + due date into a card) and daily digest ("what did I miss" summary).
+- **Classifier**: promo fast-path - a mirrored heuristic's model served as a plugin.
+- **Rule condition**: CJK matcher - matches Chinese/Japanese/Korean text, which the
+  native operators cannot express.
+- **Draft provider**: mirror-language drafts - flow draft steps whose reply
+  mirrors the incoming mail's language.
+- **Retriever**: priority-first ranking - reorders semantic search so needs-reply
+  and tagged mail float up.
+- **Integration**: webhook notifications on `mail.filed` / `mail.classified`
+  events (ntfy, Home Assistant, any endpoint).
+
+Write your own with `docs/plugins-authoring.md`; the kernel is `plugins.py`,
+`plugin_rt.py` and `plugin_worker.py` (QuickJS worker sandbox). Manage from the
+Plugins page, or `python app.py --plugins list|enable|disable|grant|config|invoke`.
+
 ## Assistant (Assistant page)
 
 A streaming, tool-calling chat over the whole mailbox. The reply streams token by
