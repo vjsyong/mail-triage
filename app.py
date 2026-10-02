@@ -25,6 +25,7 @@ import engine
 import heuristics
 import learning
 import plugins
+import plugin_rt
 import proxy
 import rag
 import store
@@ -3185,6 +3186,12 @@ def _plugin_detail_ctx(pid):
     if "tool" in kinds:
         roles.append(("Role", "Assistant tools &mdash; callable in chat under the assistant "
                               "permission below"))
+    sched = m.get("schedule") or {}
+    if isinstance(sched, dict) and sched.get("every_minutes"):
+        every = int(sched.get("every_minutes") or 0)
+        when = ("every %d minutes" % every) if every < 1440 else (
+            "every day" if every == 1440 else "every %d days" % (every // 1440))
+        roles.append(("Schedule", "Runs automatically <b>%s</b> while enabled" % when))
     lim = m.get("limits") or {}
     limits_text = "memory %sMB &middot; timeout %sms" % (lim.get("memory_mb", "?"),
                                                          lim.get("timeout_ms", "?"))
@@ -5870,15 +5877,17 @@ ASSISTANT_TMPL = r"""
           <span class="sub">The assistant queued these — nothing happens until you click.</span></div>
         {% for a in pending %}
         <div class="proposal" style="margin:8px 0">
-          <div class="p-tag warn">✦ Needs your approval</div>
+          <div class="p-tag warn">{{ '✦ From a plugin' if a.card else '✦ Needs your approval' }}</div>
           <div class="spread">
             <div><b>{{ a.preview }}</b> <span class="sub">{{ a.capability }} · queued {{ a.when_h }}</span></div>
             <div class="row" style="white-space:nowrap">
-              <form class="inline" method="post" action="{{ url_for('agent_action_apply', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small primary" type="submit">Approve</button></form>
+              <form class="inline" method="post" action="{{ url_for('agent_action_apply', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small primary" type="submit">{{ 'Acknowledge' if a.card else 'Approve' }}</button></form>
               <form class="inline" method="post" action="{{ url_for('agent_action_dismiss', aid=a.id) }}"><input type="hidden" name="session" value="{{ sid }}"><button class="btn small" type="submit">Dismiss</button></form>
             </div>
           </div>
-          <div class="note">Nothing happens until you click Approve.</div>
+          {% if a.card_html %}<div style="margin:6px 0 0">{{ a.card_html|safe }}</div>{% endif %}
+          {% if a.card_fields %}<div style="margin:6px 0 0">{% for f in a.card_fields %}<div style="display:flex;gap:8px;font-size:.85rem"><span class="sub" style="flex:0 0 34%">{{ f.label }}</span><span>{{ f.value }}</span></div>{% endfor %}</div>{% endif %}
+          <div class="note">{{ 'Nothing changes until you click.' if a.card else 'Nothing happens until you click Approve.' }}</div>
         </div>
         {% endfor %}
       </div>
@@ -6167,6 +6176,14 @@ def _assistant_page(sid):
     pending = store.pending_agent_actions()
     for pa in pending:
         pa["when_h"] = fmt_ts(pa.get("created_ts"))
+        try:
+            pobj = json.loads(pa.get("payload") or "{}")
+        except (TypeError, ValueError):
+            pobj = {}
+        card = pobj.get("card") if isinstance(pobj, dict) else None
+        pa["card"] = card if isinstance(card, dict) else None
+        pa["card_html"] = md_to_html(card.get("markdown") or "") if pa["card"] else ""
+        pa["card_fields"] = (card.get("fields") or [])[:16] if pa["card"] else []
     try:
         perms = engine.agent_permissions()
     except Exception:
@@ -6457,6 +6474,18 @@ def agent_action_apply(aid):
         payload = json.loads(row.get("payload") or "{}")
     except (TypeError, ValueError):
         payload = {}
+    if isinstance(payload, dict) and payload.get("card") and not payload.get("tool"):
+        # informational card from a plugin's ctx.action.propose() - there is no
+        # tool to execute; acknowledging just files it.
+        title = str((payload.get("card") or {}).get("title") or row.get("preview")
+                    or "plugin card")[:160]
+        store.set_agent_action(aid, "applied",
+                               json.dumps({"summary": title, "ok": True, "card": True},
+                                          ensure_ascii=False))
+        store.log_event("info", "agent action #%s (plugin card) acknowledged by user: %s"
+                        % (aid, title))
+        flash("Acknowledged: " + title, "ok")
+        return redirect(back)
     agent = engine.AssistantAgent(session_id=sid)
     try:
         res = agent.call_tool(payload.get("tool") or row.get("tool"),
@@ -8548,4 +8577,5 @@ if __name__ == "__main__":
     indexer.start()
     classifier.start()
     proxy.supervisor.start()  # keeps the embedded emailproxy running (embedded mode only)
+    plugin_rt.scheduler.start()  # fires due plugin onSchedule() entrypoints
     app.run(host=config.UI_HOST, port=config.UI_PORT, threaded=True)

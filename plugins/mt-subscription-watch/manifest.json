@@ -1,0 +1,76 @@
+{
+  "id": "mt-subscription-watch",
+  "name": "Subscription watch",
+  "action": "Watch subscriptions",
+  "version": "0.1.0",
+  "description": "Tracks subscriptions and renewals found in receipts and billing mail, keeps a ledger, and flags upcoming renewals, trials and price changes. Can check daily on a schedule.",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": [
+    "tool"
+  ],
+  "permissions": [
+    "mailbox.read",
+    "llm.complete"
+  ],
+  "required_llm_capability": "llm.complete",
+  "limits": {
+    "memory_mb": 64,
+    "timeout_ms": 30000,
+    "kv_bytes": 262144
+  },
+  "config": {
+    "type": "object",
+    "properties": {
+      "since_days": {
+        "type": "integer",
+        "description": "look back N days for receipts and renewal notices (default 120)",
+        "default": 120
+      },
+      "horizon_days": {
+        "type": "integer",
+        "description": "how many days ahead count as an upcoming renewal (default 30)",
+        "default": 30
+      },
+      "max_read": {
+        "type": "integer",
+        "description": "candidate messages to read (default 20)",
+        "default": 20
+      }
+    }
+  },
+  "schedule": {
+    "every_minutes": 1440,
+    "run_tool": "watch_subscriptions"
+  },
+  "tools": [
+    {
+      "name": "watch_subscriptions",
+      "description": "List subscriptions tracked from receipts and billing mail, upcoming renewals, expiring trials and noticed price changes. Use when asked about subscriptions, recurring charges, renewals or 'what am I paying for'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "since_days": {
+            "type": "integer",
+            "description": "look back N days (default 120)"
+          },
+          "horizon_days": {
+            "type": "integer",
+            "description": "window counted as an upcoming renewal (default 30)"
+          },
+          "reset": {
+            "type": "boolean",
+            "description": "clear the tracked-subscription ledger before running"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none"
+    }
+  ]
+}

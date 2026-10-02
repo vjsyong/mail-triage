@@ -1,0 +1,81 @@
+{
+  "id": "mt-commitments",
+  "name": "Commitments",
+  "action": "What needs doing",
+  "version": "0.1.0",
+  "description": "Extracts commitments and deadlines from recent mail with source quotes, flags what needs action, and can check daily on a schedule.",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": [
+    "tool"
+  ],
+  "permissions": [
+    "mailbox.read",
+    "llm.complete"
+  ],
+  "required_llm_capability": "llm.complete",
+  "limits": {
+    "memory_mb": 64,
+    "timeout_ms": 30000,
+    "kv_bytes": 16384
+  },
+  "config": {
+    "type": "object",
+    "properties": {
+      "since_days": {
+        "type": "integer",
+        "description": "look back N days (default 14)",
+        "default": 14
+      },
+      "horizon_days": {
+        "type": "integer",
+        "description": "how many days ahead count as due soon (default 14)",
+        "default": 14
+      },
+      "max_messages": {
+        "type": "integer",
+        "description": "candidate messages to read for extraction (default 20)",
+        "default": 20
+      },
+      "sent_folder": {
+        "type": "string",
+        "description": "Sent folder name for promise detection (blank = try common names)",
+        "default": ""
+      }
+    }
+  },
+  "schedule": {
+    "every_minutes": 1440,
+    "run_tool": "extract_commitments"
+  },
+  "tools": [
+    {
+      "name": "extract_commitments",
+      "description": "List commitments and deadlines from recent mail: what the user still owes, what has a due date, and anything the user may have promised. Use when asked 'what do I need to do', 'what is due', or about outstanding tasks and deadlines.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "since_days": {
+            "type": "integer",
+            "description": "look back N days (default 14)"
+          },
+          "horizon_days": {
+            "type": "integer",
+            "description": "window counted as due soon (default 14)"
+          },
+          "max_messages": {
+            "type": "integer",
+            "description": "candidate messages to read (default 20)"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none"
+    }
+  ]
+}

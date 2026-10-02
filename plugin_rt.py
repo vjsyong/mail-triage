@@ -554,6 +554,28 @@ class PluginRuntime:
             self._strike(plugin_id, "internal", "event handler failed: %s" % str(res)[:160])
         return False
 
+    def schedule(self, plugin_id, payload):
+        """Run a plugin's scheduled entrypoint. Returns the ToolResult dict or None."""
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled") or not row["manifest"].get("schedule"):
+            return None
+        if not self.available():
+            return None
+        status, res = self._call_worker(plugin_id, row, {"cmd": "schedule", "input": payload})
+        if status != "ok":
+            if status == "timeout":
+                self._strike(plugin_id, "timeout", "scheduled run timed out (%dms)" % res)
+            elif status != "load":
+                self._strike(plugin_id, "internal", "scheduled run failed: %s" % str(res)[:160])
+            return None
+        if "error" in res:
+            e = res.get("error") or {}
+            self._strike(plugin_id, str(e.get("code") or "internal"),
+                         "scheduled run error: %s" % str(e.get("message") or "")[:200])
+            return None
+        out = res.get("result")
+        return out if isinstance(out, dict) else None
+
     def classify(self, plugin_id, payload):
         """Run a classifier-kind plugin (mirrors a native heuristic's model).
 
@@ -900,6 +922,75 @@ def draft(plugin_id, payload):
 def retriever(plugin_id, payload):
     """Search re-ranker call (assistant semantic_search)."""
     return runtime.retriever(plugin_id, payload)
+
+
+# ---------------------------------------------------------------- scheduling
+
+def run_due_schedules(now=None, force=False):
+    """Invoke enabled plugins whose manifest declares `schedule` and are due.
+
+    Runs on the scheduler thread (never the mail pipeline). Returns a list of
+    {plugin, tool, ok, summary}; never raises. `last_run` is persisted in
+    plugin_kv before the call so a failing plugin cannot hot-loop.
+    """
+    now = int(now or time.time())
+    results = []
+    try:
+        if not store.get_setting("plugin_schedules_enabled", 1):
+            return results
+        rows = [r for r in kernel.list_rows(enabled_only=True)
+                if (r["manifest"] or {}).get("schedule")]
+    except Exception:
+        return results
+    for row in rows:
+        pid = row["id"]
+        try:
+            sched = row["manifest"].get("schedule") or {}
+            if sched.get("enabled") is False:
+                continue
+            every = max(15, int(sched.get("every_minutes") or 1440))
+            state = _kv_get(pid, "__schedule") or {}
+            last = int(state.get("last") or 0)
+            if not force and last and (now - last) < every * 60:
+                continue
+            tools = row["manifest"].get("tools") or []
+            tool = str(sched.get("run_tool") or "") or (tools[0]["name"] if tools else "")
+            if not tool:
+                continue
+            _kv_set(pid, "__schedule", {"last": now})
+            res = runtime.schedule(pid, {"every_minutes": every, "last_run": last,
+                                         "now": now, "run_tool": tool})
+            ok = bool(res and res.get("ok"))
+            results.append({"plugin": pid, "tool": tool, "ok": ok,
+                            "summary": (res or {}).get("summary") or ""})
+            store.log_event("plugin", "scheduled %s.%s %s"
+                            % (pid, tool, "ok" if ok else "no result"))
+        except Exception as exc:
+            try:
+                store.log_event("warn", "scheduled run for '%s' failed: %r" % (pid, exc))
+            except Exception:
+                pass
+    return results
+
+
+class PluginScheduler(threading.Thread):
+    """Background loop that fires `run_due_schedules` roughly every 30s."""
+
+    def __init__(self):
+        super().__init__(daemon=True, name="plugin-scheduler")
+        self.stop_flag = threading.Event()
+
+    def run(self):
+        self.stop_flag.wait(5)  # let the UI + registry settle at boot
+        while not self.stop_flag.is_set():
+            try:
+                run_due_schedules()
+            except Exception:
+                pass
+            self.stop_flag.wait(30)
+
+
+scheduler = PluginScheduler()
 
 
 atexit.register(runtime.shutdown)

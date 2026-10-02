@@ -181,3 +181,17 @@ export function rank(ctx: PluginContext,
 export function onEvent(ctx: PluginContext,
                         event: { type: string; payload: Record<string, unknown>; ts: number }):
   void | { sent?: boolean; reason?: string };
+
+/**
+ * Scheduled entrypoint: the kernel invokes this while the plugin is enabled and
+ * its manifest declares `schedule.every_minutes`. Runs on a background thread
+ * (never the mail pipeline), so keep it within limits.timeout_ms. Return a
+ * ToolResult to report, or call ctx.action.propose(card) to surface a pending
+ * card to the user. `input.last_run` is the previous run's unix seconds (0 on
+ * the first), `input.now` the current unix seconds, `input.run_tool` the
+ * manifest's hint (or the first tool).
+ */
+export function onSchedule(ctx: PluginContext,
+                           input: { every_minutes: number; last_run: number;
+                                    now: number; run_tool: string }):
+  void | ToolResult;

@@ -71,6 +71,14 @@
                        "inputs":  { "type": "array", "items": { "type": "string" } } } },
     "assistant":   { "type": "object", "additionalProperties": false,
                      "properties": {
-                       "when_to_use": { "type": "string", "maxLength": 280 } } }
+                       "when_to_use": { "type": "string", "maxLength": 280 } } },
+    "schedule":    { "type": "object", "additionalProperties": false,
+                     "required": ["every_minutes"],
+                     "description": "kernel invokes onSchedule() on this cadence while the plugin is enabled",
+                     "properties": {
+                       "every_minutes": { "type": "integer", "minimum": 15, "maximum": 10080 },
+                       "run_tool":      { "type": "string", "maxLength": 64,
+                                          "description": "tool name passed to onSchedule as a hint (default: first tool)" },
+                       "enabled":       { "type": "boolean", "default": true } } }
   }
 }

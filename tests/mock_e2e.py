@@ -572,6 +572,38 @@ class LLMHandler(BaseHTTPRequestHandler):
             content = "ok"
         elif "extract amount and due date" in system.lower():
             content = json.dumps({"amount": "880", "due": "2026-10-15"})
+        elif "extract commitments and deadlines" in system.lower():
+            # mt-commitments fixture: one "owe" for the top-ranked message, a
+            # "promise" for any Sent candidate; deterministic dates off "today".
+            def _d(days):
+                return time.strftime("%Y-%m-%d", time.gmtime(time.time() + days * 86400))
+            out_c = []
+            for mm in re.finditer(r"\[ref:(\d+)\] sent=([01])", user):
+                ref, sent = int(mm.group(1)), mm.group(2) == "1"
+                if sent:
+                    out_c.append({"ref": ref, "kind": "promise",
+                                  "action": "Send the updated deck", "due": None,
+                                  "confidence": 0.7, "quote": "I'll send it over"})
+                elif ref == 1:
+                    out_c.append({"ref": ref, "kind": "owe",
+                                  "action": "Confirm the invoice", "due": _d(3),
+                                  "confidence": 0.9, "quote": "please confirm by Friday"})
+            content = json.dumps(out_c)
+        elif "extract subscription and renewal details" in system.lower():
+            def _d(days):
+                return time.strftime("%Y-%m-%d", time.gmtime(time.time() + days * 86400))
+            amt = "12.99" if "STREAMCOHIKE" in user else "9.99"
+            out_s = []
+            for seg in user.split("---"):
+                mm = re.search(r"\[ref:(\d+)\]", seg)
+                if not mm:
+                    continue
+                low = seg.lower()
+                if ("streamco" in low) or ("subscription" in low) or ("renew" in low):
+                    out_s.append({"ref": int(mm.group(1)), "merchant": "StreamCo",
+                                  "amount": amt, "currency": "USD", "cadence": "monthly",
+                                  "next_due": _d(5), "status": "active"})
+            content = json.dumps(out_s)
         elif "condense an ai assistant" in system.lower():
             content = "Checked the budget mail and moved it"
         else:
@@ -3443,7 +3475,7 @@ def main():
           and any("must start with 'mt-'" in e for e in errdirs.get("notreserved", [])))
     check("traversal + sdk range errors are precise",
           any("escapes" in e for e in errdirs.get("bad-traversal", []))
-          and any("host SDK 0.1.0" in e for e in errdirs.get("bad-sdk", [])))
+          and any("host SDK 0.2.0" in e for e in errdirs.get("bad-sdk", [])))
     en = plugins_mod.set_enabled("good-mail", True)
     check("enabling consents to the declared permissions",
           en["ok"] and en["grants"] == ["mailbox.read", "llm.complete", "net.http"])
@@ -3500,7 +3532,7 @@ def main():
           and len([r for r in plugins_mod.list_rows() if r["id"] == "good-demo"]) == 1)
     cl = plugins_mod.cli(["list"])
     check("CLI list reports registry state",
-          cl["sdk_version"] == "0.1.0" and any(p["id"] == "good-mail" for p in cl["plugins"]))
+          cl["sdk_version"] == "0.2.0" and any(p["id"] == "good-mail" for p in cl["plugins"]))
     check("CLI validate accepts good and names errors for broken",
           plugins_mod.cli(["validate", os.path.join(fx, "good-demo")])["ok"]
           and not plugins_mod.cli(["validate", os.path.join(fx, "bad-sdk")])["ok"])
@@ -4078,6 +4110,158 @@ def main():
     check("context chip lives inside the composer", 0 <= _i1 < _i2 < _i3)
     check("same-role message grouping rule ships",
           b".crow:not(.user) + .crow:not(.user){margin-top:-10px}" in _d)
+
+    section("T53 plugin scheduling + commitments/subscription-watch dogfood")
+    import plugin_rt as _rt53
+    _sem_errs = plugins_mod.validate_semantics(
+        {"id": "x", "engines": {"sdk": ">=0.1 <1.0"}, "kind": ["classifier"],
+         "classifier": {"outputs": ["A"]}, "schedule": {"every_minutes": 60}}, "user")
+    check("schedule block requires a tool kind",
+          any("schedule requires" in e for e in _sem_errs))
+    _sem_errs2 = plugins_mod.validate_semantics(
+        {"id": "x", "engines": {"sdk": ">=0.1 <1.0"}, "kind": ["tool"],
+         "tools": [{"name": "run_it", "description": "d",
+                    "parameters": {"type": "object", "properties": {}}}],
+         "schedule": {"every_minutes": 60, "run_tool": "nope"}}, "user")
+    check("schedule.run_tool must name a declared tool",
+          any("run_tool" in e for e in _sem_errs2))
+
+    for _p in ("mt-commitments", "mt-subscription-watch"):
+        shutil.copytree(os.path.join(PROJECT, "plugins", _p),
+                        os.path.join(broot, _p), dirs_exist_ok=True)
+    plugins_mod.scan()
+    _rows53 = {r["id"]: r for r in plugins_mod.list_rows()}
+    check("commitments + subscription-watch register as built-ins",
+          _rows53.get("mt-commitments", {}).get("root") == "builtin"
+          and _rows53.get("mt-subscription-watch", {}).get("root") == "builtin")
+    check("both declare a daily schedule and ask only for read + LLM",
+          _rows53["mt-commitments"]["manifest"].get("schedule", {}).get("every_minutes") == 1440
+          and _rows53["mt-commitments"]["manifest"]["permissions"] == ["mailbox.read", "llm.complete"]
+          and _rows53["mt-subscription-watch"]["manifest"].get("schedule") is not None)
+
+    # ---- mt-commitments: extraction + sent-mail promise
+    plugins_mod.set_enabled("mt-commitments", True)
+    _now53 = int(time.time())
+    with store.db() as conn:
+        conn.execute("INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, "
+                     "to_addr, subject, date, date_ts, snippet, status, processed_at, "
+                     "llm_needs_reply) VALUES ('INBOX', 7101, 1, '<cm-1@x>', "
+                     "'billing@vendor.example', 'sean@x', 'Please confirm the invoice', "
+                     "'Fri, 02 Oct 2026 09:00:00 +0800', ?, "
+                     "'Hi, please confirm the invoice by Friday. Deadline is soon.', "
+                     "'new', ?, 1)", (_now53, _now53))
+        conn.execute("INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, "
+                     "to_addr, subject, date, date_ts, snippet, status, processed_at) VALUES "
+                     "('Sent', 7102, 1, '<cm-2@x>', 'sean@x', 'team@x', 'Re: updated deck', "
+                     "'Fri, 02 Oct 2026 09:05:00 +0800', ?, 'I will send it over tomorrow.', "
+                     "'new', ?)", (_now53, _now53))
+    _cm = _rt53.runtime.invoke("mt-commitments", "extract_commitments", {})
+    _cmr = _cm.get("result") or {}
+    _cm_items = _cmr.get("items") or []
+    _cm_due = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 3 * 86400))
+    check("commitment extractor returns items with source quotes",
+          _cm["ok"] and any(i.get("quote") for i in _cm_items))
+    check("commitment extractor resolves an explicit due date",
+          any(i.get("due") == _cm_due for i in _cm_items))
+    check("commitment extractor labels sent-mail promises and reports coverage",
+          any(i.get("kind") == "promise" for i in _cm_items)
+          and _cmr.get("sent_indexed") is True)
+    check("commitment extractor returns a card",
+          (_cm.get("card") or {}).get("title", "").startswith("Commitments")
+          and bool(_cm["card"].get("markdown")))
+
+    # ---- the scheduler fires onSchedule and delivers a pending card
+    store.set_setting("plugin_schedules_enabled", 1)
+    _pend_before = store.count_pending_agent_actions()
+    _due53 = _rt53.run_due_schedules(force=True)
+    _due_ids = [d["plugin"] for d in _due53]
+    check("the scheduler invokes due scheduled plugins",
+          bool(_due53) and all(d["ok"] for d in _due53) and "mt-commitments" in _due_ids)
+    _sched_state = _rt53._kv_get("mt-commitments", "__schedule") or {}
+    check("scheduled last-run is recorded in plugin kv",
+          int(_sched_state.get("last") or 0) > 0)
+    check("a scheduled run proposes a pending card",
+          store.count_pending_agent_actions() > _pend_before)
+    with store.db() as conn:
+        _prow = conn.execute("SELECT * FROM agent_actions WHERE capability='plugin:mt-commitments' "
+                             "ORDER BY id DESC LIMIT 1").fetchone()
+    _pid53 = _prow["id"] if _prow else 0
+    try:
+        _ppay = json.loads((_prow["payload"] if _prow else "") or "{}")
+    except (TypeError, ValueError):
+        _ppay = {}
+    check("the pending card carries the plugin's report",
+          bool((_ppay.get("card") or {}).get("title")))
+    _pl53 = client.get("/assistant").data
+    check("the assistant page renders the plugin card and Acknowledge affordance",
+          b"From a plugin" in _pl53 and b"Acknowledge" in _pl53
+          and b"Commitments" in _pl53)
+    _pdet53 = client.get("/plugins/mt-commitments").data
+    check("the plugin detail page states the daily schedule",
+          b"Runs automatically" in _pdet53 and b"every day" in _pdet53)
+    client.post("/agent/actions/%d/apply" % _pid53, follow_redirects=True)
+    _applied = store.get_agent_action(_pid53)
+    check("acknowledging a plugin card applies without a bogus tool call",
+          bool(_applied) and _applied.get("status") == "applied")
+    store.set_setting("plugin_schedules_enabled", 0)
+    check("the global schedule switch pauses due runs",
+          _rt53.run_due_schedules(force=True) == [])
+    store.set_setting("plugin_schedules_enabled", 1)
+
+    # ---- mt-subscription-watch: ledger, merge, price change, reset
+    plugins_mod.set_enabled("mt-subscription-watch", True)
+    with store.db() as conn:
+        conn.execute("INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, "
+                     "to_addr, subject, date, date_ts, snippet, status, processed_at) VALUES "
+                     "('INBOX', 7201, 1, '<sw-1@x>', 'no-reply@streamco.example', 'sean@x', "
+                     "'StreamCo subscription receipt', 'Fri, 02 Oct 2026 10:00:00 +0800', ?, "
+                     "'Your StreamCo subscription receipt: 9.99 USD.', 'new', ?)",
+                     (_now53, _now53))
+    _sw = _rt53.runtime.invoke("mt-subscription-watch", "watch_subscriptions", {})
+    _swr = _sw.get("result") or {}
+    check("subscription watch builds a ledger from receipts",
+          _sw["ok"] and _swr.get("subs_count", 0) >= 1)
+    check("subscription watch returns a renewals card",
+          (_sw.get("card") or {}).get("title") == "Subscriptions")
+    _led = _rt53._kv_get("mt-subscription-watch", "ledger") or {}
+    _tt = max([s.get("times_seen", 0) for s in (_led.get("subs") or {}).values()] or [0])
+    _rt53.runtime.invoke("mt-subscription-watch", "watch_subscriptions", {})
+    _led2 = _rt53._kv_get("mt-subscription-watch", "ledger") or {}
+    _tt2 = max([s.get("times_seen", 0) for s in (_led2.get("subs") or {}).values()] or [0])
+    check("a second run merges instead of duplicating (times_seen grows)", _tt2 > _tt)
+    with store.db() as conn:
+        conn.execute("INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, "
+                     "to_addr, subject, date, date_ts, snippet, status, processed_at) VALUES "
+                     "('INBOX', 7202, 1, '<sw-2@x>', 'no-reply@streamco.example', 'sean@x', "
+                     "'StreamCo renewal notice STREAMCOHIKE', "
+                     "'Sat, 03 Oct 2026 10:00:00 +0800', ?, "
+                     "'Your StreamCo renewal: amount 12.99 USD.', 'new', ?)",
+                     (_now53 + 60, _now53 + 60))
+    _swr3 = _rt53.runtime.invoke("mt-subscription-watch", "watch_subscriptions",
+                                 {}).get("result") or {}
+    check("a changed amount is reported as a price change",
+          any(pc.get("merchant") == "StreamCo" and pc.get("to") == "12.99"
+              for pc in _swr3.get("price_changes", [])))
+    _swr4 = _rt53.runtime.invoke("mt-subscription-watch", "watch_subscriptions",
+                                 {"reset": True}).get("result") or {}
+    check("reset clears the subscription ledger",
+          _swr4.get("reset") is True
+          and not _rt53._kv_get("mt-subscription-watch", "ledger"))
+
+    # ---- assistant inventory exposes both tools
+    _budget53 = store.get_setting("plugin_tools_budget", 8)
+    store.set_setting("plugin_tools_budget", 30)
+    try:
+        _names53 = {s["function"]["name"] for s in
+                    plugins_mod.tool_schemas(query_text="what do I need to do and what renews")}
+        check("assistant inventory offers commitments + subscription tools",
+              "plugin__mt-commitments__extract_commitments" in _names53
+              and "plugin__mt-subscription-watch__watch_subscriptions" in _names53)
+    finally:
+        store.set_setting("plugin_tools_budget", _budget53)
+    _perms53 = eng_mod.agent_permissions()
+    check("both scheduled tools get an assistant capability line",
+          "plugin:mt-commitments" in _perms53 and "plugin:mt-subscription-watch" in _perms53)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

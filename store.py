@@ -95,6 +95,7 @@ DEFAULT_SETTINGS = {
     "plugin_classifiers": [],     # plugin ids allowed to run in the classify pipeline
     "plugin_matchers": [],        # plugin ids allowed as rule/flow condition matchers
     "plugin_retrievers": [],      # plugin ids allowed to re-rank semantic search
+    "plugin_schedules_enabled": 1,  # master switch for schedule() onSchedule runs
 }
 
 _SCHEMA = """
