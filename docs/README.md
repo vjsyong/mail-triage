@@ -40,6 +40,9 @@ How this folder is organised: by what you need, not by when it was written.
 - [model-bench-plugin.md](model-bench-plugin.md) - the in-app model benchmark
   (`mt-model-bench`): frozen eval subset, slice/resume under the 30s sandbox
   clock, severity scoring, reference anchors (2026-10-02)
+- [model-evaluation.md](model-evaluation.md) - local-model right-sizing study
+  (2026-10): 7 models on 196 frozen app-workload cases; injection compliance,
+  no-match honesty, hardening backlog, recommended operating points (2026-10-02)
 - [flows-builder-v2.md](flows-builder-v2.md) - flow canvas (trigger -> filters -> steps)
 - [flows-fuzzy-classifier.md](flows-fuzzy-classifier.md) - AI category + about-topic
   conditions for flows

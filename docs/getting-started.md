@@ -87,6 +87,12 @@ LLM_BASE_URL=http://host.docker.internal:11434/v1
 LLM_MODEL=qwen2.5:14b-instruct
 ```
 
+> Benchmarked (2026-10): small local models were measured against this app's own
+> workload. The smallest model that behaved safely was the Gemma-4-E4B class;
+> 4B-class models are much faster but were observed obeying instructions embedded
+> in email content. Read [model-evaluation.md](model-evaluation.md) before
+> picking a model for automated filing.
+
 ### 24GB+ GPU
 
 `gemma/` in this repo is a complete, validated vLLM setup for a 26B MoE on a
