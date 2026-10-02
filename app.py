@@ -950,6 +950,8 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 8h5M18.5 5.5v5"/>') }}
       {{ navitem(url_for('settings'), 'Settings', p.startswith('/settings'), '
         <circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5L9 6a7 7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.5 3h5l.5-3a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5c.06-.3.1-.66.1-1z"/>') }}
+      {{ navitem(url_for('plugins_page'), 'Plugins', p.startswith('/plugins'), '
+        <path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v3"/>') }}
       {{ navitem(url_for('log'), 'Log', p.startswith('/log') or p.startswith('/proxy/log'), '
         <path d="M4 4h16v16H4z"/><path d="m8 9 3 3-3 3M13 15h4"/>') }}
     </nav>
@@ -989,7 +991,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   <a href="{{ url_for('assistant') }}" class="{{ 'on' if p.startswith('/assistant') else '' }}" {{ 'aria-current="page"'|safe if p.startswith('/assistant') else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
     <span>Assistant</span></a>
-  {% set morepaths = ('/more','/rules','/flows','/classifiers','/templates','/accounts','/settings','/log','/proxy') %}
+  {% set morepaths = ('/more','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/log','/proxy') %}
   <a href="{{ url_for('more') }}" class="{{ 'on' if p.startswith(morepaths) else '' }}" {{ 'aria-current="page"'|safe if p.startswith(morepaths) else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
     <span>More</span></a>
@@ -1840,6 +1842,7 @@ color:var(--fg);text-decoration:none}
   <a class="more-row" href="{{ url_for('accounts') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 8h5M18.5 5.5v5"/></svg><span class="grow"><b>Accounts</b><span class="sub">Mail account and sign-in</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('log') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="m8 9 3 3-3 3M13 15h4"/></svg><span class="grow"><b>Log</b><span class="sub">Recent events and activity</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('settings') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5L9 6a7 7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.5 3h5l.5-3a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5c.06-.3.1-.66.1-1z"/></svg><span class="grow"><b>Settings</b><span class="sub">App, AI, mail and agent permissions</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('plugins_page') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v3"/></svg><span class="grow"><b>Plugins</b><span class="sub">Sandboxed extensions: classifiers, tools, integrations</span></span><span aria-hidden="true">&#8250;</span></a>
 </div>
 <div class="more-list" style="margin-top:14px">
   <button class="more-row hidden" id="install-app" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg><span class="grow"><b>Install app</b><span class="sub" id="install-note">Add Mail Triage to your home screen</span></span></button>

@@ -3541,6 +3541,24 @@ def assistant_page_context(path):
                 "CURRENT PAGE: the user is on the RAW PROXY LOG - the embedded mail proxy's own "
                 "output for connection-level debugging (IMAP / OAuth). Relevant when accounts "
                 "show sign-in trouble.", "page:proxy/log")
+    if p == "/plugins":
+        try:
+            import plugins as _plugins
+            _np = len(_plugins.list_rows())
+            _en = len(_plugins.list_rows(enabled_only=True))
+        except Exception:
+            _np = _en = 0
+        return ("page", "plugins page",
+                "CURRENT PAGE: the user is on the PLUGINS page - sandboxed extensions "
+                "(classifiers, tools, integrations) that run in their own worker process. "
+                "Each card shows the plugin, its kinds and tools, an enable/disable button, "
+                "the capability grants (checkboxes; unchecking revokes at the host-function "
+                "level) and the ASSISTANT PERMISSION gate (off / ask / auto) that decides "
+                "whether YOU may call its tools. Your plugin tools are named "
+                "plugin__<plugin-id>__<tool>. Rescan re-reads the plugins directory; user "
+                "plugins go in the app data dir under plugins/. Plugins are read-only over "
+                "mail: they act only by proposing cards or through their own tools. There "
+                "are %d plugin(s) installed, %d enabled." % (_np, _en), "page:plugins")
     if p == "/more":
         return ("page", "more",
                 "CURRENT PAGE: the user is on the MORE page - the directory of all sections "

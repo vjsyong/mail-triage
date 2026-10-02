@@ -24,8 +24,8 @@ python app.py --plugins enable my-plugin
 python app.py --plugins list
 ```
 
-Or use the Plugins page (Settings → Plugins): enable, tick the capability boxes
-you consent to, set the assistant permission, rescan.
+Or use the Plugins page (sidebar → Plugins, or Settings → Plugins): enable, tick
+the capability boxes you consent to, set the assistant permission, rescan.
 
 ## The bundle
 

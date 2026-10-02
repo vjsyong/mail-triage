@@ -2430,7 +2430,7 @@ def main():
                   ("/templates", "templates page"), ("/settings", "settings"),
                   ("/accounts", "accounts"), ("/log", "log page"), ("/more", "more page"),
                   ("/learning", "learning page"), ("/learning/eval", "labeling page"),
-                  ("/simulate", "simulator")]
+                  ("/simulate", "simulator"), ("/plugins", "plugins page")]
     if _hid:
         page_cases.append(("/classifiers/%d/dataset" % _hid, "dataset review"))
     _missing = [p2 for p2, nd in page_cases
@@ -3616,6 +3616,17 @@ def main():
     r = client.get("/settings")
     check("settings page links to the Plugins page",
           r.status_code == 200 and b"Manage plugins" in r.data)
+
+    section("T47 plugins navigation")
+    r = client.get("/")
+    check("sidebar exposes Plugins from every page",
+          b'href="/plugins"' in r.data and b"Plugins</a>" in r.data)
+    r = client.get("/more")
+    check("More page lists Plugins",
+          b'href="/plugins"' in r.data and b"<b>Plugins</b>" in r.data)
+    r = client.get("/plugins")
+    check("the More tab highlights while on the Plugins page",
+          b'href="/more" class="on"' in r.data)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

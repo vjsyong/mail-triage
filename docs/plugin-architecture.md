@@ -818,8 +818,9 @@ bit-exactly (suite checks float equality to 1e-9). Opt in via the
   return Action Cards (rendered via the existing pending-action surface).
 - CLI: `python app.py --plugins list | validate <dir> | rescan |
   enable|disable <id> | grant <id> <perm...> | invoke <id> <tool> [json]`.
-- UI: `/plugins` page (enable, grants, assistant level, rescan) linked from
-  Settings; the agent permission prompt text includes plugin capabilities.
+- UI: `/plugins` page (enable, grants, assistant level, rescan) linked from the
+  sidebar (System group), the More page and Settings; the agent permission prompt
+  text includes plugin capabilities.
 
 ## Files
 
