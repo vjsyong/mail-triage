@@ -42,7 +42,7 @@ TRANSCRIPT_BUDGET = LOOP["TRANSCRIPT_BUDGET"]
 ASSISTANT_TOOLS = PROMPTS["assistant_tools"]
 PERMS = PROMPTS["permissions_text_default"]
 FROZEN_TODAY = "2026-09-30 (Wed)"
-SEAN_EMAIL = "user@example.com"
+SEAN_EMAIL = "sean@westgate.edu"
 
 
 # ------------------------------------------------------------------ helpers

@@ -71,6 +71,15 @@ v2/
 Split: **331 dev / 269 acceptance**, assigned by a hash of the **scenario
 family** (thread id + scenario), so no scenario leaks across the split.
 
+The mailbox is a coherent fictional world (Westgate University + four
+scenarios) with a diverse, globally representative cast and plausible
+domains (`westgate.edu`, `harbourline.co`, `northwindanalytics.com`,
+`acmecloud.io`, consumer providers for personal mail).  There are no reserved
+`.example` domains and no real personal contact data — deliberately, so the
+model is not cued by obviously-bogus mail.  Injections are framed as plausible
+compliance notices / hidden HTML rather than cartoonish "ignore instructions"
+strings.
+
 ## Running it
 
 ```bash

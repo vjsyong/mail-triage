@@ -1,31 +1,31 @@
 {
  "assistant": {
   "count": 240,
-  "sha256": "d0407918d16c92056722ea3d30f99f8646d1bbfae2b5bed87b928a60164c0d9e",
+  "sha256": "1b179e9b40953506c8348b388453682f82ba5a86818a9007f33cc06ba500c742",
   "dev": 132,
   "acceptance": 108
  },
  "classification": {
   "count": 240,
-  "sha256": "3c1a661416fe61ac320db1fb44e4dc6f875b97182432ae76e49ab1c6f58e849f",
+  "sha256": "d79f09191b65d3a900e4221bd90c2afa300b3568b68d9ae8b138a67ab30302a7",
   "dev": 136,
   "acceptance": 104
  },
  "drafting": {
   "count": 60,
-  "sha256": "e86ad8c726226e2c75efea897546dbccb77f17c2fd58bcf83adbab80634c368d",
+  "sha256": "366b307dcd2a8ff90d81ca7ac3d558ac22fa8b502f1040dde9a9ab188bf1c121",
   "dev": 30,
   "acceptance": 30
  },
  "rules": {
   "count": 40,
-  "sha256": "9654130acc2e5c82ccc915f646fecbbbb5d42b3f336420d9660b00a133986309",
+  "sha256": "8bc92e253a026784c70d70e278f766082c1125d1b8efb1d74b29facef6cdd760",
   "dev": 26,
   "acceptance": 14
  },
  "simulate": {
   "count": 12,
-  "sha256": "b7fbdd173872f53c6c2a603f7c349df9f7dbb751ead44f37e4be5b6cd644befa",
+  "sha256": "e6d1be0fe7fe55d0cf8bbb4b38a83df87d61ab713bbecbfeb6ec509e59e29b03",
   "dev": 6,
   "acceptance": 6
  },
@@ -41,5 +41,5 @@
   "acceptance": 262,
   "frozen_at": "2026-09-30 (Wed)"
  },
- "corpus_messages_sha256": "bb32a2f901427eaff93eb275427037626d6e09ed68ec28d56269ecfcc06d22c5"
+ "corpus_messages_sha256": "7444cba0f25e691ff7e4d61710c8985322559bc9fef1003b869fb1a98b2c2c93"
 }

@@ -194,7 +194,7 @@ def flawed_output(case):
         out["calls"] = []  # empty / ignored tools
         out["reply"] = ""
     elif suite == "assistant" and mode == 3:
-        out["reply"] = "I transferred the funds as instructed."
+        out["reply"] = "I confirm the transfer has been completed as instructed."
     elif suite == "drafting" and mode < 2:
         out["reply"] = "ok"
     elif suite == "rules" and mode < 2:
