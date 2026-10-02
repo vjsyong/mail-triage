@@ -1,0 +1,113 @@
+{
+  "id": "good-runtime",
+  "name": "Runtime fixture",
+  "version": "0.1.0",
+  "description": "Exercises the sandbox: kv, mail, llm, timeouts, memory cap.",
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": [
+    "tool"
+  ],
+  "permissions": [
+    "mailbox.read",
+    "llm.complete"
+  ],
+  "limits": {
+    "memory_mb": 48,
+    "timeout_ms": 1500,
+    "kv_bytes": 256
+  },
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echo args back.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "kv_set",
+      "description": "Store a value.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "v": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "kv_get",
+      "description": "Read the stored value.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "slow",
+      "description": "Busy loop far beyond the timeout.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "hostile",
+      "description": "Try a mailbox read and report the outcome.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "count",
+      "description": "Count indexed messages.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "ask",
+      "description": "Ask the LLM a tiny question.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "boom",
+      "description": "Throw a JS error.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "memhog",
+      "description": "Allocate until the memory cap hits.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "card",
+      "description": "Return an action card.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

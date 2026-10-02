@@ -1,0 +1,627 @@
+"""Plugin runtime - the supervisor that executes plugin bundles safely.
+
+Design (docs/plugin-architecture.md section 4, adapted at build time):
+
+- One persistent WORKER PROCESS per plugin (plugin_worker.py). The worker hosts
+  the QuickJS interpreter; the parent process runs every host call.
+- MEMORY is enforced inside the worker (interpreter memory cap from the
+  manifest limits).
+- WALL CLOCK is enforced here: the parent kills the worker at the deadline.
+  This had to move out of the interpreter because the python-quickjs binding
+  refuses host callbacks while its time-limit watchdog is active; a process
+  kill is also strictly harder to bypass than an interrupt.
+- CAPABILITIES: the worker has no I/O whatsoever; the only exit is the host
+  bridge, and every host call is mediated + audited here (grants from the
+  registry, quotas, allowlists). Ungranted capabilities fail with `denied`.
+- Consecutive runtime failures (timeout, crash, interpreter error) auto-disable
+  the plugin after STRIKES; success resets the counter.
+
+Test hook: the mock suite drives the real runtime (workers spawn with
+sys.executable); `available()` reports whether quickjs is importable.
+"""
+from __future__ import annotations
+
+import atexit
+import json
+import os
+import queue
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+
+import requests
+
+import config
+import plugins as kernel
+import store
+
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKER_PATH = os.path.join(PROJECT_DIR, "plugin_worker.py")
+DEFAULT_TIMEOUT_MS = 5000
+MAX_TIMEOUT_MS = 60000
+GRACE_MS = 500
+STRIKES = 3
+TIMEOUT_SENTINEL = "~mt-timeout~"
+MAX_RESULT_BYTES = 65536
+MAX_CARD_BYTES = 16384
+
+# host call -> required grant (None = always allowed for an enabled plugin)
+HOST_GRANT = {
+    "mail.search": "mailbox.read",
+    "mail.read": "mailbox.read",
+    "llm.complete": "llm.complete",
+    "llm.embed": "llm.embed",
+    "http.fetch": "net.http",
+}
+
+
+class _HostError(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+class _LoadError(Exception):
+    pass
+
+
+def _quickjs_importable():
+    try:
+        import quickjs  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _err_json(code, message):
+    return json.dumps({"__error": {"code": code, "message": message}}, ensure_ascii=False)
+
+
+# ------------------------------------------------------------------ kv helpers
+
+def _kv_usage(conn, plugin_id):
+    row = conn.execute("SELECT COALESCE(SUM(LENGTH(v)),0) AS n FROM plugin_kv WHERE plugin_id=?",
+                       (plugin_id,)).fetchone()
+    return int(row["n"] or 0)
+
+
+def _kv_get(plugin_id, key):
+    if not key:
+        return None
+    with store.db() as conn:
+        row = conn.execute("SELECT v FROM plugin_kv WHERE plugin_id=? AND k=?",
+                           (plugin_id, key)).fetchone()
+    if row is None:
+        return None
+    try:
+        return json.loads(row["v"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _kv_set(plugin_id, key, value, quota=None):
+    if not key or len(key) > 200:
+        raise _HostError("invalid_args", "kv key must be 1-200 chars")
+    blob = json.dumps(value, ensure_ascii=False)
+    with store.db() as conn:
+        if quota is not None:
+            used = _kv_usage(conn, plugin_id)
+            old = conn.execute("SELECT LENGTH(v) AS n FROM plugin_kv WHERE plugin_id=? AND k=?",
+                               (plugin_id, key)).fetchone()
+            old_n = int(old["n"] or 0) if old else 0
+            if used - old_n + len(blob) > quota:
+                raise _HostError("quota", "kv quota exceeded (%d bytes allowed)" % quota)
+        conn.execute("INSERT INTO plugin_kv (plugin_id, k, v, updated_ts) VALUES (?,?,?,?) "
+                     "ON CONFLICT(plugin_id, k) DO UPDATE SET v=excluded.v, updated_ts=excluded.updated_ts",
+                     (plugin_id, key, blob, int(time.time())))
+    return True
+
+
+def _kv_delete(plugin_id, key):
+    with store.db() as conn:
+        conn.execute("DELETE FROM plugin_kv WHERE plugin_id=? AND k=?", (plugin_id, key))
+    return True
+
+
+def _kv_list(plugin_id, prefix):
+    with store.db() as conn:
+        rows = conn.execute("SELECT k FROM plugin_kv WHERE plugin_id=? AND k LIKE ? ORDER BY k",
+                            (plugin_id, (prefix or "") + "%")).fetchall()
+    return [r["k"] for r in rows]
+
+
+# ------------------------------------------------------------------ host calls
+
+def _mail_search(payload):
+    try:
+        limit = max(1, min(int(payload.get("limit") or 20), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    q = str(payload.get("query") or "").strip()
+    clauses, params = [], []
+    if q:
+        clauses.append("(from_addr LIKE ? OR subject LIKE ? OR snippet LIKE ?)")
+        params += ["%" + q + "%"] * 3
+    for key, col in (("sender", "from_addr"), ("subject", "subject")):
+        v = str(payload.get(key) or "").strip()
+        if v:
+            clauses.append("%s LIKE ?" % col)
+            params.append("%" + v + "%")
+    folder = str(payload.get("folder") or "").strip()
+    if folder:
+        clauses.append("folder = ?")
+        params.append(folder)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with store.db() as conn:
+        rows = conn.execute("SELECT id, folder, uid, subject, from_addr, date, snippet "
+                            "FROM messages" + where + " ORDER BY id DESC LIMIT ?",
+                            params + [limit]).fetchall()
+    return [{"id": r["id"], "folder": r["folder"], "uid": r["uid"], "subject": r["subject"],
+             "from": r["from_addr"], "date": r["date"],
+             "snippet": (r["snippet"] or "")[:160]} for r in rows]
+
+
+def _mail_read(payload):
+    try:
+        mid = int(payload.get("id") or 0)
+    except (TypeError, ValueError):
+        mid = 0
+    with store.db() as conn:
+        row = conn.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone()
+    if row is None:
+        raise _HostError("invalid_args", "message %s is not in the local index" % mid)
+    d = dict(row)
+    return {"id": d.get("id"), "folder": d.get("folder"), "uid": d.get("uid"),
+            "subject": d.get("subject"), "from": d.get("from_addr"), "to": d.get("to_addr"),
+            "date": d.get("date"), "body_text": (d.get("snippet") or "")[:4000],
+            "category": d.get("llm_category"),
+            "tags": [d["user_tag"]] if d.get("user_tag") else [],
+            "needs_reply": bool(d.get("llm_needs_reply"))}
+
+
+def _llm_complete(payload):
+    from engine import LLMClient  # lazy: plugin_rt is imported by engine call sites
+    prompt = str(payload.get("prompt") or "")[:20000]
+    system = str(payload.get("system") or
+                 "You are a helpful assistant inside a local email app. Answer concisely.")[:4000]
+    try:
+        max_tokens = max(16, min(int(payload.get("max_tokens") or 512), 2048))
+    except (TypeError, ValueError):
+        max_tokens = 512
+    if not prompt.strip():
+        raise _HostError("invalid_args", "prompt is required")
+    text = LLMClient()._chat(system, prompt, json_mode=bool(payload.get("json")),
+                             max_tokens=max_tokens)
+    if not isinstance(text, str):
+        text = json.dumps(text, ensure_ascii=False)
+    return {"text": text}
+
+
+def _llm_embed(payload):
+    from rag import embed
+    texts = payload.get("texts")
+    if not isinstance(texts, list) or not texts:
+        raise _HostError("invalid_args", "texts must be a non-empty array")
+    texts = [str(t)[:8000] for t in texts][:32]
+    return embed(texts, kind="document")
+
+
+def _http_fetch(plugin_id, row, payload):
+    url = str(payload.get("url") or "")
+    init = payload.get("init") or {}
+    if not isinstance(init, dict):
+        init = {}
+    m = urllib.parse.urlparse(url)
+    if m.scheme not in ("http", "https") or not m.hostname:
+        raise _HostError("invalid_args", "url must be http(s)")
+    host = m.hostname.lower()
+    allowed = ((row["manifest"].get("net") or {}).get("hosts") or [])
+    ok = False
+    for pat in allowed:
+        p = str(pat).lower()
+        if p.startswith("*."):
+            if host.endswith(p[1:]) and host != p[2:]:
+                ok = True
+                break
+        elif host == p.split(":")[0]:
+            ok = True
+            break
+    if not ok:
+        raise _HostError("denied", "host '%s' is not in this plugin's net.hosts" % host)
+    cap = int((row["manifest"].get("net") or {}).get("max_requests_per_day") or 50)
+    today = time.strftime("%Y-%m-%d")
+    day = _kv_get(plugin_id, "__http_day") or {}
+    n = int(day.get("n") or 0) if day.get("d") == today else 0
+    if cap and n >= cap:
+        raise _HostError("quota", "daily http request limit reached (%d)" % cap)
+    timeout = min(max(float(init.get("timeout_ms") or 15000) / 1000.0, 1.0), 30.0)
+    method = str(init.get("method") or "GET").upper()
+    if method not in ("GET", "POST"):
+        raise _HostError("invalid_args", "method must be GET or POST")
+    headers = {str(k): str(v) for k, v in (init.get("headers") or {}).items()}
+    r = requests.request(method, url, headers=headers, data=init.get("body"), timeout=timeout)
+    _kv_set(plugin_id, "__http_day", {"d": today, "n": n + 1})
+    return {"status": r.status_code,
+            "headers": {k: str(v)[:200] for k, v in list(r.headers.items())[:20]},
+            "body": (r.text or "")[:262144]}
+
+
+def _action_propose(plugin_id, row, payload):
+    card = payload.get("card")
+    if not isinstance(card, dict) or not str(card.get("title") or "").strip():
+        raise _HostError("invalid_args", "card.title is required")
+    name = row["manifest"].get("name") or plugin_id
+    aid = store.add_agent_action("plugin:" + plugin_id, "plugin_proposal",
+                                 "Plugin '%s': %s" % (name, str(card.get("title"))[:120]),
+                                 {"plugin": plugin_id, "card": card}, 0)
+    return {"action_id": aid}
+
+
+# ------------------------------------------------------------------ worker
+
+class _Worker:
+    def __init__(self, plugin_id):
+        self.plugin_id = plugin_id
+        self.proc = None
+        self.q = queue.Queue()
+        self.th = None
+        self.key = None
+        self._seq = 0
+
+    def spawn(self):
+        env = dict(os.environ)
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        self.proc = subprocess.Popen(
+            [sys.executable, WORKER_PATH], cwd=PROJECT_DIR,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1, env=env)
+        self.th = threading.Thread(target=self._pump, daemon=True)
+        self.th.start()
+
+    def _pump(self):
+        try:
+            while True:
+                line = self.proc.stdout.readline()
+                if not line:
+                    break
+                self.q.put(line)
+        except Exception:
+            pass
+        finally:
+            self.q.put(None)
+
+    def send(self, obj):
+        self.proc.stdin.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        self.proc.stdin.flush()
+
+    def next_seq(self):
+        self._seq += 1
+        return self._seq
+
+    def read(self, timeout):
+        """-> line str | None (EOF) | TIMEOUT_SENTINEL (nothing within timeout)."""
+        try:
+            return self.q.get(timeout=max(timeout, 0.01))
+        except queue.Empty:
+            return TIMEOUT_SENTINEL
+
+    def alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def kill(self):
+        if self.proc is not None:
+            try:
+                if self.proc.poll() is None:
+                    self.proc.kill()
+            except Exception:
+                pass
+            try:
+                self.proc.stdin.close()
+            except Exception:
+                pass
+
+
+class PluginRuntime:
+    def __init__(self):
+        self._workers = {}
+        self._locks = {}
+        self._strikes = {}
+        self._guard = threading.Lock()
+
+    # ---- lifecycle
+
+    def available(self):
+        return os.path.isfile(WORKER_PATH) and _quickjs_importable()
+
+    def invalidate(self, plugin_id):
+        with self._guard:
+            w = self._workers.pop(plugin_id, None)
+        if w:
+            w.kill()
+
+    def shutdown(self):
+        with self._guard:
+            workers = list(self._workers.values())
+            self._workers.clear()
+        for w in workers:
+            w.kill()
+
+    def _lock(self, plugin_id):
+        with self._guard:
+            return self._locks.setdefault(plugin_id, threading.Lock())
+
+    # ---- worker protocol
+
+    _DEADLINE = "~mt-deadline~"
+    _EOF = "~mt-eof~"
+
+    def _read_until(self, plugin_id, w, deadline):
+        """Read worker lines until a non-host message, answering host calls
+        inline (boot itself calls plugin.info / log through the bridge).
+        Returns ("msg", dict) | (_DEADLINE, None) | (_EOF, None)."""
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return self._DEADLINE, None
+            line = w.read(min(remaining, 5.0))
+            if line == TIMEOUT_SENTINEL:
+                continue
+            if line is None:
+                return self._EOF, None
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if "host" in msg:
+                out = self._host(plugin_id, str(msg.get("host") or ""),
+                                 msg.get("payload") or "{}")
+                try:
+                    w.send({"host_result": {"rid": msg.get("rid"), "out": out}})
+                except Exception:
+                    return self._EOF, None
+                continue
+            return "msg", msg
+
+    def _worker_for(self, row):
+        pid = row["id"]
+        key = (row["dir"], (row["manifest"].get("entrypoint") or ""), row["entry_sha256"],
+               row["manifest_sha256"])
+        w = self._workers.get(pid)
+        if w and w.alive() and w.key == key:
+            return w
+        if w:
+            w.kill()
+            self._workers.pop(pid, None)
+        w = _Worker(pid)
+        w.spawn()
+        first = w.read(15.0)
+        ready = None
+        if first and first != TIMEOUT_SENTINEL:
+            try:
+                ready = json.loads(first)
+            except ValueError:
+                ready = None
+        if not ready or not ready.get("ready"):
+            w.kill()
+            raise _LoadError("worker failed to start (%s)" % str(ready or first)[:160])
+        limits = row["manifest"].get("limits") or {}
+        w.send({"cmd": "load", "dir": row["dir"],
+                "entry": row["manifest"].get("entrypoint") or "",
+                "memory_mb": int(limits.get("memory_mb") or 64),
+                "plugin_id": pid, "version": row["version"]})
+        kind, resp = self._read_until(pid, w, time.time() + 20.0)
+        if kind != "msg" or not isinstance(resp, dict) or not resp.get("loaded"):
+            w.kill()
+            err = ((resp or {}).get("error") or {}) if isinstance(resp, dict) else {}
+            if err.get("message"):
+                message = str(err["message"])[:200]
+            elif kind == self._DEADLINE:
+                message = "worker timed out during load"
+            else:
+                message = "did not load"
+            raise _LoadError(message)
+        w.key = key
+        self._workers[pid] = w
+        return w
+
+    # ---- host calls (parent side of the bridge)
+
+    def _host(self, plugin_id, name, payload_json):
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled"):
+            return _err_json("denied", "plugin '%s' is not enabled" % plugin_id)
+        try:
+            payload = json.loads(payload_json or "{}")
+        except ValueError:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        need = HOST_GRANT.get(name)
+        if need and need not in (row.get("grants") or []):
+            return _err_json("denied", "plugin '%s' is not granted '%s'" % (plugin_id, need))
+        try:
+            if name == "plugin.info":
+                out = {"id": plugin_id, "version": row["version"]}
+            elif name == "log":
+                level = str(payload.get("level") or "info")
+                message = str(payload.get("message") or "")[:500]
+                if level in ("warn", "error"):
+                    store.log_event("warn", "plugin '%s': %s" % (plugin_id, message))
+                out = True
+            elif name == "config.get":
+                out = {"defaults": row["manifest"].get("config") or {},
+                       "values": store.get_setting("plugin_config:" + plugin_id, {}) or {}}
+            elif name == "kv.get":
+                out = _kv_get(plugin_id, str(payload.get("key") or ""))
+            elif name == "kv.set":
+                quota = int((row["manifest"].get("limits") or {}).get("kv_bytes") or 65536)
+                out = _kv_set(plugin_id, str(payload.get("key") or ""), payload.get("value"), quota)
+            elif name == "kv.delete":
+                out = _kv_delete(plugin_id, str(payload.get("key") or ""))
+            elif name == "kv.list":
+                out = _kv_list(plugin_id, str(payload.get("prefix") or ""))
+            elif name == "mail.search":
+                out = _mail_search(payload)
+            elif name == "mail.read":
+                out = _mail_read(payload)
+            elif name == "llm.complete":
+                out = _llm_complete(payload)
+            elif name == "llm.embed":
+                out = _llm_embed(payload)
+            elif name == "http.fetch":
+                out = _http_fetch(plugin_id, row, payload)
+            elif name == "action.propose":
+                out = _action_propose(plugin_id, row, payload)
+            else:
+                raise _HostError("internal", "unknown host call '%s'" % name)
+        except _HostError as exc:
+            return _err_json(exc.code, str(exc))
+        except Exception as exc:
+            return _err_json("internal", repr(exc)[:250])
+        return json.dumps(out, ensure_ascii=False)
+
+    # ---- invoke
+
+    def _strike(self, plugin_id, code, message):
+        n = self._strikes.get(plugin_id, 0) + 1
+        self._strikes[plugin_id] = n
+        store.log_event("warn", "plugin '%s' runtime failure %d/%d: %s"
+                        % (plugin_id, n, STRIKES, message[:160]))
+        if n >= STRIKES:
+            self._strikes.pop(plugin_id, None)
+            kernel.disable_with_error(
+                plugin_id, "auto-disabled after %d consecutive failures: %s" % (n, message[:160]))
+            self.invalidate(plugin_id)
+        return {"ok": False, "summary": message,
+                "result": {"error": {"code": code, "message": message}}}
+
+    def _finish(self, plugin_id, tool, msg, elapsed_ms):
+        if "error" in msg:
+            e = msg.get("error") or {}
+            code = str(e.get("code") or "internal")
+            message = str(e.get("message") or "plugin error")
+            store.log_event("warn", "plugin '%s' %s failed (%dms): %s"
+                            % (plugin_id, tool, elapsed_ms, message[:160]))
+            return self._strike(plugin_id, code, "plugin error: %s" % message[:240])
+        raw = msg.get("result") or {}
+        ok = bool(raw.get("ok"))
+        summary = str(raw.get("summary") or tool)[:500]
+        data = raw.get("data")
+        out = {"ok": ok, "summary": summary}
+        if data is None:
+            data = {}
+        blob = json.dumps(data, ensure_ascii=False)
+        if len(blob) > MAX_RESULT_BYTES:
+            data = {"truncated": True, "note": "result data exceeded 64 KB and was dropped"}
+        out["result"] = data if isinstance(data, dict) else {"data": data}
+        card = raw.get("card")
+        if isinstance(card, dict) and len(json.dumps(card, ensure_ascii=False)) <= MAX_CARD_BYTES:
+            out["card"] = card
+        if not ok and isinstance(raw.get("error"), dict):
+            out["result"]["error"] = raw["error"]
+        if ok:
+            self._strikes.pop(plugin_id, None)
+        store.log_event("plugin", "%s.%s %s in %dms"
+                        % (plugin_id, tool, "ok" if ok else "returned an error", elapsed_ms))
+        return out
+
+    def invoke(self, plugin_id, tool, args, session_id=0):
+        row = kernel.get(plugin_id)
+        if not row:
+            return {"ok": False, "summary": "unknown plugin '%s'" % plugin_id,
+                    "result": {"error": {"code": "internal", "message": "unknown plugin"}}}
+        if not row.get("enabled"):
+            return {"ok": False, "summary": "plugin '%s' is not enabled" % plugin_id,
+                    "result": {"error": {"code": "denied",
+                                         "message": "plugin is disabled; enable it in the Plugins page"}}}
+        tdef = None
+        for t in (row["manifest"].get("tools") or []):
+            if t.get("name") == tool:
+                tdef = t
+                break
+        if tdef is None:
+            return {"ok": False, "summary": "plugin '%s' has no tool '%s'" % (plugin_id, tool),
+                    "result": {"error": {"code": "internal",
+                                         "message": "tool not declared in the manifest"}}}
+        verr = _validate_args(tdef.get("parameters") or {}, args or {})
+        if verr:
+            return {"ok": False, "summary": verr,
+                    "result": {"error": {"code": "invalid_args", "message": verr}}}
+        if not self.available():
+            return {"ok": False, "summary": "plugin runtime unavailable (quickjs not installed)",
+                    "result": {"error": {"code": "internal", "message": "runtime unavailable"}}}
+        limits = row["manifest"].get("limits") or {}
+        tmo = min(int(limits.get("timeout_ms") or DEFAULT_TIMEOUT_MS), MAX_TIMEOUT_MS)
+        lock = self._lock(plugin_id)
+        with lock:
+            try:
+                w = self._worker_for(row)
+            except _LoadError as exc:
+                store.log_event("warn", "plugin '%s' load failed: %s" % (plugin_id, exc))
+                kernel.set_last_error(plugin_id, "load failed: %s" % str(exc)[:200])
+                return {"ok": False, "summary": "plugin failed to load: %s" % str(exc)[:200],
+                        "result": {"error": {"code": "internal", "message": str(exc)[:300]}}}
+            except Exception as exc:
+                return self._strike(plugin_id, "internal", "runtime spawn failed: %r" % exc)
+            seq = w.next_seq()
+            t0 = time.time()
+            deadline = t0 + (tmo + GRACE_MS) / 1000.0
+            try:
+                w.send({"cmd": "invoke", "seq": seq, "tool": tool,
+                        "args": args or {}, "deadline_ms": tmo})
+            except Exception as exc:
+                self.invalidate(plugin_id)
+                return self._strike(plugin_id, "internal", "worker write failed: %r" % exc)
+            while True:
+                kind, msg = self._read_until(plugin_id, w, deadline)
+                if kind == self._DEADLINE:
+                    self.invalidate(plugin_id)
+                    return self._strike(plugin_id, "timeout",
+                                        "plugin timed out after %dms (worker killed)" % tmo)
+                if kind == self._EOF:
+                    self.invalidate(plugin_id)
+                    return self._strike(plugin_id, "internal", "plugin worker died unexpectedly")
+                if msg.get("seq") == seq:
+                    return self._finish(plugin_id, tool, msg,
+                                        int((time.time() - t0) * 1000))
+
+
+def _validate_args(params, args):
+    """Light JSON-Schema check: required present, declared scalar types correct."""
+    if not isinstance(args, dict):
+        return "arguments must be an object"
+    props = params.get("properties") or {}
+    for r in params.get("required") or []:
+        if r not in args or args[r] in (None, ""):
+            return "missing required argument '%s'" % r
+    types = {"string": str, "integer": int, "number": (int, float),
+             "boolean": bool, "array": list, "object": dict}
+    for k, v in args.items():
+        t = (props.get(k) or {}).get("type")
+        if not t:
+            continue
+        if t in ("integer", "number") and isinstance(v, bool):
+            return "argument '%s' must be %s" % (k, t)
+        if t in types and not isinstance(v, types[t]):
+            return "argument '%s' must be %s" % (k, t)
+    return None
+
+
+runtime = PluginRuntime()
+
+
+def available():
+    return runtime.available()
+
+
+def invoke_tool(full_name, args, session_id=0):
+    """Route a `plugin__<id>__<tool>` name to the runtime; None if not ours."""
+    sp = kernel.split_tool_name(full_name)
+    if not sp:
+        return None
+    return runtime.invoke(sp[0], sp[1], args or {}, session_id)
+
+
+atexit.register(runtime.shutdown)

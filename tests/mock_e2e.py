@@ -3389,6 +3389,66 @@ def main():
           plugins_mod.cli(["validate", os.path.join(fx, "good-demo")])["ok"]
           and not plugins_mod.cli(["validate", os.path.join(fx, "bad-sdk")])["ok"])
 
+    section("T44 plugin runtime: sandbox, grants, limits, strikes")
+    import plugin_rt as rt_mod
+    # T43 already copied the whole fixture tree; re-copy idempotently so this
+    # section also stands alone.
+    shutil.copytree(os.path.join(fx, "good-runtime"), os.path.join(proot, "good-runtime"),
+                    dirs_exist_ok=True)
+    shutil.copytree(os.path.join(fx, "bad-boot"), os.path.join(proot, "bad-boot"),
+                    dirs_exist_ok=True)
+    plugins_mod.scan()
+    check("runtime is available (quickjs worker)", rt_mod.available())
+    plugins_mod.set_enabled("good-runtime", True, ["llm.complete"])
+    t0 = time.time()
+    out = rt_mod.runtime.invoke("good-runtime", "echo", {"note": "hi"})
+    check("invoke round-trips through the sandbox worker",
+          out["ok"] and out["result"].get("echo") == "hi" and time.time() - t0 < 15)
+    rt_mod.runtime.invoke("good-runtime", "kv_set", {"v": "hello"})
+    out = rt_mod.runtime.invoke("good-runtime", "kv_get", {})
+    check("kv persists across invokes (one worker per plugin)", "hello" in out["summary"])
+    out = rt_mod.runtime.invoke("good-runtime", "hostile", {})
+    check("ungranted mailbox reads are denied inside the sandbox",
+          "denied" in out["summary"] and "mailbox.read" in out["summary"])
+    plugins_mod.set_grants("good-runtime", ["llm.complete", "mailbox.read"])
+    out = rt_mod.runtime.invoke("good-runtime", "count", {})
+    check("granted searches return indexed rows", out["ok"] and out["result"].get("n", 0) >= 1)
+    out = rt_mod.runtime.invoke("good-runtime", "ask", {})
+    check("plugins reach the LLM only through the host", out["ok"] and "llm:" in out["summary"])
+    out = rt_mod.runtime.invoke("good-runtime", "card", {})
+    check("action cards ride the ToolResult envelope",
+          out["ok"] and (out.get("card") or {}).get("title") == "Demo card")
+    t0 = time.time()
+    out = rt_mod.runtime.invoke("good-runtime", "slow", {})
+    took = time.time() - t0
+    check("a runaway loop is killed at the manifest timeout",
+          (not out["ok"]) and out["result"]["error"]["code"] == "timeout"
+          and 1.0 < took < 6.0)
+    out = rt_mod.runtime.invoke("good-runtime", "echo", {"note": "back"})
+    check("the worker respawns after a kill (strikes reset on success)",
+          out["ok"] and out["result"].get("echo") == "back")
+    out = rt_mod.runtime.invoke("good-runtime", "memhog", {})
+    check("the memory cap stops allocation bombs",
+          (not out["ok"]) and "memory" in out["summary"].lower())
+    out = rt_mod.runtime.invoke("good-runtime", "echo", {})
+    check("runtime recovers after an interpreter OOM", out["ok"])
+    for _i in range(3):
+        rt_mod.runtime.invoke("good-runtime", "boom", {})
+    row = plugins_mod.get("good-runtime")
+    check("three straight failures auto-disable the plugin",
+          not row["enabled"] and "auto-disabled" in row["last_error"])
+    out = rt_mod.runtime.invoke("good-runtime", "echo", {})
+    check("a disabled plugin refuses calls", (not out["ok"]) and "not enabled" in out["summary"])
+    plugins_mod.set_enabled("bad-boot", True)
+    out = rt_mod.runtime.invoke("bad-boot", "never", {})
+    check("a bundle that fails to load surfaces its own error",
+          (not out["ok"]) and "boot fail" in out["summary"]
+          and "boot fail" in (plugins_mod.get("bad-boot") or {}).get("last_error", ""))
+    with store.db() as conn:
+        n_rows = conn.execute("SELECT COUNT(*) AS n FROM events "
+                              "WHERE message LIKE '%good-runtime%'").fetchone()["n"]
+    check("runtime activity is audited in events", n_rows >= 3)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

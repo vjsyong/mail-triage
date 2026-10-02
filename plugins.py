@@ -402,6 +402,22 @@ def has_grant(plugin_id, grant):
     return bool(row and row["enabled"] and grant in row["grants"])
 
 
+def set_last_error(plugin_id, message):
+    with store.db() as conn:
+        conn.execute("UPDATE plugins SET last_error=?, updated_ts=? WHERE id=?",
+                     (str(message)[:300], int(time.time()), plugin_id))
+    return True
+
+
+def disable_with_error(plugin_id, message):
+    """Turn a plugin off after runtime failures and record why (audited)."""
+    with store.db() as conn:
+        conn.execute("UPDATE plugins SET enabled=0, last_error=?, updated_ts=? WHERE id=?",
+                     (str(message)[:300], int(time.time()), plugin_id))
+    store.log_event("warn", "plugin '%s' auto-disabled: %s" % (plugin_id, str(message)[:200]))
+    return {"ok": True, "id": plugin_id, "enabled": False}
+
+
 # ---------------------------------------------------------------- tool schemas
 
 def tool_full_name(plugin_id, tool_name):
@@ -511,5 +527,14 @@ def cli(argv):
         if len(args) < 3:
             return {"ok": False, "error": "usage: --plugins grant <id> <permission> [permission...]"}
         return set_grants(args[1], args[2:])
+    if cmd == "invoke":
+        if len(args) < 3:
+            return {"ok": False, "error": "usage: --plugins invoke <id> <tool> [json-args]"}
+        try:
+            targs = json.loads(args[3]) if len(args) > 3 else {}
+        except ValueError:
+            return {"ok": False, "error": "args must be JSON"}
+        import plugin_rt
+        return plugin_rt.runtime.invoke(args[1], args[2], targs)
     return {"ok": False, "error": "unknown command '%s'" % cmd,
             "usage": "list | validate <dir> | rescan | enable|disable <id> | grant <id> <perm...>"}
