@@ -20,7 +20,7 @@ sticky savebars; per-card partial saves on Settings.
 Citation keys (full URLs in §Sources):
 `[NNg-forms]`, `[NNg-pd]` (progressive disclosure), `[GOV-input]`, `[GOV-error]`,
 `[Baymard]`, `[Smashing]`, `[WCAG-2.5.7]`, `[Eleken]`; `[repo]` = in-repo docs/tests.
-Line references are to `/home/xrim/mail-triage/app.py` at time of writing.
+Line references are to `app.py` at time of writing.
 
 ---
 

@@ -1,17 +1,7 @@
 # Mail-intelligence: continuous improvement subsystem (design + audit)
 
-Status: **first vertical slice implemented** on branch `mail-intelligence`
-(worktree `~/mail-triage-intel`). Companion audits (read alongside this file):
-
-| file | covers |
-|---|---|
-| `audit-store.md` | every table/column; provenance, confidence, versions, joinability |
-| `audit-classification.md` | classification tasks, heuristics registry, LLM path, scan order |
-| `audit-feedback.md` | every user-feedback + implicit signal in the codebase; gaps |
-| `audit-data.md` | live production numbers: what a learner can actually train on |
-| `audit-rag.md` | embeddings/retrieval artifacts reusable by specialists |
-
-The goal: **use the LLM for novelty, learned specialists for repetition, deterministic
+Status: **first vertical slice implemented.** The goal: **use the LLM for
+novelty, learned specialists for repetition, deterministic
 rules for stable high-confidence patterns** - while every decision keeps evidence and
 provenance, and the system gets cheaper, faster and more auditable over time. The LLM
 teacher/labeller/proposer never writes executable code and never flips production

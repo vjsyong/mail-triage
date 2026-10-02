@@ -367,7 +367,7 @@ def render_template_text(template_body, msg):
         sender=msg.get("from_addr", ""),
         subject=msg.get("subject", ""),
         date=msg.get("date", ""),
-        my_name=store.get_setting("my_name", "Sean"),
+        my_name=store.get_setting("my_name", ""),
     )
     try:
         return template_body.format_map(fields)
@@ -1289,7 +1289,7 @@ class LLMClient:
         finally:
             r.close()
 
-    def classify(self, msg, categories, my_name="Sean"):
+    def classify(self, msg, categories, my_name=""):
         cats = ", ".join(categories) if categories else "Action, Notification, Newsletter, Receipt, Personal, Promo"
         system = ("You triage incoming email for %s. Reply with a single JSON object and nothing else. "
                   "Shape: {\"category\": one of [%s], \"needs_reply\": true|false, "
@@ -1329,7 +1329,7 @@ class LLMClient:
         return result
 
     def draft_reply(self, msg, body_text, template, settings, instructions=""):
-        my_name = settings.get("my_name", "Sean")
+        my_name = settings.get("my_name", "")
         system = ("You write email replies as %s (%s). Be concise, warm and professional. "
                   "Output ONLY the plain-text reply body (no subject line, no headers, no quotes)."
                   % (my_name, imap_config()["user"]))
@@ -2425,6 +2425,83 @@ def connectivity_check():
                 "inbox_uidvalidity": uv, "unseen": unseen}
     finally:
         mc.close()
+
+
+def detect_hardware():
+    """Best-effort look at what this machine can serve (GPU names + VRAM).
+
+    Runs inside the app container, so it only sees GPUs the container was
+    given. Host-side detection for deploy planning is in docs/getting-started.md."""
+    info = {"gpus": [], "tier": "none", "tier_label": "no GPU visible", "advice": ""}
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5)
+        if out.returncode == 0:
+            for line in (out.stdout or "").strip().splitlines():
+                parts = [x.strip() for x in line.split(",")]
+                if len(parts) >= 2:
+                    try:
+                        info["gpus"].append({"name": parts[0], "vram_mb": int(float(parts[1])),
+                                             "gb": round(int(float(parts[1])) / 1024)})
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+    vmax = max((g["vram_mb"] for g in info["gpus"]), default=0)
+    if vmax >= 20000:
+        info.update(tier="large", tier_label="%dGB GPU" % round(vmax / 1024),
+                    advice="A local model server fits: see gemma/ for a validated "
+                           "single-24GB-card vLLM setup, or serve any model that fits.")
+    elif vmax >= 9000:
+        info.update(tier="medium", tier_label="%dGB GPU" % round(vmax / 1024),
+                    advice="A quantized 7-14B instruct model fits locally (vLLM or "
+                           "ollama); a hosted API is an equally good option.")
+    elif vmax > 0:
+        info.update(tier="small", tier_label="%dGB GPU" % round(vmax / 1024),
+                    advice="A small (3-8B, quantized) model via ollama or llama.cpp "
+                           "fits; quality is modest - a hosted API is the stronger option.")
+    else:
+        info.update(tier="none", tier_label="no GPU visible",
+                    advice="No GPU visible to the app. Rules + search work as-is; "
+                           "use a hosted OpenAI-compatible API, or run a small CPU "
+                           "model via ollama or llama.cpp.")
+    return info
+
+
+def doctor():
+    """Setup report: hardware, mailbox config, LLM endpoint. Read-only, safe anytime.
+
+    Deliberately does not connect to IMAP (that is what --check is for); it does
+    probe the LLM endpoint when one is configured, with the client's timeout."""
+    rep = {"hardware": detect_hardware()}
+    try:
+        imap = imap_config()
+        rep["mailbox"] = {"host": imap.get("host"), "port": imap.get("port"),
+                          "user": imap.get("user") or "",
+                          "configured": bool(imap.get("user"))}
+    except Exception as exc:
+        rep["mailbox"] = {"configured": False, "error": repr(exc)[:120]}
+    try:
+        cl = LLMClient()
+        base = cl.base or ""
+        rep["llm"] = {"base_url": base, "model": cl.model or "", "configured": bool(base)}
+        if base:
+            t0 = time.time()
+            try:
+                out = cl._chat_once(base, cl.key, cl.model,
+                                    "You are a connectivity test. Reply with the single word ok.",
+                                    [{"role": "user", "content": "Reply with the single word ok."}],
+                                    json_mode=False)
+                rep["llm"].update(reachable=True, latency_ms=int((time.time() - t0) * 1000),
+                                  reply=(out or "").strip()[:40])
+            except Exception as exc:
+                rep["llm"].update(reachable=False, error=repr(exc)[:160])
+    except Exception as exc:
+        rep["llm"] = {"configured": False, "error": repr(exc)[:120]}
+    return rep
 
 
 def generate_draft(msg_id, template_id=None, instructions=""):
@@ -3666,6 +3743,14 @@ def assistant_page_context(path):
                 "CURRENT PAGE: the user is on the RAW PROXY LOG - the embedded mail proxy's own "
                 "output for connection-level debugging (IMAP / OAuth). Relevant when accounts "
                 "show sign-in trouble.", "page:proxy/log")
+    if p == "/welcome":
+        return ("page", "welcome page",
+                "CURRENT PAGE: the welcome page - the Get started checklist of first-run setup "
+                "steps (connect a mailbox, point at an LLM, build the search index, sort some "
+                "mail), each with its state and a button; hardware advice for choosing an LLM "
+                "sits below. Help the user through setup; full deploy guidance is in "
+                "docs/getting-started.md.",
+                "page:welcome")
     if p.startswith("/plugins/"):
         return ("page", "plugin detail",
                 "CURRENT PAGE: the plugin detail view of one plugin (%s) - what it does, its "

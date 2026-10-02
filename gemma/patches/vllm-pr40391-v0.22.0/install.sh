@@ -20,7 +20,7 @@ set -euo pipefail
 
 VLLM=/usr/local/lib/python3.12/dist-packages/vllm
 SITE=/usr/local/lib/python3.12/dist-packages
-PATCHDIR=/etc/club3090/pr40391
+PATCHDIR=/etc/mail-triage-gemma/pr40391
 
 # --- upstream-merged / already-applied detection (no-op cleanly) ------------
 if [ -f "$VLLM/v1/worker/kv_cache_shape_utils.py" ] \

@@ -1,7 +1,7 @@
 # Assistant mobile chat — research + what was built (2026-10-01)
 
 Goal: the assistant page should feel like a native AI chat app on phones.
-Trigger: Sean's review — history rail at the top, boxed empty state, and the
+Trigger: a design review — history rail at the top, boxed empty state, and the
 composer pushed below the fold ("this assistant UI is not it").
 
 ## Sources

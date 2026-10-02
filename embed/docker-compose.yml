@@ -1,15 +1,17 @@
 # ===========================================================================
-# Mail Triage — local embedding + reranker servers for RAG
+# Mail Triage — example GPU embedding + reranker servers (legacy RAG backend)
 # ===========================================================================
-# Two HuggingFace TEI (text-embeddings-inference) instances on the SECOND
-# RTX 3090 (CDI nvidia.com/gpu=1; gemma owns GPU 0):
+# Two HuggingFace TEI (text-embeddings-inference) instances, one per service.
+# This is OPTIONAL: the default lite RAG backend embeds and reranks on CPU and
+# needs none of this. Use it only if you want the legacy GPU backend and have
+# a card to spare (pin the CDI device ids below to whichever GPU you give it).
 #
 #   mail-triage-embed   :8041  Qwen/Qwen3-Embedding-4B   (dense embeddings)
 #   mail-triage-rerank  :8042  BAAI/bge-reranker-v2-m3   (cross-encoder rerank)
 #
-# Consumed by Mail Triage via .env:
-#   EMBED_BASE_URL=http://100.93.139.49:8041
-#   RERANK_BASE_URL=http://100.93.139.49:8042
+# Consumed by Mail Triage via .env (blank = use the CPU lite backend):
+#   EMBED_BASE_URL=http://<this-host>:8041
+#   RERANK_BASE_URL=http://<this-host>:8042
 #
 # Usage (from this directory):
 #   docker compose up -d            # start; first boot downloads ~9 GB weights

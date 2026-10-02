@@ -4,7 +4,7 @@ Guidance for AI coding agents in this repo. `README.md` is the human front page;
 file is the agent front page. Depth lives in `docs/` (`docs/README.md` indexes the
 design records and research briefs; read the relevant one before a significant change).
 
-What this is: self-hosted triage for one HKUST mailbox. Deterministic rules sort most
+What this is: self-hosted triage for a single mailbox. Deterministic rules sort most
 mail, a local LLM classifies the rest, and a learning loop compiles repeated LLM
 reasoning into small auditable models. One container runs the Flask UI, the worker,
 and an embedded OAuth mail proxy; the index and database live on this host.
@@ -14,23 +14,24 @@ deletes mail.
 
 ## Feature workflow: one feature = one branch + one worktree
 
-**Never develop a feature in the main checkout.** `~/mail-triage` stays on `master`
-and is the source every deploy builds from. (`git worktree list` shows existing ones.)
+**Never develop a feature in the main checkout.** The main checkout stays on
+`master` and is the source every deploy builds from. (`git worktree list` shows
+existing ones.)
 
 ```bash
-# 1. start a feature (from ~/mail-triage)
-git worktree add ~/mail-triage-<name> -b <name>
+# 1. start a feature (from the main checkout)
+git worktree add ../mail-triage-<name> -b <name>
 
 # 2. work there; tests need the shared venv, and ragmodels/ is gitignored
-cd ~/mail-triage-<name>
-ln -s ~/mail-triage/ragmodels ragmodels
-/home/xrim/mail-triage/.venv/bin/python tests/mock_e2e.py     # must be ALL GREEN
+cd ../mail-triage-<name>
+ln -s <main-checkout>/ragmodels ragmodels
+.venv/bin/python tests/mock_e2e.py                            # must be ALL GREEN
 
-# 3. land it (from ~/mail-triage) once the suite is green and work is committed
+# 3. land it (from the main checkout) once the suite is green and work is committed
 git merge <name>
 git push origin master
-rm -f ~/mail-triage-<name>/ragmodels     # untracked symlink blocks worktree removal
-git worktree remove ~/mail-triage-<name>
+rm -f ../mail-triage-<name>/ragmodels    # untracked symlink blocks worktree removal
+git worktree remove ../mail-triage-<name>
 git branch -d <name>
 ```
 
@@ -44,21 +45,22 @@ git branch -d <name>
   behaviour changes goes through the worktree flow.
 - Push after every merge (`git push origin master`) so GitHub stays current. Normal
   push only; never force-push (`master` is append-only history).
-- Deploy only after merging, only from `~/mail-triage`, only with a clean tree.
+- Deploy only after merging, only from the main checkout, only with a clean tree.
 
 ## Commands
 
 - **Tests** (required before any code commit; docs-only changes may skip):
-  `/home/xrim/mail-triage/.venv/bin/python tests/mock_e2e.py`
-  Full mock E2E (mock IMAP + mock LLM + mock TEI), ~3 min, ~530 checks. Add checks for
+  `.venv/bin/python tests/mock_e2e.py`
+  Full mock E2E (mock IMAP + mock LLM + mock TEI), ~6 min, ~630 checks. Add checks for
   new behaviour; never weaken or delete one to make it pass.
-- **Rebuild + deploy** (from `~/mail-triage`):
+- **Rebuild + deploy**:
   `docker compose build && docker compose create --force-recreate mail-triage && docker start mail-triage`
   then poll `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8097/healthz`
   until 200. There is no source mount: code edits need a rebuild to take effect.
 - **Health**: `docker exec mail-triage python app.py --check`
-- **UI**: http://127.0.0.1:8097 (also via Tailscale Serve). The owner uses the app
-  live: keep restarts brief, and verify before declaring anything done.
+- **UI**: http://127.0.0.1:8097 (bound to loopback; put it behind a reverse proxy
+  or VPN for remote access). If you run the app live: keep restarts brief, and
+  verify before declaring anything done.
 
 ## Repo map
 

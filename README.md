@@ -57,31 +57,24 @@ Full detail on every feature: [docs/features.md](docs/features.md).
 
 ## Quick start
 
-Docker + Compose. A GPU is optional - any OpenAI-compatible LLM endpoint works, and
-search embeddings run on CPU by default.
+Docker + Compose. No GPU needed to start: rules and search run on CPU, and any
+OpenAI-compatible LLM endpoint works for classification and drafting. Pick an
+endpoint for your hardware in [docs/getting-started.md](docs/getting-started.md)
+(after boot, `python app.py --doctor` auto-detects what this machine can host).
 
 ```bash
 git clone <this repo> && cd mail-triage
-cat > .env <<'EOF'
-LLM_BASE_URL=http://127.0.0.1:8040/v1     # any OpenAI-compatible endpoint
-LLM_MODEL=gemma-4-26b-a4b
-UI_PORT=8097
-DATA_DIR=/data
-EOF
+cp .env.example .env        # set LLM_BASE_URL / LLM_MODEL (blank = rules-only mode)
 docker compose up -d --build
-# then open http://localhost:8097
+# open http://localhost:8097 - the Get started checklist walks through the rest
 ```
 
-First run:
-
-1. **Accounts** - add your mailbox and complete the OAuth flow (the page shows the
-   exact redirect URI to register, drives the login, reports token status).
-2. **Settings** - set the LLM endpoint (blank fields fall back to `.env`) and press
-   "Test LLM endpoint".
-3. Optional: run the bundled local model server - `cd gemma && docker compose up -d`
-   (one GPU, vLLM, port 8040).
-4. Tags and corrections you make now feed the learning loop; train your first
-   specialist from **Learning**.
+First run: the app lands on a **Get started** checklist that walks through
+connecting your mailbox (OAuth, driven in the UI), pointing at an LLM and testing
+it, and building the search index. Without an LLM the app still sorts by rules
+and searches; classification and drafting stay idle until an endpoint answers.
+Tags and corrections you make now feed the learning loop; train your first
+specialist from **Learning**.
 
 ## How it works
 
@@ -93,9 +86,9 @@ First run:
 +-------------------------------|--------------------------|----------------------+
                                   |                          |
                     +-------------v------------+   +---------v------------------+
-                    |  local LLM (vLLM)        |   |  semantic search index     |
-                    |  GPU 0 :8040, optional   |   |  FTS5 + sqlite-vec (CPU)   |
-                    |  fallback: any endpoint  |   |  or legacy TEI :8041/:8042 |
+                    |  LLM (any OpenAI-compat) |   |  semantic search index     |
+                    |  local vLLM/ollama, or   |   |  FTS5 + sqlite-vec (CPU)   |
+                    |  a hosted API - optional |   |  lite backend, no GPU      |
                     +--------------------------+   +----------------------------+
 ```
 
@@ -129,6 +122,7 @@ docker logs -f mail-triage            # live logs
 docker compose up -d --build          # rebuild after code changes (image bakes the app)
 docker restart mail-triage            # simple restart
 docker exec mail-triage python app.py --check          # read-only health JSON
+docker exec mail-triage python app.py --doctor         # hardware + LLM endpoint check with setup advice
 docker exec mail-triage python app.py --index          # run the search indexer (resumable)
 docker exec mail-triage python app.py --reindex        # wipe + rebuild the index
 docker exec mail-triage python app.py --heal-snippets  # repair legacy raw-MIME snippets
@@ -145,6 +139,10 @@ tables) and `data/emailproxy/` (generated config, encrypted token cache, proxy l
 
 - [docs/](docs/README.md) - index of everything, sorted by purpose (start here /
   design records / research / history)
+- [docs/getting-started.md](docs/getting-started.md) - install, hardware tiers,
+  choosing an LLM (including no-GPU setups), first-run checklist
+- [docs/deployment.md](docs/deployment.md) - running it for real: ports, TLS and
+  reverse proxies, backups, upgrades, resource notes
 - [docs/features.md](docs/features.md) - the full feature tour
 - [docs/plugin-architecture.md](docs/plugin-architecture.md) - the plugin system
   as built: kernel, sandbox, kinds, assistant integration
@@ -173,5 +171,5 @@ plugin_rt.py      sandbox supervisor, host calls, events        plugins/ (built-
 plugin_worker.py  sandboxed QuickJS interpreter per plugin
 ```
 
-Private personal project; no license granted. Times in the UI follow the display
+MIT licensed - see [LICENSE](LICENSE). Times in the UI follow the display
 timezone setting (default UTC+8).

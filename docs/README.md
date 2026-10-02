@@ -11,6 +11,10 @@ How this folder is organised: by what you need, not by when it was written.
 ## Start here
 
 - [../README.md](../README.md) - what the app is, quick start, operations
+- [getting-started.md](getting-started.md) - install, hardware tiers, choosing an
+  LLM (including no-GPU setups), first-run checklist
+- [deployment.md](deployment.md) - ports, TLS / reverse proxies, backups,
+  upgrades, resource notes for real deployments
 - [features.md](features.md) - the full feature tour
 - [app-inventory.md](app-inventory.md) - page-by-page inventory + the app-wide layout campaign
 
@@ -20,12 +24,6 @@ How this folder is organised: by what you need, not by when it was written.
   lifecycle, provenance, safety invariants
 - [mail-intelligence/improvement-roadmap.md](mail-intelligence/improvement-roadmap.md) -
   test sets, retraining triggers, dynamic tooling (research-backed, next steps)
-- [mail-intelligence/audit-store.md](mail-intelligence/audit-store.md),
-  [audit-classification.md](mail-intelligence/audit-classification.md),
-  [audit-feedback.md](mail-intelligence/audit-feedback.md),
-  [audit-data.md](mail-intelligence/audit-data.md),
-  [audit-rag.md](mail-intelligence/audit-rag.md) - pre-build audits of the existing
-  pipeline (what data exists, what was missing)
 - [agent-permissions.md](agent-permissions.md) - enforced permission boundaries for
   the assistant
 - [plugin-architecture.md](plugin-architecture.md) - the plugin system as built

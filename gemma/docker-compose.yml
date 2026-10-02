@@ -1,26 +1,31 @@
 # ===========================================================================
-# Mail Triage — Gemma 4 26B-A4B model server (single RTX 3090)
+# Mail Triage — example local LLM server (single GPU)
 # ===========================================================================
-# Standalone, self-contained copy of the serving stack this host uses for
-# gemma-4-26b-a4b, trimmed to ONE replica on GPU 0. No litellm, no model-pool.
-# Mail Triage talks to this container directly at :8040.
+# Standalone, self-contained serving stack for the model this project was
+# developed against (a 26B-A4B MoE quantized to AWQ-4bit), trimmed to ONE
+# replica on one card. Mail Triage talks to any OpenAI-compatible API; this
+# file is an EXAMPLE — vLLM, ollama, llama.cpp or a hosted API all work.
+# Hardware tiers and alternatives: docs/getting-started.md.
 #
-#   Model:     gemma-4-26b-a4b-awq-4bit (cyankiwi AWQ-4bit, compressed-tensors)
+#   Model:     gemma-4-26b-a4b-awq-4bit (compressed-tensors AWQ)
 #   Engine:    vLLM v0.22.0 + vendored PR #40391 overlay (int8_per_token_head
-#              KV on sm_86 — stock v0.22.0 cannot serve this KV dtype)
-#   Topology:  single card (TP=1), CDI-pinned to nvidia.com/gpu=0
+#              KV on Ampere; stock v0.22.0 cannot serve this KV dtype — skip
+#              the overlay for models/quants that do not need it)
+#   Topology:  one 24GB card (validated on an RTX 3090), TP=1
 #   Drafter:   none · Vision: off · Max ctx: 16384 (mail workload)
-#   Mem util:  0.96 (~232K-token KV pool, validated without a drafter)
-#   Weights:   /home/xrim/models/gemma-4-26b-a4b-awq-4bit (host HF cache)
+#   Mem util:  0.96
+#
+# Weights:   point HF_HOME at a host directory that holds the model (or a
+#            HuggingFace cache); it is mounted as the container's HF cache.
+#            For gated models export HF_TOKEN.
 #
 # Usage (from this directory):
-#   docker compose up -d          # start (auto-starts on boot: unless-stopped)
-#   docker compose stop           # stop / free the GPU
+#   HF_HOME=$HOME/models docker compose up -d
 #   docker compose logs -f        # watch boot ("Application startup complete")
 #   curl -s localhost:8040/v1/models
 #
-# Consumed by Mail Triage via .env:
-#   LLM_BASE_URL=http://100.93.139.49:8040/v1   LLM_MODEL=gemma-4-26b-a4b
+# Point Mail Triage at it via .env:
+#   LLM_BASE_URL=http://<this-host>:8040/v1   LLM_MODEL=gemma-4-26b-a4b
 # ===========================================================================
 name: mail-triage-gemma
 
@@ -34,9 +39,9 @@ services:
     ports:
       - "8040:8000"
     volumes:
-      - /home/xrim/models:/root/.cache/huggingface
-      - ./chat_template.jinja:/etc/club3090/gemma-canonical-template.jinja:ro
-      - ./patches/vllm-pr40391-v0.22.0:/etc/club3090/pr40391:ro
+      - ${HF_HOME:-./cache/hf}:/root/.cache/huggingface
+      - ./chat_template.jinja:/etc/mail-triage-gemma/chat-template.jinja:ro
+      - ./patches/vllm-pr40391-v0.22.0:/etc/mail-triage-gemma/pr40391:ro
       - ./cache/torch_compile_int8:/root/.cache/vllm/torch_compile_cache
       - ./cache/triton_int8:/root/.triton/cache
     environment:
@@ -54,6 +59,10 @@ services:
         reservations:
           devices:
             - driver: cdi
+              # Pick your card (CDI), or use the classic form:
+              #   - driver: nvidia
+              #     count: 1
+              #     capabilities: [gpu]
               device_ids:
                 - nvidia.com/gpu=0
               capabilities: [gpu]
@@ -61,7 +70,7 @@ services:
       - /bin/bash
       - -c
       - |
-        bash /etc/club3090/pr40391/install.sh
+        bash /etc/mail-triage-gemma/pr40391/install.sh
         exec vllm serve "$@"
       - --
     command:
@@ -96,7 +105,7 @@ services:
       - --reasoning-parser
       - gemma4
       - --chat-template
-      - /etc/club3090/gemma-canonical-template.jinja
+      - /etc/mail-triage-gemma/chat-template.jinja
       - --enable-prefix-caching
       - --enable-chunked-prefill
       - --long-prefill-token-threshold

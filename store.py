@@ -33,7 +33,7 @@ DEFAULT_SETTINGS = {
         "Promo": "Promotions",
     },
     "drafts_folder": "",          # blank = auto-detect the \Drafts special-use folder
-    "my_name": "Sean",
+    "my_name": "",
     "assistant_actions_apply": True,  # RETIRED (2026-10): read only by the one-time migration; superseded by perm_*
     # ---- agent permissions: off | ask (needs your approval) | auto ----
     "perm_classify": "auto",       # run classification on a message (filing still follows llm_apply)
