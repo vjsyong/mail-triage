@@ -1,0 +1,6 @@
+{
+ "key": "granite3b",
+ "model": "granite-4.2-3b",
+ "boot_s": 195,
+ "thinking_mode": "falsekw"
+}

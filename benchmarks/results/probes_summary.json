@@ -1,18 +1,18 @@
 {
- "gemma4e4b": {
+ "granite3b": {
   "classification": {
    "n": 8,
-   "ok": 8,
-   "bad": 0,
-   "median_wall": 7.2,
-   "max_wall": 7.78
+   "ok": 0,
+   "bad": 8,
+   "median_wall": 7.4,
+   "max_wall": 9.56
   },
   "assistant": {
    "n": 3,
    "ok": 3,
    "bad": 0,
-   "median_wall": 5.0,
-   "max_wall": 6.32
+   "median_wall": 3.0,
+   "max_wall": 3.02
   }
  }
 }

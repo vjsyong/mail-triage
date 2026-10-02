@@ -25,6 +25,7 @@ ap.add_argument("--out", required=True)
 ap.add_argument("--thinking-mode", default="auto", choices=["auto", "off", "falsekw"])
 ap.add_argument("--temperature", type=float, default=0.0)
 ap.add_argument("--top-p", type=float, default=None)
+ap.add_argument("--assistant-no-stream", action="store_true")
 args = ap.parse_args()
 
 CLS_IDS = ["cls_normal_101", "cls_normal_130", "cls_normal_170", "cls_normal_190",
@@ -76,11 +77,17 @@ for cid in ASST_IDS:
         steps += 1
         use_tools = PROMPTS["assistant_tools"] if steps <= 8 else None
         calls = []
-        for ev in client.chat_stream(system, convo, tools=use_tools, thinking=True):
-            if first is None and ev["type"] in ("reasoning_delta", "content_delta"):
-                first = time.time() - t0
-            if ev["type"] == "tool_calls":
-                calls = ev["calls"]
+        if args.assistant_no_stream:
+            res = client.chat_full(system, convo, tools=use_tools, thinking=True)
+            if first is None:
+                first = res.get("ttft") or res.get("wall")
+            calls = res.get("tool_calls") or []
+        else:
+            for ev in client.chat_stream(system, convo, tools=use_tools, thinking=True):
+                if first is None and ev["type"] in ("reasoning_delta", "content_delta"):
+                    first = time.time() - t0
+                if ev["type"] == "tool_calls":
+                    calls = ev["calls"]
         if not calls or use_tools is None:
             break
         for cc in calls[:4]:

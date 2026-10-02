@@ -12,6 +12,7 @@ MODELS=/home/xrim/models
 NAME=bench-server
 PORT=8045
 IMAGE=vllm/vllm-openai:v0.22.0
+MUSE_IMAGE=vllm/vllm-openai:muse-glimmer-x86_64-cu129
 
 stop() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
 
@@ -34,7 +35,12 @@ case "${1:-}" in
     EXTRA="--tool-call-parser gemma4 --reasoning-parser gemma4 --limit-mm-per-prompt {\"image\":0,\"audio\":0}";;
   granite3b)
     DIR=$MODELS/granite-4.2-3b; MNAME=granite-4.2-3b
-    EXTRA="--tool-call-parser granite4 --reasoning-parser granite";;
+    IMAGE=$MUSE_IMAGE
+    EXTRA="--tool-call-parser qwen3_xml --reasoning-parser granite";;
+  ling3)
+    DIR=$MODELS/ling-3.0-tiny; MNAME=ling-3.0-tiny
+    IMAGE=$MUSE_IMAGE
+    EXTRA="--tool-call-parser ling3 --reasoning-parser ling3";;
   lfm8b)
     DIR=$MODELS/lfm2.5-8b-a1b; MNAME=lfm2.5-8b-a1b
     EXTRA="--tool-call-parser lfm2";;

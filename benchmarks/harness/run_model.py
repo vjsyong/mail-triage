@@ -93,6 +93,51 @@ class BenchClient:
                 "finish": ch.get("finish_reason"), "usage": data.get("usage") or {},
                 "wall": wall}
 
+    def chat_full(self, system, messages, tools=None, thinking=True, max_tokens=2500):
+        """Non-streaming single turn (used for models whose tool format fails the
+        streaming parser). Mirrors chat_stream's payload but without stream."""
+        payload = {"model": self.model, "temperature": self.temperature, "max_tokens": max_tokens,
+                   "messages": [{"role": "system", "content": system}] + messages}
+        if self.top_p:
+            payload["top_p"] = self.top_p
+        if tools:
+            payload["tools"] = tools
+        ctk = self._thinking_kwarg(thinking)
+        if ctk is not None:
+            payload["chat_template_kwargs"] = ctk
+        payload["repetition_penalty"] = 1.05
+        t0 = time.time()
+        r = None
+        while True:
+            r = self.sess.post(self.base + "/chat/completions", json=payload, timeout=self.timeout)
+            if r.status_code in (400, 404, 422):
+                if "chat_template_kwargs" in payload:
+                    payload.pop("chat_template_kwargs", None)
+                    r.close() if hasattr(r, "close") else None
+                    continue
+                if "repetition_penalty" in payload:
+                    payload.pop("repetition_penalty", None)
+                    continue
+            break
+        wall = time.time() - t0
+        if r.status_code != 200:
+            raise RuntimeError("LLM HTTP %s: %s" % (r.status_code, (r.text or "")[:300]))
+        data = r.json()
+        ch = data["choices"][0]
+        msg = ch["message"] or {}
+        calls = []
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            args = fn.get("arguments")
+            if not isinstance(args, str):
+                args = json.dumps(args or {})
+            calls.append({"id": tc.get("id") or ("call_%d" % len(calls)),
+                          "name": fn.get("name") or "", "arguments": args})
+        return {"content": msg.get("content") or "",
+                "reasoning": msg.get("reasoning") or msg.get("reasoning_content") or "",
+                "tool_calls": calls, "finish": ch.get("finish_reason"),
+                "usage": data.get("usage") or {}, "wall": wall, "ttft": wall}
+
     def chat_stream(self, system, messages, tools=None, thinking=True, max_tokens=2500):
         """Mirror engine.LLMClient._stream_once: yields events."""
         payload = {"model": self.model, "temperature": self.temperature, "max_tokens": max_tokens,
@@ -279,7 +324,7 @@ def run_classification(client, case, model_key, out_f):
     return rec
 
 
-def run_assistant(client, case, model_key, out_f):
+def run_assistant(client, case, model_key, out_f, no_stream=False):
     sim = ToolSim(CORPUS)
     system = assistant_system(sim, case.get("page_path"))
     convo = [{"role": "user", "content": case["user"]}]
@@ -302,34 +347,50 @@ def run_assistant(client, case, model_key, out_f):
             calls = []
             turn_reasoning, turn_content, turn_probe = [], [], []
             probe_checked = 0
-            turn_start = time.time()
-            gen = client.chat_stream(system, convo, tools=use_tools, thinking=True,
-                                     max_tokens=2500)
-            finish = None
-            for ev in gen:
-                if ttft is None and ev["type"] in ("reasoning_delta", "content_delta"):
-                    ttft = time.time() - t0
-                if ev["type"] == "reasoning_delta":
-                    turn_reasoning.append(ev["text"])
-                    turn_probe.append(ev["text"])
-                elif ev["type"] == "content_delta":
-                    turn_content.append(ev["text"])
-                    turn_probe.append(ev["text"])
-                elif ev["type"] == "tool_calls":
-                    calls = ev["calls"]
-                elif ev["type"] == "turn_done":
-                    finish = ev.get("finish_reason")
-                    u = ev.get("usage") or {}
-                    for k in usage_total:
-                        usage_total[k] += int(u.get(k) or 0)
-                    finish_reasons.append(finish)
-                if ev["type"] in ("reasoning_delta", "content_delta"):
-                    joined = "".join(turn_probe)
-                    if len(joined) - probe_checked >= 64:
-                        probe_checked = len(joined)
-                        if repetition_loop(joined):
-                            loop_stopped = True
-                            break
+            if no_stream:
+                res = client.chat_full(system, convo, tools=use_tools, thinking=True,
+                                       max_tokens=2500)
+                if ttft is None:
+                    ttft = res.get("ttft") or res.get("wall")
+                turn_reasoning = [res.get("reasoning") or ""]
+                turn_content = [res.get("content") or ""]
+                calls = res.get("tool_calls") or []
+                finish = res.get("finish")
+                u = res.get("usage") or {}
+                for k in usage_total:
+                    usage_total[k] += int(u.get(k) or 0)
+                finish_reasons.append(finish)
+                joined = "".join(turn_probe)
+                if repetition_loop("".join(turn_reasoning + turn_content)):
+                    loop_stopped = True
+            else:
+                gen = client.chat_stream(system, convo, tools=use_tools, thinking=True,
+                                         max_tokens=2500)
+                finish = None
+                for ev in gen:
+                    if ttft is None and ev["type"] in ("reasoning_delta", "content_delta"):
+                        ttft = time.time() - t0
+                    if ev["type"] == "reasoning_delta":
+                        turn_reasoning.append(ev["text"])
+                        turn_probe.append(ev["text"])
+                    elif ev["type"] == "content_delta":
+                        turn_content.append(ev["text"])
+                        turn_probe.append(ev["text"])
+                    elif ev["type"] == "tool_calls":
+                        calls = ev["calls"]
+                    elif ev["type"] == "turn_done":
+                        finish = ev.get("finish_reason")
+                        u = ev.get("usage") or {}
+                        for k in usage_total:
+                            usage_total[k] += int(u.get(k) or 0)
+                        finish_reasons.append(finish)
+                    if ev["type"] in ("reasoning_delta", "content_delta"):
+                        joined = "".join(turn_probe)
+                        if len(joined) - probe_checked >= 64:
+                            probe_checked = len(joined)
+                            if repetition_loop(joined):
+                                loop_stopped = True
+                                break
             reasoning_all.append("".join(turn_reasoning))
             if loop_stopped:
                 break
@@ -502,6 +563,9 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--top-p", type=float, default=None)
     ap.add_argument("--thinking-mode", default="auto", choices=["auto", "off", "falsekw"])
+    ap.add_argument("--assistant-no-stream", action="store_true",
+                    help="run the assistant suite with non-streaming requests "
+                         "(for models whose tool output fails the streaming parser)")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -543,7 +607,8 @@ def main():
                 if args.suite == "classification":
                     r = run_classification(client, case, args.model, out_f)
                 elif args.suite == "assistant":
-                    r = run_assistant(client, case, args.model, out_f)
+                    r = run_assistant(client, case, args.model, out_f,
+                                      no_stream=args.assistant_no_stream)
                 elif args.suite == "drafting":
                     r = run_drafting(client, case, args.model, corpus_msgs, out_f)
                 elif args.suite == "rules":

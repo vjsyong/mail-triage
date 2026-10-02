@@ -14,6 +14,9 @@ if [ "$MODE" = "sampling" ]; then
 else
   EXTRA="--thinking-mode $MODE"
 fi
+if [ "${NOSTREAM:-0}" = "1" ]; then
+  EXTRA="$EXTRA --assistant-no-stream"
+fi
 
 (nohup $P "$HERE/resources.py" --gpu 1 --container bench-server \
    --out "$OUT/resources_full.jsonl" --interval 3 --duration 14400 >/dev/null 2>&1 &)

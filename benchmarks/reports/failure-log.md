@@ -53,3 +53,16 @@ FINAL (v1.1): raw 93.9 / sev 90.6, 2 critical — marginally ABOVE the baseline 
 - Serve config: bf16 + enforce-eager (bf16 9B OOM'd at KV alloc with cudagraphs on a
   24GB card) + 0.90 util; classify median 5.77s / 11.1 tok/s gen in this config —
   see report caveats about tuning (AWQ + graphs would improve throughput).
+
+
+## gemma-4-e4b (adapted: NONE — app payload verbatim)
+FINAL (v1.2): raw 90.3 / sev 85.0, 1 critical (h2). Best small-model showing so far.
+- classification 92.4: adversarial 78.3, long_mail 67.5; NO runaways, but bimodal
+  thinking (skips thinking on some cases: 0.7-0.9s vs 6-7.5s).
+- assistant 86.3: process NARRATION in final answers ("The user requested... ",
+  "I can now answer") — violates the app's output discipline; answers truncated
+  mid-analysis on i1/h2 (which is why h2 reads as confabulation-ish).
+- drafting 85 (fast, 0.4s: skips thinking); rules 75.6 — guard-rule construction
+  failure: proposed actions {"move_to": "Keep"} instead of an empty-actions guard.
+- Simulate/summary 100.
+
