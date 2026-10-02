@@ -2691,6 +2691,8 @@ def main():
     check("turbo.js served", rt.status_code == 200 and b"Turbo" in rt.data[:400])
     check("singleton guards present (no duplicate listeners across swaps)",
           b"__mtChatDel" in d and b"__mtTicker" in d)
+    check("chat switching drops the previous turns from the live box",
+          b"dropLive" in d and b"clearLive" in d and b"isBusy" in d)
 
     section("T36 undo trail: file -> undo -> kept from re-filing")
     und_uid = add_msg(state, "undo.tester@x.com", "Undo me please", "please undo", "und1@x")

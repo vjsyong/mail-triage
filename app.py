@@ -1457,7 +1457,10 @@ window.assistantChat = function(opts){
       } else { fail(''+err); }
     });
   }
-  var inst = { liveEl: live, setSession: function(ns){ sid=ns; }, refreshLive: function(){ if(!live.parentNode) root.appendChild(live); } };
+  var inst = { liveEl: live, setSession: function(ns){ sid=ns; }, refreshLive: function(){ if(!live.parentNode) root.appendChild(live); },
+               isBusy: function(){ return !!currentAbort; },
+               abort: function(){ if(currentAbort) currentAbort.abort(); },
+               clearLive: function(){ live.innerHTML=''; } };
   form.__chat = inst;
   return inst;
 };
@@ -1568,11 +1571,27 @@ window.guardApply = function(f){
       chat.scrollTop = chat.scrollHeight;
     });
   }
+  /* The live box accumulates every turn this tab has streamed, and refreshLive()
+     re-appends it into each freshly loaded panel - so switching chats used to show
+     the previous conversation under the new chat's empty state ("New" looked dead).
+     Drop it on panel loads: always when idle (the fragment already carries the
+     persisted turns), and abort the running turn first when switching mid-stream. */
+  function dropLive(switching){
+    var fm = document.getElementById('dform');
+    if(!fm || !fm.__chat) return;
+    if(fm.__chat.isBusy()){
+      if(!switching) return;
+      fm.__chat.abort();
+    }
+    fm.__chat.clearLive();
+  }
   function openSession(sid){
+    var switching = String(curSid) !== String(sid);
     curSid = sid;
     try{ localStorage.setItem('assistant_sid', String(sid)); }catch(e){}
+    dropLive(switching);
     loadPanel(sid).then(function(){ bind(); loadHist(); }).catch(function(){
-      newSid().then(function(ns){ curSid = ns; return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+      newSid().then(function(ns){ curSid = ns; dropLive(true); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
     });
   }
   function ensure(){
