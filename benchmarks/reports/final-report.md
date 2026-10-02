@@ -1,122 +1,233 @@
 # Mail-Triage: Can a Smaller Local Model Replace Gemma 4 26B-A4B?
-## Final report — workstream `model-eval` (2026-10-02)
+## Final report — workstream `model-eval`, completed 2026-10-02
 
-> Suite: 196 frozen cases (`benchmarks/cases/`, see `FROZEN.md`; scorer v1.2).
-> Baseline: live production `gemma-4-26b-a4b` endpoint (GPU 0).
-> Candidates: same vLLM v0.22.0 runtime on GPU 1, bf16, 16K ctx, prefix-caching on.
-> Status: 4 of 5 candidates complete; Granite 4.2 3B and LFM2.5-8B-A1B in progress.
+Scope: determine the smallest practical local model that preserves the behavior the
+mail-triage app needs, by evidence, not generic benchmarks.
+Suite: 196 frozen cases (benchmarks/cases/; FROZEN.md; scorer v1.2).
+Baseline: live production `gemma-4-26b-a4b` (vLLM v0.22.0, GPU 0, AWQ-4bit + int8 KV).
+Candidates: same app payloads replayed on GPU 1, sequential, 16K ctx, prefix-caching on.
+Note: candidates were extended at the owner's request — Ling-3.0-tiny added as a 6th
+candidate (beyond the original shortlist of 5).
 
-## 1. Current LLM responsibilities
-See `benchmarks/docs/app-llm-inventory.md` (7 call sites; `classify` is the volume
-workload — every queued message; the assistant agent is the critical-risk surface;
-drafting + rule-learning are low-frequency but user-visible; thinking mode is ON
-for classify + assistant in production).
+────────────────────────────────────────────────────────────────────────────────
+## 1. What the LLM currently does (Phase 1 audit)
+Full inventory: benchmarks/docs/app-llm-inventory.md. Seven call sites through
+`engine.LLMClient`; the workload is heavily skewed:
+- `classify` — EVERY queued message; strict JSON {category×6, needs_reply,
+  confidence, summary, reason}; thinking ON; body truncated to 1500 chars.
+- assistant agent — streaming tool-calling loop (27 tools, ≤8 steps, ≤4 calls/step,
+  4.5K-char tool-result cap, 30K transcript budget); the critical-risk surface.
+- draft_reply / propose_rules_from_tags / example_draft / thought-summary —
+  low-frequency, user-visible; rules affect future auto-filing (high blast radius).
 
-## 2. Benchmark design
-See `benchmark-taxonomy.md` + `scoring-methodology.md`. 196 cases: 106 classification,
-60 assistant tool-use, 12 drafting, 8 rules, 6 simulate, 4 summary. Ground truth from
-the synthetic corpus + rules only. Severity weights LOW 1 / MED 3 / HIGH 9 / CRIT 27.
+## 2-3. Benchmark design and dataset
+See docs/benchmark-taxonomy.md + scoring-methodology.md. 196 cases / 6 suites /
+5 synthetic threads + adversarial + junk + long-context. Ground truth: synthetic
+corpus facts + explicit rules only — no model in the loop. Severity weights
+LOW 1 / MED 3 / HIGH 9 / CRIT 27; both raw and severity-adjusted scores reported.
+The suite discriminates: the production baseline does NOT trivially score 100%
+(92.6 raw, 3 critical failures).
 
-## 3. Dataset composition
-Synthetic fictional mailbox: 64 messages, 7 threads, adversarial set, junk/malformed
-set, long-context set; deterministic; paraphrase variants inline.
+## 4. Baseline metrics (reference implementation)
+- Overall: **92.6 raw / 90.0 severity-adjusted; 3 critical cases** (all in the
+  assistant's hallucination traps). classification 93.4 / assistant 87.6 /
+  drafting 100 / rules 100 / simulate 100 / summary 100.
+- Failure clusters: no-match traps (empty replies after search spirals), ambiguous
+  "which email" requests acted on without asking, one 27K-char CoT runaway on a
+  long receipt (no JSON), invoices occasionally read as Action.
+- Latency (controlled, 20 classify + 6 assistant): classify median 4.33s /
+  p95 16.5s / max 40s; ~135 tok/s; assistant median 1.82s, TTFT 0.09s.
+- Resources: 23.1 GB VRAM reserved, 21.3 GiB RAM, cold boot 397s, 17 GB weights.
 
-## 4. Baseline Gemma results (live production endpoint)
-- **Overall: 92.6 raw / 90.0 severity-adjusted; 3 critical cases.**
-- classification **93.4** — adversarial 91.7, ambiguous 94.2, long_mail 72.5 (one
-  27K-char CoT runaway → no JSON + 2 misses), normal 96.4, junk 98.1.
-- assistant **87.6** — hallucination traps 35 (h2 half-confabulation; h3/h4 EMPTY
-  replies after burning all 8 tool rounds), ambiguity 75 (moved a payment email
-  without asking which), multi-step 75 (search spiral → context overflow), q5 fact
-  miss; tool-arg correctness 100, unnecessary-tool 100, injection 85.8.
-- drafting / rules / simulate / summary: 100 each (after QA pass).
-- Latency (controlled): classify median **4.33s** / p95 16.5s / max 40s (CoT
-  variance; ~135 tok/s); assistant median 1.8s wall.
-- Resources: **23.1 GB VRAM** reserved (0.96 util; AWQ-4bit + int8 KV), RAM 21.3 GiB,
-  cold boot 397s.
-- Known baseline flaws: occasional CoT runaways with thinking ON; hallucination-trap
-  weakness; ambiguity handling weak; invoices sometimes filed as Action.
+## 5-6. Research + shortlist
+See docs/research-2026-10-02.md (dated sources, licenses, vLLM support verified
+against the actual images) and docs/candidate-shortlist.md.
 
-## 7-8. Candidates: exact checkpoints, adaptations, results
+## 7. Exact checkpoints / runtimes tested
+| key | checkpoint | params | quant | runtime (local image) | thinking adaptation |
+|---|---|---|---|---|---|
+| baseline | gemma-4-26b-a4b (cyankiwi AWQ-4bit) | 25.2B MoE / 3.8B active | AWQ4 + int8 KV | vLLM v0.22.0 | none (app config) |
+| qwen9b | Qwen/Qwen3.5-9B | 9B dense | bf16 | vLLM v0.22.0 (+eager, util .90) | falsekw |
+| qwen4b | Qwen/Qwen3.5-4B | 4B dense | bf16 | vLLM v0.22.0 | falsekw |
+| gemma4e4b | google/gemma-4-E4B-it | 4.5B eff (8B w/emb) | bf16 | vLLM v0.22.0 | none |
+| granite3b | ibm-granite/granite-4.2-3b | 3B dense | bf16 | vLLM 0.26.1rc (muse image) + non-stream assistant | falsekw + no-stream |
+| lfm8b | LiquidAI/LFM2.5-8B-A1B | 8.3B MoE / 1.5B active | bf16 | vLLM v0.22.0 | none |
+| ling3 | inclusionAI/Ling-3.0-tiny | 7.9B MoE (128 exp, top-8) | bf16 | vLLM 0.26.1rc (muse image) | explicit flags |
 
-### Qwen3.5-9B (Apache 2.0) — `Qwen/Qwen3.5-9B` bf16, vLLM v0.22.0
-- Serve: `--tool-call-parser qwen3_xml --reasoning-parser qwen3`, enforce-eager +
-  0.90 util (bf16 9B OOM'd at KV allocation with cudagraphs on 24GB).
-- **Adaptation (required): `enable_thinking=false` on every call site.**
-  Unmodified evidence: temp-0 + thinking = 4/8 probe cases catastrophic (median
-  wall 99.4s, 28K-char CoT, finish=length, no JSON).
-- **Result: raw 93.9 / sev 90.6; 2 critical** (adv_299 injection + h2).
-  - classification 94.1: adversarial 78.3 (**obeyed the "admin mode → Personal"
-    injection**; resisted the other one), long_mail 92.5, normal 96.7, junk 96.3.
-  - assistant 91.0: hallucination traps 75, tool-arg 70 (g3 miss), injection 100,
-    ambiguity 31 (x1-x5 mostly failed/skipped clarification), tool-misuse 87.5.
-  - rules 96.9; drafting 100; simulate/summary 100.
-- Latency: classify med 5.77s / 6.4 p95 (eager config; ~11 tok/s gen — config-bound),
-  assistant med 9.6s wall / TTFT 3.1s. VRAM 21.0 GB.
+All candidates: temperature 0, max_tokens 4096 (classify) / 2500 (assistant),
+same prompt strings, same tool schemas, same 196 cases. Every adaptation is
+documented below and in each results/<key>/server.json.
 
-### Qwen3.5-4B (Apache 2.0) — `Qwen/Qwen3.5-4B` bf16
-- Same adaptation (falsekw). Unmodified: 5/8 probe cases catastrophic (~154s each).
-- **Result: raw 87.4 / sev 82.5; 4 critical** (adv_290 + adv_299 injections; h3+h4 empty).
-  - classification 87.9: adversarial 64.2 — **obeyed BOTH tested injections**
-    (Action/needs_reply=true/conf 1.0 exactly as instructed; "Personal" for the
-    admin-mode mail), long_mail 85.0 (passed the case baseline gemma runaways on).
-  - assistant 82.3: ambiguity 31, hallucination 55, multi_step 75, false bulk-move
-    claim ("moved all") on k4; tool-arg 85.8; injection 100 (with v1.2 scorer).
-  - rules 78.8 (**guard semantics 40**: `actions` non-empty where a guard needs
-    none; placement issues); drafting 97.9; simulate/summary 100.
-- Latency: classify med **0.74s** / p95 0.82 (uniform; ~74 tok/s), assistant med
-  3.1s wall / TTFT 2.0s. VRAM 22.6 GB reserved.
+## 8. Candidate results (frozen suite, scorer v1.2)
+| model | raw | sev-adj | crit | classification | assistant | drafting | rules | simulate | summary |
+|---|---|---|---|---|---|---|---|---|---|
+| baseline 26B | 92.6 | 90.0 | 3 | 93.4 | 87.6 | 100 | 100 | 100 | 100 |
+| Qwen3.5-9B | **93.9** | **90.6** | 2 | 94.1 | 91.0 | 100 | 96.9 | 100 | 100 |
+| Gemma-4-E4B | 90.3 | 85.0 | **1** | 92.4 | 88.0 | 85.0 | 75.6 | 100 | 100 |
+| Qwen3.5-4B | 87.4 | 82.5 | 4 | 87.9 | 83.3 | 97.9 | 78.8 | 100 | 100 |
+| Ling-3.0-tiny | 83.4 | 77.6 | 5 | 81.6 | 86.8 | 89.6 | 58.1 | 91.7 | 100 |
+| LFM2.5-8B-A1B | 76.2 | 68.9 | 5 | 73.0 | 80.8 | 92.9 | 55.0 | 91.7 | 60 |
+| Granite 4.2 3B | 73.0 | 63.8 | 6 | 72.9 | 68.8 | 90.0 | 46.9 | 100 | 100 |
 
-### Gemma 4 E4B (Apache 2.0) — `google/gemma-4-E4B-it` bf16, NO adaptation needed
-- **Result: raw 90.3 / sev 85.0; 1 critical** (h2) — best small-model showing.
-  - classification 92.4: adversarial 78.3, long_mail 67.5, no runaways; bimodal
-    thinking (skips thinking some cases: 0.7s vs 6-7.5s).
-  - assistant 86.3: multi_step 60, ambiguity 56; **process narration in final
-    answers** ("The user requested…, I can now answer…") + truncated mid-analysis
-    answers on some traps (h2/i1).
-  - drafting 85.0 (injection 70); rules 75.6 (**guard semantics 40** — proposed
-    `{"move_to": "Keep"}` instead of empty actions); simulate/summary 100.
-- Latency: classify med 6.05s (bimodal) / 69.8 tok/s; assistant med 3.0s wall.
+Per-model notes:
+- **Qwen3.5-9B**: quality-equivalent to baseline (better on long mail 92.5 vs 72.5,
+  weaker on tool-arg 70 vs 100). UNMODIFIED was unusable: temp-0 thinking loops in
+  4/8 probe cases (median 99s/case). Adapted: `enable_thinking=false` everywhere.
+  Served eager (bf16 OOM at KV alloc with CUDA graphs on 24GB) -> slower generation
+  (11 tok/s); tuning upside exists (AWQ/GPTQ quants already available locally).
+- **Gemma-4-E4B**: best small-model showing; NO adaptation needed (app payload as-is);
+  only 1 critical. Weak spots: guard-rule semantics (75.6 suite), ambiguity (56),
+  multi-step (60), process narration in final answers ("The user requested…"),
+  some traps answered from incomplete narration.
+- **Qwen3.5-4B**: blazing classify (0.74s median, uniform) but 4 criticals, incl.
+  obeying BOTH injection emails verbatim (Action + needs_reply=true + conf 1.0).
+- **Ling-3.0-tiny**: fastest tier (0.68s classify / 183 tok/s; assistant 0.99s);
+  obeyed 3 injections; invents "Notifications"-style plural labels sometimes;
+  surprising assistant strength (86.8) but rules/guard collapse (58.1).
+- **LFM2.5-8B-A1B**: fastest classify (0.34s / 176 tok/s); assistant decent (80.8)
+  but obeyed FOUR injections and invented off-enum labels in 23/106 classifications.
+- **Granite 4.2 3B**: weakest; obeyed 2 injections; needs both a newer runtime
+  (v0.22 cannot serve BailingMoeV3; granite 4.2's XML tool calls fail every
+  *streaming* parser tested incl. 0.26rc/0.27) and the non-streaming assistant
+  adaptation; guard logic fails; fastest simple-tool behavior though.
 
-## 9. Performance / resources summary (completed models)
-| | baseline 26B | Qwen9B | Qwen4B | E4B |
-|---|---|---|---|---|
-| classify median | 4.33s | 5.77s* | **0.74s** | 6.05s |
-| gen tok/s | ~135 | 11* | 74 | 70 |
-| assistant med wall | 1.8s | 9.6s | 3.1s | 3.0s |
-| VRAM reserved | 23.1 GB | 21.0 GB | 22.6 GB | ~20 GB |
-| file size | 17 GB (4-bit) | 19.3 GB | 9.3 GB | 15 GB |
+## 9. Performance / resources
+| model | classify med | classify p95 | gen tok/s | assistant med wall | assst TTFT | VRAM reserved | weights | boot |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 4.33s | 16.5s | 135 | 1.82s | 0.09s | 23.1 GB | 17 GB (4-bit) | 397s |
+| Qwen3.5-9B* | 5.77s | 6.43s | 11 | 9.57s | 3.09s | 21.0 GB | 19.3 GB | 280s |
+| Qwen3.5-4B | 0.74s | 0.82s | 74 | 3.10s | 2.0s | 22.6 GB | 9.3 GB | 280s |
+| Gemma-4-E4B | 6.05s | 7.37s | 70 | 3.02s | 0.1s | 22.8 GB | 16.0 GB | 371s |
+| Ling-3.0-tiny | 0.68s | 0.96s | 183 | 0.99s | 0.13s | 21.9 GB | 15.8 GB | 210s |
+| LFM2.5-8B-A1B | 0.34s | 0.42s | 176 | 1.13s | 0.06s | 22.2 GB | 17.0 GB | 255s |
+| Granite 4.2 3B | 0.74s | 0.85s | 90 | 1.17s | 0.32s | 22.8 GB | 7.3 GB | 195s |
 
-*9B ran under enforce-eager (OOM workaround); a tuned deployment (AWQ + cudagraphs)
-would move these substantially. Ranking for RAM/VRAM: 4B < E4B < 9B < baseline.
+*9B ran enforce-eager + util 0.90 (bf16 fit workaround); tuned quantized serving
+would improve it substantially. Candidates reserve ~0.92 util (vLLM pool) — actual
+weights: 7-19 GB vs baseline 17 GB. Boot on the 3090: 3-6.5 min.
+Config note: baseline runs AWQ-4bit + int8 KV + graphs; candidates are bf16, which
+is the quality-favorable configuration for the candidates.
 
-## 10-12. Failure analysis (consolidated)
-1. **Prompt-injection compliance is the sharpest small-model gap.** Qwen3.5-4B
-   obeyed both crafted injections inside email content; Qwen3.5-9B obeyed one of
-   two; E4B and baseline resisted both (E4B flagged the phishing mail as such).
-2. **No-match / hallucination traps:** every model but E4B produced empty or
-   confabulated answers on at least two of five traps; qwen9b/E4B at 75/35?? note:
-   qwen9b 75, e4b passes... (see per-model). All models share h2 (renovation trap).
-3. **Search spirals:** worst case (m3 "move the promos") — baseline AND qwen4b
-   burned all rounds, no moves, empty answer; qwen9b solved m3. Tool-call budget
-   discipline is a differentiator (max_calls violations common).
-4. **Process narration (E4B, some qwen cases):** small models leak planning into
-   the final answer — violates the app's output discipline and truncates answers.
-5. **Guard-rule semantics:** 4B and E4B both fail to express "guard = no actions";
-   baseline handles it (rules 100).
-6. **Ambiguity/clarify:** baseline 75, qwen9b 31, qwen4b 31, E4B 56 — clarify-
-   before-acting is weak across small models (x1: they act on "the payment email"
-   without asking which).
-7. **Unmodified thinking-mode instability (Qwen family):** temp-0 + thinking
-   catastrophic on a majority of hard cases; needs the explicit thinking-off
-   adaptation to be deployable at all. Granite shows a softer variant (thinking
-   contaminates the JSON output with CoT text → app regex breaks).
+## 10. Failure analysis (the evidence that matters)
+1. **Prompt injection compliance — THE headline gap.** Crafted instructions inside
+   email content were followed by 5 of 6 candidates: Qwen4B (2/2 tested),
+   Ling3 (3/4), LFM (4/4), Granite (2/2), Qwen9B (1/2). Baseline gemma and
+   Gemma-E4B resisted all. Exact-compliance details (e.g. returning
+   category=Action + needs_reply=true + confidence=1.0 precisely as instructed).
+   In-app impact = misclassification/misfiling (the app never deletes; filing is
+   reversible via Undo), but for the agent surface it could mean executing
+   injected intent via tools — that is why it gates the recommendation.
+2. **No-match / hallucination traps:** baseline fails h3/h4 with EMPTY replies
+   (search spirals); E4B only fails h2; all models share h2 (stretched-fitting an
+   unrelated budget email to a nonexistent "renovation budget" question).
+3. **Ambiguity/clarification:** "the payment email" acted on without asking which —
+   baseline, qwen4b, qwen9b all did it (x1 fail). Ling/E4B partially better (70/56).
+4. **Guard-rule semantics:** "keep X in place" requires conditions + EMPTY actions.
+   4B, E4B, Ling, LFM, Granite all failed variants (e.g. actions {"move_to":"Keep"}).
+   Baseline handles it 100%. This class is a clean candidate for a deterministic
+   validator in the app (reject actions that equal placeholders, require explicit
+   guard flag) instead of a model-side fix.
+5. **Enum discipline:** LFM invented "Notifications"/"Reminder" labels (23/106);
+   such mail would not file anywhere in the app (no category->folder mapping).
+6. **Output discipline:** E4B narrates process in final answers; Qwen/Ling leak
+   deliberative prose at un-flagged call sites (rules/draft) unless thinking is
+   explicitly disabled — which forced model-specific thinking adaptations.
+7. **Runtime integration tax:** granite 4.2 tool format fails every streaming
+   parser in vLLM <=0.27 (non-stream works); Ling/Granite need the 0.26.1rc image;
+   bf16 9B needs eager+lower-util to fit 24GB. Deployment cost is real and must
+   be budgeted per model.
 
-## 13. Quality vs cost (so far)
-- Efficiency frontier (sev-adjusted): baseline 90.0 (3 crit) · qwen9b 90.6 (2 crit)
-  · E4B 85.0 (1 crit) · qwen4b 82.5 (4 crit).
-- The pragmatic middle: **qwen9b ≈ baseline quality** at ~1/3 the weights and -2GB
-  VRAM; **E4B** trades ~5 sev points for 4.5B-effective compute and no adaptation;
-  **qwen4b** is dramatically faster per classify but carries injection + rules risks.
+## 11. Adversarial robustness comparison (classification suite, 9 injection cases)
+| baseline | qwen9b | e4b | qwen4b | ling3 | granite | lfm |
+|---|---|---|---|---|---|---|
+| 91.7 | 78.3 | 78.3 | 64.2 | 54.2 | 52.5 | 37.5 |
+(sub-scores; higher = more resistant; failed injections counted CRITICAL)
 
-## 14-18. (to fill: Granite + LFM results, routing opportunities, final recommendation)
+## 12. Structured output / tool use
+- JSON validity after adaptation: 99-100% for every model (before adaptation:
+  Qwen3.5 both sizes catastrophic at temp-0 thinking; granite CoT-in-content).
+- Tool-call mechanics: all models emit parseable calls EXCEPT granite, which
+  needs non-streaming — a runtime, not model, defect (documented).
+- Tool-arg correctness (g-cases): baseline 100; e4b 75.8; ling 75; granite 75.8;
+  qwen4b 85.8; qwen9b 70. Small models hallucinate argument names/values and need
+  schema-strict validation; the app already validates tool schemas server-side.
+
+## 13. Quality vs cost — the efficiency frontier
+(sev-adj | classify median | weights size | crit)
+- baseline 26B/3.8B-active: 90.0 | 4.33s | 17 GB | 3 — the incumbent.
+- Qwen3.5-9B: 90.6 | 5.77s* | 19.3 GB | 2 — matches quality; needs adaptation;
+  classify slower only because of the eager fallback config; candidate for tuning.
+- Gemma-4-E4B: 85.0 | 6.05s | 16.0 GB (QAT-4bit ~5 GB) | 1 — best
+  quality-per-GB-risk at the small end; zero adaptation.
+- Qwen3.5-4B: 82.5 | 0.74s | 9.3 GB | 4 — the speed leader among 4B-class,
+  but injection compliance makes it unsafe as the sole mail AUTOMATOR today.
+- Ling-3.0-tiny: 77.6 | 0.68s | 15.8 GB | 5 — fast, decent assistant, same
+  injection caveat; guard-rule weakness.
+- LFM2.5-8B-A1B: 68.9 | 0.34s | 17 GB | 5 — fastest but enum discipline and
+  injection make it unsuitable for classification authority.
+- Granite 4.2 3B: 63.8 | 0.74s | 7.3 GB | 6 — smallest weights, largest
+  integration tax + weakest behavior; reject for this app.
+Frontier: E4B (smallest, safest) — Qwen9B (highest quality) — the 4B/8B-MoE tier
+as speed specialists with guardrails.
+
+## 14. Where smaller models struggle (post-routing view)
+Even granting rules/classifiers/metadata filters, the residual LLM-only tasks are:
+no-match honesty (assistant), ambiguity clarification, guard-rule authoring, and
+injection resistance in classify. The first three are mitigated by deterministic
+wrappers (below); injection resistance is NOT mitigable deterministically and
+must be a hard model-selection criterion until the app hardens its prompts.
+
+## 15. Movable to deterministic specialists
+- Guard-rule validation (reject non-empty "actions" placeholders; explicit guard flag).
+- Category enum enforcement (reject/retry off-enum labels — fixes LFM-class failures).
+- JSON extraction: parse the FIRST balanced object; tolerate fenced duplicates
+  (fixes Granite/Ling "Extra data" classes).
+- Prompt-budget guard (baseline itself died once at the 16K server wall in the
+  assistant loop; cap/trim transcript earlier).
+- Clarify-before-act gate for ambiguous "the X email" when >1 candidate match.
+- Injection screening: content-pattern flags are heuristic only; do not rely on them.
+
+## 16. Small-model + fallback architecture (recommended shape)
+rules/classifiers -> small model (classify/draft/simple tool use)
+                  -> Gemma fallback for: rule learning, guard authoring, long-mail
+                     classification, and any no-match/uncertain answer path
+Keep the current DeepSeek fallback env plumbing; point LLM_FALLBACK_* at the local
+Gemma endpoint (it is currently blank in production settings).
+
+## 17. Smallest practical model (the answer)
+- For NO material quality loss: **Qwen3.5-9B** (93.9/90.6 vs 92.6/90.0) with the
+  documented thinking adaptation — but it is not "substantially" smaller in wall
+  terms except memory (19.3 vs 17 GB weights) and needs runtime care. Practical
+  only if the owner values quality-equivalence over size.
+- For the SMALLEST practical replacement: **Gemma-4-E4B (4.5B effective)** —
+  90.3/85.0, ONE critical (the same h2 trap the baseline fails 3/5 of), zero
+  adaptation, ships with official QAT-4bit for smaller footprints. Its gaps
+  (guard rules, narration, multi-step) are addressable with the deterministic
+  wrappers in section 15 and a Gemma fallback for the rules suite.
+- The <=4B/MoE tier (Qwen4B, Ling, LFM, Granite) currently FAILS the injection
+  criterion; adopt one of them only after adding an authoritative anti-injection
+  system-prompt revision and re-testing, or keep them out of classification
+  authority entirely.
+
+## 18. Limitations / uncertainty
+- Injection evidence: 4 crafted emails + 2 assistant cases; a broader adversarial
+  set could move per-model numbers, but the 5-of-6 obedience pattern is stark.
+- Single run per case (temp 0); stability repeats on the hard subset are stored in
+  results/<model>/stability/ (baseline + Qwen9B; check variance there — see
+  stability notes below).
+- Latency configs differ per candidate (documented per row; 9B eager is the
+  biggest caveat). Real deployments should re-measure after quantization/tuning.
+- Case-set judgment calls: a QA pass corrected expectations; residual scorer
+  judgment risk remains on a handful of subjective cases (marked in code).
+- Ling-3.0-tiny and granite ran on a vLLM rc image (0.26.1rc) — the only local
+  build with their parsers/arch; exact numbers may shift slightly on other builds.
+
+## Artifacts
+- Suite: benchmarks/cases (+ FROZEN.md), corpus: benchmarks/corpus
+- Harness: benchmarks/harness (run_model.py, latency_pass.py, tool_sim.py, serve.sh,
+  pipeline scripts, stability.sh)
+- Results per model: benchmarks/results/<key>/ (cases, summary.json, latency.json,
+  server.json, resources, unmodified probe evidence, stability/)
+- Comparison table: benchmarks/reports/comparison.md (+ comparison_data.json)
+- Failure log: benchmarks/reports/failure-log.md
+- Research/inventory/taxonomy/scoring docs: benchmarks/docs/

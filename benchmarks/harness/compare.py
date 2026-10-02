@@ -26,6 +26,8 @@ META = {
                   "dir": "/home/xrim/models/granite-4.2-3b", "gpu": 1},
     "lfm8b": {"label": "LFM2.5-8B-A1B", "params": "8.3B MoE / 1.5B active", "quant": "bf16",
               "dir": "/home/xrim/models/lfm2.5-8b-a1b", "gpu": 1},
+    "ling3": {"label": "Ling-3.0-tiny", "params": "7.9B total MoE (128 experts, top-8)", "quant": "bf16",
+              "dir": "/home/xrim/models/ling-3.0-tiny", "gpu": 1},
 }
 
 
