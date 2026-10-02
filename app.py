@@ -6128,7 +6128,7 @@ def _assistant_page(sid):
     today = int((time.time() + off) // 86400)
     for s in sessions:
         ts = s.get("last_ts") or s.get("created") or 0
-        d = int((ts + off) // 86400) if ts else today
+        d = int((ts + off) // 86400) if ts else -1
         s["group"] = "Today" if d == today else ("Yesterday" if d == today - 1 else "Earlier")
         s["when"] = time.strftime("%H:%M" if d == today else "%m-%d", time.gmtime(ts + off)) if ts else ""
     convo, convo_html = _assistant_fragment(sid, "/assistant",
