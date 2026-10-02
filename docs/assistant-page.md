@@ -69,3 +69,15 @@ none; conversation lists should group by recency and be filterable.
 
 Files: `app.py` (BASE_TMPL + ASSISTANT_TMPL + `_assistant_page` context), suite
 pins in T52. All styling uses the existing design tokens; zero radius stays.
+
+## Follow-up: message affordances (2026-10-02)
+
+- **Regenerate**: the newest assistant reply carries an ↻ control (rendered in
+  the server fragment and added by the live stream on done). It re-runs the
+  same user turn through `/assistant/regenerate`, which replaces the trailing
+  reply in place: the agent streams with `store_user=False`, so the user
+  message is never duplicated, and only the newest reply offers the control.
+- **Bubbles**: the assistant bubble carries a black border on desktop and
+  mobile; the user bubble stays black-filled. Mobile no longer overrides
+  `.crow.user` with `justify-content:flex-end` - inside a `row-reverse` flex
+  that packs LEFT, the opposite of the documented user-right convention.

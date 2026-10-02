@@ -1341,6 +1341,11 @@ def set_assistant_proposals(mid, proposals_json):
                      (proposals_json, mid))
 
 
+def delete_assistant_message(mid):
+    with db() as conn:
+        conn.execute("DELETE FROM assistant_messages WHERE id=?", (int(mid),))
+
+
 def assistant_messages(limit=40, session_id=None):
     q = "SELECT * FROM assistant_messages"
     args = []
