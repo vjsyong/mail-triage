@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import sys
 import time
 from html import escape as html_escape
@@ -24,8 +25,9 @@ import config
 import engine
 import heuristics
 import learning
-import plugins
 import plugin_rt
+import plugin_ui
+import plugins
 import proxy
 import rag
 import store
@@ -1020,6 +1022,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>') }}
       {{ navitem(url_for('assistant'), 'Assistant', p.startswith('/assistant'), '
         <path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/>', pend) }}
+      {% for it in ext_nav if it.group == 'mail' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
       <div class="nav-label">Automation</div>
       {{ navitem(url_for('rules'), 'Rules', p.startswith('/rules'), '
         <path d="M3 6h18M7 12h10M10 18h4"/>') }}
@@ -1031,6 +1034,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>') }}
       {{ navitem(url_for('templates'), 'Templates', p.startswith('/templates'), '
         <path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/>') }}
+      {% for it in ext_nav if it.group == 'automation' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
       <div class="nav-label">System</div>
       {{ navitem(url_for('accounts'), 'Accounts', p.startswith('/accounts'), '
         <circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 8h5M18.5 5.5v5"/>') }}
@@ -1040,6 +1044,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
         <path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v3"/>') }}
       {{ navitem(url_for('log'), 'Log', p.startswith('/log') or p.startswith('/proxy/log'), '
         <path d="M4 4h16v16H4z"/><path d="m8 9 3 3-3 3M13 15h4"/>') }}
+      {% for it in ext_nav if it.group == 'system' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
     </nav>
     <div class="side-foot">
       <div class="sf-row">
@@ -1077,7 +1082,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   <a href="{{ url_for('assistant') }}" class="{{ 'on' if p.startswith('/assistant') else '' }}" {{ 'aria-current="page"'|safe if p.startswith('/assistant') else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
     <span>Assistant</span></a>
-  {% set morepaths = ('/more','/welcome','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/log','/proxy') %}
+  {% set morepaths = ('/more','/welcome','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/extensions','/log','/proxy') %}
   <a href="{{ url_for('more') }}" class="{{ 'on' if p.startswith(morepaths) else '' }}" {{ 'aria-current="page"'|safe if p.startswith(morepaths) else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
     <span>More</span></a>
@@ -1287,7 +1292,8 @@ if(!window.__mtVt){
     ['/settings', 0, 80],
     ['/more', 0, 90],
     ['/log', 0, 91],
-    ['/proxy', 0, 92]
+    ['/proxy', 0, 92],
+    ['/extensions', 0, 95]
   ];
   function vtPos(path){
     for (var i = 0; i < VTPOS.length; i++){
@@ -1925,10 +1931,15 @@ def render(body, setup=False):
     ws = dict(worker.state)
     info = dict(_header_info())
     info["imap_user"] = (engine.imap_config().get("user") or "").strip()
+    try:
+        ext_nav = plugins.ui_nav_items()
+    except Exception:
+        ext_nav = []
     return _render_src(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
                                   info=info,
                                   show_asb=(not setup) and not request.path.startswith("/assistant"),
                                   setup=setup,
+                                  ext_nav=ext_nav,
                                   pend=store.count_pending_agent_actions(),
                                   w={"err": ws.get("last_error"), "last_ok_r": rel_time(ws.get("last_ok")),
                                      "last_ok_iso": (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ws.get("last_ok"))) if ws.get("last_ok") else ""),
@@ -2734,6 +2745,34 @@ PLUGIN_DETAIL_TMPL = """
   {% endif %}
 </div>
 
+{% if p.ui_mode %}
+<div class="card" id="ui">
+  <div class="card-h"><h3>Browser view</h3>
+    <span class="sub">{{ 'Sandboxed composed page - the host renders a validated component tree; no plugin browser code runs.' if p.ui_mode == 'composed' else 'Trusted browser bundle - runs plugin code in an isolated frame.' }}</span>
+  </div>
+  {% if p.ui_pages %}
+  <div class="sub" style="margin-bottom:8px">Pages:
+    {% for pg in p.ui_pages %}<a href="{{ url_for('extension_page', pid=p.id, page=pg.id) }}">{{ pg.title }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+  {% if p.ui_trusted %}
+  <div class="msg warn" style="margin:0 0 10px">A trusted browser view runs plugin code that can transmit any data it
+  receives &mdash; including mail text &mdash; by navigating itself. The plugin&rsquo;s <span class="mono">net.http</span>
+  grants do <b>not</b> constrain it. Approve only if you trust this exact plugin content.</div>
+  <div class="spread">
+    <div class="sub">{{ ('Approved for the current content (v' ~ p.ui_approval.get('version','?') ~ ').') if p.ui_approved else 'Not approved &mdash; its page will not run.' }} Editing or updating the plugin invalidates this approval.</div>
+    <div class="row">
+      {% if p.ui_approved %}
+      <form method="post" action="{{ url_for('plugin_ui_revoke', pid=p.id) }}"><button class="btn danger" type="submit">Revoke approval</button></form>
+      {% else %}
+      <form method="post" action="{{ url_for('plugin_ui_approve', pid=p.id) }}"><button class="btn danger" type="submit">Approve browser view</button></form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card" id="access">
   <div class="card-h"><h3>Access</h3><span class="sub">{{ 'What this plugin may touch. Unchecking revokes it at the host level — the sandbox cannot call it at all.' if p.permissions else 'No host access — runs pure compute.' }}</span></div>
   <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}">
@@ -3259,6 +3298,11 @@ def _plugin_detail_ctx(pid):
         "config_fields": _plugin_config_fields(m, pid),
         "entry": m.get("entrypoint") or "", "limits_text": limits_text,
         "last_error": row["last_error"] or "", "events": events,
+        "ui_mode": plugins.ui_mode(row) or "",
+        "ui_pages": plugins.ui_pages(row),
+        "ui_trusted": plugins.ui_mode(row) == "trusted",
+        "ui_approved": plugin_ui.is_approved(row),
+        "ui_approval": plugin_ui.approval(pid),
     }
 
 
@@ -3434,6 +3478,824 @@ def plugins_update(pid):
     return redirect(url_for("plugins_page"))
 
 
+# ---------------------------------------------------------------- plugin pages
+#
+# Two tiers (docs/plugin-pages.md):
+#   * composed (default, sandboxed): the plugin's QuickJS bundle exports
+#     synchronous uiOpen/uiDispatch/uiClose and returns a component tree. The
+#     host validates it with plugin_ui (strict whitelist + bounds), owns the
+#     bounded state / revision / event binding and renders it. No plugin browser
+#     JS ever runs.
+#   * trusted (browser bundle, opaque-origin iframe): only after an explicit
+#     per-content user approval. Residual self-navigation egress is disclosed,
+#     not denied; the host disposes the bridge on unexpected frame navigation.
+
+_UI_BASE_CSS = (
+    ":root{--fg:#000;--bg:#fff;--dim:#666;--line:#e5e5e5;--line2:#d4d4d4;--card:#fff;"
+    "--card2:#f5f5f5;--acc:#0070f3;--ok:#067a46;--warn:#b25e09;--err:#d1242f;"
+    "--hover:#f7f7f7;--focus:rgba(0,112,243,.35);"
+    "--mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}"
+    "*{box-sizing:border-box}"
+    "html,body{margin:0;height:100%}"
+    "body{background:var(--bg);color:var(--fg);"
+    "font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}"
+    ":focus-visible{outline:2px solid var(--acc);outline-offset:2px}"
+    "#mt-root{display:flex;flex-direction:column;height:100%;min-height:0}"
+    ".mt-sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}"
+    ".mt-search{display:flex;gap:8px;padding:10px;border-bottom:1px solid var(--line);background:var(--card);flex:0 0 auto}"
+    ".mt-search-input{flex:1 1 auto;min-width:0;border:1px solid var(--line);background:#fff;color:var(--fg);padding:8px 10px;font:inherit}"
+    ".mt-btn{border:1px solid var(--line);background:#fff;color:var(--fg);font:inherit;padding:8px 12px;cursor:pointer}"
+    ".mt-split{display:flex;flex:1 1 auto;height:100%;min-height:0;background:var(--card)}"
+    ".mt-split>*{min-width:0;min-height:0;overflow:auto}"
+    ".mt-split .mt-pane-list{flex:0 0 300px;border-right:1px solid var(--line)}"
+    ".mt-split .mt-pane-reader{flex:1 1 auto}"
+    "html[data-mt-layout=mobile] .mt-split{display:block}"
+    "html[data-mt-layout=mobile] .mt-split .mt-pane-list,html[data-mt-layout=mobile] .mt-split .mt-pane-reader{display:none;border:0}"
+    "html[data-mt-layout=mobile] .mt-split[data-view=list] .mt-pane-list{display:block}"
+    "html[data-mt-layout=mobile] .mt-split[data-view=reader] .mt-pane-reader{display:block}"
+    ".mt-msg{padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer}"
+    ".mt-msg.on{background:var(--card2);box-shadow:inset 3px 0 0 var(--acc)}"
+    ".mt-msg-top{display:flex;justify-content:space-between;gap:8px}"
+    ".mt-msg-from{font-weight:600;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+    ".mt-msg-when{color:var(--dim);font-size:.75rem;white-space:nowrap;flex:0 0 auto}"
+    ".mt-msg-subject{font-size:.9rem;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+    ".mt-msg-snippet{color:var(--dim);font-size:.8rem;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+    ".mt-reader{padding:16px 18px}"
+    ".mt-reader-subject{font-size:1.1rem;margin:0 0 8px;font-weight:700}"
+    ".mt-reader-meta{color:var(--dim);font-size:.83rem;display:grid;gap:2px;margin-bottom:12px}"
+    ".mt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}"
+    ".mt-chip{border:1px solid var(--line);background:var(--card2);padding:1px 7px;font-size:.75rem}"
+    ".mt-reader-body{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--card2);border:1px solid var(--line);padding:12px;margin:0;font:inherit;font-size:.9rem}"
+    ".mt-hint{color:var(--dim);font-size:.76rem;margin-top:10px}"
+    ".mt-state{padding:26px 18px;color:var(--dim);display:flex;flex-direction:column;gap:10px;align-items:flex-start}"
+    ".mt-empty{padding:20px;color:var(--dim)}"
+    ".mt-back{display:none;margin:10px}"
+    "html[data-mt-layout=mobile] .mt-back{display:inline-flex}"
+)
+
+_UI_COMPONENT_CSS = (
+    ".mtc-root{display:flex;flex-direction:column;gap:10px}"
+    ".mtc-tree{display:block}"
+    ".mtc-stack{display:flex;flex-direction:column;gap:10px}"
+    ".mtc-stack.mtc-row{flex-direction:row;flex-wrap:wrap;align-items:center}"
+    ".mtc-gap-none{gap:0}.mtc-gap-md{gap:16px}"
+    ".mtc-grid{display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:10px}"
+    ".mtc-grid.mtc-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}"
+    ".mtc-grid.mtc-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}"
+    "@media(max-width:767px){.mtc-grid.mtc-cols-2,.mtc-grid.mtc-cols-3{grid-template-columns:1fr}}"
+    ".mtc-split{display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr);"
+    "border:1px solid var(--line);background:var(--card);min-height:420px}"
+    ".mtc-split>*{min-width:0;overflow:auto}"
+    ".mtc-pane-list{border-right:1px solid var(--line)}"
+    ".mtc-btn.mtc-mobile-back{display:none}"
+    "@media(max-width:767px){.mtc-split{display:block}"
+    ".mtc-split .mtc-pane-list,.mtc-split .mtc-pane-reader{display:none;border:0}"
+    ".mtc-split.mtc-view-list .mtc-pane-list{display:block}"
+    ".mtc-split.mtc-view-reader .mtc-pane-reader{display:block}"
+    ".mtc-btn.mtc-mobile-back{display:inline-flex}}"
+    ".mtc-text.mtc-title{font-size:1.1rem;font-weight:700;letter-spacing:-.02em}"
+    ".mtc-text.mtc-caption{color:var(--dim);font-size:.82rem}"
+    ".mtc-text.mtc-mono{font-family:var(--mono);font-size:.84rem}"
+    ".mtc-dim{color:var(--dim)}"
+    ".mtc-badge{border:1px solid var(--line);background:var(--card2);padding:1px 7px;font-size:.75rem;display:inline-block}"
+    ".mtc-badge.mtc-warn{border-color:var(--warn);color:var(--warn)}"
+    ".mtc-badge.mtc-ok{border-color:var(--ok);color:var(--ok)}"
+    ".mtc-badge.mtc-err{border-color:var(--err);color:var(--err)}"
+    ".mtc-sep{border:0;border-top:1px solid var(--line);margin:6px 0}"
+    ".mtc-btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 13px;"
+    "border:1px solid var(--line);background:#fff;color:var(--fg);font:inherit;font-size:.88rem;cursor:pointer}"
+    ".mtc-btn:hover{border-color:#000;background:var(--bg)}"
+    ".mtc-btn.mtc-primary{background:#000;border-color:#000;color:#fff;font-weight:600}"
+    ".mtc-btn:disabled{opacity:.45;cursor:not-allowed}"
+    ".mtc-menu{display:flex;flex-direction:column;border:1px solid var(--line);background:var(--card);max-width:280px}"
+    ".mtc-menu-item{text-align:left;border:0;border-bottom:1px solid var(--line);background:none;"
+    "padding:9px 12px;font:inherit;cursor:pointer}"
+    ".mtc-menu-item:last-child{border-bottom:0}.mtc-menu-item:hover{background:var(--hover)}"
+    ".mtc-dialog{border:1px solid var(--line2);background:var(--card);padding:14px 16px}"
+    ".mtc-dialog-title{font-weight:600;margin-bottom:8px}"
+    ".mtc-list{border:1px solid var(--line);background:var(--card)}"
+    ".mtc-list-item{padding:10px 12px;border-bottom:1px solid var(--line)}"
+    ".mtc-list-item.on{background:var(--card2);box-shadow:inset 3px 0 0 var(--acc)}"
+    ".mtc-field{display:flex;flex-direction:column;gap:4px;margin:0}"
+    ".mtc-field .mtc-label{font-size:.8rem;color:var(--dim)}"
+    ".mtc-field input{border:1px solid var(--line);background:#fff;color:var(--fg);padding:8px 10px;font:inherit;width:100%}"
+    ".mtc-search input{font-size:16px}"
+    ".mtc-sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}"
+    ".mtc-state{padding:24px 18px;color:var(--dim);display:flex;flex-direction:column;gap:10px;align-items:flex-start}"
+    ".mtc-state.mtc-error{color:var(--err)}"
+    ".mtc-msgs{display:flex;flex-direction:column}"
+    ".mtc-msg{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);"
+    "background:none;padding:9px 12px;font:inherit;cursor:pointer}"
+    ".mtc-msg:hover{background:var(--hover)}.mtc-msg.on{background:var(--card2);box-shadow:inset 3px 0 0 var(--acc)}"
+    ".mtc-msg-top{display:flex;justify-content:space-between;gap:8px}"
+    ".mtc-msg-sub{display:block;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+    ".mtc-msg-snip{display:block;color:var(--dim);font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+    ".mtc-reader{padding:16px 18px}"
+    ".mtc-reader-sub{font-size:1.1rem;margin:0 0 8px;font-weight:700}"
+    ".mtc-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}"
+    ".mtc-reader-body{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--card2);"
+    "border:1px solid var(--line);padding:12px;margin:12px 0 0;font:inherit;font-size:.9rem}"
+    ".mtc-hint{color:var(--dim);font-size:.76rem;margin-top:8px}"
+    ".mtc-tabbar{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:10px}"
+    ".mtc-tab{border:0;border-bottom:2px solid transparent;background:none;padding:8px 12px;font:inherit;cursor:pointer}"
+    ".mtc-tab.on{border-bottom-color:var(--acc);font-weight:600}"
+    ".ext-bad{margin:8px 0 0;color:var(--err);font-size:.85rem}"
+    ".ext-warn{margin:0 0 10px;border:1px solid var(--warn);background:var(--tint-warn);color:#5c3300;"
+    "padding:9px 12px;font-size:.84rem}"
+    ".mt-ext-frame{width:100%;height:calc(100vh - 290px);min-height:380px;border:1px solid var(--line);"
+    "background:var(--card);display:block}"
+)
+
+_UI_JSON_CAP = 64 * 1024
+_SDK_UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sdk", "ui.js")
+_sdk_ui_cache = {"src": None}
+
+
+def _sdk_ui_src():
+    if _sdk_ui_cache["src"] is None:
+        try:
+            with open(_SDK_UI_PATH, "r", encoding="utf-8") as fh:
+                _sdk_ui_cache["src"] = fh.read()
+        except OSError:
+            _sdk_ui_cache["src"] = ""
+    return _sdk_ui_cache["src"]
+
+
+def _extension_srcdoc(nonce, page_title, sdk_src, plugin_src):
+    """Trusted frame document: bootstrap + SDK + bundle wrapper.
+
+    The plugin bundle is embedded only as the BODY of a function (a syntactic
+    wrapper, not a security barrier); it does not execute at parse time and no
+    eval / unsafe-eval is used. The actual barrier is the document-bound
+    MessagePort: the host transfers it only after the hello/ack handshake, and
+    operational messages travel only on that port, so a synchronous
+    self-navigation at first execution cannot retain or re-establish the bridge
+    (AR2-3). A remote page that navigated the frame has no port."""
+    csp = ("default-src 'none'; script-src 'nonce-%s'; style-src 'nonce-%s'; "
+           "img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; "
+           "object-src 'none'; frame-src 'none'; worker-src 'none'; "
+           "form-action 'none'; base-uri 'none'") % (nonce, nonce)
+    token = json.dumps(nonce)
+    bootstrap = (
+        "(function(){\"use strict\";var TOKEN=%s;var started=false;"
+        "function start(port,boot){if(started)return;started=true;"
+        "try{window.__MT_BOOT=boot||{};}catch(e){}"
+        "if(window.__mt_sdk_connect)window.__mt_sdk_connect(port,(boot&&boot.sid)||'',boot||{});"
+        "try{if(window.__mt_bundle)window.__mt_bundle();}catch(e){}"
+        "try{if(window.MTUI&&window.MTUI.start)window.MTUI.start();}catch(e){}}"
+        "window.addEventListener('message',function(e){"
+        "if(e.source!==window.parent)return;var d=e.data;"
+        "if(!d||d.__mt_ack!==1||d.token!==TOKEN)return;"
+        "var port=e.ports&&e.ports[0];if(!port)return;start(port,d.boot);});"
+        "var tries=0;function hello(){if(started)return;"
+        "try{window.parent.postMessage({__mt_hello:1,token:TOKEN},'*');}catch(e){}"
+        "if(tries++<40)setTimeout(hello,150);}hello();})();"
+    ) % token
+    out = ["<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+           "<meta http-equiv=\"Content-Security-Policy\" content=\"%s\">" % csp,
+           "<meta name=\"referrer\" content=\"no-referrer\">",
+           "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+           "<title>%s</title>" % html_escape(page_title),
+           "<style nonce=\"%s\">%s</style>" % (nonce, _UI_BASE_CSS),
+           "</head><body><div id=\"mt-root\"></div>",
+           "<script nonce=\"%s\">%s</script>" % (nonce, sdk_src),
+           "<script nonce=\"%s\">%s</script>" % (nonce, bootstrap),
+           "<script nonce=\"%s\">window.__mt_bundle=function(){\n%s\n};</script>" % (nonce, plugin_src),
+           "</body></html>"]
+    return "".join(out)
+
+
+
+def _same_origin_ok():
+    if (request.headers.get("Sec-Fetch-Site") or "") == "same-origin":
+        return True
+    base = request.host_url.rstrip("/")
+    origin = (request.headers.get("Origin") or "").strip()
+    if origin:
+        return origin == base
+    ref = (request.headers.get("Referer") or "").strip()
+    return bool(ref) and (ref == base or ref.startswith(base + "/"))
+
+
+def _read_json_capped(limit=_UI_JSON_CAP):
+    """Bounded request reader: reject oversize/unknown-length bodies (AR1-2)."""
+    cl = request.content_length
+    if cl is not None and cl > limit:
+        return None, "too_large"
+    try:
+        data = request.stream.read(limit + 1)
+    except Exception:
+        return None, "bad_body"
+    if len(data) > limit:
+        return None, "too_large"
+    if not data:
+        return {}, None
+    try:
+        obj = json.loads(data.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return None, "bad_json"
+    # A valid JSON body that is not an object (array/null/string/number/bool) is
+    # a client error, not a server crash: reject it as a typed bad request.
+    if not isinstance(obj, dict):
+        return None, "bad_json"
+    return obj, None
+
+
+def _ui_envelope_status(err_code):
+    if err_code in ("forbidden", "disabled", "denied", "stale", "closed"):
+        return 403
+    if err_code == "not_found":
+        return 404
+    if err_code in ("invalid_args", "invalid_tree", "invalid_state", "too_large", "bad_json"):
+        return 400
+    if err_code == "busy":
+        return 429
+    return 200
+
+
+def _ui_session_valid_now(pid, page, sid, mode):
+    """Re-check authority AFTER a controller/tool op, before surfacing results."""
+    row = plugins.get(pid)
+    sess = plugin_ui.get_session(sid, pid, page)
+    if not sess or not row or not row.get("enabled") or sess.get("mode") != mode:
+        return False
+    if mode == "trusted":
+        rec = plugin_ui.approval(pid)
+        if not plugin_ui.is_approved(row) or \
+                sess.get("generation") != int(rec.get("approved_at") or 0):
+            return False
+    return True
+
+
+def _composed_view(result):
+    """Controller-declared mobile pane hint (host applies it to the split)."""
+    return "reader" if (result or {}).get("view") == "reader" else "list"
+
+
+def _ext_url(pid, page, spec):
+    base = "/extensions/%s/%s" % (pid, page)
+    if not isinstance(spec, dict):
+        return base
+    parts = []
+    q = spec.get("q")
+    m = spec.get("message")
+    if isinstance(q, str) and q:
+        parts.append("q=" + quote(q[:200]))
+    if isinstance(m, (str, int)) and str(m):
+        parts.append("message=" + quote(str(m)[:20]))
+    return base + ("?" + "&".join(parts) if parts else "")
+
+
+@app.after_request
+def _ext_frame_guard(resp):
+    """Host-level clickjacking guard for extension pages (AR1-6)."""
+    try:
+        if request.path.startswith("/extensions/"):
+            resp.headers["X-Frame-Options"] = "DENY"
+            resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    except Exception:
+        pass
+    return resp
+
+
+@app.route("/extensions/<pid>/<page>")
+def extension_page(pid, page):
+    row = plugins.get(pid)
+    if not row or not row.get("enabled") or not plugins.ui_page_declared(row, page):
+        flash("No such extension page.", "warn")
+        return redirect(url_for("plugins_page"))
+    mode = plugins.ui_mode(row)
+    page_info = next((p for p in plugins.ui_pages(row) if p["id"] == page),
+                     {"title": page, "description": ""})
+    name = row["manifest"].get("name") or pid
+    initial = {"q": (request.args.get("q") or "")[:200],
+               "message": (request.args.get("message") or "")[:20]}
+    if mode == "composed":
+        sid = plugin_ui.open_session(pid, page, "composed")
+        with plugin_ui.slot(pid) as _slot:
+            if not _slot.got:
+                plugin_ui.dispose(sid)
+                flash("This plugin page is busy; try again.", "warn")
+                return redirect(url_for("plugin_detail", pid=pid))
+            opened = plugin_rt.runtime.ui_open(pid, initial)
+        if "error" in (opened or {}):
+            plugin_ui.dispose(sid)
+            flash("This plugin page failed to open: %s"
+                  % ((opened.get("error") or {}).get("message") or "error"), "warn")
+            return redirect(url_for("plugin_detail", pid=pid))
+        try:
+            result = opened.get("result") or {}
+            if not isinstance(result, dict):
+                raise plugin_ui.UiError("invalid_tree", "controller result must be an object")
+            tree = plugin_ui.validate_tree(result.get("tree"))
+            state = plugin_ui.validate_state(result.get("state") or initial)
+        except plugin_ui.UiError as exc:
+            plugin_ui.dispose(sid)
+            flash("This plugin returned an invalid view (%s)." % exc, "warn")
+            return redirect(url_for("plugin_detail", pid=pid))
+        except Exception as exc:  # noqa: BLE001 - untrusted output must not 500
+            app.logger.warning("composed ui open rejected: %r", exc)
+            plugin_ui.dispose(sid)
+            flash("This plugin returned an invalid view.", "warn")
+            return redirect(url_for("plugin_detail", pid=pid))
+        plugin_ui.set_tree(sid, tree, plugin_ui.tree_events(tree), state)
+        cfg = {"mode": "composed", "sid": sid, "pid": pid, "page": page,
+               "base": "/extensions/%s/%s" % (pid, page), "revision": 0,
+               "view": _composed_view(result)}
+        cfg_json = json.dumps(cfg).replace("</", "<\\/")
+        return render(_render_src(EXTENSION_TMPL, mode="composed", p=page_info, pid=pid,
+                                  page=page, name=name, tree_html=plugin_ui.render_tree(tree),
+                                  cfg_json=cfg_json, srcdoc="", approved=False, comp_css=_UI_COMPONENT_CSS))
+    if mode != "trusted":
+        flash("This plugin has no runnable page.", "warn")
+        return redirect(url_for("plugin_detail", pid=pid))
+    if not plugin_ui.is_approved(row):
+        flash("This plugin's browser view needs explicit approval on its page.", "warn")
+        return redirect(url_for("plugin_detail", pid=pid))
+    plugin_src = plugins.ui_entry_source(row)
+    sdk_src = _sdk_ui_src()
+    if plugin_src is None or not sdk_src:
+        flash("This plugin's page bundle could not be loaded safely.", "warn")
+        return redirect(url_for("plugin_detail", pid=pid))
+    generation = int(plugin_ui.approval(pid).get("approved_at") or 0)
+    sid = plugin_ui.open_session(pid, page, "trusted", generation=generation)
+    nonce = secrets.token_urlsafe(18)
+    srcdoc = _extension_srcdoc(nonce, name + " - " + page_info["title"],
+                               sdk_src, plugin_src)
+    cfg = {"mode": "trusted", "sid": sid, "pid": pid, "page": page,
+           "base": "/extensions/%s/%s" % (pid, page), "bootToken": nonce,
+           "ops": plugins.ui_operations(row), "initial": initial,
+           "generation": generation}
+    cfg_json = json.dumps(cfg).replace("</", "<\\/")
+    return render(_render_src(EXTENSION_TMPL, mode="trusted", p=page_info, pid=pid,
+                              page=page, name=name, tree_html="", cfg_json=cfg_json,
+                              srcdoc=srcdoc, approved=True, comp_css=_UI_COMPONENT_CSS))
+
+
+@app.route("/extensions/<pid>/<page>/dispatch", methods=["POST"])
+def extension_dispatch(pid, page):
+    if not _same_origin_ok():
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "cross-site request refused"}}), 403
+    sid = (request.headers.get("X-MT-Session") or "").strip()
+    payload, err = _read_json_capped()
+    if err:
+        return jsonify({"ok": False, "error": {"code": err, "message": "bad request"}}), \
+            _ui_envelope_status(err)
+    sess = plugin_ui.get_session(sid, pid, page)
+    if not sess or sess.get("mode") != "composed":
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "view session is not valid"}}), 403
+    if not plugin_ui.rate_ok(pid, "event"):
+        return jsonify({"ok": False, "error": {"code": "busy",
+                                               "message": "too many events"}}), 429
+    ev = payload.get("event")
+    if not isinstance(ev, str):
+        return jsonify({"ok": False, "error": {"code": "invalid_args",
+                                               "message": "event must be a string"}}), 400
+    info = (sess.get("events") or {}).get(ev)
+    if not info:
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "event is not part of the rendered view"}}), 403
+    value = payload.get("value")
+    if info.get("values") is not None:
+        if str(value) not in info["values"]:
+            return jsonify({"ok": False, "error": {"code": "forbidden",
+                                                   "message": "unknown action"}}), 403
+    elif value is not None:
+        if not isinstance(value, str) or len(value) > plugin_ui.MAX_TEXT:
+            return jsonify({"ok": False, "error": {"code": "invalid_args",
+                                                   "message": "value too large"}}), 400
+    event_obj = {"kind": ev}
+    if value is not None:
+        event_obj["value"] = value
+    with plugin_ui.session_lock(sid):
+        sess = plugin_ui.get_session(sid, pid, page)
+        if not sess:
+            return jsonify({"ok": False, "error": {"code": "forbidden",
+                                                   "message": "view session is not valid"}}), 403
+        try:
+            rev = int(payload.get("revision"))
+        except (TypeError, ValueError):
+            rev = -1
+        if rev != sess.get("revision"):
+            return jsonify({"ok": False, "error": {"code": "stale",
+                                                   "message": "view changed; reload"}}), 409
+        with plugin_ui.slot(pid) as _slot:
+            if not _slot.got:
+                return jsonify({"ok": False, "error": {"code": "busy",
+                                                       "message": "too many concurrent calls"}}), 429
+            out = plugin_rt.runtime.ui_dispatch(pid, sess.get("state") or {}, event_obj)
+        if "error" in (out or {}):
+            e = out["error"]
+            return jsonify({"ok": False, "error": {"code": e.get("code") or "internal",
+                                                   "message": e.get("message") or "failed"}}), \
+                _ui_envelope_status(e.get("code"))
+        result = out.get("result") or {}
+        if not isinstance(result, dict):
+            return jsonify({"ok": False, "error": {"code": "invalid_tree",
+                                                   "message": "controller result must be an object"}}), 400
+        if not _ui_session_valid_now(pid, page, sid, "composed"):
+            return jsonify({"ok": False, "error": {"code": "closed",
+                                                   "message": "view was closed"}}), 403
+        try:
+            tree = plugin_ui.validate_tree(result.get("tree"))
+            state = plugin_ui.validate_state(result.get("state") or {})
+        except plugin_ui.UiError as exc:
+            return jsonify({"ok": False, "error": {"code": exc.code,
+                                                   "message": str(exc)}}), 400
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("composed ui dispatch rejected: %r", exc)
+            return jsonify({"ok": False, "error": {"code": "invalid_tree",
+                                                   "message": "controller returned an invalid view"}}), 400
+        plugin_ui.set_tree(sid, tree, plugin_ui.tree_events(tree), state)
+        newrev = plugin_ui.bump_revision(sid)
+        try:
+            store.log_event("plugin", "ui[%s] %s.%s dispatch ok (rev %d)"
+                            % (plugin_ui.view_id(sid), pid, ev, newrev))
+        except Exception:
+            pass
+        return jsonify({"ok": True, "html": plugin_ui.render_tree(tree),
+                        "revision": newrev, "view": _composed_view(result),
+                        "replace": bool(result.get("replace")),
+                        "url": _ext_url(pid, page, result.get("url"))})
+
+
+@app.route("/extensions/<pid>/<page>/rpc", methods=["POST"])
+def extension_rpc(pid, page):
+    if not _same_origin_ok():
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "cross-site request refused"}}), 403
+    row = plugins.get(pid)
+    if not row or not row.get("enabled") or plugins.ui_mode(row) != "trusted" \
+            or not plugin_ui.is_approved(row):
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "browser view is not approved"}}), 403
+    sid = (request.headers.get("X-MT-Session") or "").strip()
+    sess = plugin_ui.get_session(sid, pid, page)
+    if not sess or sess.get("mode") != "trusted" \
+            or sess.get("generation") != int(plugin_ui.approval(pid).get("approved_at") or 0):
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "view session is not valid"}}), 403
+    if not plugin_ui.rate_ok(pid, "call"):
+        return jsonify({"ok": False, "error": {"code": "busy",
+                                               "message": "rate limit reached"}}), 429
+    payload, err = _read_json_capped()
+    if err:
+        return jsonify({"ok": False, "error": {"code": err, "message": "bad request"}}), \
+            _ui_envelope_status(err)
+    op = str(payload.get("op") or "")
+    args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+    hdr_op = (request.headers.get("X-MT-Op") or "").strip()
+    if not op or (hdr_op and hdr_op != op):
+        return jsonify({"ok": False, "error": {"code": "invalid_args",
+                                               "message": "operation is required"}}), 400
+    with plugin_ui.slot(pid) as _slot:
+        if not _slot.got:
+            return jsonify({"ok": False, "error": {"code": "busy",
+                                                   "message": "too many concurrent calls"}}), 429
+        res = plugin_rt.runtime.invoke_ui(pid, page, op, args)
+    if not _ui_session_valid_now(pid, page, sid, "trusted"):
+        return jsonify({"ok": False, "error": {"code": "closed",
+                                               "message": "view was closed"}}), 403
+    try:
+        store.log_event("plugin", "ui[%s] %s.%s %s"
+                        % (plugin_ui.view_id(sid), pid, op,
+                           "ok" if res.get("ok") else "error"))
+    except Exception:
+        pass
+    code = (res.get("error") or {}).get("code") if not res.get("ok") else ""
+    return jsonify(res), (200 if res.get("ok") else _ui_envelope_status(code))
+
+
+@app.route("/extensions/<pid>/<page>/dispose", methods=["POST"])
+def extension_dispose(pid, page):
+    if not _same_origin_ok():
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "cross-site request refused"}}), 403
+    sid = (request.headers.get("X-MT-Session") or "").strip()
+    sess = plugin_ui.get_session(sid, pid, page)
+    if sess and sess.get("mode") == "composed":
+        with plugin_ui.slot(pid) as _slot:
+            if _slot.got:
+                try:
+                    plugin_rt.runtime.ui_close(pid, sess.get("state") or {})
+                except Exception:
+                    pass
+    plugin_ui.dispose(sid)
+    return jsonify({"ok": True})
+
+
+@app.route("/extensions/<pid>/<page>/status")
+def extension_status(pid, page):
+    # Bounded-poll validity check. It has no cross-view effect: an unknown/forged
+    # caller is reported invalid and nothing is dropped; only the caller's own
+    # session is disposed (and only for a same-origin request) when it is no
+    # longer valid.
+    sid = (request.headers.get("X-MT-Session") or "").strip()
+    sess = plugin_ui.get_session(sid, pid, page)
+    if not sess:
+        # Unknown/forged/session-less caller: report invalid but DO NOT drop other
+        # live views (AR2-4).
+        return jsonify({"ok": True, "valid": False, "revision": 0})
+    row = plugins.get(pid)
+    valid = bool(row and row.get("enabled"))
+    if valid and plugins.ui_mode(row) == "trusted":
+        valid = plugin_ui.is_approved(row) and \
+            sess.get("generation") == int(plugin_ui.approval(pid).get("approved_at") or 0)
+    if not valid and _same_origin_ok():
+        plugin_ui.dispose(sid)
+    return jsonify({"ok": True, "valid": valid,
+                    "revision": sess.get("revision", 0)})
+
+
+@app.route("/plugins/<pid>/ui-approve", methods=["POST"])
+def plugin_ui_approve(pid):
+    if not _same_origin_ok():
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "cross-site request refused"}}), 403
+    row = plugins.get(pid)
+    if not row or plugins.ui_mode(row) != "trusted":
+        flash("No trusted browser view to approve.", "warn")
+        return redirect(url_for("plugin_detail", pid=pid))
+    plugin_ui.approve(pid, row)
+    flash("Browser view approved for this exact content. It runs code that can transmit "
+          "any data it receives (including mail) by navigating itself - this is NOT limited "
+          "by the plugin's net.http grants.", "warn")
+    return redirect(url_for("plugin_detail", pid=pid))
+
+
+@app.route("/plugins/<pid>/ui-revoke", methods=["POST"])
+def plugin_ui_revoke(pid):
+    if not _same_origin_ok():
+        return jsonify({"ok": False, "error": {"code": "forbidden",
+                                               "message": "cross-site request refused"}}), 403
+    plugin_ui.revoke(pid)
+    flash("Browser view approval revoked; its page will not run.", "info")
+    return redirect(url_for("plugin_detail", pid=pid))
+
+
+EXTENSION_TMPL = r"""
+<style>
+{{ comp_css|safe }}
+.mt-ext-frame{width:100%;height:calc(100vh - 300px);min-height:380px;border:1px solid var(--line);
+background:var(--card);display:block}
+.ext-bad{margin:8px 0 0;color:var(--err);font-size:.85rem}
+.ext-warn{margin:0 0 10px;border:1px solid var(--warn);background:var(--tint-warn);color:#5c3300;
+padding:9px 12px;font-size:.84rem}
+</style>
+<div class="page-head">
+  <div style="min-width:0">
+    <a class="backlink sub" href="{{ url_for('plugin_detail', pid=pid) }}">&lsaquo; {{ name }}</a>
+    <h1 class="page-title">{{ p.title }}</h1>
+    <div class="page-desc">{{ p.description or 'Plugin page' }} &middot; <span class="mono">{{ pid }}</span></div>
+  </div>
+  <div class="sub" id="mt-ext-status" role="status" aria-live="polite">Loading&hellip;</div>
+</div>
+{% if mode == 'composed' %}
+<div id="mt-ext" class="mtc-root" data-mode="composed">
+  <div id="mt-tree" class="mtc-tree">{{ tree_html|safe }}</div>
+  <div class="ext-bad" id="mt-ext-error" hidden></div>
+</div>
+{% else %}
+<div id="mt-ext" data-mode="trusted">
+  <div class="ext-warn" role="note">This view runs plugin browser code. It can send any data
+  it receives - including mail text - by navigating itself, and that is not limited by the
+  plugin's declared network grants. Only approve plugins you trust.</div>
+  <iframe id="mt-ext-frame" class="mt-ext-frame" sandbox="allow-scripts"
+          referrerpolicy="no-referrer" title="{{ p.title }}" srcdoc="{{ srcdoc }}"></iframe>
+  <noscript><div class="ext-bad">This page needs JavaScript.</div></noscript>
+  <div class="ext-bad" id="mt-ext-error" hidden></div>
+</div>
+{% endif %}
+<script type="application/json" id="mt-ext-cfg">{{ cfg_json|safe }}</script>
+<script>
+(function(){
+  "use strict";
+  var cfg = {};
+  try { cfg = JSON.parse((document.getElementById('mt-ext-cfg')||{}).textContent || '{}'); } catch(e){}
+  var status = document.getElementById('mt-ext-status');
+  var errorEl = document.getElementById('mt-ext-error');
+  var disposed = false;
+  var pollT = null;
+  var cleanups = [];
+  function on(target, type, fn){ if(!target) return; target.addEventListener(type, fn); cleanups.push(function(){ try{ target.removeEventListener(type, fn); }catch(e){} }); }
+  function setStatus(t){ if(status){ status.textContent = t || ''; } }
+  function showError(msg){ if(errorEl){ errorEl.hidden = false; errorEl.textContent = msg; } }
+  function clearTree(){ var t=document.getElementById('mt-tree'); if(t) t.textContent=''; }
+  function teardown(){
+    if(disposed) return;
+    disposed = true;
+    if(pollT){ clearInterval(pollT); pollT = null; }
+    while(cleanups.length){ try{ cleanups.pop()(); }catch(e){} }
+    try {
+      fetch(cfg.base + '/dispose', {method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-MT-Session':cfg.sid}, body:'{}', keepalive:true});
+    } catch(e){}
+  }
+  function fail(msg){ clearTree(); showError(msg); teardown(); }
+  function poll(){
+    if(disposed) return;
+    fetch(cfg.base + '/status', {credentials:'same-origin',
+      headers:{'X-MT-Session': cfg.sid}}).then(function(r){ return r.json(); })
+      .then(function(j){
+        if(disposed) return;
+        if(j && j.ok && j.valid) return;
+        fail('This plugin page was closed (the plugin was disabled, unapproved or changed). Reload to retry.');
+      }).catch(function(){});
+  }
+  on(window, 'pagehide', teardown);
+  on(document, 'turbo:before-cache', teardown);
+  on(document, 'turbo:before-render', teardown);
+  on(document, 'turbo:before-visit', teardown);
+  if(window.__mtExt && window.__mtExt.teardown){ try{ window.__mtExt.teardown(); }catch(e){} }
+  window.__mtExt = {teardown: teardown};
+
+  if(cfg.mode === 'composed'){
+    var tree = document.getElementById('mt-tree');
+    var revision = cfg.revision || 0;
+    var busy = false;
+    function applyView(v){
+      v = (v === 'reader') ? 'reader' : 'list';
+      tree.querySelectorAll('.mtc-split').forEach(function(s){
+        s.classList.toggle('mtc-view-reader', v === 'reader');
+        s.classList.toggle('mtc-view-list', v !== 'reader');
+      });
+      tree.querySelectorAll('[data-mt-event="back"]').forEach(function(b){ b.classList.add('mtc-mobile-back'); });
+    }
+    function apply(res){
+      if(disposed || !res) return;
+      if(!res.ok){
+        showError(String((res.error && res.error.message) || 'Request failed.'));
+        setStatus('');
+        return;
+      }
+      errorEl.hidden = true;
+      if(typeof res.html === 'string') tree.innerHTML = res.html;
+      applyView(res.view || cfg.view);
+      if(res.revision) revision = res.revision;
+      if(res.url){
+        var cur = location.pathname + location.search;
+        if(res.url !== cur){
+          history[res.replace ? 'replaceState' : 'pushState'](
+            Object.assign({}, history.state || {}, {mtExt: 1}), '', res.url);
+        }
+      }
+      setStatus('');
+    }
+    function dispatch(ev, value){
+      if(disposed || busy) return;
+      busy = true;
+      setStatus('Working\u2026');
+      var prior = document.activeElement;
+      var priorEv = prior && prior.getAttribute ? prior.getAttribute('data-mt-event') : null;
+      fetch(cfg.base + '/dispatch', {method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-MT-Session':cfg.sid},
+        body: JSON.stringify({event: ev, value: (value === undefined ? null : value), revision: revision})
+      }).then(function(r){ return r.json(); }).then(function(res){
+        apply(res);
+        if(priorEv){ var n=document.querySelector('[data-mt-event="'+priorEv+'"]'); if(n && n.focus) n.focus(); }
+      }).catch(function(){ showError('Request failed. Reload to retry.'); })
+        .then(function(){ busy = false; });
+    }
+    on(document, 'click', function(e){
+      var m = e.target && e.target.closest ? e.target.closest('[data-mt-event]') : null;
+      if(!m || m.tagName === 'INPUT') return;
+      e.preventDefault();
+      dispatch(m.getAttribute('data-mt-event'), m.getAttribute('data-mt-value'));
+    });
+    on(document, 'keydown', function(e){
+      if(e.key !== 'Enter') return;
+      var m = e.target && e.target.closest ? e.target.closest('[data-mt-event]') : null;
+      if(m && m.tagName === 'INPUT'){ e.preventDefault(); dispatch(m.getAttribute('data-mt-event'), m.value); }
+    });
+    (function(){
+      var tabs = document.getElementById('mt-tree');
+      if(!tabs) return;
+      on(tabs, 'click', function(e){
+        var b = e.target && e.target.closest ? e.target.closest('[data-mt-tab]') : null;
+        if(!b) return;
+        var idx = parseInt(b.getAttribute('data-mt-tab'), 10);
+        var bar = b.parentNode;
+        bar.querySelectorAll('[data-mt-tab]').forEach(function(x){ x.classList.remove('on'); });
+        b.classList.add('on');
+        var wrap = b.closest('.mtc-tabs');
+        if(wrap){ wrap.querySelectorAll('.mtc-tabpanel').forEach(function(p, i){ p.hidden = i !== idx; }); }
+      });
+    })();
+    applyView(cfg.view);
+    on(window, 'popstate', function(){ if(!disposed) location.reload(); });
+    setStatus('');
+  } else {
+    var frame = document.getElementById('mt-ext-frame');
+    var pending = {}, seq = 0, handshaken = false, bridged = false, port = null;
+    var watchdog = null, heartbeatT = null, checkT = null, lastPong = 0;
+    function post(msg){ if(port){ try{ port.postMessage(msg); }catch(e){} } }
+    function theme(){
+      var cs = window.getComputedStyle(document.documentElement);
+      var names = ['--fg','--bg','--dim','--line','--line2','--card','--card2','--acc',
+                   '--ok','--warn','--err','--hover','--focus','--mono'];
+      var out = {};
+      for(var i=0;i<names.length;i++){ var v=cs.getPropertyValue(names[i]); if(v) out[names[i]]=v.trim(); }
+      return out;
+    }
+    function layout(){ return (window.matchMedia && window.matchMedia('(max-width:767px)').matches) ? 'mobile':'desktop'; }
+    function rpc(op, args){
+      if(disposed) return Promise.reject(new Error('disposed'));
+      var id = 'r' + (++seq);
+      var ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      pending[id] = ac;
+      var timer = setTimeout(function(){ if(ac) ac.abort(); }, 20000);
+      return fetch(cfg.base + '/rpc', {method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-MT-Session':cfg.sid,'X-MT-Op':op},
+        body: JSON.stringify({op: op, args: args || {}}),
+        signal: ac ? ac.signal : undefined
+      }).then(function(r){ return r.json().catch(function(){ return {ok:false,error:{code:'internal',message:'invalid response'}}; }); })
+        .then(function(j){ clearTimeout(timer); delete pending[id]; if(disposed) throw new Error('disposed'); return j; },
+              function(err){ clearTimeout(timer); delete pending[id];
+                var ab = err && err.name === 'AbortError';
+                return {ok:false, error:{code: ab?'timeout':'network', message: ab?'request timed out':'request failed'}}; });
+    }
+    function onPortMessage(e){
+      if(disposed) return;
+      var d = e.data;
+      if(!d || d.__mt !== 1) return;
+      if(d.sid && d.sid !== cfg.sid) return;
+      if(d.kind === 'ready'){
+        post({__mt:1, sid:cfg.sid, kind:'theme', theme:theme(), config:cfg.initial});
+        post({__mt:1, sid:cfg.sid, kind:'layout', layout:layout()});
+        if(!bridged){
+          bridged = true;
+          lastPong = Date.now();
+          heartbeatT = setInterval(function(){ if(!disposed) post({__mt:1, sid:cfg.sid, kind:'ping'}); }, 2000);
+          checkT = setInterval(function(){
+            if(!disposed && Date.now() - lastPong > 6000){
+              fail('The plugin view stopped responding; its bridge was closed. Reload to retry.');
+            }
+          }, 2000);
+        }
+      } else if(d.kind === 'pong'){
+        lastPong = Date.now();
+      } else if(d.kind === 'call'){
+        if(!d.op || cfg.ops.indexOf(d.op) < 0){
+          post({__mt:1, sid:cfg.sid, kind:'result', id:d.id, ok:false, error:{code:'forbidden', message:'operation not allowed'}});
+          return;
+        }
+        rpc(d.op, d.args).then(function(res){
+          if(disposed) return;
+          post({__mt:1, sid:cfg.sid, kind:'result', id:d.id, ok:!!res.ok, data:res.data, error:res.error, summary:res.summary});
+        });
+      } else if(d.kind === 'nav'){
+        try {
+          var url = new URL(location.href);
+          if(typeof d.q === 'string'){ if(d.q) url.searchParams.set('q', d.q.slice(0,200)); else url.searchParams.delete('q'); }
+          if(typeof d.message === 'string'){ if(d.message) url.searchParams.set('message', d.message.slice(0,20)); else url.searchParams.delete('message'); }
+          var next = url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '');
+          if(next !== location.pathname + location.search){
+            history[d.replace ? 'replaceState' : 'pushState'](Object.assign({}, history.state || {}, {mtExt:1}), '', next);
+          }
+        } catch(e){}
+      } else if(d.kind === 'log'){
+        try{ console.log('[plugin ' + cfg.pid + '] ' + String(d.message||'').slice(0,500)); }catch(err){}
+      }
+    }
+    function onHello(e){
+      if(disposed || handshaken) return;
+      if(e.source !== frame.contentWindow) return;
+      var d = e.data;
+      if(!d || d.__mt_hello !== 1 || d.token !== cfg.bootToken) return;
+      handshaken = true;   // one-shot: a later remote page cannot re-establish
+      var ch = new MessageChannel();
+      port = ch.port1;
+      port.onmessage = onPortMessage;
+      if(port.start) port.start();
+      if(watchdog){ clearTimeout(watchdog); watchdog = null; }
+      try {
+        frame.contentWindow.postMessage({__mt_ack:1, token:cfg.bootToken, sid:cfg.sid,
+          boot:{v:1, pid:cfg.pid, page:cfg.page, ops:cfg.ops, state:cfg.initial}},
+          '*', [ch.port2]);
+      } catch(err){}
+      setStatus('');
+    }
+    on(window, 'message', onHello);
+    on(window, 'resize', function(){ if(!disposed) post({__mt:1, sid:cfg.sid, kind:'layout', layout:layout()}); });
+    on(window, 'popstate', function(){
+      var params = new URLSearchParams(location.search);
+      post({__mt:1, sid:cfg.sid, kind:'state', state:{q:params.get('q')||'', message:params.get('message')||''}});
+    });
+    cleanups.push(function(){ if(heartbeatT){ clearInterval(heartbeatT); heartbeatT = null; } });
+    cleanups.push(function(){ if(checkT){ clearInterval(checkT); checkT = null; } });
+    cleanups.push(function(){ if(port){ try{ port.onmessage = null; port.close(); }catch(e){} port = null; } });
+    cleanups.push(function(){ if(frame && frame.parentNode){ try{ frame.parentNode.removeChild(frame); }catch(e){} } });
+    watchdog = setTimeout(function(){
+      if(!handshaken && !disposed){ fail('The plugin view did not start.'); }
+    }, 4000);
+    setStatus('Loading\u2026');
+  }
+  pollT = setInterval(poll, 4000);
+})();
+</script>
+"""
 @app.route("/classifiers")
 def classifiers():
     hx = []
@@ -4092,8 +4954,9 @@ function stepSummary(st){
     st.mode = st.mode || 'template';
     if(st.mode === 'fixed') return 'fixed draft "' + String(st.body || '').slice(0, 40) + '" → Drafts';
     if(st.mode === 'plugin'){
+      var pp = PLUGINS.filter(function(x){ return x.id === st.plugin; })[0];
       var pt = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
-      return 'plugin draft (' + (st.plugin || '?') + ')' + (pt ? ' using "' + pt.name + '"' : '') + ' → Drafts';
+      return 'plugin draft (' + (pp ? pp.name : (st.plugin || 'pick a plugin')) + ')' + (pt ? ' using "' + pt.name + '"' : '') + ' → Drafts';
     }
     if(st.mode === 'llm') return 'LLM draft' + (st.instructions ? ' guided by "' + String(st.instructions).slice(0, 40) + '"' : '') + ' → Drafts';
     var t = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
@@ -4191,6 +5054,7 @@ function fieldsFor(st){
     } else if(st.mode === 'plugin'){
       f.appendChild(el('label', null, 'Plugin'));
       var pSel = el('select');
+      if(!PLUGINS.length){ var pnone = el('option', null, '(no draft plugins enabled)'); pnone.value = ''; pSel.appendChild(pnone); }
       PLUGINS.forEach(function(pp){ var o = el('option', null, pp.name); o.value = pp.id; if((st.plugin || '') === pp.id) o.selected = true; pSel.appendChild(o); });
       pSel.onchange = function(){ st.plugin = pSel.value; renderSummary(); sync(); };
       f.appendChild(pSel);
@@ -4200,7 +5064,9 @@ function fieldsFor(st){
       TEMPLATES.forEach(function(t){ var o = el('option', null, t.name); o.value = String(t.id); if(String(st.template_id || '') === String(t.id)) o.selected = true; ptSel.appendChild(o); });
       ptSel.onchange = function(){ st.template_id = ptSel.value; renderSummary(); sync(); };
       f.appendChild(ptSel);
-      f.appendChild(el('div', 'sub', 'Plugins that support it fill only the blocks wrapped in {llm-infill}...{/llm-infill}.'));
+      var hint = el('div', 'sub', 'Blocks wrapped in {llm-infill}...{/llm-infill} are written by plugins that support them; everything else stays as typed.');
+      hint.style.gridColumn = '1 / -1';
+      f.appendChild(hint);
       f.appendChild(el('label', null, 'Extra instructions (optional)'));
       var pa = document.createElement('textarea'); pa.rows = 2; pa.value = st.instructions || '';
       pa.placeholder = 'e.g. keep it to three sentences';
@@ -4255,6 +5121,7 @@ function render(){
   stepsEl.innerHTML = '';
   stepsEl.appendChild(edge(0));
   steps.forEach(function(st, i){
+    if(st.type === 'draft' && st.mode === 'plugin' && !st.plugin && PLUGINS.length) st.plugin = PLUGINS[0].id;
     var card = el('div','stepcard fl-node' + (st._open ? ' open' : ''));
     var head = el('div','fl-step-head');
     var info = typeInfo(st.type);

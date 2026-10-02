@@ -36,6 +36,10 @@ How this folder is organised: by what you need, not by when it was written.
   six kinds, assistant integration, and as-built notes
 - [plugins-authoring.md](plugins-authoring.md) - how to write, install and test a
   plugin (manifest, bundle contract, ctx API, grants; every kind)
+- [plugin-pages.md](plugin-pages.md) - plugin browser pages as built
+  (2026-10-02): the `ui` manifest block, the sandboxed opaque-origin frame + nonce
+  CSP, the host bridge / session / CSRF model, the page SDK components, lifecycle,
+  and the read-only `mt-mail-desk` demo
 - [plugins-ui.md](plugins-ui.md) - the Plugins page: the research (progressive
   disclosure, toggle patterns, VS Code / Chrome / Home Assistant precedents) and
   the applied list + detail redesign

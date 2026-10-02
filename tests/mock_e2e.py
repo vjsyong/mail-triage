@@ -4653,6 +4653,417 @@ def main():
     check("both scheduled tools get an assistant capability line",
           "plugin:mt-commitments" in _perms53 and "plugin:mt-subscription-watch" in _perms53)
 
+    section("T54 plugin UI manifest: composed + trusted modes")
+    shutil.copytree(os.path.join(PROJECT, "plugins", "mt-mail-desk"),
+                    os.path.join(broot, "mt-mail-desk"), dirs_exist_ok=True)
+    for _f in ("good-ui", "good-trusted"):
+        shutil.copytree(os.path.join(fx, _f), os.path.join(proot, _f), dirs_exist_ok=True)
+    plugins_mod.scan()
+    import plugin_ui as ui_mod
+    _uirow = plugins_mod.get("mt-mail-desk")
+    check("mail-desk registers a composed UI block",
+          bool(_uirow) and plugins_mod.ui_mode(_uirow) == "composed"
+          and plugins_mod.ui_page_declared(_uirow, "desk"))
+    _trow = plugins_mod.get("good-trusted")
+    check("trusted fixture registers with mode trusted and an op allowlist",
+          bool(_trow) and plugins_mod.ui_mode(_trow) == "trusted"
+          and plugins_mod.ui_operations(_trow) == ["ping_ui"])
+    check("old fixtures keep working without a ui block",
+          plugins_mod.get("good-demo") is not None
+          and plugins_mod.ui_pages(plugins_mod.get("good-demo")) == [])
+
+    def _ui_variant(name, base_name, mutate):
+        d = os.path.join(proot, name)
+        shutil.rmtree(d, ignore_errors=True)
+        shutil.copytree(os.path.join(fx, base_name), d)
+        p = os.path.join(d, "manifest.json")
+        m = json.load(open(p))
+        m["id"] = name
+        mutate(m, d)
+        json.dump(m, open(p, "w"))
+        return plugins_mod.load_manifest(d, "user")[3]
+
+    def _m_dup(m, d):
+        m["ui"]["pages"] = [{"id": "main", "title": "A"}, {"id": "main", "title": "B"}]
+
+    def _m_nav(m, d):
+        m["ui"]["navigation"] = [{"page": "nope", "label": "X"}]
+
+    def _m_icon(m, d):
+        m["ui"]["navigation"][0]["icon"] = "evil"
+
+    def _m_comp_entry(m, d):
+        m["ui"]["entrypoint"] = "ui/page.js"
+
+    def _m_comp_ops(m, d):
+        m["ui"]["operations"] = ["ping_ui"]
+
+    def _m_trust_entry(m, d):
+        m["ui"].pop("entrypoint", None)
+
+    def _m_trust_trav(m, d):
+        m["ui"]["entrypoint"] = "../../escape.js"
+
+    def _m_trust_markup(m, d):
+        open(os.path.join(d, "ui", "page.js"), "w").write("// </script>\n")
+
+    def _m_trust_op(m, d):
+        m["ui"]["operations"] = ["nope"]
+
+    def _m_trust_oprw(m, d):
+        m["tools"][0]["side_effects"] = "local_write"
+
+    _e_dup = _ui_variant("bad-ui-dup", "good-ui", _m_dup)
+    _e_nav = _ui_variant("bad-ui-nav", "good-ui", _m_nav)
+    _e_icon = _ui_variant("bad-ui-icon", "good-ui", _m_icon)
+    _e_ce = _ui_variant("bad-ui-comp-entry", "good-ui", _m_comp_entry)
+    _e_co = _ui_variant("bad-ui-comp-ops", "good-ui", _m_comp_ops)
+    _e_te = _ui_variant("bad-ui-trust-entry", "good-trusted", _m_trust_entry)
+    _e_tt = _ui_variant("bad-ui-trust-trav", "good-trusted", _m_trust_trav)
+    _e_tm = _ui_variant("bad-ui-trust-markup", "good-trusted", _m_trust_markup)
+    _e_top = _ui_variant("bad-ui-trust-op", "good-trusted", _m_trust_op)
+    _e_torw = _ui_variant("bad-ui-trust-oprw", "good-trusted", _m_trust_oprw)
+    check("duplicate ui page ids are rejected", any("unique" in e for e in _e_dup))
+    check("navigation to an undeclared page is rejected",
+          any("undeclared page" in e for e in _e_nav))
+    check("an unknown navigation icon is rejected", any("is not one of" in e for e in _e_icon))
+    check("composed ui must not declare a browser entrypoint",
+          any("must not declare ui.entrypoint" in e for e in _e_ce))
+    check("composed ui must not declare operations",
+          any("must not declare ui.operations" in e for e in _e_co))
+    check("trusted ui requires a browser entrypoint",
+          any("requires ui.entrypoint" in e for e in _e_te))
+    check("a traversing ui.entrypoint is rejected", any("escapes" in e for e in _e_tt))
+    check("a ui.entrypoint with a script-close marker is rejected",
+          any("script" in e for e in _e_tm))
+    check("trusted ui.operations must name a declared tool",
+          any("not a declared tool" in e for e in _e_top))
+    check("trusted ui.operations must be read-only",
+          any("read-only" in e for e in _e_torw))
+    plugins_mod.scan()
+
+    section("T55 trusted browser view: explicit approval + gating")
+    plugins_mod.set_enabled("good-trusted", True)
+    _tr = plugins_mod.get("good-trusted")
+    check("enabling a trusted plugin does not auto-approve its browser view",
+          plugins_mod.ui_mode(_tr) == "trusted" and not ui_mod.is_approved(_tr))
+    _r = client.get("/extensions/good-trusted/main")
+    check("an unapproved trusted view redirects and never executes",
+          _r.status_code in (301, 302, 303))
+    _r = client.post("/plugins/good-trusted/ui-approve", follow_redirects=False)
+    check("the approval action is CSRF-guarded", _r.status_code == 403)
+    client.post("/plugins/good-trusted/ui-approve",
+                headers={"Origin": "http://localhost"}, follow_redirects=False)
+    _tr = plugins_mod.get("good-trusted")
+    check("explicit approval enables the trusted view", ui_mod.is_approved(_tr))
+    _pg = client.get("/extensions/good-trusted/main")
+    check("an approved trusted view renders a sandboxed frame",
+          _pg.status_code == 200 and b'sandbox="allow-scripts"' in _pg.data
+          and b"allow-same-origin" not in _pg.data and b"mt-ext-frame" in _pg.data)
+    check("the trusted page discloses the residual egress warning",
+          b"navigating itself" in _pg.data)
+    check("the trusted bundle is gated (wrapper-function + hello/MessagePort bridge)",
+          b"__mt_bundle" in _pg.data and b"__mt_hello" in _pg.data
+          and b"MessageChannel" in _pg.data)
+    _mm = re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>', _pg.data, re.S)
+    _tcfg = json.loads(_mm.group(1).decode()) if _mm else {}
+    _tsid = _tcfg.get("sid") or ""
+    _r = client.post("/extensions/good-trusted/main/rpc",
+                     headers={"Origin": "http://localhost", "X-MT-Session": _tsid,
+                              "X-MT-Op": "ping_ui"},
+                     data=json.dumps({"op": "ping_ui", "args": {"note": "x"}}),
+                     content_type="application/json")
+    check("an approved trusted view runs only its declared ops",
+          (_r.get_json() or {}).get("ok") is True)
+    _r = client.post("/extensions/good-trusted/main/rpc",
+                     headers={"Origin": "http://localhost", "X-MT-Session": _tsid,
+                              "X-MT-Op": "nope"},
+                     data=json.dumps({"op": "nope", "args": {}}),
+                     content_type="application/json")
+    check("an undeclared trusted op is refused", _r.status_code == 403)
+    _r = client.post("/extensions/good-trusted/main/rpc",
+                     headers={"X-MT-Session": _tsid, "X-MT-Op": "ping_ui"},
+                     data=json.dumps({"op": "ping_ui", "args": {}}),
+                     content_type="application/json")
+    check("a cross-site trusted RPC is refused", _r.status_code == 403)
+    for _nb in ("[]", "null", '"x"', "123", "true"):
+        _rnb = client.post("/extensions/good-trusted/main/rpc",
+                           headers={"Origin": "http://localhost", "X-MT-Session": _tsid},
+                           data=_nb, content_type="application/json")
+        check("a non-object trusted RPC body is a typed 400 (%s)" % _nb,
+              _rnb.status_code == 400
+              and (_rnb.get_json() or {}).get("error", {}).get("code") == "bad_json")
+    _rnb = client.post("/extensions/good-trusted/main/rpc",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _tsid},
+                       data="{}", content_type="application/json")
+    check("an empty trusted RPC body is a typed invalid_args 400",
+          _rnb.status_code == 400
+          and (_rnb.get_json() or {}).get("error", {}).get("code") == "invalid_args")
+    _rnb = client.post("/extensions/good-trusted/main/rpc",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _tsid,
+                                "X-MT-Op": "ping_ui"},
+                       data=json.dumps({"op": "ping_ui", "args": {"note": "post-guard"}}),
+                       content_type="application/json")
+    check("a valid object trusted RPC still runs after the guard",
+          _rnb.status_code == 200 and (_rnb.get_json() or {}).get("ok") is True)
+    _tp = os.path.join(proot, "good-trusted", "ui", "page.js")
+    _orig_tp = open(_tp, encoding="utf-8").read()
+    with open(_tp, "a", encoding="utf-8") as fh:
+        fh.write("\n// tampered\n")
+    try:
+        check("editing approved content invalidates approval",
+              not ui_mod.is_approved(plugins_mod.get("good-trusted")))
+        _r = client.get("/extensions/good-trusted/main")
+        check("a tampered trusted view redirects", _r.status_code in (301, 302, 303))
+    finally:
+        open(_tp, "w", encoding="utf-8").write(_orig_tp)
+    client.post("/plugins/good-trusted/ui-revoke",
+                headers={"Origin": "http://localhost"}, follow_redirects=True)
+    check("revoking approval blocks the view again",
+          not ui_mod.is_approved(plugins_mod.get("good-trusted")))
+    client.post("/plugins/good-trusted/ui-approve",
+                headers={"Origin": "http://localhost"}, follow_redirects=False)
+    check("re-approval after revoke works", ui_mod.is_approved(plugins_mod.get("good-trusted")))
+    _gp = os.path.join(proot, "good-trusted")
+    _mf = json.load(open(os.path.join(_gp, "manifest.json")))
+    _mf["version"] = "0.1.1"
+    json.dump(_mf, open(os.path.join(_gp, "manifest.json"), "w"))
+    plugins_mod.scan()
+    check("a version/content upgrade invalidates a prior approval",
+          not ui_mod.is_approved(plugins_mod.get("good-trusted")))
+    plugins_mod.set_enabled("good-trusted", False)
+
+    section("T56 composed UI: tree pipeline, injection, effects, staleness")
+    plugins_mod.set_enabled("mt-mail-desk", True)
+    _home = client.get("/").data
+    check("enabling adds the plugin navigation entry",
+          b"/extensions/mt-mail-desk/desk" in _home and b"Mail Desk" in _home)
+    _pg = client.get("/extensions/mt-mail-desk/desk")
+    _h = _pg.data
+    check("the composed page renders a validated tree in the host shell",
+          _pg.status_code == 200 and b"mtc-tree" in _h
+          and b"Search the local index to begin" in _h)
+    check("the composed page embeds no plugin browser code or iframe",
+          b'id="mt-ext-frame"' not in _h and b"__mt_ui" not in _h)
+    check("extension responses deny framing (X-Frame-Options + CSP frame-ancestors)",
+          _pg.headers.get("X-Frame-Options") == "DENY"
+          and "frame-ancestors 'none'" in (_pg.headers.get("Content-Security-Policy") or ""))
+    _mm = re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>', _h, re.S)
+    _cfg = json.loads(_mm.group(1).decode()) if _mm else {}
+    _sid = _cfg.get("sid") or ""
+    check("the composed page carries a view session and revision",
+          len(_sid) >= 20 and _cfg.get("mode") == "composed" and _cfg.get("revision") == 0)
+
+    def _disp(pid, page, event, value, revision, sid=None, origin="http://localhost"):
+        headers = {}
+        if origin is not None:
+            headers["Origin"] = origin
+        if sid is not None:
+            headers["X-MT-Session"] = sid
+        return client.post("/extensions/%s/%s/dispatch" % (pid, page), headers=headers,
+                           data=json.dumps({"event": event, "value": value, "revision": revision}),
+                           content_type="application/json")
+
+    _r = _disp("mt-mail-desk", "desk", "search", "INV-77", 0, _sid)
+    _j = _r.get_json() or {}
+    _html = _j.get("html") or ""
+    check("a search event runs the controller and returns a validated tree",
+          _r.status_code == 200 and _j.get("ok")
+          and "Your invoice INV-77" in _html)
+    _rev = _j.get("revision")
+    _msel = re.search(r'data-mt-value="(\d+)"', _html)
+    _mid = _msel.group(1) if _msel else "1"
+    _r = _disp("mt-mail-desk", "desk", "select", _mid, _rev, _sid)
+    _j2 = _r.get_json() or {}
+    check("a select event updates the reader and the URL",
+          _j2.get("ok") and "880 HKD" in (_j2.get("html") or "")
+          and ("message=" + _mid) in (_j2.get("url") or ""))
+    check("a select view hint drives the mobile pane and the back control",
+          _j2.get("view") == "reader" and 'data-mt-event="back"' in (_j2.get("html") or ""))
+    _dl = client.get("/extensions/mt-mail-desk/desk?q=INV-77&message=%s" % _mid)
+    _dl_body = _dl.data.split(b'mtc-reader-body">', 1)[1][:500] \
+        if b'mtc-reader-body">' in _dl.data else b""
+    check("a q/message deep link reopens the reader with the indexed body",
+          _dl.status_code == 200 and b"880 HKD" in _dl_body)
+    _rev = _j2.get("revision")
+    _r = _disp("mt-mail-desk", "desk", "nuke", "x", _rev, _sid)
+    check("an event absent from the rendered tree is refused", _r.status_code == 403)
+    _r = _disp("mt-mail-desk", "desk", "refresh", None, 0, _sid)
+    check("a stale revision is refused", _r.status_code == 409)
+    _r = _disp("mt-mail-desk", "desk", "search", "x", _rev, _sid, origin=None)
+    check("a cross-site dispatch is refused", _r.status_code == 403)
+    _r = client.post("/extensions/mt-mail-desk/desk/dispatch",
+                     headers={"Origin": "http://localhost", "X-MT-Session": _sid},
+                     data=json.dumps({"event": "search", "value": "x" * (70 * 1024),
+                                      "revision": _rev}), content_type="application/json")
+    check("an oversized dispatch body is refused", _r.status_code in (400, 413))
+    for _nb in ("[]", "null", '"x"', "123", "true"):
+        _rnb = client.post("/extensions/mt-mail-desk/desk/dispatch",
+                           headers={"Origin": "http://localhost", "X-MT-Session": _sid},
+                           data=_nb, content_type="application/json")
+        check("a non-object composed dispatch body is a typed 400 (%s)" % _nb,
+              _rnb.status_code == 400
+              and (_rnb.get_json() or {}).get("error", {}).get("code") == "bad_json")
+    _rnb = client.post("/extensions/mt-mail-desk/desk/dispatch",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _sid},
+                       data="{}", content_type="application/json")
+    check("an empty composed dispatch body is a typed invalid_args 400",
+          _rnb.status_code == 400
+          and (_rnb.get_json() or {}).get("error", {}).get("code") == "invalid_args")
+    _r = client.get("/extensions/mt-mail-desk/desk/status", headers={"X-MT-Session": _sid})
+    check("the status endpoint reports a live view", (_r.get_json() or {}).get("valid") is True)
+    _rnb = client.post("/extensions/mt-mail-desk/desk/dispatch",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _sid},
+                       data=json.dumps({"event": "search", "value": "INV-77", "revision": _rev}),
+                       content_type="application/json")
+    check("a valid object body still dispatches after the guard",
+          _rnb.status_code == 200 and (_rnb.get_json() or {}).get("ok") is True)
+    _r = client.get("/extensions/mt-mail-desk/desk/status")
+    check("a session-less status probe is side-effect-free",
+          (_r.get_json() or {}).get("valid") is False)
+    _r = client.get("/extensions/mt-mail-desk/desk/status",
+                    headers={"X-MT-Session": "forged-forged-forged"})
+    check("a forged-session status probe is side-effect-free",
+          (_r.get_json() or {}).get("valid") is False)
+    _r = client.get("/extensions/mt-mail-desk/desk/status", headers={"X-MT-Session": _sid})
+    check("a live view survives session-less/forged status probes",
+          (_r.get_json() or {}).get("valid") is True)
+    with store.db() as conn:
+        _na = conn.execute("SELECT COUNT(*) AS n FROM events "
+                           "WHERE message LIKE 'ui[view-%mt-mail-desk%'").fetchone()["n"]
+    check("UI calls are audited with a non-secret view id", _na >= 1)
+    plugins_mod.set_enabled("mt-mail-desk", False)
+    _r = client.get("/extensions/mt-mail-desk/desk/status", headers={"X-MT-Session": _sid})
+    check("disabling invalidates the composed view", (_r.get_json() or {}).get("valid") is False)
+    _r = client.get("/extensions/mt-mail-desk/desk")
+    check("a disabled plugin page redirects", _r.status_code in (301, 302, 303))
+    plugins_mod.set_enabled("mt-mail-desk", True)
+
+    section("T57 composed components + injection/effects/exhaustion")
+    plugins_mod.set_enabled("good-ui", True)
+
+    def _gsid_for(pid, page):
+        _x = client.get("/extensions/%s/%s" % (pid, page))
+        _mmx = re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>', _x.data, re.S)
+        return (json.loads(_mmx.group(1).decode()) if _mmx else {}).get("sid") or "", _x.data
+
+    _gsid, _gpage = _gsid_for("good-ui", "main")
+    _r = _disp("good-ui", "main", "go", "general", 0, _gsid)
+    _gj = _r.get_json() or {}
+    _gh = _gj.get("html") or ""
+    check("general components render (tabs/menu/dialog/input/list/state)",
+          _gj.get("ok") and "mtc-tab" in _gh and "mtc-menu-item" in _gh
+          and "mtc-dialog" in _gh and "mtc-field" in _gh
+          and "mtc-list-item" in _gh and "mtc-state" in _gh)
+    check("rendered trees contain no script/iframe/url/handler sink",
+          "<script" not in _gh.lower() and "<iframe" not in _gh.lower()
+          and "href=" not in _gh and "onerror" not in _gh and "srcdoc" not in _gh.lower())
+
+    def _bad_rejected(v):
+        _sx, _ = _gsid_for("good-ui", "main")
+        _rr = _disp("good-ui", "main", "go", v, 0, _sx)
+        return _rr.status_code == 400
+
+    check("an unknown component type is rejected", _bad_rejected("bad_type"))
+    check("an arbitrary DOM prop (href) is rejected", _bad_rejected("bad_prop"))
+    check("a handler prop is rejected", _bad_rejected("bad_handler"))
+    check("a prototype-key node is rejected", _bad_rejected("bad_proto"))
+    check("tree exhaustion is rejected", _bad_rejected("big"))
+    _bsid, _ = _gsid_for("good-ui", "main")
+    _r = _disp("good-ui", "main", "go", "boom", 0, _bsid)
+    _bj = _r.get_json() or {}
+    check("a controller exception surfaces as a typed error, not a crash",
+          (not _bj.get("ok")) and bool(_bj.get("error")))
+    _x = client.get("/extensions/good-ui/main")
+    check("the host is still usable after a controller exception",
+          _x.status_code == 200 and b"mtc-tree" in _x.data)
+
+    _esid, _ = _gsid_for("good-ui", "main")
+    _r = _disp("good-ui", "main", "go", "effects", 0, _esid)
+    _eh = (_r.get_json() or {}).get("html") or ""
+    check("composed controller execution denies net/llm/action/kv-write host effects",
+          "http:denied" in _eh and "llm:denied" in _eh
+          and "propose:denied" in _eh and "kvset:denied" in _eh)
+    check("composed controller execution allows mail read + kv read",
+          "mail:allowed" in _eh and "kvget:allowed" in _eh)
+    check("the composed page never embeds plugin frontend script",
+          b"RawHTML" not in _gpage and b"__mt_ui" not in _gpage)
+    check("a JSON list/dict component type is rejected", _bad_rejected("type_list")
+          and _bad_rejected("type_dict"))
+    check("deeply nested controller state is rejected", _bad_rejected("deep_state"))
+
+    # AR2-2 unit-level: non-string type and deep state must raise UiError, not TypeError/RecursionError
+    def _ui_raises(fn):
+        try:
+            fn()
+            return False
+        except ui_mod.UiError:
+            return True
+        except Exception:
+            return False
+    check("validate_tree maps a list type to UiError",
+          _ui_raises(lambda: ui_mod.validate_tree({"type": []})))
+    check("validate_tree maps a dict type to UiError",
+          _ui_raises(lambda: ui_mod.validate_tree({"type": {}})))
+    _deep = {}
+    _cur = _deep
+    for _i in range(3000):
+        _cur["n"] = {}
+        _cur = _cur["n"]
+    check("validate_state rejects pathological nesting before serializing",
+          _ui_raises(lambda: ui_mod.validate_state(_deep)))
+    # deeply nested raw JSON body must not 500
+    _deepbody = "[" * 3000 + "]" * 3000
+    _r = client.post("/extensions/good-ui/main/dispatch",
+                     headers={"Origin": "http://localhost", "X-MT-Session": _gsid},
+                     data=_deepbody, content_type="application/json")
+    check("a deeply nested raw JSON body is a typed 400, not a 500",
+          _r.status_code == 400)
+
+    # AR2-1: per-call capability profile is thread-local (no shared-slot race)
+    import threading as _th
+    _rt = rt_mod.runtime
+    _enable_pid = "good-ui"
+    _bar = _th.Barrier(2)
+    _seen = {}
+    def _probe(name, profile):
+        _rt._tls.profile = profile
+        _bar.wait()
+        _seen[name] = _rt._host(_enable_pid, "kv.set", "{}")
+    _t1 = _th.Thread(target=_probe, args=("ui", "ui"))
+    _t2 = _th.Thread(target=_probe, args=("plain", None))
+    _t1.start(); _t2.start(); _t1.join(); _t2.join()
+    check("the UI capability profile is per-call, not shared across threads",
+          "not granted" in _seen.get("ui", "") or "denied" in _seen.get("ui", "")
+          or "composed UI" in _seen.get("ui", ""))
+    check("a non-UI call is not denied by a concurrent UI call",
+          "not granted" not in _seen.get("plain", ""))
+
+    # functional concurrency: composed effects probe while a non-UI tool runs
+    _res = {}
+    _bar2 = _th.Barrier(2)
+    def _run_dispatch():
+        _sx, _ = _gsid_for("good-ui", "main")
+        _bar2.wait()
+        _res["dispatch"] = _disp("good-ui", "main", "go", "effects", 0, _sx).get_json() or {}
+    def _run_tool():
+        _bar2.wait()
+        _res["tool"] = _rt.invoke("good-ui", "ping_ui", {"note": "x"})
+    _ta = _th.Thread(target=_run_dispatch); _tb = _th.Thread(target=_run_tool)
+    _ta.start(); _tb.start(); _ta.join(); _tb.join()
+    _conc_html = _res.get("dispatch", {}).get("html") or ""
+    check("UI read-only subset holds while a non-UI tool runs concurrently",
+          "http:denied" in _conc_html and "llm:denied" in _conc_html
+          and "kvset:denied" in _conc_html and _res.get("tool", {}).get("ok") is True)
+
+    # orchestrator extra: post-op revalidation + session validity helper
+    _rv_sid, _ = _gsid_for("good-ui", "main")
+    check("a live session revalidates true",
+          app_mod._ui_session_valid_now("good-ui", "main", _rv_sid, "composed") is True)
+    ui_mod.dispose(_rv_sid)
+    check("a disposed session revalidates false",
+          app_mod._ui_session_valid_now("good-ui", "main", _rv_sid, "composed") is False)
+    plugins_mod.set_enabled("good-ui", False)
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:

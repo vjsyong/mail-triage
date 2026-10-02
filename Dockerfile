@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY config.py store.py engine.py app.py rag.py rag_lite.py heuristics.py proxy.py learning.py plugins.py plugin_rt.py plugin_worker.py ./
+COPY config.py store.py engine.py app.py rag.py rag_lite.py heuristics.py proxy.py learning.py plugins.py plugin_rt.py plugin_worker.py plugin_ui.py ./
 COPY schemas/ /app/schemas/
 COPY sdk/ /app/sdk/
 COPY plugins/ /app/plugins/

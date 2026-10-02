@@ -56,6 +56,12 @@ HOST_GRANT = {
     "http.fetch": "net.http",
 }
 
+# Composed-UI controller execution runs with a read-only host capability subset:
+# config/plugin info/log, mailbox read/search, kv.get/list. Everything that can
+# mutate or leave the box is denied for UI-originated calls (net/llm/propose/kv writes).
+UI_HOST_ALLOW = {"plugin.info", "log", "config.get", "mail.search", "mail.read",
+                 "kv.get", "kv.list"}
+
 
 class _HostError(Exception):
     def __init__(self, code, message):
@@ -351,6 +357,7 @@ class PluginRuntime:
         self._workers = {}
         self._locks = {}
         self._strikes = {}
+        self._tls = threading.local()
         self._guard = threading.Lock()
 
     # ---- lifecycle
@@ -407,7 +414,18 @@ class PluginRuntime:
                 continue
             return "msg", msg
 
-    def _call_worker(self, plugin_id, row, cmd):
+    def _call_worker(self, plugin_id, row, cmd, profile=None):
+        # Capability profile is per-call and thread-local: the host bridge pumps
+        # on THIS thread inside _call_worker_inner, so a concurrent call for the
+        # same plugin (matcher/schedule/tool) can never overwrite it (AR2-1).
+        prev = getattr(self._tls, "profile", None)
+        self._tls.profile = profile
+        try:
+            return self._call_worker_inner(plugin_id, row, cmd)
+        finally:
+            self._tls.profile = prev
+
+    def _call_worker_inner(self, plugin_id, row, cmd):
         """Send one command to the plugin worker and pump until its reply.
 
         Returns (status, payload): status in ok | load | spawn | write |
@@ -662,6 +680,9 @@ class PluginRuntime:
         row = kernel.get(plugin_id)
         if not row or not row.get("enabled"):
             return _err_json("denied", "plugin '%s' is not enabled" % plugin_id)
+        if getattr(self._tls, "profile", None) == "ui" and name not in UI_HOST_ALLOW:
+            return _err_json("denied",
+                             "capability '%s' is not available to the composed UI" % name)
         try:
             payload = json.loads(payload_json or "{}")
         except ValueError:
@@ -793,6 +814,74 @@ class PluginRuntime:
             return self._strike(plugin_id, "timeout",
                                 "plugin timed out after %dms (worker killed)" % payload)
         return self._strike(plugin_id, "internal", str(payload))
+
+    def invoke_ui(self, plugin_id, page, op, args):
+        """Route one trusted browser-view operation through the sandbox path.
+
+        The caller (app.py) has already checked the view session, approval and
+        rate limits; here we re-check enable/mode/page/allowlist, then run the
+        tool through invoke() so grants/limits/audit apply unchanged."""
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled"):
+            return {"ok": False, "error": {"code": "disabled",
+                                           "message": "plugin is disabled"}}
+        if kernel.ui_mode(row) != "trusted":
+            return {"ok": False, "error": {"code": "forbidden",
+                                           "message": "plugin has no trusted browser view"}}
+        if not kernel.ui_page_declared(row, page):
+            return {"ok": False, "error": {"code": "not_found",
+                                           "message": "unknown page"}}
+        if op not in kernel.ui_operations(row):
+            return {"ok": False, "error": {"code": "forbidden",
+                                           "message": "operation not declared for the browser UI"}}
+        res = self.invoke(plugin_id, op, args or {})
+        if res.get("ok"):
+            data = res.get("result")
+            data = data if isinstance(data, dict) else {"data": data}
+            return {"ok": True, "data": data, "summary": res.get("summary") or ""}
+        err = {}
+        if isinstance(res.get("result"), dict):
+            err = res["result"].get("error") or {}
+        code = err.get("code") or "internal"
+        message = err.get("message") or res.get("summary") or "call failed"
+        if code == "internal" and "denied" in str(message).lower():
+            code = "denied"
+        return {"ok": False, "error": {"code": code, "message": message}}
+
+    # ---- composed controller execution (read-only host capability subset)
+
+    def _ui_call(self, plugin_id, cmd, payload):
+        row = kernel.get(plugin_id)
+        if not row or not row.get("enabled"):
+            return {"error": {"code": "disabled", "message": "plugin is disabled"}}
+        if kernel.ui_mode(row) != "composed" and cmd != "ui_close":
+            return {"error": {"code": "forbidden",
+                              "message": "plugin has no composed UI controller"}}
+        if not self.available():
+            return {"error": {"code": "internal", "message": "runtime unavailable"}}
+        status, res = self._call_worker(plugin_id, row,
+                                        {"cmd": cmd, "input": payload or {}}, profile="ui")
+        if status != "ok":
+            if status == "timeout":
+                return {"error": {"code": "timeout",
+                                  "message": "controller timed out after %s ms" % res}}
+            return {"error": {"code": "internal", "message": str(res)[:200]}}
+        if isinstance(res, dict) and "error" in res:
+            e = res.get("error") or {}
+            return {"error": {"code": str(e.get("code") or "internal"),
+                              "message": str(e.get("message") or "")[:300]}}
+        out = res.get("result") if isinstance(res, dict) else None
+        return {"result": out if isinstance(out, dict) else None}
+
+    def ui_open(self, plugin_id, initial_state):
+        return self._ui_call(plugin_id, "ui_open", {"state": initial_state or {}})
+
+    def ui_dispatch(self, plugin_id, state, event):
+        return self._ui_call(plugin_id, "ui_dispatch",
+                             {"state": state or {}, "event": event or {}})
+
+    def ui_close(self, plugin_id, state):
+        return self._ui_call(plugin_id, "ui_close", {"state": state or {}})
 
 
 def _validate_args(params, args):
