@@ -3956,7 +3956,7 @@ FLOW_EDIT_TMPL = """
         {% for i in range(5) %}
         {% set c = conditions[i] if conditions|length > i else {} %}
         {% set ck = c.get('kind') or 'field' %}
-        <div class="cond-row k-{{ ck }}{{ ' extra' if i >= 2 and not c else '' }}" data-row="{{ i }}">
+        <div class="cond-row k-{{ ck }}{{ ' extra' if not c else '' }}" data-row="{{ i }}">
           <select class="k-sel" name="cond_kind_{{ i }}" aria-label="Filter {{ i+1 }} kind" onchange="condKind(this)">
             <option value="field" {{ 'selected' if ck == 'field' else '' }}>match</option>
             <option value="category" {{ 'selected' if ck == 'category' else '' }}>✦ AI category</option>
@@ -4095,7 +4095,7 @@ function condClear(btn){
   row.querySelector('.k-val').value = '';
   row.querySelector('.k-score').value = '';
   var sel = row.querySelector('.k-sel'); sel.value = 'field'; condKind(sel);
-  if(parseInt(row.getAttribute('data-row'), 10) >= 2) row.classList.add('extra');
+  row.classList.add('extra');
   condEmpty(); renderSummary();
 }
 function fieldsFor(st){
