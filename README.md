@@ -27,6 +27,10 @@ manage.
 Your provider's OAuth app registration and access policies still apply. The setup
 guide walks through the connection process.
 
+![Accounts page: an authorised institutional mailbox with token status and the embedded OAuth proxy running](docs/img/accounts-oauth2.png)
+
+*Connect an OAuth2-enabled institutional mailbox through the built-in email-oauth2-proxy integration.*
+
 ### Privacy first, powered by a local agent
 
 Run classification, mailbox chat, and drafting against a **local LLM**. The
@@ -52,6 +56,10 @@ draft an acknowledgment.** Drafts land in your mailbox's Drafts folder for revie
 You can build a flow on the canvas or describe it to the assistant and approve
 its proposal with one click.
 
+![Flow builder: a project-deadline automation with a topic-by-meaning filter and tag, star, and draft steps](docs/img/flow-builder.png)
+
+*Turn inbox habits into multi-step automations using exact filters, AI categories, or topic matching.*
+
 ### Go from natural language to action
 
 The assistant is an action interface across the app, with broad coverage of
@@ -68,6 +76,10 @@ Try requests like:
 > “When mail is about a project deadline, tag it and draft an acknowledgment.”
 >
 > “Train a classifier from the messages I've tagged.”
+
+![Assistant turning a plain-language request into a proposed automation, with one-click approval](docs/img/assistant-proposal.png)
+
+*Describe what you want in plain language. Review the assistant's proposed automation and approve it in one click.*
 
 Responses stream live, tool calls and results are visible, and actions are logged.
 Per-capability permissions let you choose **Off**, **Ask me**, or **Auto** for
