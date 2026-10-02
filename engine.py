@@ -393,6 +393,37 @@ def build_draft_message(msg, body_text, user):
     return m.as_bytes()
 
 
+def _draft_plugin_payload(row, step, snippet=None):
+    """Input for a draft-provider plugin call. The step's template is passed RAW
+    so plugins can render {sender}/{subject}/{date}/{my_name} themselves and keep
+    custom tags (e.g. {llm-infill}...{/llm-infill}) intact."""
+    tpl = None
+    tpl_id = step.get("template_id")
+    try:
+        tpl_id = int(tpl_id) if tpl_id else None
+    except (TypeError, ValueError):
+        tpl_id = None
+    if tpl_id:
+        t = store.get_template(tpl_id)
+        if t:
+            tpl = {"id": t.get("id"), "name": t.get("name") or "",
+                   "subject": t.get("subject") or "", "body": t.get("body") or ""}
+    subj = row.get("subject") or ""
+    if snippet is None:
+        snippet = row.get("snippet") or ""
+    return {
+        "subject": subj,
+        "from": row.get("from_addr") or "",
+        "snippet": str(snippet or "")[:2000],
+        "date": row.get("date") or "",
+        "instructions": str(step.get("instructions") or ""),
+        "template": tpl,
+        "fields": {"sender": row.get("from_addr") or "", "subject": subj,
+                   "date": row.get("date") or "",
+                   "my_name": store.get_setting("my_name", "")},
+    }
+
+
 # ---------------------------------------------------------------- IMAP
 
 _FOLDER_LOCK = threading.Lock()  # serialises folder CREATE across worker threads
@@ -1004,11 +1035,8 @@ def _apply_flow(mc, flow, row, settings, live):
                     if mode == "plugin" and st.get("plugin"):
                         try:
                             import plugin_rt
-                            pd = plugin_rt.draft(str(st["plugin"]), {
-                                "subject": row_now.get("subject") or "",
-                                "from": row_now.get("from_addr") or "",
-                                "snippet": (row_now.get("snippet") or "")[:2000],
-                                "instructions": st.get("instructions") or ""})
+                            pd = plugin_rt.draft(str(st["plugin"]),
+                                                 _draft_plugin_payload(row_now, st))
                             body = (pd or {}).get("text") or ""
                         except Exception:
                             body = ""
@@ -1767,17 +1795,16 @@ def _sim_draft_preview(sim_msg, step, settings, use_llm):
         pid = str(step.get("plugin") or "")
         if not use_llm:
             note = "plugin '%s'" % pid
+            if step.get("template_id"):
+                note += " template #%s" % step.get("template_id")
             if step.get("instructions"):
                 note += " - " + str(step["instructions"])
             return {"mode": mode, "needs_llm": True, "instructions": note[:400]}
         body = ""
         try:
             import plugin_rt
-            pd = plugin_rt.draft(pid, {
-                "subject": sim_msg.get("subject") or "",
-                "from": sim_msg.get("from_addr") or "",
-                "snippet": (sim_msg.get("body") or "")[:2000],
-                "instructions": step.get("instructions") or ""})
+            pd = plugin_rt.draft(pid, _draft_plugin_payload(
+                sim_msg, step, snippet=sim_msg.get("body") or ""))
             body = (pd or {}).get("text") or ""
         except Exception:
             body = ""
@@ -3271,7 +3298,10 @@ def _flow_steps_text(steps):
         elif t == "draft":
             mode = (st.get("mode") or "template").lower()
             if mode == "plugin":
-                parts.append('draft via plugin "%s" and save to Drafts' % st.get("plugin"))
+                tpl_id = st.get("template_id")
+                parts.append('draft via plugin "%s"%s and save to Drafts'
+                             % (st.get("plugin"),
+                                (' using template #%s' % tpl_id) if tpl_id else ""))
             elif mode == "fixed":
                 body = (st.get("body") or "").strip()
                 parts.append('draft a fixed reply ("%s%s") and save to Drafts'
@@ -3511,6 +3541,13 @@ def _validate_flow(proposal):
                     errors.append("plugin %r is not a draft provider" % pid)
                 else:
                     step_ = {"type": "draft", "mode": "plugin", "plugin": pid}
+                    tid = st.get("template_id") or None
+                    try:
+                        tid = int(tid) if tid else None
+                    except (TypeError, ValueError):
+                        tid = None
+                    if tid and store.get_template(tid):
+                        step_["template_id"] = tid
                     ins = str(st.get("instructions") or "").strip()
                     if ins:
                         step_["instructions"] = ins[:1000]

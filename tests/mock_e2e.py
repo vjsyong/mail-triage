@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(HERE)
 
 FAKE_DRAFT = "Hi, thanks for the note - I will reply properly shortly. - Alex"
+FAKE_INFILL = "PO 8842 confirmed; delivery Friday."
 
 passed = 0
 failed = 0
@@ -573,6 +574,11 @@ class LLMHandler(BaseHTTPRequestHandler):
                                       "summary": "mock", "reason": "mock default"})
         elif "write email replies" in system:
             content = FAKE_DRAFT
+        elif "fill in ONE marked block" in system:
+            content = FAKE_INFILL
+        elif "fill in marked blocks" in system:
+            n = user.count("BLOCK ")
+            content = json.dumps({"blocks": ["INFILL-%d" % (i + 1) for i in range(n)]})
         elif "manually tagged" in system:
             content = json.dumps({
                 "reply": "Learned rules from your tags.",
@@ -3834,7 +3840,7 @@ def main():
 
     section("T48 plugin kinds: matcher, draft provider, retriever, integration, digest")
     for _p in ("mt-cjk-matcher", "mt-mirror-language", "mt-priority-first",
-               "mt-webhook-notify", "mt-daily-digest"):
+               "mt-webhook-notify", "mt-daily-digest", "mt-llm-infill"):
         shutil.copytree(os.path.join(PROJECT, "plugins", _p),
                         os.path.join(broot, _p), dirs_exist_ok=True)
     plugins_mod.scan()
@@ -3881,6 +3887,90 @@ def main():
           b"Draft preview" in r.data and b"written by plugin" in r.data
           and FAKE_DRAFT.encode() in r.data)
     store.update_flow(fdid, enabled=0)
+    # -- infill draft provider: only {llm-infill}...{/llm-infill} is model-written
+    _r = client.get("/templates")
+    check("{llm-infill} hint stays hidden while the infill plugin is off",
+          b"LLM Draft Infill" not in _r.data)
+    plugins_mod.set_enabled("mt-llm-infill", True)
+    _r = client.get("/templates")
+    check("templates page documents {llm-infill} once the plugin is on",
+          b"LLM Draft Infill" in _r.data and b"{llm-infill}" in _r.data)
+    inf_tpl = store.add_template(
+        "Infill ack", "",
+        "Dear {sender},\n\nThanks for your note about {subject}.\n"
+        "{llm-infill}confirm the PO number{/llm-infill}\n"
+        "{llm-infill}propose a delivery window{/llm-infill}\n\n"
+        "Best,\n{my_name}")
+    infid = store.add_flow("Infill flow", "any",
+                           [{"field": "subject", "op": "contains", "value": "infillprobe"}],
+                           [{"type": "draft", "mode": "plugin", "plugin": "mt-llm-infill",
+                             "template_id": inf_tpl}], enabled=True)
+    _r = client.post("/simulate", follow_redirects=True,
+                     data={"from_addr": "x@y.com", "subject": "infillprobe hello",
+                           "body": "b", "use_llm": "0"})
+    check("simulator names the infill plugin's template",
+          b"Draft preview" in _r.data and b"model not asked" in _r.data
+          and ("template #%d" % inf_tpl).encode() in _r.data)
+    _n0 = len(llm_server.calls)
+    _r = client.post("/simulate", follow_redirects=True,
+                     data={"from_addr": "x@y.com", "subject": "infillprobe hello",
+                           "body": "b", "use_llm": "1"})
+    _new = [c for c in llm_server.calls[_n0:] if "fill in marked blocks" in c["system"]]
+    check("multi-block infill asks the model once in JSON mode",
+          len(_new) == 1 and bool(_new[0]["payload"].get("response_format")))
+    check("infill plugin writes only the marked blocks",
+          b"Draft preview" in _r.data and b"written by plugin" in _r.data
+          and b"INFILL-1" in _r.data and b"INFILL-2" in _r.data
+          and b"{llm-infill}" not in _r.data and b"{/llm-infill}" not in _r.data)
+    check("infill keeps the template literal and fills placeholders",
+          b"Dear x@y.com," in _r.data
+          and b"Thanks for your note about infillprobe hello." in _r.data
+          and b"Best," in _r.data)
+    # a single block takes the plain-text path
+    sng_tpl = store.add_template("Infill single", "",
+                                 "Hi {sender},\n{llm-infill}confirm the deadline{/llm-infill}\n"
+                                 "{my_name}")
+    sngid = store.add_flow("Infill single flow", "any",
+                           [{"field": "subject", "op": "contains", "value": "singleprobe"}],
+                           [{"type": "draft", "mode": "plugin", "plugin": "mt-llm-infill",
+                             "template_id": sng_tpl}], enabled=True)
+    _n1 = len(llm_server.calls)
+    _r = client.post("/simulate", follow_redirects=True,
+                     data={"from_addr": "x@y.com", "subject": "singleprobe hello",
+                           "body": "b", "use_llm": "1"})
+    _new1 = [c for c in llm_server.calls[_n1:] if "fill in ONE marked block" in c["system"]]
+    check("single-block infill asks for plain text, not JSON",
+          len(_new1) == 1 and not _new1[0]["payload"].get("response_format")
+          and FAKE_INFILL.encode() in _r.data and b"{llm-infill}" not in _r.data)
+    # a template without blocks must not reach the model
+    plain_tpl = store.add_template("Plain fill", "", "Hello {sender}, re: {subject}")
+    plid = store.add_flow("Plain fill flow", "any",
+                          [{"field": "subject", "op": "contains", "value": "plainprobe"}],
+                          [{"type": "draft", "mode": "plugin", "plugin": "mt-llm-infill",
+                            "template_id": plain_tpl}], enabled=True)
+    _n2 = len(llm_server.calls)
+    _r = client.post("/simulate", follow_redirects=True,
+                     data={"from_addr": "x@y.com", "subject": "plainprobe hello",
+                           "body": "b", "use_llm": "1"})
+    check("a template without blocks is filled literally, no model call",
+          b"Draft preview" in _r.data
+          and b"Hello x@y.com, re: plainprobe hello" in _r.data
+          and not [c for c in llm_server.calls[_n2:] if "fill in" in c["system"]])
+    # the flow editor keeps the template on a plugin step
+    client.post("/flows/new", data={
+        "name": "Infill form flow", "match_mode": "any", "enabled": "on",
+        "cond_value_0": "infillform", "cond_field_0": "subject", "cond_op_0": "contains",
+        "steps_json": json.dumps([{"type": "draft", "mode": "plugin",
+                                   "plugin": "mt-llm-infill",
+                                   "template_id": inf_tpl}])},
+        follow_redirects=True)
+    _stored = [f for f in store.list_flows() if f["name"] == "Infill form flow"]
+    _steps = json.loads((_stored[0].get("actions") if _stored else "") or "[]")
+    check("flow editor keeps the template on a plugin draft step",
+          bool(_steps) and _steps[0].get("mode") == "plugin"
+          and _steps[0].get("template_id") == inf_tpl)
+    for _fid in (infid, sngid, plid) + ((_stored[0]["id"],) if _stored else ()):
+        store.update_flow(_fid, enabled=0)
     # -- retriever kind
     plugins_mod.set_enabled("mt-priority-first", True)
     _ranked = rt_mod.runtime.retriever("mt-priority-first", {"query": "q", "candidates": [
