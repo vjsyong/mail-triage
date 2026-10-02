@@ -22,6 +22,9 @@ ap.add_argument("--base", required=True)
 ap.add_argument("--model-name", required=True)
 ap.add_argument("--key", required=True)
 ap.add_argument("--out", required=True)
+ap.add_argument("--thinking-mode", default="auto", choices=["auto", "off", "falsekw"])
+ap.add_argument("--temperature", type=float, default=0.0)
+ap.add_argument("--top-p", type=float, default=None)
 args = ap.parse_args()
 
 CLS_IDS = ["cls_normal_101", "cls_normal_130", "cls_normal_170", "cls_normal_190",
@@ -33,7 +36,9 @@ ASST_IDS = ["asst_b6_folders", "asst_q1_invoice_paid", "asst_b12_sync",
             "asst_u1_thanks", "asst_g4_create_folder", "asst_b8_rules"]
 
 out = {}
-client = BenchClient(args.base, args.model_name, timeout=240)
+client = BenchClient(args.base, args.model_name, timeout=240,
+                     temperature=args.temperature, top_p=args.top_p,
+                     thinking_mode=args.thinking_mode)
 
 cls_cases = {c["id"]: c for c in load_cases("classification")}
 walls, tps = [], []

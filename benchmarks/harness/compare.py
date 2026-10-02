@@ -15,16 +15,16 @@ RESULTS = os.path.join(BENCH, "results")
 META = {
     "gemma-4-26b-a4b-baseline": {"label": "Gemma 4 26B-A4B (baseline)", "params": "25.2B MoE / 3.8B active",
                                  "quant": "AWQ-4bit + int8 KV", "dir": None, "gpu": 0},
-    "qwen3.5-9b": {"label": "Qwen3.5-9B", "params": "9B dense", "quant": "bf16",
-                   "dir": "/home/xrim/models/qwen3.5-9b", "gpu": 1},
-    "qwen3.5-4b": {"label": "Qwen3.5-4B", "params": "4B dense", "quant": "bf16",
-                   "dir": "/home/xrim/models/qwen3.5-4b", "gpu": 1},
-    "gemma-4-e4b": {"label": "Gemma 4 E4B", "params": "4.5B eff (8B incl emb)", "quant": "bf16",
-                    "dir": "/home/xrim/models/gemma-4-e4b-it", "gpu": 1},
-    "granite-4.2-3b": {"label": "Granite 4.2 3B", "params": "3B dense", "quant": "bf16",
-                       "dir": "/home/xrim/models/granite-4.2-3b", "gpu": 1},
-    "lfm2.5-8b-a1b": {"label": "LFM2.5-8B-A1B", "params": "8.3B MoE / 1.5B active", "quant": "bf16",
-                      "dir": "/home/xrim/models/lfm2.5-8b-a1b", "gpu": 1},
+    "qwen9b": {"label": "Qwen3.5-9B", "params": "9B dense", "quant": "bf16",
+               "dir": "/home/xrim/models/qwen3.5-9b", "gpu": 1},
+    "qwen4b": {"label": "Qwen3.5-4B", "params": "4B dense", "quant": "bf16",
+               "dir": "/home/xrim/models/qwen3.5-4b", "gpu": 1},
+    "gemma4e4b": {"label": "Gemma 4 E4B", "params": "4.5B eff (8B incl emb)", "quant": "bf16",
+                  "dir": "/home/xrim/models/gemma-4-e4b-it", "gpu": 1},
+    "granite3b": {"label": "Granite 4.2 3B", "params": "3B dense", "quant": "bf16",
+                  "dir": "/home/xrim/models/granite-4.2-3b", "gpu": 1},
+    "lfm8b": {"label": "LFM2.5-8B-A1B", "params": "8.3B MoE / 1.5B active", "quant": "bf16",
+              "dir": "/home/xrim/models/lfm2.5-8b-a1b", "gpu": 1},
 }
 
 

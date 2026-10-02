@@ -1,0 +1,8 @@
+{
+ "note": "prod vLLM reserves gpu-memory-utilization 0.96 of the 3090; measured idle after runs",
+ "gpu0_mem_mib": 23144,
+ "gpu0_util_pct": 0,
+ "container_stats": "1.96% 21.3GiB / 94.24GiB",
+ "boot_s": 397,
+ "boot_note": "container StartedAt 01:03:54 -> Application startup complete 01:10:31"
+}

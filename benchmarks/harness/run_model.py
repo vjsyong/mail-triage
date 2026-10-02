@@ -47,9 +47,11 @@ class BenchClient:
         """Returns the chat_template_kwargs value (or None = do not send).
         auto: send {enable_thinking: True} when the call requests thinking (app behavior).
         off:  never send (app behavior when llm_thinking=off).
-        falsekw: send {enable_thinking: False} (model-specific adaptation)."""
+        falsekw: always send {enable_thinking: False} — the model defaults thinking ON
+                 when unset, so the adaptation must pin it off on EVERY call site
+                 (classify, assistant, draft, rules, simulate, summary)."""
         if self.thinking_mode == "falsekw":
-            return {"enable_thinking": False} if thinking else None
+            return {"enable_thinking": False}
         if self.thinking_mode == "off":
             return None
         return {"enable_thinking": True} if thinking else None

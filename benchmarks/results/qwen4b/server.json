@@ -1,0 +1,6 @@
+{
+ "key": "qwen4b",
+ "model": "qwen3.5-4b",
+ "thinking_mode": "falsekw",
+ "adaptation_note": "app-verbatim payload caused temp-0 CoT runaways (5/8 probe cases, 28K-char CoT, no JSON); adaptation = enable_thinking explicitly false on every call"
+}
