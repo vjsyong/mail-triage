@@ -747,20 +747,28 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 }
 
 /* ---- assistant chat (shared: page + sidebar) ---- */
+.chat-head{display:none}
 .assistant-shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}
 .assistant-rail{position:sticky;top:14px;display:flex;flex-direction:column;border:1px solid var(--line);background:#fff;max-height:calc(100vh - 120px);overflow:auto}
-.assistant-rail .arow{display:flex;gap:8px;align-items:center;padding:9px 11px;border-bottom:1px solid var(--line)}
+.assistant-rail .arow{display:flex;gap:8px;align-items:center;padding:10px 11px;border-bottom:1px solid var(--line)}
 .assistant-rail .arow:last-child{border-bottom:0}
-.assistant-rail .arow.cur{background:var(--hover)}
+.assistant-rail .arow.cur{background:#fff;box-shadow:inset 2px 0 0 #000}
+.assistant-rail .arow:hover{background:var(--hover)}
 .assistant-rail .arow .t{flex:1;min-width:0;font-size:.84rem;font-weight:500;color:var(--fg);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .assistant-rail .arow .t:hover{text-decoration:underline}
 .assistant-rail .arow .when{font-size:.7rem;color:var(--dim);white-space:nowrap}
+.rail-h{padding:8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2}
+.rail-h input{width:100%;padding:6px 9px;border:1px solid var(--line);font:inherit;font-size:.82rem;background:var(--bg)}
+.rgroup{font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);padding:9px 11px 3px}
+.assistant-main .jumpwrap,.assistant-main #pending-panel,.assistant-main #aform{max-width:820px;width:100%;margin-left:auto;margin-right:auto}
 .assistant-flex{display:flex;flex-direction:column;height:calc(100vh - 300px);min-height:480px}
 .jumpwrap{position:relative;flex:1;min-height:0;display:flex}
 .chat{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:18px;background:var(--bg);border:1px solid var(--line);padding:18px 16px;scroll-behavior:smooth}
 #jump{position:absolute;right:16px;bottom:12px;z-index:5;box-shadow:0 4px 14px rgba(0,0,0,.15)}
 .crow{display:flex;gap:10px;align-items:flex-start}
 .crow.user{flex-direction:row-reverse}
+.crow:not(.user) + .crow:not(.user){margin-top:-10px}
+.crow.user + .crow.user{margin-top:-10px}
 .avatar{flex:0 0 30px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;letter-spacing:.05em;border:1px solid var(--line)}
 .avatar.you{background:#000;color:#fff;border-color:#000}
 .avatar.ai{background:var(--acc);color:#fff;border-color:var(--acc)}
@@ -845,7 +853,8 @@ html:not(.asb-open) .asb-main{display:none}
   body.with-asb .main{margin-right:0 !important}
 }
 .dw-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
-.dw-ctx,.am-ctx{font-size:.73rem;color:var(--dim);padding:5px 12px;border-bottom:1px solid var(--line);background:var(--card2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dw-ctx{font-size:.73rem;color:var(--dim);padding:5px 12px;border-bottom:1px solid var(--line);background:var(--card2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.am-ctx{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;color:var(--dim);border:1px solid var(--line);background:#fff;padding:3px 9px;width:fit-content;margin:0 0 7px}
 .dw-hist{border-bottom:1px solid var(--line);max-height:42vh;overflow:auto;background:#fff}
 .dhist-item{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
 .dhist-item:hover{background:var(--hover)}
@@ -5758,8 +5767,8 @@ CONVO_TMPL = r"""
   <div class="chat-empty">
     <div class="ce-icon">✉</div>
     <div class="ce-title">Ask about your mail</div>
-    <div class="sub">Searches your whole archive by meaning (not just keywords), reads messages, creates folders,
-    moves or flags mail, and proposes rules you approve with one click. Its thinking and every tool step stream live.</div>
+    <div class="sub">Searches your archive by meaning, reads and files mail, and proposes rules you approve
+    with one click. Every step shows as it happens.</div>
     <div class="chips">
       {% for s in suggest %}
       {% if s.href %}<a class="chip" href="{{ s.href }}">{{ s.label }}</a>
@@ -5771,6 +5780,20 @@ CONVO_TMPL = r"""
 """
 
 ASSISTANT_TMPL = r"""
+<style>
+.chip.sm{height:22px;padding:0 8px;font-size:.72rem;gap:4px}
+.aspecline{display:flex;align-items:flex-start;gap:12px;margin-top:10px}
+.aspecline .aspec{flex:1;min-width:0}
+.aspec summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;color:var(--dim);font-size:.78rem;user-select:none}
+.aspec summary::-webkit-details-marker{display:none}
+.aspec summary:before{content:'▸';font-size:.7rem}
+.aspec[open] summary:before{content:'▾'}
+.aspec-body{border:1px solid var(--line);background:#fff;padding:10px 12px;margin-top:8px}
+.aspec-grp{display:flex;gap:8px;align-items:baseline;padding:4px 0;flex-wrap:wrap}
+.aspec-grp b{flex:0 0 110px;font-size:.78rem}
+.aspec-chips{display:flex;flex-wrap:wrap;gap:6px}
+.aspec-body>a{display:inline-block;margin-top:8px}
+</style>
 <script>/* /assistant renders directly (no 302) so Turbo never double-renders;
   keep the address bar on the canonical session URL. */
 (function(){ var p = location.pathname.replace(/\/$/, "");
@@ -5778,7 +5801,7 @@ ASSISTANT_TMPL = r"""
 <div class="page-head am-head">
   <div>
     <h1 class="page-title">Assistant</h1>
-    <div class="page-desc">Streams its thinking and every tool step live · chats are saved — resume any of them from the list, or use the sidebar on any page</div>
+    <div class="page-desc">Ask about your mail. Every step streams live; chats are saved - resume any of them from the list.</div>
   </div>
   <div class="row">
     <a class="btn primary" href="{{ url_for('assistant') }}">New chat</a>
@@ -5786,13 +5809,20 @@ ASSISTANT_TMPL = r"""
 </div>
 <div class="assistant-shell">
   <aside class="assistant-rail" aria-label="Chat history">
+    <div class="rail-h"><input id="chatfilter" type="search" placeholder="Filter chats…" aria-label="Filter chats"></div>
+    {% if sessions %}
+    {% set ns = namespace(g='') %}
     {% for s in sessions %}
+    {% if s.group != ns.g %}<div class="rgroup">{{ s.group }}</div>{% set ns.g = s.group %}{% endif %}
     <div class="arow{{ ' cur' if s.id == sid else '' }}">
       <a class="t" href="{{ url_for('assistant_session', sid=s.id) }}" title="{{ s.title or 'Untitled chat' }}">{{ s.title or 'Untitled chat' }}</a>
       <span class="when">{{ s.when }}</span>
       <form class="inline" method="post" action="{{ url_for('assistant_session_delete', sid=s.id) }}"><button class="btn small chat-del" type="submit" aria-label="Delete chat: {{ s.title or 'Untitled chat' }}">✕</button></form>
     </div>
     {% endfor %}
+    {% else %}
+    <div class="sub" style="padding:12px">No chats yet - say hello on the right.</div>
+    {% endif %}
   </aside>
   <div class="assistant-main">
     <div class="chat-head">
@@ -5824,9 +5854,9 @@ ASSISTANT_TMPL = r"""
         {% endfor %}
       </div>
       {% endif %}
-      <div class="am-ctx" id="amctx" hidden></div>
       <form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
         <input type="hidden" name="session" value="{{ sid }}">
+        <div class="am-ctx" id="amctx" hidden></div>
         <textarea name="message" id="msg" rows="1" enterkeyhint="send" placeholder="Message the assistant…"></textarea>
         <div class="comp-row">
           <span class="sub" style="font-size:.78rem">Enter sends · Shift+Enter new line</span>
@@ -5835,7 +5865,18 @@ ASSISTANT_TMPL = r"""
             <button class="btn primary" type="submit" id="asend">Send</button>
           </span>
         </div>
-        <div class="hint">runs on {{ llm.model }} · agent permissions: {{ perms_text }} <a href="{{ url_for('settings') }}#ai-perms">edit</a>{% if convo %} · <a href="#" id="aclear">clear this chat</a>{% endif %}</div>
+        <div class="aspecline">
+          <details class="aspec">
+            <summary><span class="chip sm">{{ llm.model or 'no model' }}</span> <span class="sub">assistant details</span></summary>
+            <div class="aspec-body">
+              <div class="aspec-grp"><b>Can do directly</b><span class="aspec-chips">{% for c in spec.auto %}<span class="chip sm">{{ c }}</span>{% else %}<span class="sub">nothing yet</span>{% endfor %}</span></div>
+              <div class="aspec-grp"><b>Asks first</b><span class="aspec-chips">{% for c in spec.ask %}<span class="chip sm">{{ c }}</span>{% else %}<span class="sub">nothing yet</span>{% endfor %}</span></div>
+              <div class="aspec-grp"><b>Off</b><span class="aspec-chips">{% for c in spec.off %}<span class="chip sm">{{ c }}</span>{% else %}<span class="sub">none</span>{% endfor %}</span></div>
+              <a class="sub" href="{{ url_for('settings') }}#ai-perms">Edit permissions &#8599;</a>
+            </div>
+          </details>
+          {% if convo %}<a href="#" id="aclear" class="sub">clear this chat</a>{% endif %}
+        </div>
       </form>
       {% if convo %}<form id="clearform" method="post" action="{{ url_for('assistant_clear') }}"><input type="hidden" name="session" value="{{ sid }}"></form>{% endif %}
     </div>
@@ -5870,6 +5911,17 @@ ASSISTANT_TMPL = r"""
     document.getElementById('asheet-x').addEventListener('click', closeSheet);
     ov.addEventListener('click', function(e){ if(e.target===ov) closeSheet(); });
   } else if(ov){ ov.remove(); }
+  var f=document.getElementById('chatfilter');
+  if(f){ f.addEventListener('input', function(){
+    var q=f.value.trim().toLowerCase();
+    [].slice.call(document.querySelectorAll('.assistant-rail .arow')).forEach(function(a){
+      var t=(a.querySelector('.t')||{}).textContent||'';
+      a.style.display=(!q || t.toLowerCase().indexOf(q)>=0)?'':'none'; });
+    [].slice.call(document.querySelectorAll('.assistant-rail .rgroup')).forEach(function(g){
+      var n=g.nextElementSibling, any=false;
+      while(n && !n.classList.contains('rgroup')){ if(n.classList.contains('arow') && n.style.display!=='none'){ any=true; break; } n=n.nextElementSibling; }
+      g.style.display=any?'':'none'; });
+  }); }
   }
   if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', initAssistant); }
   else { initAssistant(); }
@@ -6072,17 +6124,31 @@ def _assistant_page(sid):
         flash("That chat no longer exists.", "err")
         return redirect(url_for("assistant"))
     sessions = store.list_sessions()
+    off = tz_offset_hours() * 3600.0
+    today = int((time.time() + off) // 86400)
     for s in sessions:
-        s["when"] = fmt_ts(s["last_ts"] or s["created"])
+        ts = s.get("last_ts") or s.get("created") or 0
+        d = int((ts + off) // 86400) if ts else today
+        s["group"] = "Today" if d == today else ("Yesterday" if d == today - 1 else "Earlier")
+        s["when"] = time.strftime("%H:%M" if d == today else "%m-%d", time.gmtime(ts + off)) if ts else ""
     convo, convo_html = _assistant_fragment(sid, "/assistant",
                                             url_for("assistant_session", sid=sid))
     pending = store.pending_agent_actions()
     for pa in pending:
         pa["when_h"] = fmt_ts(pa.get("created_ts"))
+    try:
+        perms = engine.agent_permissions()
+    except Exception:
+        perms = {}
+    spec = {"auto": [], "ask": [], "off": []}
+    for cap, label, _risk, _tools, _desc in engine.AGENT_CAPS:
+        spec.setdefault(perms.get(cap, "off"), []).append(label)
+    for cap, lvl in perms.items():
+        if cap.startswith("plugin:") and lvl in spec:
+            spec[lvl].append(cap.split(":", 1)[1])
     return render(_render_src(
         ASSISTANT_TMPL, sid=sid, sessions=sessions, convo=convo, convo_html=convo_html,
-        llm=engine.llm_config(), pending=pending,
-        perms_text=engine.agent_permissions_text()))
+        llm=engine.llm_config(), pending=pending, spec=spec))
 
 
 @app.route("/assistant/s/<int:sid>")

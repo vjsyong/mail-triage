@@ -18,6 +18,8 @@ How this folder is organised: by what you need, not by when it was written.
 - [features.md](features.md) - the full feature tour
 - [onboarding.md](onboarding.md) - research + decisions behind the setup wizard
   (`/welcome`)
+- [assistant-page.md](assistant-page.md) - research + decisions for the assistant
+  page layout (reading column, disclosure, rail)
 - [app-inventory.md](app-inventory.md) - page-by-page inventory + the app-wide layout campaign
 
 ## Design records

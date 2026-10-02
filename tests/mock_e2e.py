@@ -4014,6 +4014,26 @@ def main():
     check("--doctor CLI prints the setup report",
           _dr.returncode == 0 and "Mail Triage doctor" in _dr.stdout
           and "hardware:" in _dr.stdout and "UNREACHABLE" in _dr.stdout)
+    section("T52 assistant page layout")
+    r = client.get("/assistant")
+    check("desktop hides the mobile chat header",
+          r.status_code == 200 and b".chat-head{display:none}" in r.data)
+    check("thread + composer form a capped reading column",
+          b".assistant-main .jumpwrap,.assistant-main #pending-panel,.assistant-main #aform{max-width:820px" in r.data)
+    check("permission wall collapses behind a details disclosure",
+          b'class="aspec"' in r.data and b"assistant details" in r.data
+          and b"Can do directly" in r.data and b"agent permissions:" not in r.data)
+    check("rail ships a filter box", b'id="chatfilter"' in r.data)
+    check("rail groups sessions by day",
+          b'class="rgroup"' in r.data or b"No chats yet" in r.data)
+    _d = r.data
+    _i1 = _d.find(b'<form id="aform"')
+    _i2 = _d.find(b'id="amctx"')
+    _i3 = _d.find(b"</form>", _i1)
+    check("context chip lives inside the composer", 0 <= _i1 < _i2 < _i3)
+    check("same-role message grouping rule ships",
+          b".crow:not(.user) + .crow:not(.user){margin-top:-10px}" in _d)
+
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:
