@@ -4086,7 +4086,11 @@ function stepSummary(st){
   if(st.type === 'draft'){
     st.mode = st.mode || 'template';
     if(st.mode === 'fixed') return 'fixed draft "' + String(st.body || '').slice(0, 40) + '" → Drafts';
-    if(st.mode === 'plugin') return 'plugin draft (' + (st.plugin || '?') + ') → Drafts';
+    if(st.mode === 'plugin'){
+      var pp = PLUGINS.filter(function(x){ return x.id === st.plugin; })[0];
+      var pt = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
+      return 'plugin draft (' + (pp ? pp.name : (st.plugin || 'pick a plugin')) + ')' + (pt ? ' using "' + pt.name + '"' : '') + ' → Drafts';
+    }
     if(st.mode === 'llm') return 'LLM draft' + (st.instructions ? ' guided by "' + String(st.instructions).slice(0, 40) + '"' : '') + ' → Drafts';
     var t = TEMPLATES.filter(function(x){ return String(x.id) === String(st.template_id); })[0];
     return 'draft from ' + (t ? t.name : '(pick a template)') + ' → Drafts';
@@ -4183,9 +4187,19 @@ function fieldsFor(st){
     } else if(st.mode === 'plugin'){
       f.appendChild(el('label', null, 'Plugin'));
       var pSel = el('select');
+      if(!PLUGINS.length){ var pnone = el('option', null, '(no draft plugins enabled)'); pnone.value = ''; pSel.appendChild(pnone); }
       PLUGINS.forEach(function(pp){ var o = el('option', null, pp.name); o.value = pp.id; if((st.plugin || '') === pp.id) o.selected = true; pSel.appendChild(o); });
       pSel.onchange = function(){ st.plugin = pSel.value; renderSummary(); sync(); };
       f.appendChild(pSel);
+      f.appendChild(el('label', null, 'Template (optional)'));
+      var ptSel = el('select');
+      var ptnone = el('option', null, '(none)'); ptnone.value = ''; ptSel.appendChild(ptnone);
+      TEMPLATES.forEach(function(t){ var o = el('option', null, t.name); o.value = String(t.id); if(String(st.template_id || '') === String(t.id)) o.selected = true; ptSel.appendChild(o); });
+      ptSel.onchange = function(){ st.template_id = ptSel.value; renderSummary(); sync(); };
+      f.appendChild(ptSel);
+      var hint = el('div', 'sub', 'Blocks wrapped in {llm-infill}...{/llm-infill} are written by plugins that support them; everything else stays as typed.');
+      hint.style.gridColumn = '1 / -1';
+      f.appendChild(hint);
       f.appendChild(el('label', null, 'Extra instructions (optional)'));
       var pa = document.createElement('textarea'); pa.rows = 2; pa.value = st.instructions || '';
       pa.placeholder = 'e.g. keep it to three sentences';
@@ -4240,6 +4254,7 @@ function render(){
   stepsEl.innerHTML = '';
   stepsEl.appendChild(edge(0));
   steps.forEach(function(st, i){
+    if(st.type === 'draft' && st.mode === 'plugin' && !st.plugin && PLUGINS.length) st.plugin = PLUGINS[0].id;
     var card = el('div','stepcard fl-node' + (st._open ? ' open' : ''));
     var head = el('div','fl-step-head');
     var info = typeInfo(st.type);
@@ -4346,7 +4361,10 @@ def _flow_summary(flow, tpl_names):
         elif t == "draft":
             dmode = (st.get("mode") or "template").lower()
             if dmode == "plugin":
-                acts.append("draft via plugin ‘%s’ and save to Drafts" % (st.get("plugin") or "?"))
+                name = tpl_names.get(int(st.get("template_id") or 0), "")
+                acts.append("draft via plugin ‘%s’%s and save to Drafts"
+                            % (st.get("plugin") or "?",
+                               (" using ‘%s’" % name) if name else ""))
             elif dmode == "llm":
                 name = tpl_names.get(int(st.get("template_id") or 0), "")
                 ins = (st.get("instructions") or "").strip()
@@ -4412,6 +4430,8 @@ def _flow_from_form():
             if dmode == "plugin":
                 st2 = {"type": "draft", "mode": "plugin",
                        "plugin": (st.get("plugin") or "").strip()[:80]}
+                if tid:
+                    st2["template_id"] = tid
                 ins = (st.get("instructions") or "").strip()
                 if ins:
                     st2["instructions"] = ins[:1000]
@@ -4549,7 +4569,7 @@ TEMPLATES_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Reply templates</h1>
-    <div class="page-desc">Used as guidance when the LLM drafts a reply — placeholders: {sender} {subject} {date} {my_name}</div>
+    <div class="page-desc">Used as guidance when the LLM drafts a reply — placeholders: {sender} {subject} {date} {my_name}{% if infill %}; blocks tagged {llm-infill}...{/llm-infill} are filled by the LLM Draft Infill plugin{% endif %}</div>
   </div>
   <div class="row"><a class="btn primary" href="{{ url_for('template_new') }}">New template</a></div>
 </div>
@@ -4599,7 +4619,7 @@ TEMPLATE_EDIT_TMPL = """
   </div>
   <div class="card">
     <div class="card-h"><h3 id="t-body-h">Body</h3><span class="sub">keep it short — the LLM adapts it to the actual email</span></div>
-    <div class="sub" id="t-body-help" style="margin-bottom:6px">Placeholders: <span class="mono">{sender}</span> <span class="mono">{subject}</span> <span class="mono">{date}</span> <span class="mono">{my_name}</span> are filled in from the message.</div>
+    <div class="sub" id="t-body-help" style="margin-bottom:6px">Placeholders: <span class="mono">{sender}</span> <span class="mono">{subject}</span> <span class="mono">{date}</span> <span class="mono">{my_name}</span> are filled in from the message.{% if infill %}<br id="t-infill-help">With the <b>LLM Draft Infill</b> plugin (flow draft step &rarr; plugin), <span class="mono">{llm-infill}what the LLM should write here{/llm-infill}</span> blocks are written by the LLM and everything around them stays exactly as typed.{% endif %}</div>
     <textarea id="t-body" name="body" rows="10" aria-labelledby="t-body-h" aria-describedby="t-body-help">{{ template.body if template else '' }}</textarea>
   </div>
   <div class="savebar"><button class="btn primary" type="submit">Save template</button><a class="btn" href="{{ url_for('templates') }}">Cancel</a></div>
@@ -4611,9 +4631,20 @@ TEMPLATE_EDIT_TMPL = """
 
 
 
+def _infill_plugin_enabled():
+    """True when the bundled LLM Draft Infill plugin is enabled; drives the
+    {llm-infill} hint on the templates pages."""
+    try:
+        row = plugins.get("mt-llm-infill")
+        return bool(row and row.get("enabled"))
+    except Exception:
+        return False
+
+
 @app.route("/templates")
 def templates():
-    return render(_render_src(TEMPLATES_TMPL, templates=store.list_templates()))
+    return render(_render_src(TEMPLATES_TMPL, templates=store.list_templates(),
+                              infill=_infill_plugin_enabled()))
 
 
 @app.route("/templates/new", methods=["GET", "POST"])
@@ -4624,7 +4655,8 @@ def template_new():
                            request.form.get("body") or "")
         flash("Template added.", "ok")
         return redirect(url_for("templates"))
-    return render(_render_src(TEMPLATE_EDIT_TMPL, template=None))
+    return render(_render_src(TEMPLATE_EDIT_TMPL, template=None,
+                              infill=_infill_plugin_enabled()))
 
 
 @app.route("/templates/<int:tid>/edit", methods=["GET", "POST"])
@@ -4639,7 +4671,8 @@ def template_edit(tid):
                               request.form.get("body") or "")
         flash("Template saved.", "ok")
         return redirect(url_for("templates"))
-    return render(_render_src(TEMPLATE_EDIT_TMPL, template=t))
+    return render(_render_src(TEMPLATE_EDIT_TMPL, template=t,
+                              infill=_infill_plugin_enabled()))
 
 
 @app.route("/templates/<int:tid>/delete", methods=["POST"])

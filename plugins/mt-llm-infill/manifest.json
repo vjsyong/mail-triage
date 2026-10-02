@@ -1,0 +1,41 @@
+{
+  "id": "mt-llm-infill",
+  "name": "LLM Draft Infill",
+  "action": "Fill only the marked blocks",
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "version": "0.1.0",
+  "description": "Flow draft step (mode \"plugin\") with a template: only {llm-infill}...{/llm-infill} blocks are written by the LLM; everything around them stays exactly as typed. A template without blocks is filled literally, with no model call.",
+  "kind": [
+    "draft-provider"
+  ],
+  "permissions": [
+    "llm.complete"
+  ],
+  "required_llm_capability": "llm.complete",
+  "limits": {
+    "memory_mb": 32,
+    "timeout_ms": 30000,
+    "kv_bytes": 4096
+  },
+  "config": {
+    "type": "object",
+    "properties": {
+      "style": {
+        "type": "string",
+        "description": "Style hint applied to every LLM-filled block (e.g. brief and friendly)",
+        "default": ""
+      },
+      "max_block_tokens": {
+        "type": "integer",
+        "description": "Token budget per filled block (16-1024, default 250)",
+        "default": 250
+      }
+    }
+  }
+}

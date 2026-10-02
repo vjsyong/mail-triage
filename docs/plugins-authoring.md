@@ -105,6 +105,30 @@ featurizes the message (`{tokens, from, domain, subject, body}`) and calls your
 reference implementation (bit-exact ports of `decision_list`/`naive_bayes`
 predictions from `heuristics.py`).
 
+## Draft-provider kind
+
+A flow draft step can hand its work to a plugin instead of the built-in LLM
+drafter:
+
+```json
+{"type":"draft","mode":"plugin","plugin":"my-drafter",
+ "template_id": 7, "instructions": "optional extra guidance"}
+```
+
+`draft(ctx, input)` receives the message context (`subject`, `from`, `snippet`,
+`date`, `instructions`) plus the step's template **raw** - not
+placeholder-rendered - as `input.template = {id, name, subject, body}` (null
+when the step has none), and the placeholder values as
+`input.fields = {sender, subject, date, my_name}`. Rendering the placeholders is
+the plugin's job, which is what lets a plugin define its own tags. Return
+`{text: "..."}`; `{text: ""}` means "nothing to draft" and the flow logs a skip.
+Keep within `limits.timeout_ms`; LLM calls count against it.
+
+`plugins/mt-llm-infill` is the reference implementation: it fills only the
+`{llm-infill}...{/llm-infill}` blocks of the template and passes everything
+else through untouched (no template / no blocks means no model call at all).
+`plugins/mt-mirror-language` shows the no-template style.
+
 ## Scheduled runs
 
 A tool plugin can ask the kernel to call `onSchedule(ctx, input)` on a cadence:
