@@ -170,7 +170,7 @@ html { touch-action: manipulation; }
   `browser_exec`; screenshots + `vision_analyze` per page; checklist above walked item
   by item; then the mock E2E suite stays green (add: /manifest.webmanifest 200 +
   content-type; /more renders; viewport meta).
-- Real-device smoke by Sean (Tailscale host) — installed-to-home-screen check.
+- Real-device smoke (Tailscale host) — installed-to-home-screen check.
 
 ### Keyboard-follow, Android correction (2026-10-02)
 Bug: on Android the tab bar stayed visible over the keyboard and the composer was

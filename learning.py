@@ -120,7 +120,8 @@ def extract_features(msg, contact=None):
         "f_exclaim_marks": float(min(5, text.count("!"))),
         "f_caps_words": float(min(5, sum(1 for w in re.findall(r"\b[A-Z]{3,}\b", text)))),
         "f_n_recipients": float(min(20, len([x for x in to_addr.split(",") if x.strip()]))),
-        "f_direct_recipient": 1.0 if (me and me in to_addr) or ("ust.hk" in to_addr) else 0.0,
+        "f_direct_recipient": 1.0 if (me and (me in to_addr
+                                            or (me.split("@")[-1] and me.split("@")[-1] in to_addr))) else 0.0,
         "f_contains_money": 1.0 if _RE_MONEY.search(text) else 0.0,
         "f_has_dates": 1.0 if _RE_DATE.search(text) else 0.0,
         "f_contains_request": 1.0 if _RE_REQUEST.search(text) else 0.0,

@@ -40,7 +40,7 @@ removal of the `replace` import from `kv_cache_utils.py` is **dropped** — v0.2
 ## How it's wired
 
 `single/awq/int8.yml` (slug `vllm/gemma-26ba4b-single`) mounts this dir read-only at
-`/etc/club3090/pr40391` and runs `install.sh` from the entrypoint **before** `vllm serve`.
+`/etc/mail-triage-gemma/pr40391` and runs `install.sh` from the entrypoint **before** `vllm serve`.
 The script no-ops cleanly if #40391 is already present (future merged image) and `exit 1`s
 if the diff fails to apply (never ships a half-patched engine).
 

@@ -17,6 +17,7 @@ import json
 import re
 import time
 
+import config
 import store
 
 RRF_K = 60
@@ -98,7 +99,10 @@ def norm_subject(s):
 
 def thread_key(subject, from_addr, to_addr):
     f = (from_addr or "").lower()
-    counterpart = (to_addr or "").lower() if ("seanyong" in f or "ust.hk" in f) else f
+    me = (config.IMAP_USER or "").lower()
+    me_local, _, me_dom = me.partition("@")
+    from_is_me = bool(me) and ((me_local and me_local in f) or (me_dom and me_dom in f))
+    counterpart = (to_addr or "").lower() if from_is_me else f
     raw = "t:%s|%s" % (norm_subject(subject), counterpart)
     return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:14]
 

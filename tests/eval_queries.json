@@ -1,50 +1,300 @@
 [
-  {"q": "the typhoon shuttle bus and staff bus arrangements", "expect": ["Shuttle and Staff Bus Service Arrangements During Typho"]},
-  {"q": "where can I get a free reusable glass food container", "expect": ["Reusable Glass Food Container"]},
-  {"q": "HPV vaccination campaign for staff", "expect": ["HPV Disease Prevention Vaccination Campaign", "Human Papillomavirus (HPV)"]},
-  {"q": "winter flu shot and influenza awareness", "expect": ["Influenza Awareness Campaign"]},
-  {"q": "campus cinema movie vote", "expect": ["Campus Cinema"]},
-  {"q": "hot and spicy chicken pot promotion", "expect": ["Chicken Pot"]},
-  {"q": "press release about alumnus Jensen Huang", "expect": ["Jensen Hua"]},
-  {"q": "library newsletter September 2025", "expect": ["Library Newsletter No. 137"]},
-  {"q": "protecting personal data privacy notice", "expect": ["Protecting Personal Data Privacy"]},
-  {"q": "work from home arrangement this afternoon", "expect": ["Arrangement for staff to work from home"]},
-  {"q": "warnings about deception scams targeting staff", "expect": ["Anti-Deception Seminar"]},
-  {"q": "electric vehicle charging procedure update", "expect": ["Electric Vehicle (EV) Charging"]},
-  {"q": "TSSSU Q&A session registration", "expect": ["TSSSU@HKUST 2026-27 Q&A Session"]},
-  {"q": "search committee for the dean of the business school", "expect": ["Search Committee for the Dean"]},
-  {"q": "welcome event fire up your year", "expect": ["Fire Up Your Year"]},
-  {"q": "press release MoU with French companies", "expect": ["French Companies Sign MoU"]},
-  {"q": "campus catering services typhoon arrangements", "expect": ["Campus Catering Services"]},
-  {"q": "SENG e-In Focus monthly newsletter", "expect": ["e-In Focus"]},
-  {"q": "Shaw Auditorium fall newsletter", "expect": ["Shaw Auditorium Fall 2025 Newsletter"]},
-  {"q": "veggie lifestyle menu promotion", "expect": ["Veggie Lifestyle"]},
-  {"q": "AIS new students outstanding registration documents", "expect": ["AIS New Students", "Outstanding Program Registration"]},
-  {"q": "AI literacy symposium invitation", "expect": ["AI Literacy Symposium"]},
-  {"q": "book talk by professor Philip Chen", "expect": ["Book Talk by Prof. Philip Chen"]},
-  {"q": "the city that reinvents itself UST boundless", "expect": ["City That Reinvents Itself"]},
-  {"q": "suspicious cloud account login alert", "expect": ["账号登录提醒", "Verify Your Account"]},
-  {"q": "heavy rainstorm signal no 8 alert", "expect": ["Tropical Cyclone Signal No. 8"]},
-  {"q": "staff ID and account association reminder", "expect": ["HKUST Account Association"]},
-  {"q": "PPOL seminar on human-machine collaboration", "expect": ["Human-Machine Synergy"]},
-  {"q": "ice cream giveaway for staff members", "expect": ["Ice-Cream"]},
-  {"q": "the IP seminar about robust IP protection", "expect": ["Achieving Robust IP Protect"]},
-  {"q": "TIE interview scheduling for the late January session", "expect": ["TIE Interview Scheduling"]},
-  {"q": "trouble accessing the isdtie outlook account incident", "expect": ["Difficulty with Accessing", "Outlook Account"]},
-  {"q": "reimbursement request and expense claim notifications", "expect": ["Reimbursement", "Expense Claim"]},
-  {"q": "problem with the IEDA server of Tristan's group", "expect": ["IEDA Server"]},
-  {"q": "follow up on the overdue purchase order", "expect": ["Follow up overdue PO", "PO D100305765"]},
-  {"q": "update of the TIE website", "expect": ["Update of TIE website"]},
-  {"q": "postgraduate admissions offer list", "expect": ["Offer List", "Application Summary"]},
-  {"q": "staff wellness day event", "expect": ["Staff Wellness Day"]},
-  {"q": "walking club event in January", "expect": ["Walking Club Event"]},
-  {"q": "invitation to meet the Nobel laureates", "expect": ["Nobel Laureates"]},
-  {"q": "visit to the DT-hub and AMC", "expect": ["DT-hub"]},
-  {"q": "workshop about making assigned readings engaging", "expect": ["assigned readings engaging"]},
-  {"q": "seminar on harnessing AI to transform manufacturing", "expect": ["Harnessing AI to Transform Ma"]},
-  {"q": "grade submission deadline reminder", "expect": ["Grade Submission Deadline"]},
-  {"q": "what happens to buses when a big storm comes", "expect": ["Shuttle and Staff Bus Service Arrangements", "Shuttle Bus / Staff Bus Arrangement Under Typhoon"]},
-  {"q": "locked out of my university email account", "expect": ["isdtie@ust.hk", "Outlook Account"]},
-  {"q": "getting money back for things I bought for work", "expect": ["Reimbursement", "Expense Claim"]},
-  {"q": "someone wants to schedule job interviews with candidates", "expect": ["TIE Interview Scheduling"]}
+  {
+    "q": "the typhoon shuttle bus and staff bus arrangements",
+    "expect": [
+      "Shuttle and Staff Bus Service Arrangements During Typho"
+    ]
+  },
+  {
+    "q": "where can I get a free reusable glass food container",
+    "expect": [
+      "Reusable Glass Food Container"
+    ]
+  },
+  {
+    "q": "HPV vaccination campaign for staff",
+    "expect": [
+      "HPV Disease Prevention Vaccination Campaign",
+      "Human Papillomavirus (HPV)"
+    ]
+  },
+  {
+    "q": "winter flu shot and influenza awareness",
+    "expect": [
+      "Influenza Awareness Campaign"
+    ]
+  },
+  {
+    "q": "campus cinema movie vote",
+    "expect": [
+      "Campus Cinema"
+    ]
+  },
+  {
+    "q": "hot and spicy chicken pot promotion",
+    "expect": [
+      "Chicken Pot"
+    ]
+  },
+  {
+    "q": "press release about a distinguished alumnus",
+    "expect": [
+      "Alumnus"
+    ]
+  },
+  {
+    "q": "library newsletter September 2025",
+    "expect": [
+      "Library Newsletter No. 137"
+    ]
+  },
+  {
+    "q": "protecting personal data privacy notice",
+    "expect": [
+      "Protecting Personal Data Privacy"
+    ]
+  },
+  {
+    "q": "work from home arrangement this afternoon",
+    "expect": [
+      "Arrangement for staff to work from home"
+    ]
+  },
+  {
+    "q": "warnings about deception scams targeting staff",
+    "expect": [
+      "Anti-Deception Seminar"
+    ]
+  },
+  {
+    "q": "electric vehicle charging procedure update",
+    "expect": [
+      "Electric Vehicle (EV) Charging"
+    ]
+  },
+  {
+    "q": "Q&A session registration for a funding scheme",
+    "expect": [
+      "Q&A Session"
+    ]
+  },
+  {
+    "q": "search committee for the dean of the business school",
+    "expect": [
+      "Search Committee for the Dean"
+    ]
+  },
+  {
+    "q": "welcome event fire up your year",
+    "expect": [
+      "Fire Up Your Year"
+    ]
+  },
+  {
+    "q": "press release MoU with French companies",
+    "expect": [
+      "French Companies Sign MoU"
+    ]
+  },
+  {
+    "q": "campus catering services typhoon arrangements",
+    "expect": [
+      "Campus Catering Services"
+    ]
+  },
+  {
+    "q": "engineering faculty monthly newsletter",
+    "expect": [
+      "e-In Focus"
+    ]
+  },
+  {
+    "q": "auditorium fall newsletter",
+    "expect": [
+      "Auditorium Fall 2025 Newsletter"
+    ]
+  },
+  {
+    "q": "veggie lifestyle menu promotion",
+    "expect": [
+      "Veggie Lifestyle"
+    ]
+  },
+  {
+    "q": "new students outstanding registration documents",
+    "expect": [
+      "New Students",
+      "Outstanding Program Registration"
+    ]
+  },
+  {
+    "q": "AI literacy symposium invitation",
+    "expect": [
+      "AI Literacy Symposium"
+    ]
+  },
+  {
+    "q": "book talk by a visiting professor",
+    "expect": [
+      "Book Talk"
+    ]
+  },
+  {
+    "q": "the city that reinvents itself",
+    "expect": [
+      "City That Reinvents Itself"
+    ]
+  },
+  {
+    "q": "suspicious cloud account login alert",
+    "expect": [
+      "\u8d26\u53f7\u767b\u5f55\u63d0\u9192",
+      "Verify Your Account"
+    ]
+  },
+  {
+    "q": "heavy rainstorm signal no 8 alert",
+    "expect": [
+      "Tropical Cyclone Signal No. 8"
+    ]
+  },
+  {
+    "q": "staff ID and account association reminder",
+    "expect": [
+      "Account Association"
+    ]
+  },
+  {
+    "q": "policy seminar on human-machine collaboration",
+    "expect": [
+      "Human-Machine Synergy"
+    ]
+  },
+  {
+    "q": "ice cream giveaway for staff members",
+    "expect": [
+      "Ice-Cream"
+    ]
+  },
+  {
+    "q": "the IP seminar about robust IP protection",
+    "expect": [
+      "Achieving Robust IP Protect"
+    ]
+  },
+  {
+    "q": "interview scheduling for the late January session",
+    "expect": [
+      "Interview Scheduling"
+    ]
+  },
+  {
+    "q": "trouble accessing the shared outlook account incident",
+    "expect": [
+      "Difficulty with Accessing",
+      "Outlook Account"
+    ]
+  },
+  {
+    "q": "reimbursement request and expense claim notifications",
+    "expect": [
+      "Reimbursement",
+      "Expense Claim"
+    ]
+  },
+  {
+    "q": "problem with the research group's server",
+    "expect": [
+      "Server"
+    ]
+  },
+  {
+    "q": "follow up on the overdue purchase order",
+    "expect": [
+      "Follow up overdue PO",
+      "PO D100305765"
+    ]
+  },
+  {
+    "q": "update of the programme website",
+    "expect": [
+      "Update of"
+    ]
+  },
+  {
+    "q": "postgraduate admissions offer list",
+    "expect": [
+      "Offer List",
+      "Application Summary"
+    ]
+  },
+  {
+    "q": "staff wellness day event",
+    "expect": [
+      "Staff Wellness Day"
+    ]
+  },
+  {
+    "q": "walking club event in January",
+    "expect": [
+      "Walking Club Event"
+    ]
+  },
+  {
+    "q": "invitation to meet the Nobel laureates",
+    "expect": [
+      "Nobel Laureates"
+    ]
+  },
+  {
+    "q": "visit to the campus hub",
+    "expect": [
+      "DT-hub"
+    ]
+  },
+  {
+    "q": "workshop about making assigned readings engaging",
+    "expect": [
+      "assigned readings engaging"
+    ]
+  },
+  {
+    "q": "seminar on harnessing AI to transform manufacturing",
+    "expect": [
+      "Harnessing AI to Transform Ma"
+    ]
+  },
+  {
+    "q": "grade submission deadline reminder",
+    "expect": [
+      "Grade Submission Deadline"
+    ]
+  },
+  {
+    "q": "what happens to buses when a big storm comes",
+    "expect": [
+      "Shuttle and Staff Bus Service Arrangements",
+      "Shuttle Bus / Staff Bus Arrangement Under Typhoon"
+    ]
+  },
+  {
+    "q": "locked out of my university email account",
+    "expect": [
+      "Outlook Account",
+      "Outlook Account"
+    ]
+  },
+  {
+    "q": "getting money back for things I bought for work",
+    "expect": [
+      "Reimbursement",
+      "Expense Claim"
+    ]
+  },
+  {
+    "q": "someone wants to schedule job interviews with candidates",
+    "expect": [
+      "Interview Scheduling"
+    ]
+  }
 ]

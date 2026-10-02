@@ -28,7 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(HERE)
 
-FAKE_DRAFT = "Hi, thanks for the note - I will reply properly shortly. - Sean"
+FAKE_DRAFT = "Hi, thanks for the note - I will reply properly shortly. - Alex"
 
 passed = 0
 failed = 0
@@ -651,7 +651,7 @@ class LLMHandler(BaseHTTPRequestHandler):
                     "name": "Hotmail -> Personal + ack",
                     "match_mode": "all",
                     "conditions": [{"field": "from", "op": "contains",
-                                    "value": "seanyong97@hotmail.com"}],
+                                    "value": "personal@example.com"}],
                     "steps": [{"type": "move", "folder": "Personal"},
                               {"type": "draft", "mode": "fixed",
                                "body": "Thank you for your email, I will get back to you shortly"}],
@@ -815,7 +815,7 @@ class TEIHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------- helpers
 
 def add_msg(state, frm, subj, body, msgid, folder="INBOX", date="Wed, 30 Sep 2026 10:00:00 +0800"):
-    raw = ("From: %s\r\nTo: seanyong@ust.hk\r\nSubject: %s\r\n"
+    raw = ("From: %s\r\nTo: me@example.com\r\nSubject: %s\r\n"
            "Date: %s\r\nMessage-ID: <%s>\r\n"
            "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s"
            % (frm, subj, date, msgid, body)).encode()
@@ -881,7 +881,7 @@ def main():
         "DATA_DIR": tmp,
         "IMAP_HOST": "127.0.0.1",
         "IMAP_PORT": str(imap_port),
-        "IMAP_USER": "seanyong@ust.hk",
+        "IMAP_USER": "me@example.com",
         "IMAP_PASSWORD": "test-password",
         "IMAP_TLS": "0",
         "LLM_BASE_URL": "http://127.0.0.1:%d/v1" % llm_port,
@@ -1023,7 +1023,7 @@ def main():
 
     section("T5 connectivity check")
     conn = engine.connectivity_check()
-    check("connectivity ok", conn["ok"] and conn["user"] == "seanyong@ust.hk")
+    check("connectivity ok", conn["ok"] and conn["user"] == "me@example.com")
     check("unseen counted", conn["unseen"] >= 3)
 
     section("T6 idempotency")
@@ -1359,7 +1359,7 @@ def main():
     c.base = "http://127.0.0.1:1/v1"
     c.fallback = (config.LLM_BASE_URL, config.LLM_API_KEY, config.LLM_MODEL)
     out = c.classify({"from_addr": "x@y", "subject": "Weekly newsletter", "snippet": "deals",
-                      "to_addr": "", "date": ""}, ["Newsletter"], "Sean")
+                      "to_addr": "", "date": ""}, ["Newsletter"], "Alex")
     check("fallback served the classification", out.get("category") == "Newsletter")
 
     section("T11 LLM failure: retry twice, park, then retry button")
@@ -1408,7 +1408,7 @@ def main():
     check("retry stored vectors too", vcount == nchunks)
     mc.close()
     long_body = "Attendance summary for HMAW1905E. " + "The student roster lists 40 names. " * 100
-    uid_long = add_msg(state, "registry@ust.hk", "Attendance report long", long_body, "lr@x")
+    uid_long = add_msg(state, "records@example.com", "Attendance report long", long_body, "lr@x")
     add_msg(state, "spam@spam.com", "You won a prize", "claim your money now", "j1@x",
             folder="Junk Email")
     res = rag.index_pass(limit=200)
@@ -1637,8 +1637,8 @@ def main():
 
     agent = engine.AssistantAgent()
     r = agent.call_tool("propose_rule", {
-        "name": "Keep Jac in inbox", "match_mode": "any",
-        "conditions": [{"field": "from", "op": "contains", "value": "jac.leung"}],
+        "name": "Keep Alex in inbox", "match_mode": "any",
+        "conditions": [{"field": "from", "op": "contains", "value": "alex"}],
         "placement": "top", "rationale": "his mail always stays in the inbox"})
     check("guard rule accepted without actions",
           r["ok"] and r["result"]["rule"]["actions"] == {}
@@ -1647,14 +1647,14 @@ def main():
 
     store.set_setting("rules_apply", True)
     store.set_setting("llm_apply", True)
-    guard_id = store.add_rule("Keep Jac in inbox", "any",
-                              [{"field": "from", "op": "contains", "value": "jac.leung"}],
+    guard_id = store.add_rule("Keep Alex in inbox", "any",
+                              [{"field": "from", "op": "contains", "value": "alex"}],
                               {}, enabled=True, position="top")
-    mover_id = store.add_rule("Jac to Notifications", "any",
-                              [{"field": "from", "op": "contains", "value": "jac.leung"}],
+    mover_id = store.add_rule("Alex to Notifications", "any",
+                              [{"field": "from", "op": "contains", "value": "alex"}],
                               {"move_to": "Notifications"}, enabled=True)
     check("top placement wins the ordering", store.list_rules()[0]["id"] == guard_id)
-    jac_uid = add_msg(state, "jac.leung@ust.hk", "Absence arrangement for AISC1000B",
+    jac_uid = add_msg(state, "alex@example.com", "Absence arrangement for AISC1000B",
                       "here is the invoice arrangement", "jac1@x")
     engine.process_mailbox()
     rowj = [r for r in store.messages(limit=2000) if r["uid"] == jac_uid][0]
@@ -1728,10 +1728,10 @@ def main():
 
     section("T21 message viewer: decoded MIME bodies")
     import base64 as _b64
-    payload = "Hi Sean, this is the decoded invoice text for September, please process it."
+    payload = "Hi Alex, this is the decoded invoice text for September, please process it."
     enc = _b64.b64encode(payload.encode()).decode()
     enc_lines = "\r\n".join(enc[i:i+76] for i in range(0, len(enc), 76))
-    raw_b64 = ("From: siyan@connect.ust.hk\r\nTo: seanyong@ust.hk\r\n"
+    raw_b64 = ("From: sam@example.com\r\nTo: me@example.com\r\n"
                "Subject: Re: About PGTA of HMAW1905E\r\n"
                "Date: Tue, 15 Sep 2026 13:24:40 +0000\r\nMessage-ID: <b64msg@x>\r\n"
                "MIME-Version: 1.0\r\n"
@@ -1765,7 +1765,7 @@ def main():
     check("salvage decodes truncated MIME snippets", "decoded invoice text" in salv)
     check("junk detector flags raw MIME, passes clean text",
           engine.looks_like_mime_junk("--XXB\r\nContent-Type: text/plain") is True
-          and engine.looks_like_mime_junk("Hi Sean, readable text.") is False)
+          and engine.looks_like_mime_junk("Hi Alex, readable text.") is False)
     junk_text = ("--XXB\r\nContent-Type: text/plain; charset=utf-8\r\n"
                  "Content-Transfer-Encoding: base64\r\n\r\n" + enc_lines)
     jr = add_msg(state, "junktest@x.com", "Junk snippet repair", "plain body for repair test", "junkrepair@x")
@@ -1848,7 +1848,7 @@ def main():
                  '<script>alert(1)</script><p onclick="hack()">safe text</p>'
                  '</body></html>')
     raw_html_mail = (
-        "From: news@example.com\r\nTo: seanyong@ust.hk\r\n"
+        "From: news@example.com\r\nTo: me@example.com\r\n"
         "Subject: Formatted mail test\r\nDate: Wed, 30 Sep 2026 09:00:00 +0800\r\n"
         "Message-ID: <htmlmail@x>\r\nMIME-Version: 1.0\r\n"
         'Content-Type: multipart/related; boundary="REL"\r\n\r\n'
@@ -2151,7 +2151,7 @@ def main():
           c.base == llm_base_mock and c.model == "settings-model-x" and c.timeout == 33)
     check("stored API key is used", c.key == "settings-key-1")
     out = c.classify({"from_addr": "x@y", "subject": "Weekly newsletter", "snippet": "deals",
-                      "to_addr": "", "date": ""}, ["Newsletter"], "Sean")
+                      "to_addr": "", "date": ""}, ["Newsletter"], "Alex")
     call = llm_server.calls[-1]
     check("classify uses the settings model + bearer from settings",
           out.get("category") == "Newsletter" and call["payload"].get("model") == "settings-model-x"
@@ -2172,7 +2172,7 @@ def main():
     client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
                                    "llm_model": "settings-model-x", "llm_thinking": "off"})
     engine.LLMClient().classify({"from_addr": "x@y", "subject": "Weekly newsletter",
-                                 "snippet": "deals", "to_addr": "", "date": ""}, ["Newsletter"], "Sean")
+                                 "snippet": "deals", "to_addr": "", "date": ""}, ["Newsletter"], "Alex")
     check("thinking=off suppresses chat_template_kwargs",
           "chat_template_kwargs" not in llm_server.calls[-1]["payload"])
     client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
@@ -2182,7 +2182,7 @@ def main():
     n0 = len(llm_server.calls)
     out = engine.LLMClient().classify({"from_addr": "x@y", "subject": "Weekly newsletter",
                                        "snippet": "deals", "to_addr": "", "date": ""},
-                                      ["Newsletter"], "Sean")
+                                      ["Newsletter"], "Alex")
     attempts = llm_server.calls[n0:]
     llm_server.reject_ctk = False
     check("auto mode survives an endpoint that rejects the thinking extension",
@@ -2431,7 +2431,8 @@ def main():
                   ("/accounts", "accounts"), ("/log", "log page"), ("/more", "more page"),
                   ("/learning", "learning page"), ("/learning/eval", "labeling page"),
                   ("/simulate", "simulator"), ("/plugins", "plugins page"),
-                  ("/plugins/mt-cjk-matcher", "plugin detail")]
+                  ("/plugins/mt-cjk-matcher", "plugin detail"),
+                  ("/welcome", "welcome page")]
     if _hid:
         page_cases.append(("/classifiers/%d/dataset" % _hid, "dataset review"))
     _missing = [p2 for p2, nd in page_cases
@@ -2510,7 +2511,7 @@ def main():
     flows32 = [f for f in store.list_flows() if "Hotmail" in (f["name"] or "")]
     check("one-click apply created the flow",
           r.status_code == 302 and len(flows32) == 1
-          and "seanyong97@hotmail.com" in flows32[0]["conditions"]
+          and "personal@example.com" in flows32[0]["conditions"]
           and "fixed" in flows32[0]["actions"])
     r = client.post("/assistant/apply", data={"msg_id": pm["id"], "idx": 0, "session": str(sid32)})
     flows_again = [f for f in store.list_flows() if "Hotmail" in (f["name"] or "")]
@@ -2531,7 +2532,7 @@ def main():
     check("flow builder offers fixed drafts",
           b"Fixed message" in client.get("/flows/new").data)
     before_a = len(state.appended)
-    add_msg(state, "seanyong97@hotmail.com", "Hello from hotmail", "hey there", "hm1@x")
+    add_msg(state, "personal@example.com", "Hello from hotmail", "hey there", "hm1@x")
     engine.process_mailbox()
     hrow32 = [r for r in store.messages(limit=3000) if r["msgid"] == "hm1@x"][0]
     check("flow moved the hotmail message to Personal", hrow32["folder"] == "Personal")
@@ -3099,7 +3100,7 @@ def main():
 
     ts0 = int(time.time())
     feats = learning_mod.extract_features({
-        "from_addr": "rev@acme.com", "to_addr": "seanyong@ust.hk",
+        "from_addr": "rev@acme.com", "to_addr": "me@example.com",
         "subject": "Please confirm the invoice",
         "snippet": "Could you review the attached invoice for HKD 1,200? Deadline is Friday.",
         "date_ts": ts0, "sort_ts": ts0})
@@ -3798,6 +3799,52 @@ def main():
     r = client.get("/plugins/mt-cjk-matcher")
     check("matcher detail explains its rule-condition role",
           b"Rule condition" in r.data and b"plugin</span>" in r.data)
+
+    section("T50 onboarding: welcome checklist, banner, doctor")
+    hw = eng_mod.detect_hardware()
+    check("doctor detects a hardware tier",
+          hw.get("tier") in ("none", "small", "medium", "large")
+          and bool(hw.get("tier_label")) and bool(hw.get("advice")))
+    _rep = eng_mod.doctor()
+    check("doctor report covers hardware, mailbox and llm",
+          "hardware" in _rep and "mailbox" in _rep and "llm" in _rep)
+    r = client.get("/welcome")
+    check("welcome checklist renders its steps",
+          r.status_code == 200 and b"Setup checklist" in r.data
+          and b"Connect your mailbox" in r.data and b"Point at an LLM" in r.data
+          and b"Build the search index" in r.data and b"Test LLM" in r.data)
+    _st2 = app_mod.setup_state()
+    check("setup_state reports 4 steps with a done count",
+          isinstance(_st2["steps"], list) and len(_st2["steps"]) == 4
+          and 0 <= _st2["done"] <= _st2["total"] == 4)
+    client.post("/welcome", data={"action": "dismiss"}, follow_redirects=True)
+    check("dismiss persists welcome_done", store.get_setting("welcome_done", 0) == 1)
+    _orig_setup = app_mod.setup_state
+    app_mod.setup_state = lambda: {"steps": [], "done": 1, "total": 4,
+                                   "dismissed": True, "llm": {}}
+    r = client.get("/")
+    check("dashboard banner respects the dismissed flag",
+          b"Getting started" not in r.data)
+    app_mod.setup_state = lambda: {"steps": [], "done": 1, "total": 4,
+                                   "dismissed": False, "llm": {}}
+    r = client.get("/")
+    check("dashboard banner shows while setup is incomplete",
+          b"Getting started" in r.data and b"Open checklist" in r.data)
+    app_mod.setup_state = _orig_setup
+    client.post("/welcome", data={"action": "reset"}, follow_redirects=True)
+    check("checklist can be reopened", store.get_setting("welcome_done", 0) == 0)
+    r = client.get("/more")
+    check("More page links the checklist",
+          b'href="/welcome"' in r.data and b"Get started" in r.data)
+    _denv = dict(os.environ, DATA_DIR=str(tmp), LLM_BASE_URL="http://127.0.0.1:9/v1",
+                 LLM_API_KEY="x", LLM_MODEL="dummy",
+                 PLUGINS_DIR=os.path.join(str(tmp), "plugins"),
+                 PLUGINS_BUILTIN_DIR=os.path.join(PROJECT, "plugins"))
+    _dr = subprocess.run([sys.executable, "app.py", "--doctor"], capture_output=True,
+                         text=True, timeout=120, cwd=PROJECT, env=_denv)
+    check("--doctor CLI prints the setup report",
+          _dr.returncode == 0 and "Mail Triage doctor" in _dr.stdout
+          and "hardware:" in _dr.stdout and "UNREACHABLE" in _dr.stdout)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

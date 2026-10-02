@@ -10,7 +10,7 @@ def get(name, default=None):
     return v if v not in (None, "") else default
 
 
-IMAP_HOST = get("IMAP_HOST", "100.93.139.49")
+IMAP_HOST = get("IMAP_HOST", "127.0.0.1")
 IMAP_PORT = int(get("IMAP_PORT", "1993"))
 IMAP_USER = get("IMAP_USER", "")
 IMAP_PASSWORD = get("IMAP_PASSWORD", "")
@@ -18,9 +18,11 @@ IMAP_PASSWORD = get("IMAP_PASSWORD", "")
 # Keep this off unless you point the app at a TLS-capable server.
 IMAP_TLS = get("IMAP_TLS", "0") == "1"
 
-LLM_BASE_URL = get("LLM_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
+# No default provider: a blank base URL means "not configured" - rules and search
+# still work, classification and drafting stay idle until an endpoint answers.
+LLM_BASE_URL = get("LLM_BASE_URL", "").rstrip("/")
 LLM_API_KEY = get("LLM_API_KEY", "")
-LLM_MODEL = get("LLM_MODEL", "deepseek-chat")
+LLM_MODEL = get("LLM_MODEL", "")
 LLM_TIMEOUT = int(get("LLM_TIMEOUT", "90"))
 # Optional fallback endpoint, used only when the primary endpoint fails
 # (e.g. keep a cloud model as a safety net when the local GPU server is down).
@@ -28,11 +30,12 @@ LLM_FALLBACK_BASE_URL = get("LLM_FALLBACK_BASE_URL", "")
 LLM_FALLBACK_API_KEY = get("LLM_FALLBACK_API_KEY", "")
 LLM_FALLBACK_MODEL = get("LLM_FALLBACK_MODEL", "")
 
-# RAG: local embedding + rerank servers (see embed/, TEI on GPU 1).
-EMBED_BASE_URL = get("EMBED_BASE_URL", "").rstrip("/")      # e.g. http://100.93.139.49:8041
+# RAG: optional embedding + rerank servers for the legacy GPU backend
+# (the default lite backend runs on CPU and needs neither).
+EMBED_BASE_URL = get("EMBED_BASE_URL", "").rstrip("/")      # e.g. http://your-embed-host:8041
 EMBED_MODEL = get("EMBED_MODEL", "Qwen/Qwen3-Embedding-4B")
 EMBED_TIMEOUT = int(get("EMBED_TIMEOUT", "180"))
-RERANK_BASE_URL = get("RERANK_BASE_URL", "").rstrip("/")    # e.g. http://100.93.139.49:8042
+RERANK_BASE_URL = get("RERANK_BASE_URL", "").rstrip("/")    # e.g. http://your-rerank-host:8042
 RERANK_MODEL = get("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 RERANK_TIMEOUT = int(get("RERANK_TIMEOUT", "90"))
 

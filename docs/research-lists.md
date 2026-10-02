@@ -14,7 +14,7 @@ Tables*, NN/g *Confirmation Dialogs*, M3 *Lists*, M3 *Chips*, Pencil & Paper
 *Enterprise Data Tables*); second pass added empty-state, gesture, reordering
 and logging sources (all fetched 2026-10-01, listed at the bottom). Every
 recommendation names one source; template/line references are to
-`/home/xrim/mail-triage/app.py`.
+`app.py`.
 
 ## Shared rules (apply to every page here)
 

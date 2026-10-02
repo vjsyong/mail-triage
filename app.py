@@ -274,6 +274,49 @@ def index_status():
     return st
 
 
+def setup_state():
+    """The Get started checklist: per-step state + counts for the dashboard banner."""
+    accounts = []
+    try:
+        accounts = proxy.list_accounts()
+    except Exception:
+        accounts = []
+    llm = {"configured": False, "base": "", "model": ""}
+    try:
+        cl = engine.LLMClient()
+        llm = {"configured": bool(cl.base), "base": cl.base or "", "model": cl.model or ""}
+    except Exception:
+        pass
+    indexed = 0
+    try:
+        indexed = int((rag.index_stats() or {}).get("messages") or 0)
+    except Exception:
+        indexed = 0
+    try:
+        has_rules = bool(store.list_rules())
+    except Exception:
+        has_rules = False
+    steps = [
+        {"id": "mailbox", "title": "Connect your mailbox",
+         "desc": "Sign in through the embedded OAuth proxy. Tokens stay on this machine.",
+         "done": bool(accounts), "url": "/accounts", "action": "Open Accounts"},
+        {"id": "llm", "title": "Point at an LLM",
+         "desc": "Any OpenAI-compatible endpoint: a local server or a hosted API. Rules and "
+                 "search work without one; classification and drafting stay idle.",
+         "done": llm["configured"], "url": "/settings", "action": "Open Settings"},
+        {"id": "index", "title": "Build the search index",
+         "desc": "Semantic search over the archive. Runs on CPU, resumable, %d message(s) so far."
+                 % indexed,
+         "done": indexed > 0, "url": "/", "action": "Index now"},
+        {"id": "learn", "title": "Sort some mail",
+         "desc": "Tag a few messages or write a rule - that is the raw material the learning "
+                 "loop trains on.",
+         "done": has_rules, "url": "/messages", "action": "Open Messages"},
+    ]
+    return {"steps": steps, "done": sum(1 for s in steps if s["done"]), "total": len(steps),
+            "dismissed": bool(store.get_setting("welcome_done", 0)), "llm": llm}
+
+
 def summarize_conditions(rule):
     try:
         conds = json.loads(rule.get("conditions") or "[]")
@@ -1015,7 +1058,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   <a href="{{ url_for('assistant') }}" class="{{ 'on' if p.startswith('/assistant') else '' }}" {{ 'aria-current="page"'|safe if p.startswith('/assistant') else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
     <span>Assistant</span></a>
-  {% set morepaths = ('/more','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/log','/proxy') %}
+  {% set morepaths = ('/more','/welcome','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/log','/proxy') %}
   <a href="{{ url_for('more') }}" class="{{ 'on' if p.startswith(morepaths) else '' }}" {{ 'aria-current="page"'|safe if p.startswith(morepaths) else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
     <span>More</span></a>
@@ -1853,6 +1896,9 @@ color:var(--fg);text-decoration:none}
     <div class="page-desc">All sections of the app.</div>
   </div>
 </div>
+<div class="more-list" style="margin-bottom:16px">
+  <a class="more-row" href="{{ url_for('welcome') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg><span class="grow"><b>Get started</b><span class="sub">Setup checklist: mailbox, LLM, search index</span></span><span aria-hidden="true">&#8250;</span></a>
+</div>
 <div class="nav-label" style="margin:2px 2px 8px">Automation</div>
 <div class="more-list">
   <a class="more-row" href="{{ url_for('rules') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"/></svg><span class="grow"><b>Rules</b><span class="sub">First-match sorting rules and guards</span></span><span aria-hidden="true">&#8250;</span></a>
@@ -2054,6 +2100,16 @@ DASH_TMPL = """
     <a class="btn" href="{{ url_for('messages') }}">Open messages</a>
   </div>
 </div>
+
+{% if setup and setup.done < setup.total and not setup.dismissed %}
+<div class="card" id="getstarted" style="border-left:3px solid var(--acc);margin-top:14px">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="flex:1;min-width:0"><b>Getting started: {{ setup.done }} of {{ setup.total }} steps done.</b>
+    <span class="sub">Connect your mailbox, point at an LLM, build the index.</span></div>
+    <a class="btn small" href="{{ url_for('welcome') }}">Open checklist</a>
+  </div>
+</div>
+{% endif %}
 
 <details class="card syswrap" open data-alert="{{ '1' if sys_alert else '0' }}">
   <summary class="sys-sum"><span class="dot {{ 'err' if sys_alert else 'ok' }}"></span><span class="sys-sum-t">{% if sys_alert %}Something needs attention{% else %}All systems normal{% endif %}</span><span class="sys-chev" aria-hidden="true"></span></summary>
@@ -2314,7 +2370,8 @@ def dashboard():
     return render(_render_src(
         DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
         settings=store.all_settings(), ix=ix_st, px=px, filings=filings,
-        llm=llm_cfg, llm_used=store.llm_count_last_hour(), sys_alert=sys_alert))
+        llm=llm_cfg, llm_used=store.llm_count_last_hour(), sys_alert=sys_alert,
+        setup=setup_state()))
 
 
 @app.route("/check", methods=["POST"])
@@ -2387,6 +2444,8 @@ def retry_errors():
 def index_run():
     indexer.trigger()
     flash("Indexing started — progress shows on the dashboard and the Log page.", "ok")
+    if (request.form.get("next") or "") == "welcome":
+        return redirect(url_for("welcome"))
     return redirect(url_for("dashboard"))
 
 
@@ -2668,6 +2727,73 @@ PLUGIN_DETAIL_TMPL = """
 </details>
 """
 
+WELCOME_TMPL = """
+<style>
+.ws-row{display:flex;gap:12px;align-items:flex-start;padding:13px 0;border-top:1px solid var(--line)}
+.ws-row:first-of-type{border-top:0;padding-top:4px}
+.ws-num{flex:0 0 26px;width:26px;height:26px;border:1px solid var(--line2);display:inline-flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:600;color:var(--dim);margin-top:2px}
+.ws-num.done{background:#000;color:#fff;border-color:#000}
+.ws-main{flex:1;min-width:0}
+.ws-main b{display:block;font-size:.92rem}
+.ws-main .sub{display:block}
+.ws-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:640px){ .ws-row{flex-wrap:wrap} .ws-acts{width:100%;justify-content:flex-start;margin-left:38px} }
+</style>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Get started</h1>
+    <div class="page-desc">A few short steps and your mail starts sorting itself. Everything runs on
+    this machine; mail only leaves it if you point the LLM at a hosted API.</div>
+  </div>
+  <form method="post" action="{{ url_for('welcome') }}">
+    <input type="hidden" name="action" value="dismiss">
+    <button class="btn">{{ 'Done - hide this' if st.done == st.total else 'Hide this checklist' }}</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-h"><h3>Setup checklist</h3><span class="sub">{{ st.done }} of {{ st.total }} done</span></div>
+  {% for s in st.steps %}
+  <div class="ws-row">
+    <span class="ws-num{{ ' done' if s.done else '' }}">{{ '&#10003;'|safe if s.done else loop.index }}</span>
+    <div class="ws-main">
+      <b>{{ s.title }}{% if s.done %} <span class="badge ok">done</span>{% endif %}</b>
+      <span class="sub">{{ s.desc }}</span>
+      {% if s.id == 'llm' %}
+        {% if st.llm.configured %}
+        <span class="sub">Current endpoint: <span class="mono">{{ st.llm.model or 'model?' }} @ {{ st.llm.base }}</span></span>
+        {% else %}
+        <span class="sub">Detected here: <b>{{ hw.tier_label }}</b>{% if hw.gpus %} ({% for g in hw.gpus %}{{ g.name }}, {{ g.gb }}GB{% if not loop.last %}; {% endif %}{% endfor %}){% endif %}. {{ hw.advice }}</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    <div class="ws-acts">
+      {% if s.id == 'llm' %}
+      <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><input type="hidden" name="next" value="welcome"><button class="btn small" type="submit">Test LLM</button></form>
+      {% endif %}
+      {% if s.id == 'index' and not s.done %}
+      <form class="inline" method="post" action="{{ url_for('index_run') }}"><input type="hidden" name="next" value="welcome"><button class="btn small" type="submit">Build index</button></form>
+      {% endif %}
+      <a class="btn small" href="{{ s.url }}">{{ s.action }}</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<details class="card" open>
+  <summary class="sub" style="cursor:pointer">Choosing an LLM for this machine</summary>
+  <div class="sub" style="margin-top:8px">
+    <b>No GPU:</b> rules and search run as-is; for classification use a hosted OpenAI-compatible
+    API, or a small CPU model via ollama / llama.cpp (quality is modest).<br>
+    <b>8-16GB GPU:</b> a quantized 7-14B instruct model served by vLLM or ollama is a good fit.<br>
+    <b>24GB+ GPU:</b> the <span class="mono">gemma/</span> example serves a 26B MoE on a single
+    24GB card (vLLM).<br>
+    Details and copy-paste examples: <span class="mono">docs/getting-started.md</span>.
+  </div>
+</details>
+"""
+
+
 
 
 CLASSIFIERS_TMPL = """
@@ -2888,6 +3014,22 @@ def plugin_detail(pid):
         flash("No plugin with id %r." % pid, "warn")
         return redirect(url_for("plugins_page"))
     return render(_render_src(PLUGIN_DETAIL_TMPL, p=ctx, sdk=plugins.HOST_SDK_VERSION))
+
+
+@app.route("/welcome", methods=["GET", "POST"])
+def welcome():
+    if request.method == "POST":
+        act = (request.form.get("action") or "").strip()
+        if act == "dismiss":
+            store.set_setting("welcome_done", 1)
+            flash("Checklist hidden - reopen it from More any time.", "info")
+            return redirect(url_for("dashboard"))
+        if act == "reset":
+            store.set_setting("welcome_done", 0)
+            return redirect(url_for("welcome"))
+    st = setup_state()
+    return render(_render_src(WELCOME_TMPL, st=st,
+                              hw=engine.detect_hardware(), sdk=plugins.HOST_SDK_VERSION))
 
 
 @app.route("/plugins/rescan", methods=["POST"])
@@ -6024,7 +6166,7 @@ def _save_behavior_settings():
         store.set_setting("watch_folders",
                           [x.strip() for x in (f.get("watch_folders") or "INBOX").split(",") if x.strip()])
     if has("my_name"):
-        store.set_setting("my_name", (f.get("my_name") or "Sean").strip())
+        store.set_setting("my_name", (f.get("my_name") or "").strip())
     for k in ("rules_apply", "heuristics_enabled", "heuristic_autorefine", "llm_suggest",
               "llm_apply", "index_enabled", "rerank_enabled",
               "render_images", "flows_apply"):
@@ -6583,18 +6725,20 @@ def settings():
 @app.route("/settings/test-llm", methods=["POST"])
 def settings_test_llm():
     which = request.args.get("which") or "primary"
+    nxt = request.values.get("next") or ""
+    dest = url_for("welcome") if nxt == "welcome" else url_for("settings")
     started = time.time()
     client = engine.LLMClient()
     if which == "fallback":
         if not client.fallback:
             flash("No fallback endpoint configured (see the LLM endpoint card).", "err")
-            return redirect(url_for("settings"))
+            return redirect(dest)
         base, key, model = client.fallback
     else:
         base, key, model = client.base, client.key, client.model
     if not base:
         flash("No LLM endpoint configured - set one in Settings.", "err")
-        return redirect(url_for("settings"))
+        return redirect(dest)
     try:
         out = client._chat_once(base, key, model,
                                 "You are a connectivity test. Reply with the single word ok.",
@@ -6606,7 +6750,7 @@ def settings_test_llm():
         flash("LLM %s FAILED after %.1fs: %r - check the endpoint on this page "
               "(local model server: cd gemma && docker compose ps)"
               % (which, time.time() - started, exc), "err")
-    return redirect(url_for("settings"))
+    return redirect(dest)
 
 
 @app.route("/settings/test-embed", methods=["POST"])
@@ -7919,6 +8063,34 @@ if __name__ == "__main__":
         plugins.scan()  # discover built-in + user plugins (inert until enabled)
     except Exception as exc:  # a broken plugins dir must never block boot
         print("plugin scan failed at boot: %r" % exc, flush=True)
+    if "--doctor" in sys.argv:
+        rep = engine.doctor()
+        hw = rep.get("hardware") or {}
+        ll = rep.get("llm") or {}
+        mb = rep.get("mailbox") or {}
+        print("Mail Triage doctor")
+        gpus = ", ".join("%s %sGB" % (g.get("name"), g.get("gb", "?"))
+                         for g in (hw.get("gpus") or []))
+        print("  hardware: %s%s" % (hw.get("tier_label"),
+                                    (" - " + gpus) if gpus else ""))
+        print("            %s" % hw.get("advice"))
+        print("  mailbox:  %s" % (("%s @ %s:%s" % (mb.get("user"), mb.get("host"), mb.get("port")))
+                                  if mb.get("configured") else
+                                  "not configured yet - add it on the Accounts page"))
+        if ll.get("configured"):
+            if ll.get("reachable"):
+                print("  llm:      OK in %sms - %s @ %s (replied %r)"
+                      % (ll.get("latency_ms") or 0, ll.get("model"), ll.get("base_url"),
+                         (ll.get("reply") or "")[:30]))
+            else:
+                print("  llm:      configured (%s @ %s) but UNREACHABLE: %s"
+                      % (ll.get("model"), ll.get("base_url"), ll.get("error")))
+        else:
+            print("  llm:      not configured - rules and search work; classification and "
+                  "drafting need an OpenAI-compatible endpoint")
+        print("  next:     open the Get started checklist at /welcome (UI on port %s)"
+              % config.UI_PORT)
+        sys.exit(0)
     if "--check" in sys.argv:
         out = engine.connectivity_check()
         try:
