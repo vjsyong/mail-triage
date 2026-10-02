@@ -229,8 +229,13 @@ Run the mock end-to-end suites with the project's Python environment:
 
 ```bash
 .venv/bin/python tests/mock_e2e.py     # app suite: mock IMAP, LLM, and embeddings
+.venv/bin/python tests/mock_e2e.py --list   # sections and their domain groups
+.venv/bin/python tests/mock_e2e.py --only core,rag   # partial run by domain
 .venv/bin/python tests/proxy_e2e.py    # proxy suite: mock OAuth and IMAP
 ```
+
+On a dirty working tree the app suite auto-runs only the domains its changed
+files touch; a clean tree runs everything. `--all` forces the full suite.
 
 ## License and acknowledgments
 

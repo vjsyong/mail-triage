@@ -50,9 +50,17 @@ git branch -d <name>
 ## Commands
 
 - **Tests** (required before any code commit; docs-only changes may skip):
-  `.venv/bin/python tests/mock_e2e.py`
-  Full mock E2E (mock IMAP + mock LLM + mock TEI), ~6 min, ~630 checks. Add checks for
-  new behaviour; never weaken or delete one to make it pass.
+  `.venv/bin/python tests/mock_e2e.py` — full mock E2E (mock IMAP + mock LLM +
+  mock TEI), ~70 s, ~730 checks. On a dirty tree it auto-selects the domains the
+  changed files touch (`engine.py` -> core+assistant, template-only `app.py`
+  hunks -> ui, `rag*.py` -> rag, `plugins/` -> plugins, ...); a clean tree runs
+  everything. Sections are tagged `base/core/ui/assistant/rag/learning/plugins/
+  proxy/bench`; `base` fixtures and each group's prerequisites always run.
+  - `--all` forces the full suite; `--only core,rag` / `--skip ui` pick domains
+    explicitly; `--list` shows every section's groups. Partial summaries say
+    `[partial run]` and list skipped sections. Run `--all` before merging to
+    master. Add checks for new behaviour; never weaken or delete one to make it
+    pass.
 - **Rebuild + deploy**:
   `docker compose build && docker compose create --force-recreate mail-triage && docker start mail-triage`
   then poll `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8097/healthz`

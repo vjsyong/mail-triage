@@ -44,8 +44,11 @@ def check(name, cond):
         print("  \u2717 FAIL: %s" % name)
 
 
-def section(name):
-    print("\n== %s ==" % name)
+def section(name, *groups):
+    if name in globals().get("_PARTIAL_SKIPPED", ()):
+        print("\n== %s ==  (skipped: not in the selected groups)" % name)
+    else:
+        print("\n== %s ==" % name)
 
 
 # ---------------------------------------------------------------- mock state
@@ -1037,16 +1040,20 @@ def main():
     import rag
     import rag_lite
     import learning as learning_mod
+    import plugins as plugins_mod
+    eng_mod = engine
 
     store.init_db()
     store.set_setting("max_llm_per_hour", 200)
     store.set_setting("llm_batch_per_cycle", 10)
+    import app as app_mod
+    client = app_mod.app.test_client()
     check("env: config points at mock IMAP",
           config.IMAP_HOST == "127.0.0.1" and config.IMAP_PORT == imap_port)
     check("env: config points at mock LLM",
           config.LLM_BASE_URL.endswith(str(llm_port) + "/v1"))
 
-    section("T0 rule matcher units")
+    section("T0 rule matcher units", "base")
     check("contains", engine.rule_matches(
         {"conditions": json.dumps([{"field": "from", "op": "contains", "value": "BOSS@"}]),
          "match_mode": "all"}, {"from": "boss@work.com"}))
@@ -1061,7 +1068,7 @@ def main():
                                    {"field": "subject", "op": "contains", "value": "Budget"}]),
          "match_mode": "any"}, {"from": "a@b", "subject": "Budget review"}))
 
-    section("T1 first pass: rule sort + LLM classification (suggest only)")
+    section("T1 first pass: rule sort + LLM classification (suggest only)", "base")
     store.set_setting("rules_apply", True)
     store.set_setting("llm_suggest", True)
     store.set_setting("llm_apply", False)
@@ -1087,7 +1094,7 @@ def main():
     check("nothing filed by LLM yet (suggest only)",
           len(state.get("Newsletters", )["uids"] if state.get("Newsletters") else []) == 0)
 
-    section("T2 LLM auto-filing ON")
+    section("T2 LLM auto-filing ON", "base")
     store.set_setting("llm_apply", True)
     add_msg(state, "newsletter@deals.com", "Weekly newsletter: even more deals", "More deals inside.", "n2@x")
     engine.process_mailbox()
@@ -1099,7 +1106,7 @@ def main():
     check("row action=move:Newsletters", row5["action_taken"] == "move:Newsletters")
     check("auto-file row records the renumbered destination uid", row5["uid"] == news_uid5)
 
-    section("T2b move-uid recording + assistant self-heal (the COPYUID trap)")
+    section("T2b move-uid recording + assistant self-heal (the COPYUID trap)", "base")
     rec_rid = store.add_rule("UID record test", "any",
                              [{"field": "from", "op": "contains", "value": "uidrecv"}],
                              {"move_to": "UIDBox"}, enabled=True)
@@ -1135,7 +1142,7 @@ def main():
     check("assistant read self-heals a stale row + writes back",
           rrse["ok"] and healed["folder"] == "UIDBox" and healed["uid"] == dst1)
 
-    section("T3 dry-run mode")
+    section("T3 dry-run mode", "base")
     store.set_setting("rules_apply", False)
     add_msg(state, "boss@work.com", "Second budget note", "Another budget item.", "b2@x")
     engine.process_mailbox()
@@ -1144,7 +1151,7 @@ def main():
     row6 = [r for r in store.messages(limit=60) if r["msgid"] == "b2@x"][0]
     check("row status=matched-dry", row6["status"] == "matched-dry")
 
-    section("T4 reply drafting + save to Drafts")
+    section("T4 reply drafting + save to Drafts", "base")
     store.add_template("Ack", "Re: {subject}", "Hi {sender},\n\nThanks for your note.\n\n{my_name}")
     msg4 = [r for r in store.messages(limit=60) if r["uid"] == 4][0]
     tid = store.list_templates()[0]["id"]
@@ -1160,18 +1167,18 @@ def main():
         check("draft subject header", b"Subject: Re: Lunch tomorrow?" in raw)
         check("draft In-Reply-To", b"In-Reply-To: <f1@x>" in raw)
 
-    section("T5 connectivity check")
+    section("T5 connectivity check", "base")
     conn = engine.connectivity_check()
     check("connectivity ok", conn["ok"] and conn["user"] == "me@example.com")
     check("unseen counted", conn["unseen"] >= 3)
 
-    section("T6 idempotency")
+    section("T6 idempotency", "base")
     before = len(store.messages(limit=500))
     engine.process_mailbox()
     after = len(store.messages(limit=500))
     check("no duplicates on re-run", before == after)
 
-    section("T7 UIDVALIDITY change triggers re-index")
+    section("T7 UIDVALIDITY change triggers re-index", "base")
     state.get("INBOX")["uidvalidity"] = 42
     engine.process_mailbox()
     rows_in = [r for r in store.messages(limit=500) if r["folder"] == "INBOX"]
@@ -1184,9 +1191,7 @@ def main():
           and state_uid(state, "INBOX", "f1@x") is not None
           and state_uid(state, "INBOX", "b2@x") is not None)
 
-    section("T8 web UI smoke (Flask test client)")
-    import app as app_mod
-    client = app_mod.app.test_client()
+    section("T8 web UI smoke (Flask test client)", "ui")
     for path in ("/", "/rules", "/flows", "/flows/new", "/classifiers", "/templates",
                  "/messages", "/accounts", "/accounts/new", "/settings", "/log", "/proxy/log",
                  "/healthz"):
@@ -1217,7 +1222,7 @@ def main():
         conn.execute("DELETE FROM messages WHERE id=?", (pid,))
         conn.commit()
 
-    section("T9a assistant tools (direct executor tests)")
+    section("T9a assistant tools (direct executor tests)", "assistant")
     agent = engine.AssistantAgent()
     r = agent.call_tool("list_folders", {})
     check("list_folders lists folders with counts",
@@ -1400,7 +1405,7 @@ def main():
     agent.close()
     store.set_setting("perm_move", "auto")
 
-    section("T9b assistant agent stream (SSE + tools + proposals)")
+    section("T9b assistant agent stream (SSE + tools + proposals)", "assistant")
     rules_before = len(store.list_rules())
     r = client.post("/assistant/stream", data={"message": "Sort the budget mail please"})
     check("stream responds 200 + SSE", r.status_code == 200 and r.mimetype == "text/event-stream")
@@ -1456,7 +1461,7 @@ def main():
     check("move logged to events", any("assistant moved" in e["message"]
                                        for e in store.recent_events(60)))
 
-    section("T9c assistant page: transcript + one-click apply")
+    section("T9c assistant page: transcript + one-click apply", "assistant", "ui")
     r = client.get("/assistant/s/%d" % t9_sid)
     check("assistant session page renders", r.status_code == 200)
     check("page shows the thinking transcript", b"thinking" in r.data)
@@ -1476,7 +1481,7 @@ def main():
     check("clear empties only this chat", len(store.session_messages(t9_sid)) == 0
           and store.get_session(t9_sid) is not None)
 
-    section("T9c2 assistant regenerate: swaps the newest reply in place")
+    section("T9c2 assistant regenerate: swaps the newest reply in place", "assistant")
     _rsid = store.find_or_create_session()
     _ruid = store.add_assistant_message("user", "Build this multi-step regen flow for me please",
                                         session_id=_rsid)
@@ -1521,7 +1526,7 @@ def main():
     check("started chats render without the suggestions",
           b'class="chat-empty"' not in _rem_page2.data)
 
-    section("T9d assistant failure is visible, not silent")
+    section("T9d assistant failure is visible, not silent", "assistant")
     r = client.post("/assistant/stream", data={"message": "streamfail please"})
     check("error event streamed, no done", b"event: error" in r.data and b"event: done" not in r.data)
     check("failure logged", any("assistant failed" in e["message"]
@@ -1529,7 +1534,7 @@ def main():
     r = client.post("/assistant/send", data={"message": "hello again"})
     check("buffered no-JS fallback still works", r.status_code == 302)
 
-    section("T9e streaming fallback to the secondary endpoint")
+    section("T9e streaming fallback to the secondary endpoint", "assistant")
     c = engine.LLMClient()
     c.base = "http://127.0.0.1:1/v1"
     c.fallback = (config.LLM_BASE_URL, config.LLM_API_KEY, config.LLM_MODEL)
@@ -1538,7 +1543,7 @@ def main():
     txt = "".join(e.get("text", "") for e in evs if e["type"] == "content_delta")
     check("fallback streamed a reply", "fallback" in txt)
 
-    section("T10 LLM fallback")
+    section("T10 LLM fallback", "base")
     c = engine.LLMClient()
     c.base = "http://127.0.0.1:1/v1"
     c.fallback = (config.LLM_BASE_URL, config.LLM_API_KEY, config.LLM_MODEL)
@@ -1546,7 +1551,7 @@ def main():
                       "to_addr": "", "date": ""}, ["Newsletter"], "Alex")
     check("fallback served the classification", out.get("category") == "Newsletter")
 
-    section("T11 LLM failure: retry twice, park, then retry button")
+    section("T11 LLM failure: retry twice, park, then retry button", "base")
     for _ in range(25):
         if not store.queued_messages(999):
             break
@@ -1566,7 +1571,7 @@ def main():
     check("retry requeues and clears failures",
           n == 1 and row["status"] == "queued" and store.llm_fail_count(row["id"]) == 0)
 
-    section("T12 RAG: indexer, chunking, folder exclusions")
+    section("T12 RAG: indexer, chunking, folder exclusions", "rag")
     uid_probe = add_msg(state, "probe@x.com", "Half index probe", "probe body text", "hx@x")
     mc = engine.MailClient().connect()
     uv_inbox = mc.select("INBOX")
@@ -1626,7 +1631,7 @@ def main():
     res2 = rag.index_pass(limit=5)
     check("second pass is a no-op", res2["processed"] == 0 and res2["remaining"] == 0)
 
-    section("T13 RAG: hybrid search, rerank, filters")
+    section("T13 RAG: hybrid search, rerank, filters", "rag")
     r = rag.search("payment", mode="vector")
     check("vector search finds the invoice for a paraphrase",
           r["ok"] and any("Invoice" in (x["subject"] or "") for x in r["results"]))
@@ -1653,7 +1658,7 @@ def main():
           r["ok"] and any("Invoice" in (x["subject"] or "") for x in r["result"]["results"]))
     agent.close()
 
-    section("T13b lite backend: quote stripping + backend switching")
+    section("T13b lite backend: quote stripping + backend switching", "rag")
     new_t, quoted_t, method_t = rag_lite.strip_quoted(
         "Hello team,\n\nHere is the update on the project. It is going well.\n\n"
         "On Mon, Jan 5, 2026 at 9:00 AM Alice <a@x> wrote:\n"
@@ -1685,7 +1690,7 @@ def main():
     check("lite stats report the backend",
           rag.index_stats().get("backend") == "lite" and rag.index_stats()["chunks"] >= 1)
 
-    section("T14 RAG: assistant streams a semantic-search turn")
+    section("T14 RAG: assistant streams a semantic-search turn", "rag", "assistant")
     r = client.post("/assistant/stream",
                     data={"message": "do a semantic search for the vendor invoice"})
     body = r.data.decode()
@@ -1696,7 +1701,7 @@ def main():
     check("linkify renders message refs as links",
           'href="/messages/3"' in app_mod.linkify("see [msg:3]"))
 
-    section("T15 UI: ordering, markdown, tags, non-mail rows")
+    section("T15 UI: ordering, markdown, tags, non-mail rows", "ui")
     md = app_mod.md_to_html("**bold** and `code`\n- one\n- two")
     check("md renderer handles bold/lists/code",
           "<b>bold</b>" in md and "<code>code</code>" in md and "<li>one</li>" in md)
@@ -1736,7 +1741,7 @@ def main():
     r = client.post("/messages/untag", data={"ids": [row_old["id"]]})
     check("untag clears", store.get_message(row_old["id"])["user_tag"] == "")
 
-    section("T16 classify: single + batch")
+    section("T16 classify: single + batch", "core")
     c1 = add_msg(state, "cafe@x.com", "Lunch with the team", "grabbing lunch friday", "c1@x")
     c2 = add_msg(state, "billing2@vendor.com", "Invoice for September", "invoice attached", "c2@x")
     c3 = add_msg(state, "deals2@shop.com", "Weekly newsletter deals", "deals inside", "c3@x")
@@ -1776,7 +1781,7 @@ def main():
     r = client.post("/messages/classify-all")
     check("classify-all route triggers", r.status_code == 302)
 
-    section("T17 learn rules from manual tags")
+    section("T17 learn rules from manual tags", "learning", "core")
     store.tag_messages([rowc1["id"], rowc3["id"]], "Receipt")
     r = client.post("/learn-rules")
     check("learn-rules redirects", r.status_code == 302)
@@ -1806,7 +1811,7 @@ def main():
           and any(t["tag"] == "Receipt" for t in r["result"]["tagged"]))
     agent.close()
 
-    section("T18 guard rules, top placement, short-token matching")
+    section("T18 guard rules, top placement, short-token matching", "core")
     po_rule = {"conditions": json.dumps([{"field": "subject", "op": "contains", "value": "PO"}]),
                "match_mode": "all"}
     check("short contains value does not fire inside words",
@@ -1864,7 +1869,7 @@ def main():
     store.delete_rule(guard_id)
     store.delete_rule(mover_id)
 
-    section("T19 batch classify: parallel workers + thinking")
+    section("T19 batch classify: parallel workers + thinking", "core")
     store.set_setting("classify_concurrency", 4)
     b_uids = [add_msg(state, "batch%d@x.com" % i, "Batch newsletter item %d" % i,
                       "weekly deals inside", "batch%d@x" % i) for i in range(6)]
@@ -1891,7 +1896,7 @@ def main():
     check("single classify stores thinking",
           "mock thinking about Receipt" in (rt["llm_thinking"] or ""))
 
-    section("T20 messages list: pagination + summary line")
+    section("T20 messages list: pagination + summary line", "ui")
     store.update_message(rows_b[0]["id"], llm_summary="Summary under the row test")
     r = client.get("/messages?per=500")
     check("summary line renders under the message row", b"Summary under the row test" in r.data)
@@ -1910,7 +1915,7 @@ def main():
     check("pager shows total and an Older link",
           b"page 1 of" in r.data and b"Older" in r.data and b"per page" in r.data)
 
-    section("T21 message viewer: decoded MIME bodies")
+    section("T21 message viewer: decoded MIME bodies", "ui", "core")
     import base64 as _b64
     payload = "Hi Alex, this is the decoded invoice text for September, please process it."
     enc = _b64.b64encode(payload.encode()).decode()
@@ -2103,7 +2108,7 @@ def main():
           engine.looks_like_mime_junk("Received: from mail.example.com by mx1; Wed") is True
           and engine.looks_like_mime_junk("Your order 1Z999AA10123456784 has shipped.") is False)
 
-    section("T22 rule proposals consult existing rules (update vs add)")
+    section("T22 rule proposals consult existing rules (update vs add)", "assistant")
     rules_all = store.list_rules()
     boss_rule = [r for r in rules_all if r["name"] == "Work from boss"][0]
     agent = engine.AssistantAgent()
@@ -2165,7 +2170,7 @@ def main():
     check("rule_similarity matches exact conditions", bool(sim) and sim["id"] == boss_rule["id"])
     agent2.close()
 
-    section("T23 heuristic classifiers: registry, pipeline order, refine")
+    section("T23 heuristic classifiers: registry, pipeline order, refine", "learning", "core")
     ex = [("Promo", heuristics_mod.featurize({"from_addr": "deals@shop.example",
                                               "subject": "Weekly deal blast",
                                               "snippet": "promo code inside"})) for _ in range(3)]
@@ -2259,7 +2264,7 @@ def main():
     check("negative-only match abstains instead of mislabeling", verdict is None)
     store.delete_heuristic(hx)
 
-    section("T24 classifier datasets: review, remove, re-include")
+    section("T24 classifier datasets: review, remove, re-include", "learning")
     sample_id = rows_h[0]["id"]  # a tagged Promo sample from T23
     ds = heuristics_mod.dataset_for(store.get_heuristic(hid))
     check("dataset view lists positives untouched",
@@ -2287,7 +2292,7 @@ def main():
     check("classifiers page links the dataset page",
           ("/classifiers/%d/dataset" % hid).encode() in client.get("/classifiers").data)
 
-    section("T25 dataset relabel: dropdown reclassification + toast")
+    section("T25 dataset relabel: dropdown reclassification + toast", "learning")
     pos_ids = [s["msg_id"] for s in heuristics_mod.dataset_for(store.get_heuristic(hid))["positives"]]
     rid = [i for i in pos_ids if i != sample_id][0]
     r = client.post("/classifiers/%d/dataset/relabel" % hid,
@@ -2322,7 +2327,7 @@ def main():
     check("classified-source relabel corrects the LLM label on the message", ok_relabel)
     store.delete_heuristic(hcl)
 
-    section("T26 settings decouple endpoints from env (LLM + RAG)")
+    section("T26 settings decouple endpoints from env (LLM + RAG)", "core", "ui")
     llm_base_mock = "http://127.0.0.1:%d/v1" % llm_port
     tei_base = "http://127.0.0.1:%d" % tei_port
     # -- the LLM endpoint (base/model/key/timeout) is now a setting
@@ -2479,7 +2484,7 @@ def main():
           and b'id="embed-base-url"' in r.data and b'id="rerank-base-url"' in r.data)
     client.post("/settings", data={"section": "llm", "llm_base_url": "", "llm_model": ""})
 
-    section("T27 embedded proxy: account store, config generation, connection resolution")
+    section("T27 embedded proxy: account store, config generation, connection resolution", "proxy")
     import proxy as proxy_mod
     store.set_setting("proxy_tailnet_host", "node.example.ts.net")
     rec, ferr = proxy_mod.account_from_form({
@@ -2523,7 +2528,7 @@ def main():
     check("removing the last account is a clean outcome", ok and not rerr)
     check("account removed", proxy_mod.list_accounts() == [])
 
-    section("T28 flows: multi-step builder, execution, dedupe, dry-run")
+    section("T28 flows: multi-step builder, execution, dedupe, dry-run", "core", "ui")
     import app as app_mod2
     tpl_id = store.list_templates()[0]["id"]
     flow_steps = [{"type": "move", "folder": "FlowBox"},
@@ -2575,7 +2580,7 @@ def main():
           and len(state.appended) == before_appends + 1)
     store.set_setting("flows_apply", True)
 
-    section("T29 assistant chats: sessions, panel fragment, drawer")
+    section("T29 assistant chats: sessions, panel fragment, drawer", "assistant")
     r = client.get("/assistant")
     check("assistant tab starts a chat (direct render, canonical URL via replaceState)",
           r.status_code == 200 and b"replaceState" in r.data)
@@ -2662,7 +2667,7 @@ def main():
           "CURRENT PAGE block" in engine.ASSISTANT_SYSTEM)
     client.post("/assistant/session/%d/delete" % esid29, data={"json": "1"})
 
-    section("T31 assistant: repetition guard + rule housekeeping tools")
+    section("T31 assistant: repetition guard + rule housekeeping tools", "assistant")
     r = client.post("/assistant/stream", data={"message": "loopme now please"})
     body = r.data.decode()
     check("looped turn ends gracefully with done", "event: done" in body and "event: error" not in body)
@@ -2727,7 +2732,7 @@ def main():
     store.set_setting("perm_rules", "ask")
     store.delete_rule(rid_pend)
 
-    section("T32 flows from the assistant: propose -> approve -> execute (fixed draft)")
+    section("T32 flows from the assistant: propose -> approve -> execute (fixed draft)", "assistant", "core")
     r = client.post("/assistant/stream", data={"message": "Build this multi-step flow for me please"})
     body = r.data.decode()
     check("proposal turn ran propose_flow",
@@ -2802,7 +2807,7 @@ def main():
     check("propose_flow rejects invalid steps", not bad["ok"] and "move step needs a folder" in bad["summary"])
     r.close()
 
-    section("T33 fuzzy flows: AI category + about (topic) conditions, instructed LLM drafts")
+    section("T33 fuzzy flows: AI category + about (topic) conditions, instructed LLM drafts", "assistant", "core")
     fp = client.get("/flows/new").data
     check("flow builder offers fuzzy condition kinds",
           b"AI category" in fp and b"about (topic)" in fp and b"min score" in fp and b"condKind" in fp)
@@ -2877,7 +2882,7 @@ def main():
           r.status_code == 302 and len(af) == 1
           and '"kind": "topic"' in af[0]["conditions"] and '"instructions"' in af[0]["actions"])
 
-    section("T35 served page scripts parse (node --check)")
+    section("T35 served page scripts parse (node --check)", "ui")
     import shutil as _sh, re as _re, tempfile as _tf
     node = _sh.which("node")
     if node:
@@ -2897,7 +2902,7 @@ def main():
     else:
         check("node available for script syntax check (skipped otherwise)", True)
 
-    section("T34 flow builder v2: canvas = trigger -> filters -> step chain")
+    section("T34 flow builder v2: canvas = trigger -> filters -> step chain", "ui")
     np = client.get("/flows/new").data
     check("canvas renders trigger + filter nodes",
           b"flowcanvas" in np and b"New mail arrives" in np and b"Only when" in np)
@@ -2913,7 +2918,7 @@ def main():
           b"fl-edge" in edit34 and b'value="all" checked' in edit34
           and b"Food plans" in edit34 and b"lunch and restaurant plans" in edit34)
 
-    section("T30 mobile shell: viewport, PWA manifest, tab bar, More page")
+    section("T30 mobile shell: viewport, PWA manifest, tab bar, More page", "ui")
     rp = client.get("/")
     check("viewport meta invites edge-to-edge", b"viewport-fit=cover" in rp.data)
     check("PWA head present (manifest link + apple metas)",
@@ -2935,7 +2940,7 @@ def main():
     check("icon route serves the png",
           rp.status_code == 200 and rp.data[:8] == b"\x89PNG\r\n\x1a\n")
 
-    section("T32 messages mobile layout hooks")
+    section("T32 messages mobile layout hooks", "ui")
     r = client.get("/messages")
     check("toolbar groups chips and actions",
           b'class="tchips"' in r.data and b'class="tactions"' in r.data
@@ -2943,7 +2948,7 @@ def main():
     check("pager pieces tagged for mobile",
           b'plast' in r.data and b'pageno' in r.data and b'class="sub pp"' in r.data)
 
-    section("T31 dashboard rethink: system line, hero, demoted detail")
+    section("T31 dashboard rethink: system line, hero, demoted detail", "ui")
     rp = client.get("/")
     d = rp.data
     check("system status is a one-line collapsible",
@@ -2992,7 +2997,7 @@ def main():
     check("chat switching drops the previous turns from the live box",
           b"dropLive" in d and b"clearLive" in d and b"isBusy" in d)
 
-    section("T36 undo trail: file -> undo -> kept from re-filing")
+    section("T36 undo trail: file -> undo -> kept from re-filing", "core")
     und_uid = add_msg(state, "undo.tester@x.com", "Undo me please", "please undo", "und1@x")
     engine.process_mailbox()
     urow = [r for r in store.messages(limit=3000) if r["uid"] == und_uid][0]
@@ -3042,7 +3047,7 @@ def main():
           and not in_arch)
     store.update_rule(keeper_rid, enabled=0)
 
-    section("T37 viewer triage queue: newer/older + file & next")
+    section("T37 viewer triage queue: newer/older + file & next", "core", "ui")
     add_msg(state, "queue.a@x.com", "Queue A", "a", "qa@x")
     add_msg(state, "queue.b@x.com", "Queue B", "b", "qb@x")
     add_msg(state, "queue.c@x.com", "Queue C", "c", "qc@x")
@@ -3066,7 +3071,7 @@ def main():
     qb2 = store.get_message(idB)
     check("the filed message really moved", qb2["folder"] == "Archive")
 
-    section("T38 snooze: hide, resurface, counts, chips")
+    section("T38 snooze: hide, resurface, counts, chips", "core", "ui")
     add_msg(state, "snoozee@x.com", "Snooze me", "z", "sz@x")
     engine.process_mailbox()
     srow = [r for r in store.messages(limit=3000) if r["subject"] == "Snooze me"][0]
@@ -3094,7 +3099,7 @@ def main():
     check("wake clears the snooze", srow3["snoozed_until"] == 0
           and sid_ in [x["id"] for x in store.messages(limit=3000)])
 
-    section("T38b needs-reply clearing: bulk, viewer, correction survives re-classify")
+    section("T38b needs-reply clearing: bulk, viewer, correction survives re-classify", "core", "ui")
     nrid = add_msg(state, "nr@x.com", "Nr lunch probe", "lunch probe body", "nr1@x")
     nrid2 = add_msg(state, "nr2@x.com", "Nr quiet probe", "no trigger words here", "nr2@x")
     nrid3 = add_msg(state, "nr3@x.com", "Nr lunch again", "lunch again body", "nr3@x")
@@ -3142,7 +3147,7 @@ def main():
     check("single clear + next clears the flag and advances", r.status_code == 302
           and store.get_message(nrC["id"])["llm_needs_reply"] == 0)
 
-    section("T39 log tools: search, time window, pause")
+    section("T39 log tools: search, time window, pause", "core", "ui")
     store.log_event("warn", "needle-alpha warning for search")
     store.log_event("info", "ordinary line without the token")
     with store.db() as conn:
@@ -3163,7 +3168,7 @@ def main():
     r = client.get("/log?mins=15&q=needle-alpha&lvl=warn")
     check("combined filters compose", b"needle-alpha" in r.data)
 
-    section("T40 per-message audit trail")
+    section("T40 per-message audit trail", "core")
     add_msg(state, "audit@x.com", "Audit me", "audit body", "au@x")
     engine.process_mailbox()
     arow = [r for r in store.messages(limit=3000) if r["subject"] == "Audit me"][0]
@@ -3194,7 +3199,7 @@ def main():
     kinds5 = [e["kind"] for e in store.get_msg_events(aid)]
     check("wake recorded in the audit trail", "wake" in kinds5)
 
-    section("T41 draft simulator")
+    section("T41 draft simulator", "core", "ui")
     sim_rid = store.add_rule("Simulator match", "any",
                              [{"field": "from", "op": "contains", "value": "sim.test"}],
                              {"move_to": "Archive", "mark_read": True}, enabled=True)
@@ -3246,7 +3251,7 @@ def main():
     store.update_flow(simld, enabled=0)
     store.update_rule(sim_rid, enabled=0)
 
-    section("T42 assistant page context (this email / this flow)")
+    section("T42 assistant page context (this email / this flow)", "assistant", "ui")
     add_msg(state, "ctx@x.com", "Context target email", "ctx body", "cx@x")
     engine.process_mailbox()
     crow = [r for r in store.messages(limit=3000) if r["subject"] == "Context target email"][0]
@@ -3275,7 +3280,7 @@ def main():
                   for c in llm_server.calls)
     check("page context reached the model's system prompt", sys_hit)
 
-    section("T43 contextual intelligence: scoped sessions + simulator prefill")
+    section("T43 contextual intelligence: scoped sessions + simulator prefill", "assistant", "ui")
     check("context keys are compact and id-scoped",
           ckey == "message:%d" % cid and fkey == "flow:%d" % fctx_id)
     r = client.get("/assistant/context.json?path=/messages/%d" % cid)
@@ -3302,7 +3307,7 @@ def main():
           b"Simulate a draft that tests it" in r.data
           and ("/simulate?flow=%d" % fctx_id).encode() in r.data)
 
-    section("T44 audit backfill sweep (retroactive)")
+    section("T44 audit backfill sweep (retroactive)", "core")
     add_msg(state, "oldmail@x.com", "Old canvas notice", "old body", "old@x")
     engine.process_mailbox()
     orow = [r for r in store.messages(limit=3000) if r["subject"] == "Old canvas notice"][0]
@@ -3335,7 +3340,7 @@ def main():
     r = client.post("/messages/%d/sweep" % oid)
     check("per-message backfill route responds", r.status_code == 302)
 
-    section("T44 learning loop: decisions, labels, needs_reply specialist")
+    section("T44 learning loop: decisions, labels, needs_reply specialist", "learning")
 
     ts0 = int(time.time())
     feats = learning_mod.extract_features({
@@ -3459,7 +3464,7 @@ def main():
           store.get_specialist(sid)["status"] == "retired"
           and not store.get_specialist(sid)["enabled"])
 
-    section("T45 learning: second task (category) + next-step proposals")
+    section("T45 learning: second task (category) + next-step proposals", "learning")
 
     props_before = learning_mod.proposals()
     check("proposals offer the category model before training",
@@ -3504,7 +3509,7 @@ def main():
 
 
 
-    section("T46 test sets: frozen human-labeled evaluation")
+    section("T46 test sets: frozen human-labeled evaluation", "learning")
 
     sres = learning_mod.sample_eval_set(n_needs=10, n_cat=6)
     counts = store.eval_counts()
@@ -3550,8 +3555,7 @@ def main():
     check("learning page shows the test set and its truth-based scores",
           b"Test sets" in r.data and b"of your labels" in r.data)
 
-    section("T43 plugin kernel: discovery, validation, registry")
-    import plugins as plugins_mod
+    section("T43 plugin kernel: discovery, validation, registry", "plugins")
     fx = os.path.join(PROJECT, "tests", "plugins_fixture")
     proot = os.path.join(tmp, "plugins")
     broot = os.path.join(tmp, "plugins_builtin")
@@ -3646,7 +3650,7 @@ def main():
           plugins_mod.cli(["validate", os.path.join(fx, "good-demo")])["ok"]
           and not plugins_mod.cli(["validate", os.path.join(fx, "bad-sdk")])["ok"])
 
-    section("T44 plugin runtime: sandbox, grants, limits, strikes")
+    section("T44 plugin runtime: sandbox, grants, limits, strikes", "plugins")
     import plugin_rt as rt_mod
     # T43 already copied the whole fixture tree; re-copy idempotently so this
     # section also stands alone.
@@ -3706,7 +3710,7 @@ def main():
                               "WHERE message LIKE '%good-runtime%'").fetchone()["n"]
     check("runtime activity is audited in events", n_rows >= 3)
 
-    section("T45 plugin dogfood: classifier parity + invoice finder")
+    section("T45 plugin dogfood: classifier parity + invoice finder", "plugins")
     import heuristics as heur_mod
     shutil.copytree(os.path.join(PROJECT, "plugins", "mt-promo-fastpath"),
                     os.path.join(broot, "mt-promo-fastpath"), dirs_exist_ok=True)
@@ -3769,8 +3773,7 @@ def main():
           (inv.get("card") or {}).get("title") == "Invoices found"
           and bool(inv["card"].get("fields")))
 
-    section("T46 assistant integration + Plugins page")
-    import engine as eng_mod
+    section("T46 assistant integration + Plugins page", "plugins")
     perms = eng_mod.agent_permissions()
     check("enabled plugin tools get an assistant capability entry",
           perms.get("plugin:good-demo") == "auto"
@@ -3858,7 +3861,7 @@ def main():
     check("settings page links to the Plugins page",
           r.status_code == 200 and b"Manage plugins" in r.data)
 
-    section("T47 plugins navigation")
+    section("T47 plugins navigation", "plugins", "ui")
     r = client.get("/")
     check("sidebar exposes Plugins from every page",
           b'href="/plugins"' in r.data and b"Plugins</a>" in r.data)
@@ -3869,7 +3872,7 @@ def main():
     check("the More tab highlights while on the Plugins page",
           b'href="/more" class="on"' in r.data)
 
-    section("T48 plugin kinds: matcher, draft provider, retriever, integration, digest")
+    section("T48 plugin kinds: matcher, draft provider, retriever, integration, digest", "plugins")
     for _p in ("mt-cjk-matcher", "mt-mirror-language", "mt-priority-first",
                "mt-webhook-notify", "mt-daily-digest"):
         shutil.copytree(os.path.join(PROJECT, "plugins", _p),
@@ -3930,6 +3933,7 @@ def main():
     import rag as _rag
     _orig_search = _rag.search
     try:
+        store.update_message(_msgs[0]["id"], llm_needs_reply=0)
         store.update_message(_msgs[1]["id"], llm_needs_reply=1)
         _rag.search = lambda *a, **k: {"ok": True, "meta": {}, "results": [
             {"message_id": _msgs[0]["id"], "folder": "INBOX", "from_addr": "a@x",
@@ -4006,7 +4010,7 @@ def main():
           and "need a reply" in _dg["summary"])
     check("digest tool returns a card", bool(_dg.get("card")))
 
-    section("T48b unsubscribe plugin: link aggregation + card through the UI")
+    section("T48b unsubscribe plugin: link aggregation + card through the UI", "plugins", "ui")
     shutil.copytree(os.path.join(PROJECT, "plugins", "mt-unsubscribe"),
                     os.path.join(broot, "mt-unsubscribe"), dirs_exist_ok=True)
     plugins_mod.scan()
@@ -4081,7 +4085,7 @@ def main():
     check("assistant pages ship the plugin card renderer",
           b"renderToolCard" in _apage.data and b"d.pending,d.card" in _apage.data)
 
-    section("T49 plugins UI: list rows, toggles, detail page")
+    section("T49 plugins UI: list rows, toggles, detail page", "plugins")
     r = client.get("/plugins")
     _pl = r.data
     check("plugins list is rows with toggles, not checkbox soup",
@@ -4114,7 +4118,7 @@ def main():
     check("matcher detail explains its rule-condition role",
           b"Rule condition" in r.data and b"plugin</span>" in r.data)
 
-    section("T50 model bench plugin: frozen subset, scoring, slices, report")
+    section("T50 model bench plugin: frozen subset, scoring, slices, report", "bench")
     shutil.copytree(os.path.join(PROJECT, "plugins", "mt-model-bench"),
                     os.path.join(broot, "mt-model-bench"), dirs_exist_ok=True)
     _slow_dir = os.path.join(broot, "mt-model-bench-slice")
@@ -4192,7 +4196,7 @@ def main():
     check("bench config form persists scope + prompt name",
           _cfg.get("default_scope") == "quick" and _cfg.get("user_name") == "the user")
 
-    section("T51 onboarding wizard: welcome flow, state.json, next redirects")
+    section("T51 onboarding wizard: welcome flow, state.json, next redirects", "ui")
     r = client.get("/welcome")
     check("wizard renders chrome-free with the step rail",
           b'class="setup"' in r.data and b'class="wz"' in r.data and b"Exit setup" in r.data
@@ -4268,7 +4272,7 @@ def main():
     check("--doctor CLI prints the setup report",
           _dr.returncode == 0 and "Mail Triage doctor" in _dr.stdout
           and "hardware:" in _dr.stdout and "UNREACHABLE" in _dr.stdout)
-    section("T52 assistant page layout")
+    section("T52 assistant page layout", "plugins")
     r = client.get("/assistant")
     check("desktop hides the mobile chat header",
           r.status_code == 200 and b".chat-head{display:none}" in r.data)
@@ -4300,7 +4304,7 @@ def main():
     check("live turns clear the empty-state suggestions",
           b"root.querySelector('.chat-empty')" in _d and b"if(ce) ce.remove()" in _d)
 
-    section("T53 plugin scheduling + commitments/subscription-watch dogfood")
+    section("T53 plugin scheduling + commitments/subscription-watch dogfood", "plugins")
     import plugin_rt as _rt53
     _sem_errs = plugins_mod.validate_semantics(
         {"id": "x", "engines": {"sdk": ">=0.1 <1.0"}, "kind": ["classifier"],
@@ -4457,6 +4461,9 @@ def main():
     check("both scheduled tools get an assistant capability line",
           "plugin:mt-commitments" in _perms53 and "plugin:mt-subscription-watch" in _perms53)
 
+    # ==== suite tail (always runs, even in a partial run) ====
+    if globals().get("_PARTIAL_NOTE"):
+        print("\n" + globals()["_PARTIAL_NOTE"])
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))
     try:
@@ -4471,4 +4478,22 @@ def main():
 
 
 if __name__ == "__main__":
+    # Partial runs: tests/suite_select.py blanks the bodies of sections whose
+    # groups are not selected, then re-executes this file with the plan injected.
+    if not globals().get("_PARTIAL_ACTIVE"):
+        try:
+            from suite_select import partial_plan
+        except Exception:
+            partial_plan = None
+        if partial_plan is not None:
+            _plan = partial_plan(sys.argv[1:], __file__)
+            if _plan is not None:
+                exec(compile(_plan["source"], __file__, "exec"), {
+                    "__name__": "__main__",
+                    "__file__": __file__,
+                    "_PARTIAL_ACTIVE": True,
+                    "_PARTIAL_SKIPPED": _plan["skipped"],
+                    "_PARTIAL_NOTE": _plan["note"],
+                })
+                raise SystemExit(0)
     main()
