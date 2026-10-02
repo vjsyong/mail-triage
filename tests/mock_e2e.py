@@ -734,6 +734,21 @@ class LLMHandler(BaseHTTPRequestHandler):
                                                "total_tokens": 10}})
             self.sse_done()
             return
+        if "unsubscribe probe" in (user or "").lower():
+            self.sse_start()
+            self.delta(role="assistant")
+            if step == 0:
+                self.delta(reasoning="Scanning for unsubscribe links...")
+                self.tool_delta(0, "plugin__mt-unsubscribe__find_unsubscribe",
+                                {"since_days": 3650, "max_scan": 50}, "call_u_0")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            else:
+                self.delta(content="Found senders you can unsubscribe from.")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.sse({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 5,
+                                               "total_tokens": 10}})
+            self.sse_done()
+            return
         if "multi-step" in (user or "").lower():
             self.sse_start()
             self.delta(role="assistant")
@@ -3896,6 +3911,81 @@ def main():
           _dg["ok"] and _dg["result"].get("total", 0) >= 1
           and "need a reply" in _dg["summary"])
     check("digest tool returns a card", bool(_dg.get("card")))
+
+    section("T48b unsubscribe plugin: link aggregation + card through the UI")
+    shutil.copytree(os.path.join(PROJECT, "plugins", "mt-unsubscribe"),
+                    os.path.join(broot, "mt-unsubscribe"), dirs_exist_ok=True)
+    plugins_mod.scan()
+    check("unsubscribe plugin validates as a built-in",
+          plugins_mod.cli(["validate", os.path.join(broot, "mt-unsubscribe")])["ok"])
+    plugins_mod.set_enabled("mt-unsubscribe", True, ["mailbox.read"])
+    _now = int(time.time())
+    with store.db() as conn:
+        for _uid, _frm, _subj, _snip in [
+                (9951, "Deals <deals@shop.example>", "Mega sale",
+                 "Big sale this week. Unsubscribe: https://shop.example/u/1"),
+                (9952, "Deals <news@shop.example>", "More deals",
+                 "Even more. Unsubscribe: https://shop.example/u/2"),
+                (9953, "RCC Users <rcc-users@lists.westgate.example>", "Digest",
+                 "mailing list\nUnsubscribe: https://lists.westgate.example/rcc-users/unsub"),
+                (9954, "Old <old@news.example>", "Bye",
+                 "To opt out visit https://news.example/optout or mailto:leave@news.example"),
+                (9955, "NoLink <hi@personal.example>", "Hi",
+                 "Just saying hello, no links here.")]:
+            conn.execute("INSERT INTO messages (folder, uid, uidvalidity, from_addr, subject, "
+                         "snippet, status, processed_at, date_ts) VALUES ('INBOX',?,1,?,?,?,"
+                         "'new',?,?)", (_uid, _frm, _subj, _snip, _now, _now))
+        conn.commit()
+    _us = rt_mod.runtime.invoke("mt-unsubscribe", "find_unsubscribe",
+                                {"since_days": 3650, "max_scan": 50})
+    _senders = {s["domain"]: s for s in (_us.get("result") or {}).get("senders", [])}
+    check("unsubscribe scan aggregates senders by base domain",
+          _us["ok"] and _senders.get("shop.example", {}).get("count") == 2
+          and "westgate.example" in _senders)
+    check("unsubscribe scan skips mail without a link",
+          "personal.example" not in _senders)
+    check("unsubscribe scan prefers https links near the keyword",
+          _senders.get("shop.example", {}).get("url", "").startswith("https://shop.example/")
+          and _senders.get("news.example", {}).get("url") == "https://news.example/optout")
+    _ucard = _us.get("card") or {}
+    _ulinks = [a for a in (_ucard.get("actions") or [])
+               if a.get("kind") == "link" and a.get("url")]
+    check("unsubscribe scan returns a card with one-click link actions",
+          _ucard.get("title", "").startswith("Unsubscribe (") and len(_ulinks) >= 2
+          and any("shop.example" in a["label"] for a in _ulinks))
+    _umark = rt_mod.runtime.invoke("mt-unsubscribe", "mark_unsubscribed",
+                                   {"domain": "shop.example"})
+    _us2 = rt_mod.runtime.invoke("mt-unsubscribe", "find_unsubscribe",
+                                 {"since_days": 3650, "max_scan": 50})
+    _us2d = [s["domain"] for s in (_us2.get("result") or {}).get("senders", [])]
+    check("marking a sender unsubscribed drops it from later scans",
+          _umark["ok"] and "shop.example" not in _us2d and "westgate.example" in _us2d)
+    _us3 = rt_mod.runtime.invoke("mt-unsubscribe", "find_unsubscribe",
+                                 {"since_days": 3650, "max_scan": 50, "include_done": True})
+    _flags = {s["domain"]: s.get("done") for s in (_us3.get("result") or {}).get("senders", [])}
+    check("include_done surfaces tracked senders", _flags.get("shop.example") is True)
+    rt_mod.runtime.invoke("mt-unsubscribe", "mark_unsubscribed",
+                          {"domain": "shop.example", "undo": True})
+    _stream = client.post("/assistant/stream",
+                          data={"message": "unsubscribe probe please"}).data.decode()
+    _tool_card = False
+    for _blk in _stream.split("\n\n"):
+        if not _blk.startswith("event: tool_end"):
+            continue
+        for _ln in _blk.splitlines():
+            if _ln.startswith("data: "):
+                try:
+                    _d = json.loads(_ln[6:])
+                except ValueError:
+                    continue
+                if (_d.get("name") == "plugin__mt-unsubscribe__find_unsubscribe"
+                        and isinstance(_d.get("card"), dict)
+                        and _d["card"].get("actions")):
+                    _tool_card = True
+    check("the assistant stream carries the plugin card to the UI", _tool_card)
+    _apage = client.get("/assistant")
+    check("assistant pages ship the plugin card renderer",
+          b"renderToolCard" in _apage.data and b"d.pending,d.card" in _apage.data)
 
     section("T49 plugins UI: list rows, toggles, detail page")
     r = client.get("/plugins")

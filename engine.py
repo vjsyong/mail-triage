@@ -4826,6 +4826,7 @@ class AssistantAgent:
                         t0 = time.time()
                         res = self.call_tool(c["name"], args)
                         res["elapsed"] = round(time.time() - t0, 2)
+                        card = res.get("card") if isinstance(res.get("card"), dict) else None
                         self.tools_log.append({"name": c["name"],
                                                "args": _truncate(json.dumps(args, ensure_ascii=False), 300),
                                                "ok": bool(res.get("ok")),
@@ -4837,7 +4838,8 @@ class AssistantAgent:
                                "ok": bool(res.get("ok")),
                                "summary": _truncate(res.get("summary") or "", 400),
                                "dry_run": bool(res.get("dry_run")),
-                               "pending": bool(res.get("pending_approval")), "elapsed": res["elapsed"]}
+                               "pending": bool(res.get("pending_approval")),
+                               "card": card, "elapsed": res["elapsed"]}
                     payload = json.dumps(res.get("result", {}), ensure_ascii=False)
                     cap = min(self.RESULT_CHARS, max(800, self._budget))
                     payload = _truncate(payload, cap)

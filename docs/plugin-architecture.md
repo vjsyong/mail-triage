@@ -865,14 +865,23 @@ bit-exactly (suite checks float equality to 1e-9). Opt in via the
 `mt-cjk-matcher` (matcher), `mt-mirror-language` (draft-provider),
 `mt-priority-first` (retriever), `mt-webhook-notify` (integration),
 `mt-daily-digest` (tool), `mt-model-bench` (tool), `mt-commitments` (tool +
-schedule), `mt-subscription-watch` (tool + schedule) · tests: suite sections
-T43-T53 + `tests/plugins_fixture/`.
+schedule), `mt-subscription-watch` (tool + schedule), `mt-unsubscribe` (tool) ·
+tests: suite sections T43-T53 + `tests/plugins_fixture/`.
+
+## Plugin cards in the assistant, as built (2026-10-02)
+
+A tool's `ToolResult.card` now travels on the `tool_end` SSE event (engine.py) and
+renders in the assistant transcript by `renderToolCard` (app.py, `BASE_TMPL`
+script): title, markdown, label/value fields, and `kind:"link"` actions as
+clickable buttons. That is what gives `mt-unsubscribe` its one-click opt-out list.
+`kind:"apply"`/`kind:"dismiss"` actions are still kernel-side (`ctx.action.propose`,
+pending actions); only link actions render inline today.
 
 ## All kinds, as built (2026-10-02, second wave)
 
 | Kind | Hook | Opt-in | Built-in |
 |---|---|---|---|
-| tool | assistant inventory -> `call_tool` -> sandbox | enable + assistant gate (`plugin:<id>`) | mt-invoice-finder, mt-daily-digest, mt-model-bench |
+| tool | assistant inventory -> `call_tool` -> sandbox | enable + assistant gate (`plugin:<id>`) | mt-invoice-finder, mt-daily-digest, mt-model-bench, mt-unsubscribe, mt-commitments, mt-subscription-watch |
 | classifier | `heuristics.classify()` fallback | `plugin_classifiers` | mt-promo-fastpath |
 | matcher | `_cond_field` op `plugin` in rules/flows | `plugin_matchers` (+ builder has the op) | mt-cjk-matcher |
 | draft-provider | flow draft step `mode:"plugin"` (live + simulator preview) | referenced by the step | mt-mirror-language |

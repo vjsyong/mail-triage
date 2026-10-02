@@ -1422,13 +1422,38 @@ window.assistantChat = function(opts){
       toolsBox.style.display=''; toolsList.appendChild(c);
       toolsLabel();
     }
-    function toolDone(id,ok,summary,dry,pending){
+    function toolDone(id,ok,summary,dry,pending,card){
       var c=cards[id]; if(!c) return;
       c.className='tool-chip '+(ok?'ok':'err');
       var tx=c.textContent.replace(/^[\u23f3\u2713\u2717]\s*/,'');
       c.textContent=(ok?'\u2713 ':'\u2717 ')+tx+' \u2192 '+(pending?'[awaiting approval] ':(dry?'[dry-run] ':''))+summary;
       cardInfo[id].label=(ok?'\u2713 ':'\u2717 ')+cardInfo[id].name+' \u2192 '+(pending?'[awaiting approval] ':(dry?'[dry-run] ':''))+summary;
       toolsLabel();
+      renderToolCard(card);
+    }
+    function renderToolCard(card){
+      if(!card || !card.title) return;
+      var w=mk('div','proposal');
+      w.appendChild(mk('div','p-tag','\u2726 '+String(card.title)));
+      if(card.markdown) w.appendChild(mk('div','sub',String(card.markdown)));
+      (card.fields||[]).forEach(function(f){
+        var r=mk('div','spread');
+        r.appendChild(mk('b','',String(f.label||'')));
+        r.appendChild(mk('span','sub',String(f.value||'')));
+        w.appendChild(r);
+      });
+      var links=(card.actions||[]).filter(function(a){ return a && a.kind==='link' && a.url; });
+      if(links.length){
+        var row=mk('div','row'); row.style.flexWrap='wrap'; row.style.marginTop='8px';
+        links.forEach(function(a){
+          var el=mk('a','btn small primary',String(a.label||a.url));
+          el.href=a.url; el.target='_blank'; el.rel='noopener noreferrer';
+          row.appendChild(el);
+        });
+        w.appendChild(row);
+      }
+      box.appendChild(w);
+      scrollBottom();
     }
     function actsText(a){
       a=a||{}; var out=[];
@@ -1548,7 +1573,7 @@ window.assistantChat = function(opts){
       else if(ev==='content'){ content.textContent+=(d.text||''); rawText+=(d.text||''); label('writing\u2026'); }
       else if(ev==='content_break'){ if(content.textContent){ content.textContent+='\n\n'; rawText+='\n\n'; } }
       else if(ev==='tool_start'){ label('running '+d.name+'\u2026'); toolCard(d.id,d.name,d.args); }
-      else if(ev==='tool_end'){ toolDone(d.id,d.ok,d.summary,d.dry_run,d.pending); label('thinking\u2026'); }
+      else if(ev==='tool_end'){ toolDone(d.id,d.ok,d.summary,d.dry_run,d.pending,d.card); label('thinking\u2026'); }
       else if(ev==='proposals'){ proposals=d.proposals||[]; }
       else if(ev==='action_proposals'){ pendingActions=(d.actions||[]); }
       else if(ev==='thought_summary'){ if(det.style.display!=='none' && d.text){ det.dataset.summary='1'; detSum.textContent=d.text; } }

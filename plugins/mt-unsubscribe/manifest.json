@@ -1,0 +1,93 @@
+{
+  "id": "mt-unsubscribe",
+  "name": "Unsubscribe helper",
+  "action": "Find unsubscribes",
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "version": "0.1.0",
+  "description": "Finds unsubscribe links across recent mail, groups them by sender, and returns one-click links so you can leave many lists at once.",
+  "kind": [
+    "tool"
+  ],
+  "permissions": [
+    "mailbox.read"
+  ],
+  "limits": {
+    "memory_mb": 64,
+    "timeout_ms": 20000,
+    "kv_bytes": 262144
+  },
+  "config": {
+    "type": "object",
+    "properties": {
+      "since_days": {
+        "type": "integer",
+        "description": "How many days back to scan by default",
+        "default": 30
+      },
+      "max_scan": {
+        "type": "integer",
+        "description": "Maximum messages to inspect per run (10-200)",
+        "default": 120
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "find_unsubscribe",
+      "description": "Scan recent mail for unsubscribe links and opt-out addresses, group the results by sender, and return a list of one-click unsubscribe links. Use when the user wants to reduce newsletters/promos or asks how to unsubscribe from senders.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "since_days": {
+            "type": "integer",
+            "description": "look back N days (default 30)"
+          },
+          "max_scan": {
+            "type": "integer",
+            "description": "maximum messages to inspect (default 120)"
+          },
+          "include_done": {
+            "type": "boolean",
+            "description": "include senders already marked as unsubscribed"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none"
+    },
+    {
+      "name": "mark_unsubscribed",
+      "description": "Record that the user has unsubscribed from a sender (or undo that) so the sender drops out of future find_unsubscribe results. This only updates the plugin's own list; it does not change mail.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "sender domain, e.g. shop.example"
+          },
+          "url": {
+            "type": "string",
+            "description": "the unsubscribe link that was used, when known"
+          },
+          "undo": {
+            "type": "boolean",
+            "description": "remove the sender from the done list instead of adding it"
+          }
+        },
+        "required": [
+          "domain"
+        ]
+      },
+      "side_effects": "none"
+    }
+  ],
+  "assistant": {
+    "when_to_use": "cleaning up newsletters, promos or mailing lists; unsubscribing in bulk"
+  }
+}
