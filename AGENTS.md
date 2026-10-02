@@ -83,6 +83,9 @@ git branch -d <name>
 
 ## Conventions that bite
 
+- UI behaviour follows `docs/ui-conventions.md`: entity deletes arm in place (never a
+  confirm popup), on/off is always a `.px-sw` switch, feedback is flash (`ok`/`warn`/
+  `err` only) on redirect or `toast()` in place.
 - CSS shared by 2+ pages lives in `BASE_TMPL`; page-exclusive styles may ride in the
   page template's own `<style>` block (a page-scoped block never ships elsewhere, so
   cross-page reuse silently breaks). `BASE_TMPL` is a raw string: `\uXXXX` renders

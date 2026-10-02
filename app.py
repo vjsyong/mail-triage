@@ -868,9 +868,9 @@ html:not(.asb-open) .asb-main{display:none}
 .dhist-item .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem}
 .dhist-item .when{font-size:.7rem;color:var(--dim);white-space:nowrap}
 .dhist-item.cur{background:var(--hover)}
-.chat-del{transition:background .12s ease,color .12s ease,border-color .12s ease}
-.chat-del svg{display:block}
-.chat-del.armed{background:var(--err);border-color:var(--err);color:#fff}
+.chat-del,.arm-del{transition:background .12s ease,color .12s ease,border-color .12s ease}
+.chat-del svg,.arm-del svg{display:block}
+.chat-del.armed,.arm-del.armed{background:var(--err);border-color:var(--err);color:#fff}
 .dw-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#fff}
 .dw-body .chat{border:0;background:#fff;padding:14px 12px}
 .dw-comp{margin:0;border-left:0;border-right:0;border-bottom:0}
@@ -885,6 +885,7 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   .btn{min-height:44px}
   .btn.small,.iconbtn{min-height:44px;min-width:44px}
   .menu-item{min-height:44px}
+  .px-sw{min-height:44px;min-width:44px;justify-content:center}
   .setrow input:not([type=checkbox]):not([type=radio]),
   input[type=text],input[type=number],input[type=password],input[type=search],
   input[type=email],input[type=url],input[type=tel],select,textarea{font-size:16px}
@@ -1119,21 +1120,45 @@ if(!window.__mtTicker){ window.__mtTicker = 1;
   setInterval(function(){ if(!document.hidden) tick(); }, 30000);
 })();
 }
-/* two-step chat delete: first tap arms (red trash), second tap deletes */
-if(!window.__mtChatDel){ window.__mtChatDel = 1;
+/* two-step delete: first activation arms (red trash / "Confirm delete"), the
+   second one deletes. Used by the chat lists and every list-item delete. */
+if(!window.__mtArmDel){ window.__mtArmDel = 1;
 (function(){
   var TRASH='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 7V5h4v2m-6 0 1 13h6l1-13M10 11v6M14 11v6"/></svg>';
-  function disarm(b){ if(!b.classList.contains('armed')) return; b.classList.remove('armed'); b.textContent='\u2715'; b.setAttribute('aria-label', b.getAttribute('data-al') || 'Delete chat'); if(b._armT){ clearTimeout(b._armT); b._armT=null; } }
-  function disarmAll(except){ document.querySelectorAll('.chat-del.armed').forEach(function(b){ if(b!==except) disarm(b); }); }
-  function arm(b){ disarmAll(b); if(b.classList.contains('armed')) return; if(!b.getAttribute('data-al')) b.setAttribute('data-al', b.getAttribute('aria-label') || 'Delete chat'); b.classList.add('armed'); b.innerHTML=TRASH; b.setAttribute('aria-label','Press again to delete this chat'); b._armT=setTimeout(function(){ disarm(b); }, 4000); }
+  function disarm(b){
+    if(!b.classList.contains('armed')) return;
+    b.classList.remove('armed');
+    if(b._armSaved){
+      b.innerHTML=b._armSaved.html;
+      if(b._armSaved.al !== null){ b.setAttribute('aria-label', b._armSaved.al); } else { b.removeAttribute('aria-label'); }
+      b._armSaved=null;
+    }
+    if(b._armT){ clearTimeout(b._armT); b._armT=null; }
+  }
+  function disarmAll(except){ document.querySelectorAll('.chat-del.armed,.arm-del.armed').forEach(function(b){ if(b!==except) disarm(b); }); }
+  function arm(b){
+    disarmAll(b);
+    if(b.classList.contains('armed')) return;
+    if(!b._armSaved) b._armSaved={html:b.innerHTML, al:b.getAttribute('aria-label')};
+    b.classList.add('armed');
+    if(b.classList.contains('chat-del')){
+      b.innerHTML=TRASH;
+      b.setAttribute('aria-label', b.getAttribute('data-arm-label') || 'Press again to delete this chat');
+    } else {
+      b.textContent='Confirm delete';
+      b.setAttribute('aria-label', b.getAttribute('data-arm-label') || 'Press again to delete');
+    }
+    b._armT=setTimeout(function(){ disarm(b); }, 4000);
+  }
   document.addEventListener('click', function(e){
-    var b = e.target && e.target.closest ? e.target.closest('.chat-del') : null;
+    var b = e.target && e.target.closest ? e.target.closest('.chat-del,.arm-del') : null;
     if(!b){ disarmAll(null); return; }
     if(b.classList.contains('armed')) return;
     e.preventDefault(); e.stopPropagation();
     arm(b);
   }, true);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') disarmAll(null); });
+  document.addEventListener('toggle', function(e){ if(e.target && e.target.tagName==='DETAILS' && !e.target.open) e.target.querySelectorAll('.armed').forEach(disarm); }, true);
 })();
 }
 function cp(text, el){
@@ -1171,6 +1196,29 @@ function cp(text, el){
     });
   }
 })();
+/* in-flight guard: a real form submission disables its submit button (after any
+   confirm()); reset before Turbo caches the page so Back stays usable. */
+if(!window.__mtSubmitBusy){ window.__mtSubmitBusy = 1;
+(function(){
+  function clearBusy(){
+    document.querySelectorAll('[data-busy]').forEach(function(b){
+      b.removeAttribute('data-busy');
+      if(b.tagName === 'BUTTON') b.disabled = false;
+    });
+  }
+  document.addEventListener('submit', function(e){
+    if(e.defaultPrevented) return;
+    var f = e.target;
+    if(!f || f.tagName !== 'FORM' || f.hasAttribute('data-no-busy')) return;
+    var b = e.submitter || f.querySelector('button[type=submit],input[type=submit]');
+    if(!b || b.disabled) return;
+    b.setAttribute('data-busy', '1');
+    b.disabled = true;
+  });
+  document.addEventListener('turbo:before-cache', clearBusy);
+  window.addEventListener('pageshow', clearBusy);
+})();
+}
 </script>
 
 {% if show_asb %}
@@ -1725,6 +1773,7 @@ window.guardApply = function(f){
           if(!del.classList.contains('armed')) return;
           post('/assistant/session/' + s.id + '/delete', 'json=1').then(function(){
             if(String(curSid) === String(s.id)) curSid = null;
+            if(window.toast) toast('Chat deleted.', 'ok');
             loadHist();
           });
         });
@@ -2590,17 +2639,18 @@ RULES_TMPL = """
         <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" title="move up" aria-label="Move rule up">↑</button></form>
         <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" title="move down" aria-label="Move rule down">↓</button></form>
         </span>
-        <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}"><button class="btn small" type="submit">{{ 'disable' if r.enabled else 'enable' }}</button></form>
-        <a class="btn small ra-inline" href="{{ url_for('rule_edit', rule_id=r.id) }}">edit</a>
-        <form class="inline ra-inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
-              onsubmit="return confirm('Delete rule {{ r.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
+        <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}">
+          <label class="px-sw" title="{{ 'Disable' if r.enabled else 'Enable' }} {{ r.name }}"><input type="checkbox" {{ 'checked' if r.enabled }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if r.enabled else 'Enable' }} {{ r.name }}"><span class="px-tr"></span></label>
+        </form>
+        <a class="btn small ra-inline" href="{{ url_for('rule_edit', rule_id=r.id) }}">Edit</a>
+        <form class="inline ra-inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}">
+          <button class="btn small danger arm-del" type="submit" data-arm-label="Press again to delete rule {{ r.name }}" aria-label="Delete rule {{ r.name }}">Delete</button></form>
         <details class="menu ra-menu">
           <summary class="btn small" aria-haspopup="menu" aria-label="More actions">⋯</summary>
           <div class="menu-pop" role="menu">
             <a class="menu-item" href="{{ url_for('rule_edit', rule_id=r.id) }}">Edit</a>
-            <form method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
-                  onsubmit="return confirm('Delete rule {{ r.name }}?')">
-              <button class="menu-item danger" type="submit">Delete…</button></form>
+            <form method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}">
+              <button class="menu-item danger arm-del" type="submit" data-arm-label="Press again to delete rule {{ r.name }}" aria-label="Delete rule {{ r.name }}">Delete…</button></form>
           </div>
         </details>
       </span></td>
@@ -2765,7 +2815,7 @@ PLUGIN_DETAIL_TMPL = """
       {% if p.ui_approved %}
       <form method="post" action="{{ url_for('plugin_ui_revoke', pid=p.id) }}"><button class="btn danger" type="submit">Revoke approval</button></form>
       {% else %}
-      <form method="post" action="{{ url_for('plugin_ui_approve', pid=p.id) }}"><button class="btn danger" type="submit">Approve browser view</button></form>
+      <form method="post" action="{{ url_for('plugin_ui_approve', pid=p.id) }}" onsubmit="return confirm('Approve this browser view? It runs plugin code that can transmit mail text by navigating itself.');"><button class="btn danger" type="submit">Approve browser view</button></form>
       {% endif %}
     </div>
   </div>
@@ -2804,7 +2854,7 @@ PLUGIN_DETAIL_TMPL = """
     </div>
     {% endif %}
     {% if p.permissions or p.has_tools or p.optin_matcher or p.optin_retriever or p.optin_classifier %}
-    <div class="savebar"><button class="btn small" type="submit">Save</button></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save</button></div>
     {% endif %}
   </form>
 </div>
@@ -2824,7 +2874,7 @@ PLUGIN_DETAIL_TMPL = """
       </div>
     </div>
     {% endfor %}
-    <div class="savebar"><button class="btn small" type="submit">Save settings</button></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save settings</button></div>
   </form>
 </div>
 {% endif %}
@@ -3138,13 +3188,16 @@ CLASSIFIERS_TMPL = """
       <td class="sub" style="max-width:340px">{{ h.description[:170] }}</td>
       <td class="sub">{{ h.when }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
-        <a class="btn small" href="{{ url_for('classifier_dataset', hid=h.id) }}">dataset</a>
+        <a class="btn small" href="{{ url_for('classifier_dataset', hid=h.id) }}">Dataset</a>
+        <form class="inline" method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}">
+          <label class="px-sw" title="{{ 'Disable' if h.enabled else 'Enable' }} {{ h.name }}"><input type="checkbox" {{ 'checked' if h.enabled }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if h.enabled else 'Enable' }} {{ h.name }}"><span class="px-tr"></span></label>
+        </form>
         <details class="menu">
           <summary class="btn small" aria-haspopup="menu" aria-label="More actions">⋯</summary>
           <div class="menu-pop" role="menu">
-            <form method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}"><button class="menu-item" type="submit">{{ 'Disable' if h.enabled else 'Enable' }}</button></form>
             <form method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="menu-item" type="submit">Retrain</button></form>
-            <form method="post" action="{{ url_for('classifier_delete', hid=h.id) }}" onsubmit="return confirm('Delete this classifier?');"><button class="menu-item danger" type="submit">Delete…</button></form>
+            <form method="post" action="{{ url_for('classifier_delete', hid=h.id) }}">
+              <button class="menu-item danger arm-del" type="submit" data-arm-label="Press again to delete classifier {{ h.name }}" aria-label="Delete classifier {{ h.name }}">Delete…</button></form>
           </div>
         </details>
       </span></td>
@@ -3349,7 +3402,7 @@ def welcome():
         act = (request.form.get("action") or "").strip()
         if act == "dismiss":
             store.set_setting("welcome_done", 1)
-            flash("Setup help hidden - reopen it from the More page any time.", "info")
+            flash("Setup help hidden - reopen it from the More page any time.", "ok")
             return redirect(url_for("dashboard"))
         if act == "reset":
             store.set_setting("welcome_done", 0)
@@ -3403,7 +3456,7 @@ def plugins_rescan():
     rep = plugins.scan()
     flash("Plugins rescanned: %d found, %d error(s)."
           % (len(rep["found"]), len(rep["errors"])),
-          "warn" if rep["errors"] else "info")
+          "warn" if rep["errors"] else "ok")
     return redirect(url_for("plugins_page"))
 
 
@@ -3472,7 +3525,7 @@ def plugins_update(pid):
     if res.get("ok") is False:
         flash(res.get("error") or "Plugin action failed.", "warn")
     else:
-        flash("Saved.", "info")
+        flash("Saved.", "ok")
     if nxt == "detail":
         return redirect(url_for("plugin_detail", pid=pid))
     return redirect(url_for("plugins_page"))
@@ -4031,7 +4084,7 @@ def plugin_ui_revoke(pid):
         return jsonify({"ok": False, "error": {"code": "forbidden",
                                                "message": "cross-site request refused"}}), 403
     plugin_ui.revoke(pid)
-    flash("Browser view approval revoked; its page will not run.", "info")
+    flash("Browser view approval revoked; its page will not run.", "ok")
     return redirect(url_for("plugin_detail", pid=pid))
 
 
@@ -4314,6 +4367,8 @@ def classifier_toggle(hid):
         store.update_heuristic(hid, enabled=new_state)
         store.log_event("info", "classifier #%d '%s' %s (by ui)"
                         % (hid, row.get("name") or "", "enabled" if new_state else "disabled"))
+        flash("Classifier '%s' %s." % (row.get("name") or hid,
+                                       "enabled" if new_state else "disabled"), "ok")
     return redirect(url_for("classifiers"))
 
 
@@ -4348,10 +4403,6 @@ def classifier_delete(hid):
 
 
 CLASSIFIER_DATASET_TMPL = """
-{% if request.args.get('toast') %}
-<div class="toast">✓ <b>{{ request.args.get('subj') }}</b> moved to {{ 'the in-set' if request.args.get('toast') == 'in' else 'the out-of-set' }} → {{ request.args.get('cat') }}</div>
-<script>setTimeout(function(){ var t=document.querySelector('.toast'); if(t){ t.style.opacity='0'; setTimeout(function(){ t.remove(); }, 700); } }, 3800);</script>
-{% endif %}
 <div class="page-head">
   <div>
     <div class="backlink"><a href="{{ url_for('classifiers') }}">← Classifiers</a></div>
@@ -4371,8 +4422,8 @@ CLASSIFIER_DATASET_TMPL = """
   </div>
   <div class="sub">{{ ds.pos_total }} positive sample(s){% if ds.pos_excluded %} ({{ ds.pos_excluded }} removed){% endif %} ·
     {{ ds.neg_total }} negative sample(s){% if ds.neg_excluded %} ({{ ds.neg_excluded }} removed){% endif %}.
-    Change a sample's label in the dropdown to reclassify it — it moves between the sets immediately
-    {% if request.args.get('toast') %}{% else %}(and you get a toast){% endif %}; retrain to apply the new dataset to the model.
+    Change a sample's label in the dropdown to reclassify it — it moves between the sets immediately;
+    retrain to apply the new dataset to the model.
     {% if ds.weak %}These labels come from the LLM's own auto-classification, so correcting them here fixes both the
     dataset and the message's record.{% endif %}</div>
 </div>
@@ -4392,9 +4443,9 @@ CLASSIFIER_DATASET_TMPL = """
         <div class="sub" style="font-size:.72rem;margin-top:2px">{% if ds.source == 'tags' %}tag{% else %}LLM label{% endif %}{% if s.confidence is not none %} · {{ '%.0f' % (s.confidence*100) }}%{% endif %}{% if s.excluded %} · removed{% endif %}</div>
       </td>
       <td class="r">{% if s.excluded %}
-        <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">re-include</button></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">Re-include</button></form>
       {% else %}
-        <form class="inline" method="post" action="{{ url_for('classifier_dataset_remove', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small danger" type="submit">remove</button></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_remove', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">Remove</button></form>
       {% endif %}</td>
     </tr>
     {% endfor %}
@@ -4418,9 +4469,9 @@ CLASSIFIER_DATASET_TMPL = """
         <div class="sub" style="font-size:.72rem;margin-top:2px">{% if ds.source == 'tags' %}tag{% else %}LLM label{% endif %}{% if s.confidence is not none %} · {{ '%.0f' % (s.confidence*100) }}%{% endif %}{% if s.excluded %} · removed{% endif %}</div>
       </td>
       <td class="r">{% if s.excluded %}
-        <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">re-include</button></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_reinclude', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">Re-include</button></form>
       {% else %}
-        <form class="inline" method="post" action="{{ url_for('classifier_dataset_remove', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small danger" type="submit">remove</button></form>
+        <form class="inline" method="post" action="{{ url_for('classifier_dataset_remove', hid=h.id) }}"><input type="hidden" name="msg_id" value="{{ s.msg_id }}"><button class="btn small" type="submit">Remove</button></form>
       {% endif %}</td>
     </tr>
     {% endfor %}
@@ -4473,9 +4524,8 @@ def classifier_dataset_relabel(hid):
             store.record_label(mid, "category", json.dumps(cat), 1.0,
                                "explicit_user_correction", "dataset relabel")
             in_set = cat.strip().lower() == (row.get("category") or "").strip().lower()
-            return redirect(url_for("classifier_dataset", hid=hid,
-                                    toast="in" if in_set else "out",
-                                    subj=(msg.get("subject") or "(no subject)")[:70], cat=cat))
+            flash(("Sample moved to the in-set — %s." if in_set else
+                   "Sample moved to the out-of-set — %s.") % cat, "ok")
     return redirect(url_for("classifier_dataset", hid=hid))
 
 
@@ -4603,7 +4653,7 @@ RULE_EDIT_TMPL = """
       </div>
     </div>
   </div>
-  <div class="savebar"><button class="btn primary" type="submit">Save rule</button><a class="btn" href="{{ url_for('rules') }}">Back</a><span class="sub">Test the whole list (dry run) from the Rules page.</span></div>
+  <div class="savebar"><button class="btn primary" type="submit">Save rule</button><a class="btn" href="{{ url_for('rules') }}">Cancel</a><span class="sub">Test the whole list (dry run) from the Rules page.</span></div>
 </form>
 """
 
@@ -4695,7 +4745,13 @@ def rule_edit(rule_id):
 def rule_toggle(rule_id):
     rule = store.get_rule(rule_id)
     if rule:
-        store.update_rule(rule_id, enabled=0 if rule["enabled"] else 1)
+        new_state = 0 if rule["enabled"] else 1
+        store.update_rule(rule_id, enabled=new_state)
+        store.log_event("info", "rule #%d '%s' %s (by ui)"
+                        % (rule_id, rule.get("name") or "",
+                           "enabled" if new_state else "disabled"))
+        flash("Rule '%s' %s." % (rule.get("name") or rule_id,
+                                 "enabled" if new_state else "disabled"), "ok")
     return redirect(url_for("rules"))
 
 
@@ -4748,13 +4804,15 @@ FLOWS_TMPL = """
         <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" aria-label="Move up" {{ 'disabled' if loop.first else '' }}>&#8593;</button></form>
         <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" aria-label="Move down" {{ 'disabled' if loop.last else '' }}>&#8595;</button></form>
         </span>
-        <form class="inline" method="post" action="{{ url_for('flow_toggle', flow_id=f.id) }}"><button class="btn small" type="submit">{{ 'Disable' if f.enabled else 'Enable' }}</button></form>
+        <form class="inline" method="post" action="{{ url_for('flow_toggle', flow_id=f.id) }}">
+          <label class="px-sw" title="{{ 'Disable' if f.enabled else 'Enable' }} {{ f.name }}"><input type="checkbox" {{ 'checked' if f.enabled }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if f.enabled else 'Enable' }} {{ f.name }}"><span class="px-tr"></span></label>
+        </form>
         <details class="menu">
           <summary class="btn small" aria-haspopup="menu" aria-label="More actions">⋯</summary>
           <div class="menu-pop" role="menu">
             <a class="menu-item" href="{{ url_for('flow_edit', flow_id=f.id) }}">Edit</a>
-            <form method="post" action="{{ url_for('flow_delete', flow_id=f.id) }}" onsubmit="return confirm('Delete this flow?');">
-              <button class="menu-item danger" type="submit">Delete…</button></form>
+            <form method="post" action="{{ url_for('flow_delete', flow_id=f.id) }}">
+              <button class="menu-item danger arm-del" type="submit" data-arm-label="Press again to delete flow {{ f.name }}" aria-label="Delete flow {{ f.name }}">Delete…</button></form>
           </div>
         </details>
       </div>
@@ -5502,10 +5560,13 @@ def flow_edit(flow_id):
 def flow_toggle(flow_id):
     flow = store.get_flow(flow_id)
     if flow:
-        store.update_flow(flow_id, enabled=0 if flow["enabled"] else 1)
+        new_state = 0 if flow["enabled"] else 1
+        store.update_flow(flow_id, enabled=new_state)
         store.log_event("info", "flow #%d '%s' %s (by ui)"
                         % (flow_id, flow.get("name"),
-                           "disabled" if flow["enabled"] else "enabled"))
+                           "enabled" if new_state else "disabled"))
+        flash("Flow '%s' %s." % (flow.get("name") or flow_id,
+                                 "enabled" if new_state else "disabled"), "ok")
     return redirect(url_for("flows"))
 
 
@@ -5545,9 +5606,17 @@ TEMPLATES_TMPL = """
       <td><a href="{{ url_for('template_edit', tid=t.id) }}">{{ t.name }}</a></td>
       <td class="sub">{{ t.body[:120] }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
-        <a class="btn small" href="{{ url_for('template_edit', tid=t.id) }}">edit</a>
-        <form class="inline" method="post" action="{{ url_for('template_delete', tid=t.id) }}"
-              onsubmit="return confirm('Delete template {{ t.name }}?')"><button class="btn small danger" type="submit">delete</button></form>
+        <a class="btn small ra-inline" href="{{ url_for('template_edit', tid=t.id) }}">Edit</a>
+        <form class="inline ra-inline" method="post" action="{{ url_for('template_delete', tid=t.id) }}">
+          <button class="btn small danger arm-del" type="submit" data-arm-label="Press again to delete template {{ t.name }}" aria-label="Delete template {{ t.name }}">Delete</button></form>
+        <details class="menu ra-menu">
+          <summary class="btn small" aria-haspopup="menu" aria-label="More actions">⋯</summary>
+          <div class="menu-pop" role="menu">
+            <a class="menu-item" href="{{ url_for('template_edit', tid=t.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('template_delete', tid=t.id) }}">
+              <button class="menu-item danger arm-del" type="submit" data-arm-label="Press again to delete template {{ t.name }}" aria-label="Delete template {{ t.name }}">Delete…</button></form>
+          </div>
+        </details>
       </span></td>
     </tr>
     {% endfor %}
@@ -5666,7 +5735,7 @@ MESSAGES_TMPL = """
         {% if p.similar %}<form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><input type="hidden" name="mode" value="update"><input type="hidden" name="rule_id" value="{{ p.similar.id }}"><button class="btn small primary" type="submit">Update rule #{{ p.similar.id }}</button></form>{% endif %}
         <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><button class="btn small{{ '' if p.similar else ' primary' }}" type="submit">Add rule</button></form>
         <form class="inline" method="post" action="{{ url_for('proposal_apply', pid=p.id) }}"><input type="hidden" name="disabled" value="1"><button class="btn small" type="submit">Add (disabled)</button></form>
-        <form class="inline" method="post" action="{{ url_for('proposal_dismiss', pid=p.id) }}"><button class="btn small danger" type="submit">Dismiss</button></form>
+        <form class="inline" method="post" action="{{ url_for('proposal_dismiss', pid=p.id) }}"><button class="btn small" type="submit">Dismiss</button></form>
       </div>
     </div>
     {% if p.similar %}<div class="note" style="border-color:var(--warn);color:var(--warn);margin-top:8px">⚠ Similar rule exists: #{{ p.similar.id }} "{{ p.similar.name }}"{% if not p.similar.enabled %} (disabled){% endif %} — {{ p.similar_actions }}. Updating it avoids a duplicate.</div>{% endif %}
@@ -6162,7 +6231,7 @@ MESSAGE_TMPL = """
         <textarea name="body" rows="12" aria-label="Draft body">{{ draft }}</textarea>
         <p class="row" style="margin-top:8px">
           <button class="btn primary" type="submit">Save to Drafts</button>
-          <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.querySelector('textarea[name=body]').value);this.textContent='copied'">Copy</button>
+          <button class="btn" type="button" onclick="cp(document.querySelector('textarea[name=body]').value, this)">Copy</button>
           <span class="sub">Review and send from your mail client.</span>
         </p>
       </form>
@@ -7263,6 +7332,7 @@ def assistant_session_delete(sid):
     store.delete_session(sid)
     if request.form.get("json"):
         return Response(json.dumps({"ok": True}), mimetype="application/json")
+    flash("Chat deleted.", "ok")
     return redirect(url_for("assistant"))
 
 
@@ -7552,8 +7622,10 @@ def assistant_clear():
     if sid and store.get_session(sid):
         store.clear_assistant(session_id=sid)
         store.log_event("info", "assistant chat #%d cleared" % sid)
+        flash("Chat cleared.", "ok")
         return redirect(url_for("assistant_session", sid=sid))
     store.clear_assistant()
+    flash("Chat cleared.", "ok")
     return redirect(url_for("assistant"))
 
 def _form_int(name, default, lo=None, hi=None):
@@ -8552,15 +8624,6 @@ ACCOUNTS_TMPL = """
 </details>
 
 <script>
-function cp(text, el){
-  function done(){ if(el){ const t=el.textContent; el.textContent='copied'; setTimeout(()=>el.textContent=t,900);} }
-  if(navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(text).then(done, fallback); }
-  else { fallback(); }
-  function fallback(){
-    const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
-    document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); done();
-  }
-}
 function startAuth(email, btn){
   if(!btn.dataset.label){ btn.dataset.label = btn.textContent.trim(); }
   btn.disabled = true; btn.textContent = 'Starting…';
@@ -9449,7 +9512,9 @@ LEARN_TMPL = """<style>
   <div class="dsrow"><span class="dsk">Self-check accuracy</span><span class="dsv">{{ '%.0f' % (c.accuracy * 100) if c.accuracy is not none else '—' }}%</span></div>
   <div class="dsrow"><span class="dsk">Learned from</span><span class="dsv">{{ "{:,}".format(c.samples) if c.samples else '—' }} examples</span></div>
   <div class="row" style="margin-top:12px;align-items:center;gap:8px">
-    <form method="post" action="{{ url_for('classifier_toggle', hid=c.id) }}"><button class="btn small" type="submit">{{ 'Pause' if c.status == 'live' else 'Resume' }}</button></form>
+    <form method="post" action="{{ url_for('classifier_toggle', hid=c.id) }}">
+      <label class="px-sw" title="{{ 'Disable' if c.status == 'live' else 'Enable' }} {{ c.name }}"><input type="checkbox" {{ 'checked' if c.status == 'live' }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if c.status == 'live' else 'Enable' }} {{ c.name }}"><span class="px-tr"></span></label>
+    </form>
     <form method="post" action="{{ url_for('classifier_retrain', hid=c.id) }}"><button class="btn small" type="submit">Retrain</button></form>
     <a class="btn small" href="{{ url_for('classifier_dataset', hid=c.id) }}">Review dataset</a>
   </div>

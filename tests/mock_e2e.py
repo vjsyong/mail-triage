@@ -2376,24 +2376,22 @@ def main():
     check("classifiers page links the dataset page",
           ("/classifiers/%d/dataset" % hid).encode() in client.get("/classifiers").data)
 
-    section("T25 dataset relabel: dropdown reclassification + toast", "learning")
+    section("T25 dataset relabel: dropdown reclassification + flash", "learning")
     pos_ids = [s["msg_id"] for s in heuristics_mod.dataset_for(store.get_heuristic(hid))["positives"]]
     rid = [i for i in pos_ids if i != sample_id][0]
     r = client.post("/classifiers/%d/dataset/relabel" % hid,
-                    data={"msg_id": rid, "category": "Personal"})
-    check("relabel redirects with an out-of-set toast",
-          r.status_code == 302 and "toast=out" in (r.headers.get("Location") or ""))
+                    data={"msg_id": rid, "category": "Personal"}, follow_redirects=True)
+    check("relabel redirects with an out-of-set flash",
+          r.status_code == 200 and b"moved to the out-of-set" in r.data
+          and b"Personal" in r.data and b'class="toast"' not in r.data)
     ds3 = heuristics_mod.dataset_for(store.get_heuristic(hid))
     check("relabelled sample moved to the negatives",
           any(s["msg_id"] == rid for s in ds3["negatives"])
           and not any(s["msg_id"] == rid for s in ds3["positives"]))
-    r = client.get("/classifiers/%d/dataset?toast=out&subj=x&cat=Personal" % hid)
-    check("toast markup renders on the page",
-          b'class="toast"' in r.data and b"moved to" in r.data)
     r = client.post("/classifiers/%d/dataset/relabel" % hid,
-                    data={"msg_id": rid, "category": "Promo"})
-    check("relabel back redirects with an in-set toast",
-          r.status_code == 302 and "toast=in" in (r.headers.get("Location") or ""))
+                    data={"msg_id": rid, "category": "Promo"}, follow_redirects=True)
+    check("relabel back confirms the in-set move",
+          r.status_code == 200 and b"moved to the in-set" in r.data)
     check("sample moved back up into the positives",
           any(s["msg_id"] == rid and s["tag"] == "Promo"
               for s in heuristics_mod.dataset_for(store.get_heuristic(hid))["positives"]))
@@ -3082,7 +3080,7 @@ def main():
     rt = client.get("/static/turbo.js")
     check("turbo.js served", rt.status_code == 200 and b"Turbo" in rt.data[:400])
     check("singleton guards present (no duplicate listeners across swaps)",
-          b"__mtChatDel" in d and b"__mtTicker" in d)
+          b"__mtArmDel" in d and b"__mtSubmitBusy" in d and b"__mtTicker" in d)
     check("chat switching drops the previous turns from the live box",
           b"dropLive" in d and b"clearLive" in d and b"isBusy" in d)
 
@@ -3621,8 +3619,9 @@ def main():
           b"Promo robot" in r.data and b"Working on your mail" in r.data
           and (b"deciding live" in r.data or b"paused" in r.data)
           and b"Review dataset" in r.data)
-    check("fast-path controls wired (toggle + retrain + dataset)",
-          b"/classifiers/" in r.data and b"/toggle" in r.data and b"/retrain" in r.data)
+    check("fast-path controls wired (switch toggle + retrain + dataset)",
+          b'class="px-sw"' in r.data and b"/classifiers/" in r.data and b"/toggle" in r.data
+          and b"/retrain" in r.data and b">Pause<" not in r.data and b">Resume<" not in r.data)
 
 
 
@@ -5073,6 +5072,54 @@ def main():
     check("a disposed session revalidates false",
           app_mod._ui_session_valid_now("good-ui", "main", _rv_sid, "composed") is False)
     plugins_mod.set_enabled("good-ui", False)
+
+    section("T58 UI conventions: armed deletes, switches, consequence confirms", "ui")
+    _u_rule = store.add_rule("Conventions rule", "all",
+                             [{"field": "subject", "op": "contains", "value": "conv"}],
+                             {"move_to": "Conventions"}, True)
+    _u_flow = store.add_flow("Conventions flow", "all",
+                             [{"field": "subject", "op": "contains", "value": "conv"}],
+                             [{"type": "tag", "tag": "conv"}], True)
+    _u_tpl = store.add_template("Conventions template", "Re: {subject}", "hello")
+    _u_hid = store.add_heuristic("Conventions classifier", "decision_list", "Convention",
+                                 model=json.dumps({"conditions": []}),
+                                 stats=json.dumps({"source": "tags"}))
+    _rp = client.get("/rules").data
+    check("rules: disable/enable is a switch, delete is armed",
+          b'class="px-sw"' in _rp and b"arm-del" in _rp and b"ra-menu" in _rp
+          and b"confirm('Delete rule" not in _rp)
+    check("rules: arm labels name the rule",
+          b'data-arm-label="Press again to delete rule Conventions rule"' in _rp)
+    _fp = client.get("/flows").data
+    check("flows: switch + armed menu delete, no popup",
+          b'class="px-sw"' in _fp and b"arm-del" in _fp
+          and b"confirm('Delete this flow" not in _fp)
+    _cp = client.get("/classifiers").data
+    check("classifiers: switch in the row, armed menu delete",
+          b'class="px-sw"' in _cp and b"arm-del" in _cp
+          and b"confirm('Delete this classifier" not in _cp)
+    _tp = client.get("/templates").data
+    check("templates: armed delete + touch overflow menu",
+          b"arm-del" in _tp and b"ra-menu" in _tp
+          and b"confirm('Delete template" not in _tp)
+    _dp = client.get("/").data
+    check("high-stakes actions keep a consequence confirm",
+          b"Rebuild the search index from scratch? Mail is untouched." in _dp)
+    _ap = client.get("/assistant").data
+    check("shared arm + submit guards ship in the base shell",
+          b"__mtArmDel" in _ap and b"__mtSubmitBusy" in _ap and b"turbo:before-cache" in _ap)
+    r = client.post("/rules/%d/toggle" % _u_rule, follow_redirects=True)
+    check("rule toggle announces the new state",
+          b'class="msg ok"' in r.data and b"disabled." in r.data)
+    r = client.post("/flows/%d/toggle" % _u_flow, follow_redirects=True)
+    check("flow toggle announces the new state",
+          b'class="msg ok"' in r.data and b"disabled." in r.data)
+    r = client.post("/classifiers/%d/toggle" % _u_hid, follow_redirects=True)
+    check("classifier toggle announces the new state",
+          b'class="msg ok"' in r.data and b"disabled." in r.data)
+    store.delete_rule(_u_rule); store.delete_flow(_u_flow)
+    store.delete_template(_u_tpl); store.delete_heuristic(_u_hid)
+
     # ==== suite tail (always runs, even in a partial run) ====
     if globals().get("_PARTIAL_NOTE"):
         print("\n" + globals()["_PARTIAL_NOTE"])

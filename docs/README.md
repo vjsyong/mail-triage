@@ -59,6 +59,9 @@ How this folder is organised: by what you need, not by when it was written.
 - [spa-turbo.md](spa-turbo.md) - SPA navigation layer (Turbo Drive), and why not a
   framework rewrite
 - [ui-redesign.md](ui-redesign.md) - simulator / dry-run report page design
+- [ui-conventions.md](ui-conventions.md) - the app-wide interaction standard: armed
+  deletes, switches for on/off, flash vs toast split (`ok`/`warn`/`err`), row-action
+  laws, empty-state anatomy, exceptions register
 
 ## Research briefs
 
