@@ -851,6 +851,25 @@ class LLMHandler(BaseHTTPRequestHandler):
                                                "total_tokens": 10}})
             self.sse_done()
             return
+        if "fill the draft" in (user or "").lower():
+            self.sse_start()
+            self.delta(role="assistant")
+            if step == 0:
+                self.delta(reasoning="The user is on the Simulator; I will fill the fields directly.")
+                self.tool_delta(0, "fill_simulator",
+                                {"from": "colleague@university-example.com",
+                                 "to": "me@example.com",
+                                 "subject": "Catch up?",
+                                 "body": "Hey, I will be near the dining hall around noon."},
+                                "call_%d_0" % step)
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            else:
+                self.delta(content="Filled the Simulator draft - check the fields, then Run simulation.")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.sse({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 5,
+                                               "total_tokens": 10}})
+            self.sse_done()
+            return
         self.sse_start()
         self.delta(role="assistant")
         if step == 0:
@@ -3370,6 +3389,31 @@ def main():
     check("simulator prefills a draft for the flow",
           b"to exercise flow" in r.data and b"Context flow" in r.data
           and b'name="subject" value=""' not in r.data)
+    agf = engine.AssistantAgent(page_path="/simulate")
+    rf = agf.call_tool("fill_simulator", {"from": "colleague@university-example.com",
+                                          "subject": "Catch up?", "body": "Lunch soon?"})
+    check("fill_simulator returns a live UI fill action",
+          rf["ok"] and (rf.get("ui") or {}).get("action") == "fill_simulator"
+          and rf["ui"]["fields"].get("subject") == "Catch up?"
+          and rf["ui"]["fields"].get("from_addr") == "colleague@university-example.com")
+    rn = engine.AssistantAgent().call_tool("fill_simulator", {"subject": "x"})
+    check("fill_simulator refuses off the simulator page",
+          not rn["ok"] and rn["result"].get("error") == "not_on_simulator")
+    rflow2 = engine.AssistantAgent(page_path="/simulate").call_tool("fill_simulator", {"flow_id": fctx_id})
+    check("fill_simulator builds an example from a flow",
+          rflow2["ok"] and bool((rflow2.get("ui") or {}).get("fields", {}).get("subject")))
+    rsim = client.get("/simulate")
+    check("simulator page ships the live fill hook",
+          b"window.mtSimFill" in rsim.data and b"d.ui.action==='fill_simulator'" in rsim.data)
+    check("simulator page context teaches fill_simulator",
+          "fill_simulator" in engine.assistant_page_context("/simulate")[2])
+    rstreamfill = client.post("/assistant/stream",
+                              data={"message": "Please fill the draft for a quick test",
+                                    "session": "0", "path": "/simulate"})
+    sbf = rstreamfill.data.decode()
+    check("assistant stream carries the fill UI event",
+          "event: tool_end" in sbf and '"action": "fill_simulator"' in sbf
+          and '"from_addr"' in sbf and "event: done" in sbf)
     r = client.get("/flows?test=%d" % fctx_id)
     check("flows page shows the 'test it' banner after saving",
           b"Simulate a draft that tests it" in r.data

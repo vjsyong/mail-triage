@@ -1582,7 +1582,12 @@ window.assistantChat = function(opts){
       else if(ev==='content'){ content.textContent+=(d.text||''); rawText+=(d.text||''); label('writing\u2026'); }
       else if(ev==='content_break'){ if(content.textContent){ content.textContent+='\n\n'; rawText+='\n\n'; } }
       else if(ev==='tool_start'){ label('running '+d.name+'\u2026'); toolCard(d.id,d.name,d.args); }
-      else if(ev==='tool_end'){ toolDone(d.id,d.ok,d.summary,d.dry_run,d.pending,d.card); label('thinking\u2026'); }
+      else if(ev==='tool_end'){
+        if(d.ui && d.ui.action==='fill_simulator' && window.mtSimFill){
+          try{ window.mtSimFill(d.ui.fields||{}, d.ui.note||''); }catch(e){}
+        }
+        toolDone(d.id,d.ok,d.summary,d.dry_run,d.pending,d.card); label('thinking\u2026');
+      }
       else if(ev==='proposals'){ proposals=d.proposals||[]; }
       else if(ev==='action_proposals'){ pendingActions=(d.actions||[]); }
       else if(ev==='thought_summary'){ if(det.style.display!=='none' && d.text){ det.dataset.summary='1'; detSum.textContent=d.text; } }
@@ -6981,8 +6986,8 @@ ASSIST_SUGGESTIONS = {
         {"label": "What moved mail?", "prompt": "What has been moving my mail in the last day - rules, flows, or the LLM?"},
     ],
     "simulate": [
-        {"label": "Fill a draft to test a flow", "prompt": "Help me fill in the simulator draft to test one of my flows: pick a suitable flow and give me the From/To/Subject/Body values."},
-        {"label": "Fill a draft to test a rule", "prompt": "Help me fill in the simulator draft to test one of my rules: pick a rule and give me the From/To/Subject/Body values."},
+        {"label": "Fill a draft to test a flow", "prompt": "Help me test one of my flows: pick a suitable flow, fill the simulator draft with an example that would exercise it, then tell me what you filled in."},
+        {"label": "Fill a draft to test a rule", "prompt": "Help me test one of my rules: pick a suitable rule, fill the simulator draft with an example that would exercise it, then tell me what you filled in."},
         {"label": "How does this work?", "prompt": "Explain what the simulator does and how the Prefill from / Generate an example draft options work."},
     ],
     "accounts": [
@@ -9142,6 +9147,23 @@ SIMULATE_TMPL = """
   </div>
   {% endif %}
 </div>
+<script>
+window.mtSimFill = function(fields, note){
+  fields = fields || {};
+  function set(id, v){ if(typeof v !== 'string') return; var el=document.getElementById(id); if(el) el.value=v; }
+  set('s-from', fields.from_addr); set('s-to', fields.to_addr);
+  set('s-subj', fields.subject); set('s-body', fields.body);
+  var llm=document.getElementById('s-llm');
+  if(llm && typeof fields.use_llm === 'boolean') llm.checked = fields.use_llm;
+  var card=document.querySelector('.simgrid form .card');
+  if(card){
+    card.style.transition='box-shadow .35s';
+    card.style.boxShadow='0 0 0 2px var(--acc)';
+    setTimeout(function(){ card.style.boxShadow=''; }, 1800);
+  }
+  if(note && window.toast) toast(note, 'ok');
+};
+</script>
 """
 
 

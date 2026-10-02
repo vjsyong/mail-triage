@@ -3058,9 +3058,18 @@ ASSISTANT_TOOLS = [
          "subject": {"type": "string"},
          "body": {"type": "string"},
          "message_id": {"type": "integer", "description": "for reply modes"},
-         "folder": {"type": "string"},
-         "uid": {"type": "integer"}},
-        ("body",)),
+          "folder": {"type": "string"},
+          "uid": {"type": "integer"}},
+         ("body",)),
+    _fn("fill_simulator",
+        "Fill the Simulator page's draft fields (From / To / Subject / Body) directly in the user's browser - the fields update live, so never paste the values in chat instead. Use ONLY when the Simulator page is open and the user asks for help filling the draft or testing a flow/rule. Pass flow_id or rule_id to auto-generate an example that exercises it (same as the page's 'Generate an example draft'), and/or explicit from/to/subject/body values. Nothing is sent or run; the user still presses Run simulation.",
+        {"flow_id": {"type": "integer", "description": "generate an example that would exercise this flow"},
+         "rule_id": {"type": "integer", "description": "generate an example that would exercise this rule"},
+         "from": {"type": "string", "description": "From value (optional; overrides the generated example)"},
+         "to": {"type": "string", "description": "To value (optional)"},
+         "subject": {"type": "string", "description": "Subject value (optional; overrides the generated example)"},
+         "body": {"type": "string", "description": "Body value (optional; overrides the generated example)"},
+         "use_llm": {"type": "boolean", "description": "tick 'Ask the classifier' (omit to leave it as-is)"}}),
 ]
 
 
@@ -3747,13 +3756,14 @@ def assistant_page_context(path):
                 "draft: the \u201cPrefill from\u201d dropdown picks a flow or rule and \u201cGenerate "
                 "an example draft\u201d writes a matching example; /simulate?flow=<id> and "
                 "/simulate?rule=<id> prefill the same way. When the user asks for help filling the "
-                "fields or testing a flow/rule (e.g. \u201ctest the PhD flow\u201d): find that "
-                "flow/rule first (list_flows / list_rules), then either give them concrete "
-                "From/To/Subject/Body values that would exercise it, or point them at the prefill: "
-                "a link like [Test \u201c<name>\u201d \u2192](/simulate?flow=<id>), or the Prefill "
-                "from dropdown + \u201cGenerate an example draft\u201d. The draft is test input: do "
-                "NOT search the mailbox, drafts or messages, and do not ask which email they mean. "
-                "Reply with the draft values or a line of guidance, not a play-by-play of tools.",
+                "fields or testing a flow/rule (e.g. \u201ctest the PhD flow\u201d or \u201cfill the "
+                "draft\u201d): find that flow/rule first if needed (list_flows / list_rules), then "
+                "CALL fill_simulator to put the values straight into the fields - pass flow_id or "
+                "rule_id to generate a matching example, or the From/To/Subject/Body values you "
+                "wrote. The fields update live in the user's browser; never paste the values in "
+                "chat instead when this page is open. After the tool runs, reply with one short "
+                "line saying what you filled (and offer to run it). The draft is test input: do "
+                "NOT search the mailbox, drafts or messages, and do not ask which email they mean.",
                 "page:simulate")
     if p == "/":
         try:
@@ -4941,6 +4951,7 @@ class AssistantAgent:
                         res = self.call_tool(c["name"], args)
                         res["elapsed"] = round(time.time() - t0, 2)
                         card = res.get("card") if isinstance(res.get("card"), dict) else None
+                        ui = res.get("ui") if isinstance(res.get("ui"), dict) else None
                         self.tools_log.append({"name": c["name"],
                                                "args": _truncate(json.dumps(args, ensure_ascii=False), 300),
                                                "ok": bool(res.get("ok")),
@@ -4953,7 +4964,7 @@ class AssistantAgent:
                                "summary": _truncate(res.get("summary") or "", 400),
                                "dry_run": bool(res.get("dry_run")),
                                "pending": bool(res.get("pending_approval")),
-                               "card": card, "elapsed": res["elapsed"]}
+                               "card": card, "ui": ui, "elapsed": res["elapsed"]}
                     payload = json.dumps(res.get("result", {}), ensure_ascii=False)
                     cap = min(self.RESULT_CHARS, max(800, self._budget))
                     payload = _truncate(payload, cap)
@@ -5202,6 +5213,62 @@ class AssistantAgent:
                         % (to_addr, _truncate(subject, 60), (" [%s]" % sent_note) if sent_note else ""))
         return {"ok": True, "summary": "sent to %s" % to_addr,
                 "result": {"to": to_addr, "subject": subject, "mode": mode, "saved_to": sent_note}}
+
+    def _tool_fill_simulator(self, a):
+        """Fill the Simulator draft live in the browser (no mailbox activity)."""
+        _kind, _desc, _block, _key = assistant_page_context(self.page_path)
+        if _kind != "simulator":
+            return {"ok": False,
+                    "summary": "the Simulator page is not open in this browser",
+                    "result": {"error": "not_on_simulator",
+                               "note": ("The draft fields can only be filled live on the Simulator "
+                                        "page. Give the user the values in your reply, or link to "
+                                        "/simulate?flow=<id> / /simulate?rule=<id>.")}}
+        fields = {}
+        for src_key, dst_key, limit in (("from", "from_addr", 200), ("from_addr", "from_addr", 200),
+                                        ("to", "to_addr", 200), ("to_addr", "to_addr", 200),
+                                        ("subject", "subject", 300), ("body", "body", 8000)):
+            v = a.get(src_key)
+            if isinstance(v, str) and v.strip():
+                fields[dst_key] = v.strip()[:limit]
+        kind, gid = "", 0
+        try:
+            if a.get("flow_id") not in (None, "", 0):
+                kind, gid = "flow", int(a.get("flow_id"))
+            elif a.get("rule_id") not in (None, "", 0):
+                kind, gid = "rule", int(a.get("rule_id"))
+        except (TypeError, ValueError):
+            kind, gid = "", 0
+        src = ""
+        if kind and not (fields.get("from_addr") and fields.get("subject") and fields.get("body")):
+            ex = example_draft_for(kind, gid)
+            if not ex:
+                return {"ok": False,
+                        "summary": "%s #%s not found (use list_flows / list_rules)" % (kind, gid),
+                        "result": {"error": "not_found"}}
+            d = ex.get("draft") or {}
+            for key, val in (("from_addr", d.get("from_addr")), ("subject", d.get("subject")),
+                             ("body", d.get("body"))):
+                if val and not fields.get(key):
+                    fields[key] = str(val)[:8000]
+            src = "%s \u201c%s\u201d" % (ex["kind"], ex["name"])
+        if not any(fields.get(k) for k in ("from_addr", "to_addr", "subject", "body")):
+            return {"ok": False,
+                    "summary": "nothing to fill - pass flow_id / rule_id or from, to, subject, body",
+                    "result": {"error": "no_fields"}}
+        if "use_llm" in a:
+            v = _as_bool(a.get("use_llm"))
+            if v is not None:
+                fields["use_llm"] = v
+        labels = [lbl for key, lbl in (("from_addr", "From"), ("to_addr", "To"),
+                                       ("subject", "Subject"), ("body", "Body")) if fields.get(key)]
+        return {"ok": True,
+                "summary": "filled the Simulator draft (%s)%s - nothing has run"
+                           % (", ".join(labels), (" from %s" % src) if src else ""),
+                "result": {"filled": sorted(fields), "source": src or "assistant values",
+                           "note": "The fields update live in the browser; press Run simulation to test them."},
+                "ui": {"action": "fill_simulator", "fields": fields,
+                       "note": "Draft filled from the assistant \u2014 review it, then Run simulation."}}
 
     def _summarize_thoughts(self, reasoning_text):
         """One short sentence describing what the reasoning was about (best-effort)."""
