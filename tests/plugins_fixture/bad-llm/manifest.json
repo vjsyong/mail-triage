@@ -1,0 +1,25 @@
+{
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "id": "bad-llm",
+  "name": "Bad llm",
+  "version": "0.1.0",
+  "description": "x",
+  "required_llm_capability": "llm.complete",
+  "kind": [
+    "tool"
+  ],
+  "tools": [
+    {
+      "name": "noop",
+      "description": "x",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

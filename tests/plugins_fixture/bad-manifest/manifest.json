@@ -1,0 +1,13 @@
+{
+  "id": "bad-manifest",
+  "name": "Bad",
+  "version": "v1",
+  "description": "x",
+  "engines": {
+    "sdk": ">=0.1"
+  },
+  "runtime": "quickjs",
+  "kind": [
+    "tool"
+  ]
+}

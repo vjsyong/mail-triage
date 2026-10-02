@@ -3293,6 +3293,101 @@ def main():
     check("learning page shows the test set and its truth-based scores",
           b"Test sets" in r.data and b"of your labels" in r.data)
 
+    section("T43 plugin kernel: discovery, validation, registry")
+    import plugins as plugins_mod
+    fx = os.path.join(PROJECT, "tests", "plugins_fixture")
+    proot = os.path.join(tmp, "plugins")
+    broot = os.path.join(tmp, "plugins_builtin")
+    shutil.copytree(fx, proot)
+    os.makedirs(broot, exist_ok=True)
+    # a valid built-in (mt- prefix, builtin root) + one wrongly unprefixed builtin
+    bdemo = os.path.join(broot, "mt-builtin-demo")
+    shutil.copytree(os.path.join(proot, "good-demo"), bdemo)
+    bm = json.load(open(os.path.join(bdemo, "manifest.json")))
+    bm["id"] = "mt-builtin-demo"; bm["name"] = "Builtin demo"
+    json.dump(bm, open(os.path.join(bdemo, "manifest.json"), "w"))
+    bwrong = os.path.join(broot, "notreserved")
+    shutil.copytree(os.path.join(proot, "good-demo"), bwrong)
+    bw = json.load(open(os.path.join(bwrong, "manifest.json")))
+    bw["id"] = "not-reserved"; bw["name"] = "Not reserved"
+    json.dump(bw, open(os.path.join(bwrong, "manifest.json"), "w"))
+    plugins_mod.config.PLUGINS_DIR = proot
+    plugins_mod.config.PLUGINS_BUILTIN_DIR = broot
+    rep = plugins_mod.scan()
+    rows = {r["id"]: r for r in plugins_mod.list_rows()}
+    check("scan registers valid plugins from both roots, inert by default",
+          {"good-demo", "good-mail", "mt-builtin-demo"} <= set(rows)
+          and not any(r["enabled"] for r in rows.values()))
+    errdirs = {os.path.basename(e["dir"]): e["errors"] for e in rep["errors"]}
+    check("broken manifests are rejected with specific errors",
+          all(k in errdirs for k in ("bad-manifest", "bad-sdk", "bad-traversal",
+                                     "bad-reserved", "bad-llm", "bad-toolref", "notreserved")))
+    check("reserved mt- prefix is enforced both ways",
+          any("reserved" in e.lower() for e in errdirs.get("bad-reserved", []))
+          and any("must start with 'mt-'" in e for e in errdirs.get("notreserved", [])))
+    check("traversal + sdk range errors are precise",
+          any("escapes" in e for e in errdirs.get("bad-traversal", []))
+          and any("host SDK 0.1.0" in e for e in errdirs.get("bad-sdk", [])))
+    en = plugins_mod.set_enabled("good-mail", True)
+    check("enabling consents to the declared permissions",
+          en["ok"] and en["grants"] == ["mailbox.read", "llm.complete", "net.http"])
+    check("undeclared grants are refused",
+          not plugins_mod.set_grants("good-demo", ["mailbox.read"])["ok"])
+    plugins_mod.set_grants("good-mail", ["mailbox.read"])
+    check("grants can be narrowed", plugins_mod.has_grant("good-mail", "mailbox.read")
+          and not plugins_mod.has_grant("good-mail", "llm.complete"))
+    plugins_mod.set_grants("good-mail", ["mailbox.read", "llm.complete", "net.http"])
+    count_before = len(plugins_mod.list_rows())
+    installed_before = rows["good-demo"]["installed_ts"]
+    plugins_mod.scan()
+    rows2 = {r["id"]: r for r in plugins_mod.list_rows()}
+    check("rescan is idempotent (no dupes, install time stable)",
+          len(rows2) == count_before and rows2["good-demo"]["installed_ts"] == installed_before)
+    with open(os.path.join(proot, "good-demo", "dist", "plugin.js"), "a") as fh:
+        fh.write("\n// tweaked\n")
+    plugins_mod.scan()
+    rows3 = {r["id"]: r for r in plugins_mod.list_rows()}
+    check("same-version changes are flagged as modified",
+          "modified" in rows3["good-demo"]["last_error"])
+    mpath = os.path.join(proot, "good-mail", "manifest.json")
+    mm = json.load(open(mpath))
+    mm["version"] = "0.3.0"
+    mm["permissions"] = mm["permissions"] + ["llm.embed"]
+    json.dump(mm, open(mpath, "w"))
+    plugins_mod.scan()
+    gm = plugins_mod.get("good-mail")
+    check("a rights-growing version bump resets consent to re-grant",
+          gm["version"] == "0.3.0" and not gm["enabled"]
+          and "re-grant" in gm["last_error"])
+    plugins_mod.set_enabled("good-mail", True)
+    plugins_mod.set_enabled("good-demo", True)
+    plugins_mod.set_enabled("mt-builtin-demo", True)
+    schemas = plugins_mod.tool_schemas()
+    names = {s["function"]["name"] for s in schemas}
+    check("tool schemas synthesize namespaced function definitions",
+          "plugin__good-demo__ping" in names
+          and any(s["function"]["description"].startswith("Good mail:") for s in schemas))
+    check("tool name roundtrip + capability mapping",
+          plugins_mod.split_tool_name("plugin__good-demo__ping") == ("good-demo", "ping")
+          and plugins_mod.capability_for_tool("plugin__good-demo__ping") == "plugin:good-demo"
+          and plugins_mod.split_tool_name("search_messages") is None)
+    store.set_setting("plugin_tools_budget", 1)
+    kept = plugins_mod.tool_schemas(query_text="ping the probe")
+    check("budget caps plugin schemas, ranked by keyword overlap",
+          len(kept) == 1 and kept[0]["function"]["name"] == "plugin__good-demo__ping")
+    store.set_setting("plugin_tools_budget", 8)
+    dup = os.path.join(proot, "zdup-good-demo")
+    shutil.copytree(os.path.join(fx, "good-demo"), dup)
+    rep4 = plugins_mod.scan()
+    check("duplicate ids across dirs are detected",
+          any("duplicate id 'good-demo'" in e for e2 in rep4["errors"] for e in e2["errors"])
+          and len([r for r in plugins_mod.list_rows() if r["id"] == "good-demo"]) == 1)
+    cl = plugins_mod.cli(["list"])
+    check("CLI list reports registry state",
+          cl["sdk_version"] == "0.1.0" and any(p["id"] == "good-mail" for p in cl["plugins"]))
+    check("CLI validate accepts good and names errors for broken",
+          plugins_mod.cli(["validate", os.path.join(fx, "good-demo")])["ok"]
+          and not plugins_mod.cli(["validate", os.path.join(fx, "bad-sdk")])["ok"])
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

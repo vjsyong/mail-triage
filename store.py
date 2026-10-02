@@ -88,6 +88,11 @@ DEFAULT_SETTINGS = {
     "imap_user": "",
     "imap_password": "",
     "imap_tls": "",               # "", "0"/"1" (blank = env)
+
+    # ---- plugins (docs/plugin-architecture.md) ----
+    "plugins_enabled": 1,         # master switch for plugin tool discovery + runtime
+    "plugin_tools_budget": 8,     # max plugin tool schemas offered to the model per turn
+    "plugin_classifiers": [],     # plugin ids allowed to run in the classify pipeline
 }
 
 _SCHEMA = """
@@ -417,6 +422,32 @@ def _migrate(conn):
         UNIQUE(set_name, msg_id, task)
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_msg ON eval_items(set_name, msg_id)")
+    # ---- plugin system: registry + namespaced key/value store
+    # See docs/plugin-architecture.md. `enabled` is user consent to run the
+    # plugin at all; `grants_json` is the subset of the manifest's declared
+    # permissions that host functions may exercise. A version bump that grows
+    # the permission set resets both (re-grant).
+    conn.execute("""CREATE TABLE IF NOT EXISTS plugins (
+        id TEXT PRIMARY KEY,
+        version TEXT NOT NULL,
+        root TEXT NOT NULL DEFAULT 'user',
+        dir TEXT NOT NULL,
+        manifest_json TEXT NOT NULL DEFAULT '{}',
+        manifest_sha256 TEXT NOT NULL DEFAULT '',
+        entry_sha256 TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 0,
+        grants_json TEXT NOT NULL DEFAULT '[]',
+        last_error TEXT NOT NULL DEFAULT '',
+        installed_ts INTEGER NOT NULL DEFAULT 0,
+        updated_ts INTEGER NOT NULL DEFAULT 0
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS plugin_kv (
+        plugin_id TEXT NOT NULL,
+        k TEXT NOT NULL,
+        v TEXT NOT NULL,
+        updated_ts INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (plugin_id, k)
+    )""")
     # one-time: retire assistant_actions_apply (False meant dry-run -> the three gated
     # tools become 'ask', so nothing the assistant did before can now happen silently)
     has_perm = conn.execute("SELECT COUNT(*) FROM settings WHERE k GLOB 'perm_*'").fetchone()[0]

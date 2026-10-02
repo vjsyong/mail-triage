@@ -1,0 +1,41 @@
+{
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "id": "good-mail",
+  "name": "Good mail",
+  "version": "0.2.0",
+  "description": "Fixture plugin with permissions.",
+  "kind": [
+    "tool"
+  ],
+  "permissions": [
+    "mailbox.read",
+    "llm.complete",
+    "net.http"
+  ],
+  "net": {
+    "hosts": [
+      "example.com",
+      "*.example.org"
+    ],
+    "max_requests_per_day": 10
+  },
+  "required_llm_capability": "llm.complete",
+  "tools": [
+    {
+      "name": "summarize_recent",
+      "description": "Summarize recent mail.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  ]
+}

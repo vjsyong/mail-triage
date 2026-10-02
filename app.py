@@ -24,6 +24,7 @@ import config
 import engine
 import heuristics
 import learning
+import plugins
 import proxy
 import rag
 import store
@@ -7413,6 +7414,10 @@ if __name__ == "__main__":
         except Exception as exc:
             out["proxy"] = {"error": repr(exc)}
         print(json.dumps(out, indent=1))
+        sys.exit(0)
+    if "--plugins" in sys.argv:
+        # plugin kernel: list | validate <dir> | rescan | enable|disable <id> | grant <id> [caps...]
+        print(json.dumps(plugins.cli(sys.argv[sys.argv.index("--plugins") + 1:]), indent=1))
         sys.exit(0)
     if "--import-proxy" in sys.argv:
         # one-time migration: import accounts from a standalone emailproxy ui_state.json

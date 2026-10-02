@@ -1,0 +1,24 @@
+{
+  "engines": {
+    "sdk": ">=9 <10"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "id": "bad-sdk",
+  "name": "Bad sdk",
+  "version": "0.1.0",
+  "description": "x",
+  "kind": [
+    "tool"
+  ],
+  "tools": [
+    {
+      "name": "noop",
+      "description": "x",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

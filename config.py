@@ -42,4 +42,12 @@ UI_PORT = int(get("UI_PORT", "8097"))
 DATA_DIR = get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 DB_PATH = os.path.join(DATA_DIR, "triage.db")
 
+# Plugin system (docs/plugin-architecture.md): user plugins live in the data
+# volume (Docker: /data/plugins, mounted => they survive rebuilds); built-ins
+# ship with the app (repo plugins/ dir, reserved mt- ids).
+PLUGINS_DIR = get("PLUGINS_DIR", os.path.join(DATA_DIR, "plugins"))
+PLUGINS_BUILTIN_DIR = get("PLUGINS_BUILTIN_DIR",
+                          os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins"))
+PLUGIN_SDK_VERSION = "0.1.0"
+
 APP_NAME = "Mail Triage"

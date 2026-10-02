@@ -1,0 +1,28 @@
+{
+  "engines": {
+    "sdk": ">=0.1 <1.0"
+  },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "id": "good-demo",
+  "name": "Good demo",
+  "version": "0.1.0",
+  "description": "Fixture plugin for the mock suite.",
+  "kind": [
+    "tool"
+  ],
+  "tools": [
+    {
+      "name": "ping",
+      "description": "Probe tool for tests.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}
