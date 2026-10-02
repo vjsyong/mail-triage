@@ -1294,7 +1294,7 @@ class LLMClient:
         system = ("You triage incoming email for %s. Reply with a single JSON object and nothing else. "
                   "Shape: {\"category\": one of [%s], \"needs_reply\": true|false, "
                   "\"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", "
-                  "\"reason\": \"why that category, max 15 words\"}" % (my_name or "the user", cats))
+                  "\"reason\": \"why that category, max 15 words\"}" % (my_name or "the account owner", cats))
         body_text = msg.get("snippet") or ""
         if looks_like_mime_junk(body_text):
             body_text = readable_body(body_text, limit=1500)
@@ -1332,7 +1332,7 @@ class LLMClient:
         my_name = settings.get("my_name", "")
         system = ("You write email replies as %s (%s). Be concise, warm and professional. "
                   "Output ONLY the plain-text reply body (no subject line, no headers, no quotes)."
-                  % (my_name, imap_config()["user"]))
+                  % (my_name or "the account owner", imap_config()["user"]))
         guidance = ""
         if template:
             subject_hint = template.get("subject") or ""
