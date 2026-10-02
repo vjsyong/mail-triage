@@ -3666,6 +3666,14 @@ def assistant_page_context(path):
                 "CURRENT PAGE: the user is on the RAW PROXY LOG - the embedded mail proxy's own "
                 "output for connection-level debugging (IMAP / OAuth). Relevant when accounts "
                 "show sign-in trouble.", "page:proxy/log")
+    if p.startswith("/plugins/"):
+        return ("page", "plugin detail",
+                "CURRENT PAGE: the plugin detail view of one plugin (%s) - what it does, its "
+                "access permissions in plain language, the assistant permission (off / ask / "
+                "auto), pipeline opt-ins, its settings and recent activity. The toggle in the "
+                "header switches it on or off. When enabled and permitted, its tools appear in "
+                "your inventory as plugin__<id>__<tool>."
+                % p.rsplit("/", 1)[-1][:60], "page:plugin")
     if p == "/plugins":
         try:
             import plugins as _plugins
@@ -3674,16 +3682,15 @@ def assistant_page_context(path):
         except Exception:
             _np = _en = 0
         return ("page", "plugins page",
-                "CURRENT PAGE: the user is on the PLUGINS page - sandboxed extensions "
-                "(classifiers, tools, integrations) that run in their own worker process. "
-                "Each card shows the plugin, its kinds and tools, an enable/disable button, "
-                "the capability grants (checkboxes; unchecking revokes at the host-function "
-                "level) and the ASSISTANT PERMISSION gate (off / ask / auto) that decides "
-                "whether YOU may call its tools. Your plugin tools are named "
-                "plugin__<plugin-id>__<tool>. Rescan re-reads the plugins directory; user "
-                "plugins go in the app data dir under plugins/. Plugins are read-only over "
-                "mail: they act only by proposing cards or through their own tools. There "
-                "are %d plugin(s) installed, %d enabled." % (_np, _en), "page:plugins")
+                "CURRENT PAGE: the user is on the PLUGINS page - a list of sandboxed extensions "
+                "(classifiers, tools, integrations) with an on/off toggle per row; clicking a row "
+                "opens its detail page (access permissions in plain language, assistant permission "
+                "off/ask/auto, pipeline opt-ins, settings, activity). Your plugin tools are named "
+                "plugin__<plugin-id>__<tool> and are gated by each plugin's assistant permission. "
+                "Rescan re-reads the plugins directory; user plugins go in the app data dir under "
+                "plugins/. Plugins are read-only over mail: they act only by proposing cards or "
+                "through their own tools. There are %d plugin(s) installed, %d enabled."
+                % (_np, _en), "page:plugins")
     if p == "/more":
         return ("page", "more",
                 "CURRENT PAGE: the user is on the MORE page - the directory of all sections "

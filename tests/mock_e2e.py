@@ -2430,7 +2430,8 @@ def main():
                   ("/templates", "templates page"), ("/settings", "settings"),
                   ("/accounts", "accounts"), ("/log", "log page"), ("/more", "more page"),
                   ("/learning", "learning page"), ("/learning/eval", "labeling page"),
-                  ("/simulate", "simulator"), ("/plugins", "plugins page")]
+                  ("/simulate", "simulator"), ("/plugins", "plugins page"),
+                  ("/plugins/mt-cjk-matcher", "plugin detail")]
     if _hid:
         page_cases.append(("/classifiers/%d/dataset" % _hid, "dataset review"))
     _missing = [p2 for p2, nd in page_cases
@@ -3599,8 +3600,8 @@ def main():
     r = client.get("/plugins")
     check("plugins page renders installed plugins with controls",
           r.status_code == 200 and b"mt-promo-fastpath" in r.data
-          and b"good-demo" in r.data and b"Rescan now" in r.data
-          and b"Assistant permission" in r.data)
+          and b"good-demo" in r.data and b"Rescan" in r.data
+          and r.data.count(b'class="px-sw"') >= 3 and b"px-row" in r.data)
     r = client.post("/plugins/rescan", follow_redirects=True)
     check("rescan button re-syncs the registry",
           r.status_code == 200 and b"Plugins rescanned" in r.data)
@@ -3764,6 +3765,39 @@ def main():
           _dg["ok"] and _dg["result"].get("total", 0) >= 1
           and "need a reply" in _dg["summary"])
     check("digest tool returns a card", bool(_dg.get("card")))
+
+    section("T49 plugins UI: list rows, toggles, detail page")
+    r = client.get("/plugins")
+    _pl = r.data
+    check("plugins list is rows with toggles, not checkbox soup",
+          r.status_code == 200 and _pl.count(b'class="px-sw"') >= 7
+          and b"px-row" in _pl and b"grant_" not in _pl
+          and b'<details class="card"' in _pl)
+    check("plugins list groups running first, then off",
+          b'px-grp">Running' in _pl and b'px-grp">Off' in _pl)
+    r = client.get("/plugins/mt-webhook-notify")
+    _dt = r.data
+    check("plugin detail page renders its sections",
+          r.status_code == 200 and b"What it does" in _dt and b"Access" in _dt
+          and b"Activity" in _dt and b"mt-webhook-notify" in _dt)
+    check("detail page shows human permission labels with raw names",
+          b"Make web requests" in _dt and b"net.http" in _dt
+          and b"Use the AI model" not in _dt)
+    r = client.post("/plugins/mt-webhook-notify", data={"action": "disable", "next": "detail"},
+                    follow_redirects=False)
+    _loc = (r.headers.get("Location") or "")
+    check("toggle from the detail page returns to the detail page",
+          r.status_code in (301, 302, 303) and _loc.endswith("/plugins/mt-webhook-notify"))
+    _pc_before = list(store.get_setting("plugin_classifiers", []) or [])
+    client.post("/plugins/mt-promo-fastpath",
+                data={"action": "config", "opt_in_classifier": "1", "next": "detail"},
+                follow_redirects=True)
+    check("classifier pipeline opt-in saves plugin_classifiers",
+          "mt-promo-fastpath" in (store.get_setting("plugin_classifiers", []) or []))
+    store.set_setting("plugin_classifiers", _pc_before)
+    r = client.get("/plugins/mt-cjk-matcher")
+    check("matcher detail explains its rule-condition role",
+          b"Rule condition" in r.data and b"plugin</span>" in r.data)
 
     print("\n%s\n%d passed, %d failed (workspace: %s)\n"
           % ("ALL PASS" if failed == 0 else "FAILURES PRESENT", passed, failed, tmp))

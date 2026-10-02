@@ -912,6 +912,28 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
   input[type=email],input[type=url],input[type=tel],select,textarea{font-size:16px}
 }
 @media(max-width:640px){pre.log{font-size:.78rem}}
+
+/* plugins: list + detail share these */
+.px-ico{width:36px;height:36px;flex:0 0 36px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:var(--card2);color:var(--fg)}
+.px-ico svg{width:18px;height:18px}
+.px-grp{margin:18px 4px 6px;font-size:.76rem;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+.px-list{border:1px solid var(--line);background:var(--card)}
+.px-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid var(--line)}
+.px-row:first-child{border-top:0}
+.px-row:hover{background:var(--card2)}
+.px-main{flex:1;min-width:0;display:block;color:inherit}
+.px-main:hover{text-decoration:none}
+.px-nm{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-weight:600;font-size:.95rem;color:var(--fg)}
+.px-dz{display:block;color:var(--dim);font-size:.83rem;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.px-sw{display:inline-flex;align-items:center;cursor:pointer;margin:0;position:relative}
+.px-sw input{position:absolute;opacity:0;width:1px;height:1px}
+.px-sw .px-tr{width:36px;height:21px;border:1px solid var(--line2);background:var(--card2);position:relative;transition:background .12s,border-color .12s;display:inline-block}
+.px-sw .px-tr::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;background:#fff;border:1px solid var(--line2);transition:transform .12s,border-color .12s}
+.px-sw input:checked+.px-tr{background:var(--acc);border-color:var(--acc)}
+.px-sw input:checked+.px-tr::after{transform:translateX(15px);border-color:transparent}
+.px-sw input:focus-visible+.px-tr{outline:2px solid var(--acc);outline-offset:2px}
+.px-go{color:var(--dim);font-size:1.2rem;line-height:1;padding:0 2px}
+.px-go:hover{color:var(--fg);text-decoration:none}
 </style>
 <script>try{var v=localStorage.getItem('asb_open');if(v===null||v==='1')document.documentElement.classList.add('asb-open');var w=parseInt(localStorage.getItem('asb_w')||'',10);if(w>=280)document.documentElement.style.setProperty('--asb-w',Math.min(720,w)+'px');}catch(e){}</script>
 </head><body{% if show_asb %} class="with-asb"{% endif %}>
@@ -2452,100 +2474,193 @@ PLUGINS_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Plugins</h1>
-    <div class="page-desc">Sandboxed extensions: classifiers, tools and integrations that run in their own
-    worker process. Plugins never touch mail directly — every host call (mailbox reads, the LLM, network) is
-    permission-gated and audited, and the assistant reaches them as
-    <span class="mono">plugin__&lt;id&gt;__&lt;tool&gt;</span> tools under the usual off / ask / auto gate.
-    SDK {{ sdk }} · user plugins: <span class="mono">{{ proots.user }}</span> · built-ins:
-    <span class="mono">{{ proots.builtin }}</span>. To write one, see <span class="mono">sdk/README.md</span>
-    and <span class="mono">docs/plugin-architecture.md</span>.</div>
+    <div class="page-desc">Sandboxed extensions for the mail pipeline and the assistant. They stay inert
+    until switched on, and every host call they make is permission-gated and audited.</div>
   </div>
-  <form method="post" action="{{ url_for('plugins_rescan') }}"><button class="btn">Rescan now</button></form>
+  <form method="post" action="{{ url_for('plugins_rescan') }}"><button class="btn">Rescan</button></form>
 </div>
 
 {% if not px %}
 <div class="card"><div class="sub">No plugins installed yet. Drop a folder with a
-<span class="mono">manifest.json</span> and a JS bundle into the user plugins dir, then Rescan.</div></div>
+<span class="mono">manifest.json</span> and a JS bundle into <span class="mono">{{ proots.user }}</span>, then Rescan.</div></div>
+{% else %}
+<div class="sub" style="margin:2px 2px 0">{{ n_on }} of {{ n_all }} running</div>
+
+{% if running %}
+<div class="px-grp">Running</div>
+<div class="px-list">
+  {% for p in running %}
+  <div class="px-row">
+    <span class="px-ico" aria-hidden="true">{{ p.icon|safe }}</span>
+    <a class="px-main" href="{{ url_for('plugin_detail', pid=p.id) }}">
+      <span class="px-nm">{{ p.name }} <span class="badge">{{ p.version }}</span> <span class="badge">{{ p.kind_label }}</span>{% if p.needs_regrant %} <span class="badge warn">needs re-grant</span>{% endif %}{% if p.problem %} <span class="badge warn">issue</span>{% endif %}</span>
+      <span class="px-dz">{{ p.oneliner }}</span>
+    </a>
+    <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline">
+      <input type="hidden" name="action" value="disable">
+      <label class="px-sw" title="Disable {{ p.name }}"><input type="checkbox" checked onchange="this.form.requestSubmit()" aria-label="Disable {{ p.name }}"><span class="px-tr"></span></label>
+    </form>
+    <a class="px-go" href="{{ url_for('plugin_detail', pid=p.id) }}" aria-label="Open {{ p.name }} details">&rsaquo;</a>
+  </div>
+  {% endfor %}
+</div>
 {% endif %}
 
-{% for p in px %}
+{% if stopped %}
+<div class="px-grp">Off</div>
+<div class="px-list">
+  {% for p in stopped %}
+  <div class="px-row">
+    <span class="px-ico" aria-hidden="true">{{ p.icon|safe }}</span>
+    <a class="px-main" href="{{ url_for('plugin_detail', pid=p.id) }}">
+      <span class="px-nm">{{ p.name }} <span class="badge">{{ p.version }}</span> <span class="badge">{{ p.kind_label }}</span>{% if p.needs_regrant %} <span class="badge warn">needs re-grant</span>{% endif %}{% if p.problem %} <span class="badge warn">issue</span>{% endif %}</span>
+      <span class="px-dz">{{ p.oneliner }}</span>
+    </a>
+    <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline">
+      <input type="hidden" name="action" value="enable">
+      <label class="px-sw" title="Enable {{ p.name }}"><input type="checkbox" onchange="this.form.requestSubmit()" aria-label="Enable {{ p.name }}"><span class="px-tr"></span></label>
+    </form>
+    <a class="px-go" href="{{ url_for('plugin_detail', pid=p.id) }}" aria-label="Open {{ p.name }} details">&rsaquo;</a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<details class="card" style="margin-top:20px">
+  <summary class="sub" style="cursor:pointer">Developer details</summary>
+  <div class="sub" style="margin-top:8px">SDK {{ sdk }} &middot; built-ins: <span class="mono">{{ proots.builtin }}</span> &middot;
+  user plugins: <span class="mono">{{ proots.user }}</span>. The assistant sees a plugin&rsquo;s tools as
+  <span class="mono">plugin__&lt;id&gt;__&lt;tool&gt;</span>. To write one, see <span class="mono">sdk/README.md</span> and
+  <span class="mono">docs/plugins-authoring.md</span>.</div>
+</details>
+{% endif %}
+"""
+
+
+PLUGIN_DETAIL_TMPL = """
+<style>
+ .pxd-seg{display:inline-flex;border:1px solid var(--line2)}
+ .pxd-seg label{display:flex;margin:0}
+ .pxd-seg input{position:absolute;opacity:0;width:1px;height:1px}
+ .pxd-seg span{display:block;padding:7px 13px;font-size:.85rem;border-left:1px solid var(--line);cursor:pointer;color:var(--dim);background:#fff}
+ .pxd-seg label:first-child span{border-left:0}
+ .pxd-seg input:checked+span{background:#000;color:#fff}
+ .pxd-seg input:focus-visible+span{outline:2px solid var(--acc);outline-offset:-2px}
+ .pxd-perm{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-top:1px solid var(--line);cursor:pointer;margin:0}
+ .pxd-perm:first-of-type{border-top:0;padding-top:2px}
+ .pxd-perm input{margin:3px 0 0;width:15px;height:15px;accent-color:#000;flex:0 0 auto}
+ .pxd-perm .pxd-pt{flex:1;min-width:0}
+ .pxd-perm .pxd-pt b{display:block;font-size:.9rem}
+ .pxd-dl{display:grid;grid-template-columns:150px minmax(0,1fr);gap:5px 16px;font-size:.88rem;margin:10px 0 0}
+ .pxd-dl dt{color:var(--dim)} .pxd-dl dd{margin:0;min-width:0}
+ .pxd-ev{display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:.85rem;align-items:baseline}
+ .pxd-ev:first-of-type{border-top:0}
+ .pxd-ev time{color:var(--dim);font-family:var(--mono);font-size:.76rem;white-space:nowrap;flex:0 0 auto}
+ @media (max-width:640px){ .pxd-dl{grid-template-columns:1fr;gap:1px} .pxd-dl dt{margin-top:8px} }
+</style>
+<div class="page-head">
+  <div style="min-width:0">
+    <a class="backlink sub" href="{{ url_for('plugins_page') }}">&lsaquo; All plugins</a>
+    <h1 class="page-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="px-ico" aria-hidden="true">{{ p.icon|safe }}</span> <span>{{ p.name }}</span>{% if p.root == 'builtin' %} <span class="badge">built-in</span>{% endif %} <span class="badge">{{ p.version }}</span></h1>
+    <div class="page-desc">{{ p.tagline }}</div>
+  </div>
+  <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline" style="display:flex;align-items:center;gap:10px">
+    <input type="hidden" name="action" value="{{ 'disable' if p.enabled else 'enable' }}">
+    <input type="hidden" name="next" value="detail">
+    <span class="sub" style="font-weight:600">{{ 'Running' if p.enabled else 'Off' }}</span>
+    <label class="px-sw" title="{{ 'Disable' if p.enabled else 'Enable' }} {{ p.name }}"><input type="checkbox" {{ 'checked' if p.enabled }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if p.enabled else 'Enable' }} {{ p.name }}"><span class="px-tr"></span></label>
+  </form>
+</div>
+
 <div class="card">
-  <div class="card-h">
-    <h3>{{ p.name }} <span class="badge">{{ p.version }}</span>
-      {% if p.root == 'builtin' %}<span class="badge">built-in</span>{% endif %}
-      {% if not p.enabled %}<span class="badge warn">disabled</span>{% endif %}
-      {% if p.needs_regrant %}<span class="badge warn">re-grant needed</span>{% endif %}</h3>
-    <span class="sub mono">{{ p.id }}{% if p.kinds %} · {{ p.kinds }}{% endif %}</span>
-  </div>
-  <div class="sub" style="margin:2px 0 8px">{{ p.description }}{% if p.tools %}
-    <span class="mono">Tools: {{ p.tools|join(', ') }}</span>{% endif %}</div>
-  <div class="setrow">
-    <div class="st-l"><b>{{ 'Enabled' if p.enabled else 'Disabled' }}</b>
-      <span class="sub">{% if p.enabled %}In use; the assistant can call it subject to the gate below.{% else %}Inert until enabled.{% endif %}</span></div>
-    <div class="st-c">
-      <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline">
-        <input type="hidden" name="action" value="{{ 'disable' if p.enabled else 'enable' }}">
-        <button class="btn small">{{ 'Disable' if p.enabled else 'Enable' }}</button>
-      </form>
-    </div>
-  </div>
-  {% if p.enabled %}
+  <div class="card-h"><h3>What it does</h3></div>
+  <div>{{ p.description }}</div>
+  <dl class="pxd-dl">
+    {% for k2, v2 in p.roles %}<dt>{{ k2 }}</dt><dd>{{ v2|safe }}</dd>{% endfor %}
+    <dt>Plugin ID</dt><dd class="mono">{{ p.id }}</dd>
+    <dt>Source</dt><dd>{{ 'shipped with the app' if p.root == 'builtin' else 'user plugin' }} &middot; v{{ p.version }}</dd>
+  </dl>
+  {% if p.tools %}
+  <div class="sub" style="margin-top:14px;font-weight:600">Assistant tools</div>
+  {% for t in p.tools %}
+  <div class="pxd-ev"><span class="mono" style="flex:0 0 150px">{{ t.name }}</span><span class="sub">{{ t.description }}</span></div>
+  {% endfor %}
+  {% endif %}
+</div>
+
+<div class="card" id="access">
+  <div class="card-h"><h3>Access</h3><span class="sub">{{ 'What this plugin may touch. Unchecking revokes it at the host level — the sandbox cannot call it at all.' if p.permissions else 'No host access — runs pure compute.' }}</span></div>
   <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}">
     <input type="hidden" name="action" value="save">
+    <input type="hidden" name="next" value="detail">
+    {% for g in p.perms_detail %}
+    <label class="pxd-perm">
+      <input type="checkbox" name="grant_{{ g.name }}" value="1" {{ 'checked' if g.granted else '' }}>
+      <span class="pxd-pt"><b>{{ g.title }}</b><span class="sub">{{ g.why }}</span></span>
+      <span class="mono sub">{{ g.name }}</span>
+    </label>
+    {% endfor %}
+    {% if p.has_tools %}
     <div class="setrow">
-      <div class="st-l"><b>Capabilities granted</b>
-        <span class="sub">Declared reach; unchecking revokes it at the host-function level — the sandbox cannot call it at all.</span></div>
-      <div class="st-c" style="flex-wrap:wrap;justify-content:flex-end">
-        {% for g in p.permissions %}
-        <label class="check" style="margin-left:10px"><input type="checkbox" name="grant_{{ g }}" value="1" {{ 'checked' if g in p.grants else '' }}> <span class="mono">{{ g }}</span></label>
-        {% endfor %}
-        {% if not p.permissions %}<span class="sub">no host capabilities — pure compute</span>{% endif %}
+      <div class="st-l"><b>Assistant permission</b><span class="sub">When you ask the assistant in chat. Ask = it queues a card you approve; Auto = runs directly (still audited).</span></div>
+      <div class="st-c"><div class="pxd-seg" role="radiogroup" aria-label="Assistant permission for {{ p.name }}">
+        {% for lvl in ('off','ask','auto') %}<label><input type="radio" name="agent_level" value="{{ lvl }}" {{ 'checked' if p.agent_level == lvl else '' }}><span>{{ lvl }}</span></label>{% endfor %}
+      </div></div>
+    </div>
+    {% endif %}
+    {% if p.optin_matcher or p.optin_retriever or p.optin_classifier %}
+    <div class="setrow">
+      <div class="st-l"><b>Pipeline use</b><span class="sub">The kernel only calls this plugin inside the mail pipeline when ticked.</span></div>
+      <div class="st-c" style="flex-direction:column;align-items:flex-end;gap:2px">
+        {% if p.optin_classifier %}<label class="check" style="margin:2px 0"><input type="checkbox" name="opt_in_classifier" value="1" {{ 'checked' if p.in_classifiers else '' }}> <span>classification fast-path</span></label>{% endif %}
+        {% if p.optin_matcher %}<label class="check" style="margin:2px 0"><input type="checkbox" name="opt_in_matcher" value="1" {{ 'checked' if p.in_matchers else '' }}> <span>rule conditions</span></label>{% endif %}
+        {% if p.optin_retriever %}<label class="check" style="margin:2px 0"><input type="checkbox" name="opt_in_retriever" value="1" {{ 'checked' if p.in_retrievers else '' }}> <span>search re-ranking</span></label>{% endif %}
       </div>
     </div>
-    <div class="setrow">
-      <div class="st-l"><b>Assistant permission</b>
-        <span class="sub">Off = refused; Ask = the assistant queues a card you click; Auto = it runs directly (still audited).</span></div>
-      <div class="st-c"><select name="agent_level" aria-label="Assistant permission for {{ p.name }}">
-        {% for lvl in ('off', 'ask', 'auto') %}
-        <option value="{{ lvl }}" {{ 'selected' if p.agent_level == lvl else '' }}>{{ lvl }}</option>
-        {% endfor %}
-      </select></div>
-    </div>
-    <div class="savebar"><button class="btn small" type="submit">Save plugin</button></div>
+    {% endif %}
+    {% if p.permissions or p.has_tools or p.optin_matcher or p.optin_retriever or p.optin_classifier %}
+    <div class="savebar"><button class="btn small" type="submit">Save</button></div>
+    {% endif %}
   </form>
-  {% if p.config_fields or p.optin_matcher or p.optin_retriever %}
+</div>
+
+{% if p.config_fields %}
+<div class="card">
+  <div class="card-h"><h3>Settings</h3><span class="sub">Stored per install; the plugin reads these via ctx.config.</span></div>
   <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}">
     <input type="hidden" name="action" value="config">
-    {% if p.config_fields %}
-    <div class="setrow">
-      <div class="st-l"><b>Settings</b><span class="sub">Stored per install; the plugin reads these via ctx.config.</span></div>
-      <div class="st-c" style="flex-direction:column;align-items:stretch;gap:6px">
-        {% for f in p.config_fields %}
-        <label><span class="sub">{{ f.label }}</span>
-          {% if f.type == 'boolean' %}<span class="check"><input type="checkbox" name="cfg_{{ f.name }}" value="1" {{ 'checked' if f.value else '' }}> <span>{{ f.name }}</span></span>
-          {% else %}<input type="text" name="cfg_{{ f.name }}" value="{{ f.value }}" class="mono" aria-label="{{ f.name }}">{% endif %}
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-    {% if p.optin_matcher or p.optin_retriever %}
-    <div class="setrow">
-      <div class="st-l"><b>Pipeline use</b><span class="sub">Opt-in: the kernel calls this plugin in the hot path only when ticked.</span></div>
+    <input type="hidden" name="next" value="detail">
+    {% for f in p.config_fields %}
+    <div class="setrow" style="grid-template-columns:minmax(0,1fr) minmax(220px,340px)">
+      <div class="st-l"><b class="mono" style="font-size:.84rem">{{ f.name }}</b><span class="sub">{{ f.label }}</span></div>
       <div class="st-c">
-        {% if p.optin_matcher %}<label class="check"><input type="checkbox" name="opt_in_matcher" value="1" {{ 'checked' if p.in_matchers else '' }}> <span>rule conditions</span></label>{% endif %}
-        {% if p.optin_retriever %}<label class="check"><input type="checkbox" name="opt_in_retriever" value="1" {{ 'checked' if p.in_retrievers else '' }}> <span>search re-ranking</span></label>{% endif %}
+        {% if f.type == 'boolean' %}<label class="check"><input type="checkbox" name="cfg_{{ f.name }}" value="1" {{ 'checked' if f.value else '' }}> <span>enabled</span></label>
+        {% else %}<input type="text" name="cfg_{{ f.name }}" value="{{ f.value }}" class="mono" aria-label="{{ f.name }}">{% endif %}
       </div>
     </div>
-    {% endif %}
+    {% endfor %}
     <div class="savebar"><button class="btn small" type="submit">Save settings</button></div>
   </form>
-  {% endif %}
-  {% endif %}
-  {% if p.last_error %}<div class="sub" style="margin-top:6px">last note: <span class="badge warn">{{ p.last_error }}</span></div>{% endif %}
 </div>
-{% endfor %}
+{% endif %}
+
+<div class="card">
+  <div class="card-h"><h3>Activity</h3><span class="sub">Recent log lines mentioning this plugin.</span></div>
+  {% if p.last_error %}<div class="sub" style="margin-bottom:8px">last note: <span class="badge warn">{{ p.last_error }}</span></div>{% endif %}
+  {% if p.events %}
+  {% for e in p.events %}<div class="pxd-ev"><time>{{ e.when }}</time><span class="sub mono" style="font-size:.75rem">{{ e.level }}</span><span style="min-width:0">{{ e.message }}</span></div>{% endfor %}
+  {% else %}<div class="sub">Nothing logged yet.</div>{% endif %}
+</div>
+
+<details class="card">
+  <summary class="sub" style="cursor:pointer">Developer details</summary>
+  <div class="sub" style="margin-top:8px">
+    entrypoint <span class="mono">{{ p.entry }}</span> &middot; runtime quickjs (sandboxed worker process) &middot; SDK {{ sdk }}<br>
+    limits: {{ p.limits_text }} &middot; docs: <span class="mono">sdk/README.md</span> &middot; <span class="mono">docs/plugins-authoring.md</span>
+  </div>
+</details>
 """
+
 
 
 CLASSIFIERS_TMPL = """
@@ -2623,35 +2738,149 @@ def _plugin_config_fields(manifest, pid):
     return fields
 
 
-@app.route("/plugins")
-def plugins_page():
-    data = []
+PLUGIN_KIND_LABELS = {"tool": "tool", "classifier": "classifier", "matcher": "matcher",
+                      "draft-provider": "draft provider", "retriever": "retriever",
+                      "integration": "integration"}
+PLUGIN_KIND_ICONS = {
+    "tool": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+    "classifier": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54z"/></svg>',
+    "matcher": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+    "draft-provider": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+    "retriever": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>',
+    "integration": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v3"/></svg>',
+}
+PLUGIN_PERM_INFO = {
+    "mailbox.read": ("Read your mail",
+                     "Search and read indexed messages: senders, subjects, snippets and bodies."),
+    "llm.complete": ("Use the AI model", "Send prompts to the configured language model."),
+    "llm.embed": ("Use embeddings", "Compute local text embeddings for similarity."),
+    "net.http": ("Make web requests",
+                 "Fetch URLs it declares \u2014 every call is audited and rate-capped."),
+}
+
+
+def _plugin_icon(manifest):
+    for k in (manifest.get("kind") or []):
+        if k in PLUGIN_KIND_ICONS:
+            return PLUGIN_KIND_ICONS[k]
+    return ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+            'stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 21V13"/></svg>')
+
+
+def _plugin_oneliner(manifest):
+    d = (manifest.get("description") or "").strip()
+    if not d:
+        return ""
+    cut = d.find(". ")
+    s = d[:cut + 1] if cut != -1 else d
+    return s[:170]
+
+
+def _plugin_detail_ctx(pid):
+    """Everything the /plugins/<pid> detail page renders, or None."""
+    row = plugins.get(pid)
+    if not row:
+        return None
+    m = row["manifest"]
+    kinds = m.get("kind") or []
     try:
         perms = engine.agent_permissions()
     except Exception:
         perms = {}
+    tools = [{"name": t.get("name") or "", "description": t.get("description") or ""}
+             for t in (m.get("tools") or [])]
+    roles = []
+    if "classifier" in kinds:
+        roles.append(("Role", "Classifier &mdash; used by the classification fast-path when the "
+                              "pipeline opt-in below is ticked"))
+    if "matcher" in kinds:
+        roles.append(("Role", "Rule condition &mdash; usable as the <span class=\"mono\">plugin</span> "
+                              "operator in rules and flows"))
+    if "draft-provider" in kinds:
+        roles.append(("Role", "Draft provider &mdash; flow draft steps with mode "
+                              "&ldquo;Draft via plugin&rdquo;"))
+    if "retriever" in kinds:
+        roles.append(("Role", "Search re-ranker &mdash; reorders the assistant&rsquo;s semantic "
+                              "search when opted in"))
+    if "integration" in kinds:
+        roles.append(("Role", "Integration &mdash; receives <span class=\"mono\">mail.filed</span> "
+                              "and <span class=\"mono\">mail.classified</span> events"))
+    if "tool" in kinds:
+        roles.append(("Role", "Assistant tools &mdash; callable in chat under the assistant "
+                              "permission below"))
+    lim = m.get("limits") or {}
+    limits_text = "memory %sMB &middot; timeout %sms" % (lim.get("memory_mb", "?"),
+                                                         lim.get("timeout_ms", "?"))
+    if "net.http" in (m.get("permissions") or []):
+        net = m.get("net") or {}
+        hosts = net.get("hosts") or []
+        limits_text += " &middot; net: %s" % (", ".join(hosts) if hosts else "hosts from settings")
+    events = []
+    with store.db() as conn:
+        er = conn.execute("SELECT ts, level, message FROM events WHERE message LIKE ? "
+                          "ORDER BY id DESC LIMIT 6", ("%" + pid + "%",)).fetchall()
+    for e in er:
+        events.append({"when": time.strftime("%m-%d %H:%M", time.localtime(e["ts"] or 0)),
+                       "level": e["level"] or "", "message": e["message"] or ""})
+    return {
+        "id": row["id"], "name": m.get("name") or row["id"], "version": row["version"],
+        "description": m.get("description") or "", "tagline": _plugin_oneliner(m),
+        "root": row["root"], "enabled": bool(row["enabled"]), "icon": _plugin_icon(m),
+        "kinds": kinds, "roles": roles,
+        "tools": tools, "has_tools": bool(tools),
+        "permissions": m.get("permissions") or [], "grants": row["grants"],
+        "perms_detail": [{"name": g, "title": PLUGIN_PERM_INFO.get(g, (g, ""))[0],
+                          "why": PLUGIN_PERM_INFO.get(g, (g, ""))[1],
+                          "granted": g in row["grants"]}
+                         for g in (m.get("permissions") or [])],
+        "agent_level": perms.get("plugin:" + pid, "auto"),
+        "optin_matcher": "matcher" in kinds, "optin_retriever": "retriever" in kinds,
+        "optin_classifier": "classifier" in kinds,
+        "in_matchers": pid in (store.get_setting("plugin_matchers", []) or []),
+        "in_retrievers": pid in (store.get_setting("plugin_retrievers", []) or []),
+        "in_classifiers": pid in (store.get_setting("plugin_classifiers", []) or []),
+        "config_fields": _plugin_config_fields(m, pid),
+        "entry": m.get("entrypoint") or "", "limits_text": limits_text,
+        "last_error": row["last_error"] or "", "events": events,
+    }
+
+
+@app.route("/plugins")
+def plugins_page():
+    rows = []
+    try:
+        engine.agent_permissions()
+    except Exception:
+        pass
     for r in plugins.list_rows():
         m = r["manifest"]
-        data.append({
+        kinds = m.get("kind") or []
+        rows.append({
             "id": r["id"], "name": m.get("name") or r["id"], "version": r["version"],
-            "description": m.get("description") or "", "root": r["root"],
-            "kinds": ", ".join(m.get("kind") or []),
             "enabled": bool(r["enabled"]),
-            "permissions": m.get("permissions") or [], "grants": r["grants"],
-            "tools": [t.get("name") for t in (m.get("tools") or [])],
-            "agent_level": perms.get("plugin:" + r["id"], "auto"),
+            "oneliner": _plugin_oneliner(m),
+            "icon": _plugin_icon(m),
+            "kind_label": PLUGIN_KIND_LABELS.get(kinds[0], kinds[0]) if kinds else "extension",
             "needs_regrant": "re-grant" in (r["last_error"] or ""),
-            "last_error": r["last_error"] or "",
-            "config_fields": _plugin_config_fields(m, r["id"]),
-            "optin_matcher": "matcher" in (m.get("kind") or []),
-            "optin_retriever": "retriever" in (m.get("kind") or []),
-            "in_matchers": r["id"] in (store.get_setting("plugin_matchers", []) or []),
-            "in_retrievers": r["id"] in (store.get_setting("plugin_retrievers", []) or []),
+            "problem": bool(r["last_error"]) and "re-grant" not in (r["last_error"] or ""),
         })
     plugins.ensure_user_root()
-    return render(_render_src(PLUGINS_TMPL, px=data, sdk=plugins.HOST_SDK_VERSION,
+    running = [p for p in rows if p["enabled"]]
+    stopped = [p for p in rows if not p["enabled"]]
+    return render(_render_src(PLUGINS_TMPL, px=rows, running=running, stopped=stopped,
+                              n_on=len(running), n_all=len(rows), sdk=plugins.HOST_SDK_VERSION,
                               proots={"user": plugins.user_root(),
                                       "builtin": plugins.builtin_root()}))
+
+
+@app.route("/plugins/<pid>")
+def plugin_detail(pid):
+    ctx = _plugin_detail_ctx(pid)
+    if not ctx:
+        flash("No plugin with id %r." % pid, "warn")
+        return redirect(url_for("plugins_page"))
+    return render(_render_src(PLUGIN_DETAIL_TMPL, p=ctx, sdk=plugins.HOST_SDK_VERSION))
 
 
 @app.route("/plugins/rescan", methods=["POST"])
@@ -2666,6 +2895,7 @@ def plugins_rescan():
 @app.route("/plugins/<pid>", methods=["POST"])
 def plugins_update(pid):
     action = (request.form.get("action") or "").strip()
+    nxt = (request.form.get("next") or "").strip()
     if action == "enable":
         res = plugins.set_enabled(pid, True)
     elif action == "disable":
@@ -2715,6 +2945,11 @@ def plugins_update(pid):
                 if request.form.get("opt_in_retriever"):
                     lst.append(pid)
                 store.set_setting("plugin_retrievers", lst)
+            if "classifier" in kinds:
+                lst = [x for x in (store.get_setting("plugin_classifiers", []) or []) if x != pid]
+                if request.form.get("opt_in_classifier"):
+                    lst.append(pid)
+                store.set_setting("plugin_classifiers", lst)
         else:
             res = {"ok": False, "error": "unknown plugin '%s'" % pid}
     else:
@@ -2723,6 +2958,8 @@ def plugins_update(pid):
         flash(res.get("error") or "Plugin action failed.", "warn")
     else:
         flash("Saved.", "info")
+    if nxt == "detail":
+        return redirect(url_for("plugin_detail", pid=pid))
     return redirect(url_for("plugins_page"))
 
 
