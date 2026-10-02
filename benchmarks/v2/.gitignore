@@ -1,0 +1,7 @@
+# v2 run artifacts are regenerated; the frozen corpus/cases are committed.
+results/*
+!results/.gitkeep
+reports/*
+!reports/.gitkeep
+__pycache__/
+*.pyc

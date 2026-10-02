@@ -1,0 +1,31 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v2 run manifest",
+ "type": "object",
+ "required": ["model_key", "model_revision", "tokenizer", "chat_template",
+              "runtime_image", "hardware", "harness_revision", "scorer_revision",
+              "corpus_sha256", "case_manifest_sha256", "prompts_sha256",
+              "params", "adaptations", "retry_policy", "fallback_policy",
+              "cache_state", "config_hash", "run_id"],
+ "additionalProperties": true,
+ "properties": {
+  "model_key": {"type": "string", "minLength": 1},
+  "model_revision": {"type": "string"},
+  "tokenizer": {"type": "string"},
+  "chat_template": {"type": "string"},
+  "runtime_image": {"type": "string"},
+  "hardware": {"type": "string"},
+  "harness_revision": {"type": "string", "minLength": 1},
+  "scorer_revision": {"type": "string", "minLength": 1},
+  "corpus_sha256": {"type": ["string", "null"]},
+  "case_manifest_sha256": {"type": ["string", "null"]},
+  "prompts_sha256": {"type": ["string", "null"]},
+  "params": {"type": "object"},
+  "adaptations": {"type": "object"},
+  "retry_policy": {"type": "object"},
+  "fallback_policy": {"type": "object"},
+  "cache_state": {"type": "string"},
+  "config_hash": {"type": "string", "minLength": 8},
+  "run_id": {"type": "string", "minLength": 3}
+ }
+}

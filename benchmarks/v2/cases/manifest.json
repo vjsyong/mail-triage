@@ -1,0 +1,45 @@
+{
+ "assistant": {
+  "count": 240,
+  "sha256": "d0407918d16c92056722ea3d30f99f8646d1bbfae2b5bed87b928a60164c0d9e",
+  "dev": 132,
+  "acceptance": 108
+ },
+ "classification": {
+  "count": 240,
+  "sha256": "24e26aff6ed285e565d632846f638377f57a299e3fb6b5bbc480e7fb67edd849",
+  "dev": 136,
+  "acceptance": 104
+ },
+ "drafting": {
+  "count": 60,
+  "sha256": "e86ad8c726226e2c75efea897546dbccb77f17c2fd58bcf83adbab80634c368d",
+  "dev": 30,
+  "acceptance": 30
+ },
+ "rules": {
+  "count": 40,
+  "sha256": "9654130acc2e5c82ccc915f646fecbbbb5d42b3f336420d9660b00a133986309",
+  "dev": 26,
+  "acceptance": 14
+ },
+ "simulate": {
+  "count": 12,
+  "sha256": "b7fbdd173872f53c6c2a603f7c349df9f7dbb751ead44f37e4be5b6cd644befa",
+  "dev": 6,
+  "acceptance": 6
+ },
+ "summary": {
+  "count": 8,
+  "sha256": "7023efb9e84917cf929bb1759dc4aa4e042c2d67e3e357f3cc001b501414a7fe",
+  "dev": 8,
+  "acceptance": 0
+ },
+ "total": {
+  "count": 600,
+  "dev": 338,
+  "acceptance": 262,
+  "frozen_at": "2026-09-30 (Wed)"
+ },
+ "corpus_messages_sha256": "bf73fdf2da75af31aad0d036262a6c416643b9b6e53f35ae99b08471030dc286"
+}

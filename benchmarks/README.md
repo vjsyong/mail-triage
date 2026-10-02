@@ -1,5 +1,9 @@
 # mail-triage model benchmark (`model-bench` workstream)
 
+> **v2 is available.** The expanded, versioned evaluation system lives in
+> [`v2/`](v2/README.md). V1 (this page) is a frozen historical regression track;
+> v1 and v2 scores are not comparable. Use v2 for any new model decision.
+
 A frozen 196-case regression suite that evaluates a local/offline LLM against
 **the mail-triage app's real LLM workload** — exact production prompts, tool
 schemas and call sites — so model choices are made on this app's evidence, not

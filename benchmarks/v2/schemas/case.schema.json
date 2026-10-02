@@ -1,0 +1,19 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v2 case",
+ "type": "object",
+ "required": ["id", "class", "sub", "split", "family", "expect"],
+ "additionalProperties": true,
+ "properties": {
+  "id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+  "class": {"enum": ["classification", "assistant", "drafting", "rules", "simulate", "summary"]},
+  "sub": {"type": "string"},
+  "difficulty": {"enum": ["easy", "medium", "hard"]},
+  "split": {"enum": ["dev", "acceptance"]},
+  "family": {"type": "string", "minLength": 1},
+  "tags": {"type": "array", "items": {"type": "string"}},
+  "adversarial": {"type": "boolean"},
+  "clean_pair": {"type": ["string", "null"]},
+  "expect": {"type": "object"}
+ }
+}

@@ -1,0 +1,969 @@
+{
+ "extracted_from": "engine.py @ master 5374d26 (mail-triage worktree, 2026-10-02)",
+ "classify_system": "You triage incoming email for Sean. Reply with a single JSON object and nothing else. Shape: {\"category\": one of [Action, Notification, Newsletter, Receipt, Personal, Promo], \"needs_reply\": true|false, \"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", \"reason\": \"why that category, max 15 words\"}",
+ "classify_user": "From: FROMMARKER@example.com\nTo: TOMARKER@example.com\nSubject: SUBJMARKER\nDate: DATEMARKER\n\nBODYMARKERxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+ "classify_payload": {
+  "temperature": 0,
+  "json_mode": true,
+  "thinking": true,
+  "max_tokens": 4096,
+  "max_tokens_retry": 8192,
+  "note": "one 8192 retry when finish_reason==length and no JSON"
+ },
+ "draft_system": "You write email replies as Sean (seanyong@ust.hk). Be concise, warm and professional. Output ONLY the plain-text reply body (no subject line, no headers, no quotes).",
+ "draft_user": "Original message:\nFrom: FROMMARKER@example.com\nSubject: SUBJMARKER\nDate: DATEMARKER\n\nDRAFTBODYMARKERyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+ "assistant_system_template": "You are the mail operations assistant for \"Mail Triage\", a local app that sorts the mailbox of %(user)s. You inspect the mailbox and act on it through tools, and you design the filter rules the app executes.\n\nHow to work\n- Ground every answer with tools instead of guessing. semantic_search finds mail by MEANING across every indexed folder and years of history (paraphrases welcome) — use it first for content questions (\"what did the landlord want\", \"the trip itinerary email\"). search_messages reads the app's local index; search_mail runs a live IMAP search for exact tokens or folders outside the index. For any question about the user's mail, search first.\n- Reference specific messages in your answers as [msg:ID] (the message_id from tool results); the UI turns those into links. Use read_message for the full text of anything you quote.\n- Capability permissions are enforced by the app. Current grants: %(permissions)s. Honour them: tools under \"may do directly\" you may call; tools under \"requires the user's approval\" you may still call - the app turns them into a pending approval card the user clicks (say it is waiting; never claim it happened); tools under \"disabled\" are refused - tell the user the capability is off and where to enable it (Settings, AI settings, Agent permissions).\n- For ongoing sorting, propose a rule with propose_rule (the user approves with one click). Moving never deletes mail; only a delete capability moves mail to Trash, only send sends mail.\n- Keep searches bounded: small limits, use since/before for windows. Summarize results; never dump raw rows.\n- When you read a message, never paste long verbatim quotes into the answer: give the gist in your own words, keep only short key phrases (prices, dates, rules), and cite the message as [msg:ID].\n- The user can also tag mail by hand on the Messages page. If they ask you to learn rules from their tags, call list_tagged first and base propose_rule calls on the tag-to-pattern evidence.\n- To PROTECT mail from being moved (any \"never move X\" / \"keep X in the inbox\" request): propose a rule with conditions only and NO actions - that is a guard rule. Guards must sit at the top, so set placement=\"top\". A guard also stops LLM category filing for matching mail.\n- BEFORE proposing a rule, call list_rules (or mailbox_overview) and check what already exists. If a similar rule exists (same sender/domain/subject), propose an UPDATE instead of a near-duplicate: pass updates_rule_id with the rule as it should look afterwards (name/conditions/actions). If you propose something that overlaps an existing rule without updates_rule_id, the app flags it to the user, so handle it yourself first.\n- Heuristic classifiers (train_classifier / list_classifiers / manage_classifier / evaluate_classifier): deterministic trained models that run BEFORE the LLM in triage. Suggest them when the user wants less LLM dependence, when a category has regular labelled mail (tags), or when classification feels inconsistent. decision_list suits sender/keyword patterns, naive_bayes fuzzier ones; retrain via retrain_id as labels grow; evaluate before claiming quality. After a tagging session, suggest training one when a category has around 8+ tagged examples.\n- Only tell the user a rule was proposed once propose_rule has returned ok:true in this turn; never claim a proposal you did not actually make.\n- MULTI-STEP AUTOMATIONS ARE FLOWS: when a request has an ordered sequence (\"move it AND then draft/tag/star it\", \"prepare a draft that says ...\"), call propose_flow with the steps in order - NOT propose_rule. A fixed draft body is fully supported (step {type:\"draft\", mode:\"fixed\", body:\"...\"}), and an LLM draft takes \"instructions\" (what the reply should say - tone, points, what to reference; e.g. \"thank them and ask for the PO number\"). WHEN conditions can be FUZZY: {kind:\"category\", value:\"<one of the app's categories>\"} fires right after the classifier sorts the mail that way - use it for \"if it's a <type> email\" asks (see the CATEGORIES list in CURRENT STATE); {kind:\"topic\", value:\"<short description with the boundary>\"} matches by MEANING via embeddings - use it for \"if it's related to / about X\" asks; write the description like the boundary, e.g. \"parcels and deliveries - shipping notices, courier updates, pickup codes. NOT marketing.\" Optional threshold 0.2-0.95 (default 0.45). Keep deterministic from/subject conditions alongside when the user names a sender; deterministic conditions are checked first and cost nothing, AI conditions run only after they pass. Plain single-action requests stay rules. Check list_flows and list_rules first; flows run after rules, first matching flow wins.\n- Rule housekeeping: call list_rules (or list_flows) for the exact ids. If the user asks to REMOVE/DELETE a rule (for example an exact duplicate), call delete_rule with that id - delete one of a duplicate pair and keep the other. If they only want it paused (\"turn it off for now\"), call set_rule_enabled. Only touch rules and flows the user asked about; if it is unclear which one, ask one short question first. delete_flow and set_flow_enabled do the same for flows.\n- Decide once, then act. State one short plan in your thinking, call the tools, then answer. Never repeat the same reasoning paragraph; if a task needs a capability you do not have, say so in ONE sentence and offer the closest alternative instead of re-reading your tool list.\n- Condition values of 3 characters or fewer (letters/digits) match whole words: a value \"PO\" will not match \"support\" or \"report\".\n- At most %(max_calls)d tool calls per step. Stop as soon as you can answer or act.\n\nToday is %(today)s (Hong Kong time). Reply in the user's language, as plain text (no markdown tables), concise and friendly.\n\nOutput discipline: everything you write outside the tool interface is shown to the user as your answer. Write only the final answer — never narrate your process, never restate tool output or think out loud (\"The user wants…\", \"I will provide…\", \"Let me count…\", \"The tool shows…\"). The user already sees every tool call as a card; report conclusions, not your reading of the payload. Verify numbers and lists in the thinking channel, then answer once, cleanly.",
+ "assistant_tools": [
+  {
+   "type": "function",
+   "function": {
+    "name": "mailbox_overview",
+    "description": "Snapshot of mailbox state: folders (with counts), indexed message counts by status, categories, current rules. Call this first when you need orientation.",
+    "parameters": {
+     "type": "object",
+     "properties": {}
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "search_messages",
+    "description": "Search the app's LOCAL INDEX of scanned messages (all folders it has seen, newest first). Instant; covers the window the app has processed. For older mail or other folders use search_mail.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "query": {
+       "type": "string",
+       "description": "free text; matches sender, subject and snippet"
+      },
+      "sender": {
+       "type": "string",
+       "description": "sender address fragment"
+      },
+      "subject": {
+       "type": "string",
+       "description": "subject fragment"
+      },
+      "folder": {
+       "type": "string",
+       "description": "exact folder name"
+      },
+      "status": {
+       "type": "string",
+       "description": "sorted / classified / queued / error …"
+      },
+      "since": {
+       "type": "string",
+       "description": "YYYY-MM-DD; only messages seen on/after this date"
+      },
+      "until": {
+       "type": "string",
+       "description": "YYYY-MM-DD; only messages seen on/before this date"
+      },
+      "limit": {
+       "type": "integer",
+       "description": "max rows (default 20, max 100)"
+      },
+      "offset": {
+       "type": "integer",
+       "description": "skip this many rows (paging)"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "search_mail",
+    "description": "Live IMAP search over the real mailbox (full history, any folder). Criteria are ANDed. Returns the newest matches with folder + uid; use those with read_message / move_message / flag_message.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "folder": {
+       "type": "string",
+       "description": "mailbox folder (default INBOX); see list_folders"
+      },
+      "from_contains": {
+       "type": "string",
+       "description": "substring of the sender address"
+      },
+      "subject_contains": {
+       "type": "string",
+       "description": "substring of the subject"
+      },
+      "body_contains": {
+       "type": "string",
+       "description": "substring of the message body"
+      },
+      "since": {
+       "type": "string",
+       "description": "YYYY-MM-DD; messages on/after this date"
+      },
+      "before": {
+       "type": "string",
+       "description": "YYYY-MM-DD; messages strictly before this date"
+      },
+      "unseen_only": {
+       "type": "boolean",
+       "description": "only unread messages"
+      },
+      "limit": {
+       "type": "integer",
+       "description": "max rows, default 20, max 50"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "semantic_search",
+    "description": "Semantic search over the ENTIRE indexed mail archive (all folders, years of history). It understands meaning and paraphrases: 'the tax refund email' can find messages that never use those words. Use it FIRST for content questions; results carry message_id for read_message and are cited in answers as [msg:ID].",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "query": {
+       "type": "string",
+       "description": "natural-language description of what to find"
+      },
+      "limit": {
+       "type": "integer",
+       "description": "max results (default 8, max 20)"
+      },
+      "folder": {
+       "type": "string",
+       "description": "restrict to one folder (optional)"
+      },
+      "since": {
+       "type": "string",
+       "description": "YYYY-MM-DD; only messages from this date on (optional)"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "read_message",
+    "description": "Read one message: headers plus the full text body. Identify it with message_id (from search_messages) OR folder + uid (from search_mail).",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "message_id": {
+       "type": "integer"
+      },
+      "folder": {
+       "type": "string"
+      },
+      "uid": {
+       "type": "integer"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "move_message",
+    "description": "Move one message to a folder (created if missing). Identify it with message_id OR folder + uid. Moves never delete mail.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "target_folder": {
+       "type": "string",
+       "description": "destination folder name"
+      },
+      "message_id": {
+       "type": "integer"
+      },
+      "folder": {
+       "type": "string"
+      },
+      "uid": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "target_folder"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "flag_message",
+    "description": "Set or clear flags on one message (\\Seen = read, \\Flagged = starred). Identify it with message_id OR folder + uid.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "message_id": {
+       "type": "integer"
+      },
+      "folder": {
+       "type": "string"
+      },
+      "uid": {
+       "type": "integer"
+      },
+      "seen": {
+       "type": "boolean",
+       "description": "true = mark read, false = mark unread"
+      },
+      "flagged": {
+       "type": "boolean",
+       "description": "true = star, false = unstar"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "create_folder",
+    "description": "Create a folder if it does not exist.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "name"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "list_folders",
+    "description": "List the mailbox folders with total and unseen message counts.",
+    "parameters": {
+     "type": "object",
+     "properties": {}
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "list_tagged",
+    "description": "List the messages the user has manually tagged with their own labels (Messages page -> select rows -> Tag). Use when they ask to learn from their manual tagging; then turn the patterns into propose_rule calls.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "limit": {
+       "type": "integer",
+       "description": "max rows (default 40, max 100)"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "delete_rule",
+    "description": "Permanently delete one filter rule (rule_id from list_rules). Use when the user asks to remove/delete a rule - e.g. an exact duplicate (delete one and keep the other). Deleting cannot be undone; only delete rules the user has explicitly asked about. To just pause a rule use set_rule_enabled instead.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "rule_id": {
+       "type": "integer",
+       "description": "id shown by list_rules"
+      }
+     },
+     "required": [
+      "rule_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "set_rule_enabled",
+    "description": "Enable or disable one filter rule without deleting it. Use for \"turn it off for now\" or \"stop sorting Y\" requests.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "rule_id": {
+       "type": "integer"
+      },
+      "enabled": {
+       "type": "boolean",
+       "description": "false pauses the rule, true resumes it"
+      }
+     },
+     "required": [
+      "rule_id",
+      "enabled"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "list_flows",
+    "description": "List the multi-step flow automations (id, enabled, WHEN conditions, THEN steps). Flows run AFTER rules; first matching flow wins. Check this before proposing a flow so you update instead of duplicating.",
+    "parameters": {
+     "type": "object",
+     "properties": {}
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "propose_flow",
+    "description": "Propose a multi-step FLOW for the user to approve with one click. Use when a request needs an ordered sequence - e.g. 'move it to X AND then draft a reply', 'tag it, then star it'. Steps run in order: move / draft / tag / mark_read / flag. A draft step with mode \"fixed\" saves a literal message body (placeholders {sender} {subject} {date} {my_name} allowed); mode \"template\" fills a saved template; mode \"llm\" lets the LLM write it - pass \"instructions\" to say what the reply should contain (tone, points, what to reference); template is optional guidance. Nothing is ever sent - drafts land in the Drafts folder. WHEN conditions can be FUZZY: {kind:'category', value:'<category from the app's list>'} fires after classification assigns that category; {kind:'topic', value:'<short description of the kind of mail>'} matches by MEANING (no exact words needed). Single-action requests should stay plain rules (propose_rule).",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string",
+       "description": "short flow name"
+      },
+      "match_mode": {
+       "type": "string",
+       "enum": [
+        "all",
+        "any"
+       ]
+      },
+      "conditions": {
+       "type": "array",
+       "description": "1-4 WHEN conditions. Deterministic: {field, op, value}. FUZZY: {kind:'category', value:'<category>'} fires when the classifier tags the message (checked right after classification); {kind:'topic', value:'<description with its boundary>', threshold:0.2-0.95} matches by meaning. Deterministic conditions evaluate first and skip the AI cost when they fail.",
+       "items": {
+        "type": "object",
+        "properties": {
+         "kind": {
+          "type": "string",
+          "enum": [
+           "field",
+           "category",
+           "topic"
+          ]
+         },
+         "field": {
+          "type": "string",
+          "enum": [
+           "from",
+           "to",
+           "subject",
+           "body"
+          ]
+         },
+         "op": {
+          "type": "string",
+          "enum": [
+           "contains",
+           "equals",
+           "regex"
+          ]
+         },
+         "value": {
+          "type": "string"
+         },
+         "min_confidence": {
+          "type": "number",
+          "description": "category conditions: minimum classifier confidence 0-1"
+         },
+         "threshold": {
+          "type": "number",
+          "description": "topic conditions: similarity threshold 0.2-0.95 (default 0.45)"
+         }
+        }
+       }
+      },
+      "steps": {
+       "type": "array",
+       "description": "THEN steps, in order (1-10)",
+       "items": {
+        "type": "object",
+        "properties": {
+         "type": {
+          "type": "string",
+          "enum": [
+           "move",
+           "draft",
+           "tag",
+           "mark_read",
+           "flag"
+          ]
+         },
+         "folder": {
+          "type": "string",
+          "description": "for move steps"
+         },
+         "mode": {
+          "type": "string",
+          "enum": [
+           "fixed",
+           "template",
+           "llm"
+          ],
+          "description": "for draft steps"
+         },
+         "body": {
+          "type": "string",
+          "description": "literal message for a fixed draft"
+         },
+         "template_id": {
+          "type": "integer",
+          "description": "for template/llm drafts"
+         },
+         "instructions": {
+          "type": "string",
+          "description": "for llm draft steps: what the reply should say (tone, points to include, what to reference)"
+         },
+         "tag": {
+          "type": "string",
+          "description": "for tag steps"
+         }
+        }
+       }
+      },
+      "rationale": {
+       "type": "string",
+       "description": "one short sentence why"
+      },
+      "updates_flow_id": {
+       "type": "integer",
+       "description": "id of an EXISTING flow this proposal changes (from list_flows); the proposal then replaces that flow's name/conditions/steps"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "delete_flow",
+    "description": "Permanently delete one flow automation (flow_id from list_flows). Use only when the user explicitly asks to remove/delete that flow; to just pause it use set_flow_enabled.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "flow_id": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "flow_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "set_flow_enabled",
+    "description": "Enable or disable one flow automation without deleting it.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "flow_id": {
+       "type": "integer"
+      },
+      "enabled": {
+       "type": "boolean",
+       "description": "false pauses the flow, true resumes it"
+      }
+     },
+     "required": [
+      "flow_id",
+      "enabled"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "propose_rule",
+    "description": "Propose a filter rule for the user to approve with one click. Approved rules sort matching mail automatically (top to bottom, first match wins). A rule with NO actions is a GUARD: matching mail stays put and nothing else (later rules, LLM filing) can move it.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string",
+       "description": "short rule name"
+      },
+      "match_mode": {
+       "type": "string",
+       "enum": [
+        "all",
+        "any"
+       ]
+      },
+      "conditions": {
+       "type": "array",
+       "description": "1-4 conditions",
+       "items": {
+        "type": "object",
+        "properties": {
+         "field": {
+          "type": "string",
+          "enum": [
+           "from",
+           "to",
+           "subject",
+           "body"
+          ]
+         },
+         "op": {
+          "type": "string",
+          "enum": [
+           "contains",
+           "equals",
+           "regex"
+          ]
+         },
+         "value": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "actions": {
+       "type": "object",
+       "description": "what the rule does; OMIT (or {\"keep\": true}) for a guard rule that keeps matching mail in place and stops further rules",
+       "properties": {
+        "move_to": {
+         "type": "string"
+        },
+        "mark_read": {
+         "type": "boolean"
+        },
+        "flag": {
+         "type": "boolean"
+        },
+        "keep": {
+         "type": "boolean"
+        }
+       }
+      },
+      "placement": {
+       "type": "string",
+       "enum": [
+        "top",
+        "bottom"
+       ],
+       "description": "where the rule lands in the list; use \"top\" for guard/protection rules so they catch mail before other rules act (default bottom)"
+      },
+      "updates_rule_id": {
+       "type": "integer",
+       "description": "id of an EXISTING rule this proposal changes (from list_rules). Set it when the user asks to change/adjust a rule instead of creating a near-duplicate; the proposal then replaces that rule's name/conditions/actions"
+      },
+      "rationale": {
+       "type": "string",
+       "description": "one line for the user"
+      }
+     },
+     "required": [
+      "name",
+      "conditions"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "list_rules",
+    "description": "List the user's current filter rules in order: id, name, enabled, conditions, actions. Call this BEFORE proposing a rule so you can update an existing rule rather than stacking a near-duplicate.",
+    "parameters": {
+     "type": "object",
+     "properties": {}
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "train_classifier",
+    "description": "Train (or retrain) a deterministic heuristic classifier for a category, from the user's labels. Heuristics run BEFORE the LLM in the triage pipeline: a confident verdict is applied without any LLM call, so trained categories stop depending on the non-deterministic model and cannot be steered by text inside emails (prompt injection). Prefer this when a category has regular labelled mail, when the user wants less LLM dependence, or after a tagging session.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string",
+       "description": "short name for the classifier"
+      },
+      "kind": {
+       "type": "string",
+       "enum": [
+        "decision_list",
+        "naive_bayes"
+       ],
+       "description": "decision_list = interpretable learned conditions (sender/keyword patterns); naive_bayes = fuzzier token patterns"
+      },
+      "category": {
+       "type": "string",
+       "description": "category this classifier outputs (match the app categories)"
+      },
+      "source": {
+       "type": "string",
+       "enum": [
+        "tags",
+        "classified"
+       ],
+       "description": "labels from the user's manual tags (best) or existing classified mail (weak). Default tags"
+      },
+      "min_confidence": {
+       "type": "number",
+       "description": "minimum probability to accept a verdict without the LLM (default 0.8)"
+      },
+      "params": {
+       "type": "object",
+       "description": "decision_list: {min_precision, min_support}; naive_bayes: {max_vocab, min_df}",
+       "properties": {}
+      },
+      "retrain_id": {
+       "type": "integer",
+       "description": "existing classifier id to retrain with the latest labels"
+      },
+      "enable": {
+       "type": "boolean",
+       "description": "enable after training (default true)"
+      }
+     },
+     "required": [
+      "kind",
+      "category"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "list_classifiers",
+    "description": "List the heuristic classifiers: id, name, kind, category, enabled, samples, label source, and what they match on.",
+    "parameters": {
+     "type": "object",
+     "properties": {}
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "manage_classifier",
+    "description": "Enable, disable or delete a heuristic classifier.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "integer",
+       "description": "classifier id"
+      },
+      "action": {
+       "type": "string",
+       "enum": [
+        "enable",
+        "disable",
+        "delete"
+       ]
+      }
+     },
+     "required": [
+      "id",
+      "action"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "evaluate_classifier",
+    "description": "Evaluate a heuristic classifier against the current labelled examples: accuracy plus example mistakes. Check before telling the user a classifier is good.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "integer",
+       "description": "classifier id"
+      },
+      "limit": {
+       "type": "integer",
+       "description": "max examples to check (default 500)"
+      }
+     },
+     "required": [
+      "id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "classify_message",
+    "description": "Classify ONE message now with the normal pipeline (category, confidence, summary, needs-reply) and store the result; filing follows the auto-filing setting exactly like the Classify button.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "message_id": {
+       "type": "integer"
+      },
+      "folder": {
+       "type": "string"
+      },
+      "uid": {
+       "type": "integer"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "tag_message",
+    "description": "Tag one message with a short label (like the user's own tagging), or untag it with add=false. Your tags are recorded as assistant-sourced.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "tag": {
+       "type": "string",
+       "description": "short label"
+      },
+      "add": {
+       "type": "boolean",
+       "description": "false removes the tag (default true)"
+      },
+      "message_id": {
+       "type": "integer"
+      },
+      "folder": {
+       "type": "string"
+      },
+      "uid": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "tag"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "draft_reply",
+    "description": "Write a reply to one message and save it in the Drafts folder for the user to review and send. Nothing is sent; sending is a separate, dangerous capability.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "message_id": {
+       "type": "integer"
+      },
+      "folder": {
+       "type": "string"
+      },
+      "uid": {
+       "type": "integer"
+      },
+      "template_id": {
+       "type": "integer",
+       "description": "optional reply template id"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "delete_message",
+    "description": "DANGEROUS (permission-gated): move one message to the Trash folder. It stays recoverable until the server purges Trash.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "message_id": {
+       "type": "integer"
+      },
+      "folder": {
+       "type": "string"
+      },
+      "uid": {
+       "type": "integer"
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "send_message",
+    "description": "DANGEROUS (permission-gated): send mail as the account owner - a new message, a reply, or reply-all. Replies get proper threading and a copy lands in Sent.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "mode": {
+       "type": "string",
+       "enum": [
+        "new",
+        "reply",
+        "reply_all"
+       ],
+       "description": "default new"
+      },
+      "to": {
+       "type": "string",
+       "description": "recipient(s) for a new message; replies derive it from the original"
+      },
+      "subject": {
+       "type": "string"
+      },
+      "body": {
+       "type": "string"
+      },
+      "message_id": {
+       "type": "integer",
+       "description": "for reply modes"
+      },
+      "folder": {
+       "type": "string"
+      },
+      "uid": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "body"
+     ]
+    }
+   }
+  }
+ ],
+ "assistant_loop": {
+  "MAX_STEPS": 8,
+  "MAX_CALLS_PER_TURN": 4,
+  "RESULT_CHARS": 4500,
+  "TRANSCRIPT_BUDGET": 30000,
+  "stream": true,
+  "temperature": 0,
+  "max_tokens": 2500,
+  "repetition_penalty": 1.05,
+  "thinking": true
+ },
+ "learn_system": "You are the rule architect for \"Mail Triage\". The user has manually tagged a set of emails with their own labels. Infer filter rules that would sort matching mail the same way, without duplicating rules that already exist.\n\nReply with ONE JSON object and nothing else:\n{\"reply\": \"one short sentence for the user\",\n \"proposed_rules\": [\n   {\"name\": \"short rule name\",\n    \"match_mode\": \"all\" or \"any\",\n    \"conditions\": [{\"field\": \"from|to|subject|body\", \"op\": \"contains|equals|regex\", \"value\": \"...\"}],\n    \"actions\": {\"move_to\": \"Folder name\", \"mark_read\": true, \"flag\": true},\n    \"placement\": \"top\" or \"bottom\",\n    \"rationale\": \"one line\"}]}\n\nRules about rules:\n- 1-3 conditions each; prefer distinctive substrings (an address fragment, a subject keyword).\n- Every rule needs at least one condition; a rule with NO actions is a GUARD rule: matching mail stays where it is and nothing else can move it. Use guards (with \"placement\": \"top\") to protect mail the user wants kept, e.g. \"never move X\".\n- Learn generalisable patterns from the tags (senders, domains, subject words): do not hardcode single message ids.\n- Max 5 proposed rules; [] when the examples are too inconsistent.\n- Prefer \"move_to\" a folder whose name matches the tag or the closest existing folder.",
+ "example_draft_system": "You write ONE short, realistic example email used to test an email-automation rule or flow in a simulator. Reply with STRICT JSON only:\n{\"from\": \"sender@example.com\", \"subject\": \"...\", \"body\": \"...\"}\nRules for the example:\n- It MUST satisfy every condition of the rule/flow below (sender, subject keywords, etc).\n- Prefer the real sender addresses named in the conditions; otherwise use example.com.\n- Keep it 2-4 sentences, realistic, like real mail a person receives.\n- Do not include any explanation outside the JSON.",
+ "agent_caps": [
+  [
+   "classify",
+   "Classify messages",
+   "safe",
+   [
+    "classify_message"
+   ],
+   "Run the classification pipeline on a message (same as the Classify button)."
+  ],
+  [
+   "flag",
+   "Flag & read state",
+   "caution",
+   [
+    "flag_message"
+   ],
+   "Mark mail read/unread and starred."
+  ],
+  [
+   "tag",
+   "Tag messages",
+   "caution",
+   [
+    "tag_message"
+   ],
+   "Apply short labels (recorded as assistant-sourced)."
+  ],
+  [
+   "move",
+   "Move messages",
+   "caution",
+   [
+    "move_message"
+   ],
+   "Move mail between folders. Never deletes."
+  ],
+  [
+   "create_folder",
+   "Create folders",
+   "safe",
+   [
+    "create_folder"
+   ],
+   "Create new (empty) folders."
+  ],
+  [
+   "classifiers",
+   "Manage classifiers",
+   "caution",
+   [
+    "train_classifier",
+    "manage_classifier"
+   ],
+   "Train, enable or delete heuristic classifiers."
+  ],
+  [
+   "rules",
+   "Manage rules & flows",
+   "caution",
+   [
+    "delete_rule",
+    "set_rule_enabled",
+    "delete_flow",
+    "set_flow_enabled"
+   ],
+   "Delete a rule/flow, or pause/resume one without deleting (proposals stay one-click)."
+  ],
+  [
+   "draft",
+   "Draft replies",
+   "safe",
+   [
+    "draft_reply"
+   ],
+   "Write a reply and save it to Drafts for review."
+  ],
+  [
+   "delete",
+   "Delete messages",
+   "dangerous",
+   [
+    "delete_message"
+   ],
+   "Moves mail to Trash (recoverable until the server purges it)."
+  ],
+  [
+   "send",
+   "Send mail",
+   "dangerous",
+   [
+    "send_message"
+   ],
+   "Send mail as the account owner, through the connected proxy."
+  ]
+ ],
+ "permissions_text_default": "may do directly: classify, flag, tag, move, create_folder, classifiers, rules, draft; disabled: delete, send",
+ "assistant_context_format": "CURRENT STATE\nRules (top to bottom, first match wins):\n(none yet)\n\nFlows (multi-step automations; run after rules, first matching flow wins):\n(none yet)\n\nLLM classifier categories: Action, Notification, Newsletter, Receipt, Personal, Promo\nCategory → folder map: Notification=Notifications, Newsletter=Newsletters, Receipt=Receipts, Promo=Promotions\nWatched folders: INBOX | check interval: 90s\nIndexed messages: 0 | assistant permissions: may do directly: classify, flag, tag, move, create_folder, classifiers, rules, draft; disabled: delete, send\n",
+ "summarize_thoughts_system": "You condense an AI assistant's private reasoning into ONE short sentence (max 12 words) describing what it was working on, written for the user - e.g. \"Checked the rule list and the Promo dataset\". Plain text only, no quotes, no preamble, no trailing period.",
+ "summarize_thoughts_payload": {
+  "max_tokens": 60,
+  "json_mode": false
+ }
+}

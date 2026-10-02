@@ -1,0 +1,28 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v2 attempt record",
+ "type": "object",
+ "required": ["case_id", "suite", "model", "run_id", "attempt", "status"],
+ "additionalProperties": true,
+ "properties": {
+  "case_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+  "suite": {"enum": ["classification", "assistant", "drafting", "rules", "simulate", "summary"]},
+  "model": {"type": "string", "minLength": 1},
+  "run_id": {"type": "string", "minLength": 1},
+  "attempt": {"type": "integer", "minimum": 1},
+  "status": {"enum": ["ok", "error", "timeout", "missing", "skipped"]},
+  "config_hash": {"type": "string"},
+  "request_sha256": {"type": "string"},
+  "wall_s": {"type": "number", "minimum": 0},
+  "ttft_s": {"type": ["number", "null"], "minimum": 0},
+  "first_visible_s": {"type": ["number", "null"], "minimum": 0},
+  "first_tool_call_s": {"type": ["number", "null"], "minimum": 0},
+  "completion_s": {"type": ["number", "null"], "minimum": 0},
+  "prompt_tokens": {"type": "integer", "minimum": 0},
+  "completion_tokens": {"type": "integer", "minimum": 0},
+  "decode_s": {"type": ["number", "null"], "minimum": 0},
+  "error": {"type": ["string", "null"]},
+  "output": {"type": "object"},
+  "tool_events": {"type": "array", "items": {"type": "object"}}
+ }
+}
