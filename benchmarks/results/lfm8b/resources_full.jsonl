@@ -857,3 +857,4 @@
 {"t": 1790922314.59, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
 {"t": 1790922317.67, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
 {"t": 1790922320.74, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
+{"t": 1790922323.82, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}

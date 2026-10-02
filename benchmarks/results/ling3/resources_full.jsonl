@@ -1953,3 +1953,6 @@
 {"t": 1790922318.88, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
 {"t": 1790922320.66, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
 {"t": 1790922320.68, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
+{"t": 1790922321.95, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
+{"t": 1790922323.73, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
+{"t": 1790922323.75, "gpu_mem_mib": 1, "gpu_util_pct": 0, "container_err": "ValueError('not enough values to unpack (expected 2, got 1)')"}
