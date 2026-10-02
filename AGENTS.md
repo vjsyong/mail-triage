@@ -29,6 +29,7 @@ ln -s ~/mail-triage/ragmodels ragmodels
 # 3. land it (from ~/mail-triage) once the suite is green and work is committed
 git merge <name>
 git push origin master
+rm -f ~/mail-triage-<name>/ragmodels     # untracked symlink blocks worktree removal
 git worktree remove ~/mail-triage-<name>
 git branch -d <name>
 ```
