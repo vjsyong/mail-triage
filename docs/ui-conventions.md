@@ -98,6 +98,10 @@ matching mail in place.
 - Status transitions that are not booleans (Retire, approve, save permissions) stay
   text buttons.
 - On coarse pointers `.px-sw` gets a 44px hit area.
+- Geometry: 36×21 track, a 15×15 `border-box` knob inset 2px on every side
+  (`.px-sw .px-tr::after`), and the switch-only form carries `inline px-swf`
+  (`display:flex;align-items:center`) so it centers against adjacent buttons instead
+  of baseline-drifting. Keep all three together when restyling.
 - The switch needs JS (same as plugins have always worked). The entity editors'
   "Enabled" checkboxes remain the no-JS path.
 
