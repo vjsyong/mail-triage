@@ -151,8 +151,7 @@
           var comp = ((d.fusion || {}).verdict || {}).components || {};
           var extra = comp.tinyjev_ms !== undefined ? "TinyJev " + comp.tinyjev_ms + " ms"
                                                      : null;
-          detail.appendChild(verdictBlock("Fusion (TinyJev + MiniCPM, thinking off)",
-                                          d.fusion, extra));
+          detail.appendChild(verdictBlock("MiniCPM5-2B-TinyJev-Fusion", d.fusion, extra));
           detail.appendChild(el("div", "mt-hint",
             "Primary and fallback answer the production classify prompt. " +
             "Fusion = TinyJev category + MiniCPM direct needs_reply prompt (recall wording, " +

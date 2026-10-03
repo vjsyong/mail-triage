@@ -6,7 +6,9 @@ user runs it from the Fusion Lab page.
 
 ## What it is
 
-A local decision system that splits classification into two cheap jobs:
+The system is named **MiniCPM5-2B-TinyJev-Fusion** (`FUSION_NAME`; it is the
+first model id on the OpenAI facade). It splits classification into two cheap
+jobs:
 
 | job | model | why |
 |---|---|---|
@@ -64,7 +66,8 @@ boilerplate mail (TinyJev category drops; a >4k-char fallback fixes it) and the
 
 The sidecar also exposes an OpenAI-compatible facade, so the fusion can be used
 without the plugin, the endpoint selector, or any app modification: point a
-client's base URL at `http://fusion:8098/v1` (model list comes from `/v1/models`).
+client's base URL at `http://fusion:8098/v1` and select
+`MiniCPM5-2B-TinyJev-Fusion` (the alias is listed first by `/v1/models`).
 
 - requests whose system prompt is the production classify prompt (detected and
   parsed for its category list) are answered by the fusion: TinyJev picks the

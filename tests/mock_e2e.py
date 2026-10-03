@@ -5360,6 +5360,11 @@ def main():
     _fresp = fusion_proxy.openai_completion(json.dumps(_fv), "fusion",
                                             {"prompt_tokens": 1, "completion_tokens": 2,
                                              "total_tokens": 3})
+    check("the fusion carries its system name and maps the alias for proxying",
+          fusion_proxy.FUSION_NAME == "MiniCPM5-2B-TinyJev-Fusion"
+          and fusion_proxy.upstream_model(fusion_proxy.FUSION_NAME) == fusion_proxy.LLM_MODEL
+          and fusion_proxy.upstream_model("minicpm5-2b") == "minicpm5-2b"
+          and fusion_proxy.upstream_model("") == fusion_proxy.LLM_MODEL)
     check("OpenAI completion envelope is well formed",
           _fresp["object"] == "chat.completion"
           and _fresp["choices"][0]["message"]["content"] == json.dumps(_fv)
