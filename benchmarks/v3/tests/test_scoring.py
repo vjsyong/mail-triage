@@ -274,6 +274,16 @@ class IntegrityTest(unittest.TestCase):
         with self.assertRaises(ScoringError):
             score_run(ds, T.run(manifest, [bad]), policy=SMALL)
 
+    def test_case_split_outside_requested_scope_flags_integrity(self):
+        ds = T.dataset([T.case("case_0001", split="private_test")],
+                       [T.gold("case_0001")])
+        manifest = T.manifest(requested_case_ids=["case_0001"],
+                              requested_splits=["development"])
+        run = T.run(manifest, [T.attempt("case_0001")])
+        report = score_run(ds, run, policy=SMALL)
+        self.assertFalse(report["integrity"]["ok"])
+        self.assertTrue(any("split" in p for p in report["integrity"]["problems"]))
+
     def test_request_hash_mismatch_flags_integrity(self):
         ds = T.dataset([T.case("case_0001")], [T.gold("case_0001")])
         manifest = T.manifest(requested_case_ids=["case_0001"])

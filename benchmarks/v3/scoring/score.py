@@ -615,11 +615,16 @@ def compare_runs(dataset, baseline_run, candidate_run, policy=None):
                 lambda pairs: M.binary_metrics(pairs)["f1"], resolved, profile,
                 "reply_f1"),
         }
+    requested = set(base["manifest"].get("requested_case_ids") or [])
     scope = {
         "requested_profiles": sorted(shared_profiles),
+        "requested_cases": len(requested),
+        "completed_cases": len(shared_ids),
         "shared_cases": len(shared_ids),
         "n_roots": len(roots),
-        "complete": bool(shared_ids) and base_eval["report"]["scope"]["complete"]
+        "complete": bool(shared_ids)
+        and len(shared_ids) == len(requested)
+        and base_eval["report"]["scope"]["complete"]
         and cand_eval["report"]["scope"]["complete"],
     }
     comparison = {

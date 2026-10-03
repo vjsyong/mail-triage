@@ -119,6 +119,8 @@ class ComparisonTest(unittest.TestCase):
         self.assertTrue(metric["noninferior"])
         self.assertEqual(comparison["protocol"]["B"], 200)
         self.assertEqual(comparison["eligibility"]["eligible"], True)
+        self.assertEqual(comparison["scope"]["requested_cases"],
+                         comparison["scope"]["completed_cases"])
 
     def test_compare_deterministic(self):
         ds, baseline = build(n=12, correct=False)

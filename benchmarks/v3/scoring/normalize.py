@@ -291,9 +291,14 @@ def validate_scope(ds, run):
     if not isinstance(requested, list):
         requested = []
     requested_set = set(requested)
+    requested_splits = set(manifest.get("requested_splits") or [])
     for cid in requested:
-        if cid not in ds["case_by_id"]:
+        case = ds["case_by_id"].get(cid)
+        if case is None:
             problems.append("manifest requests unknown case %r" % cid)
+        elif requested_splits and case_split(case) not in requested_splits:
+            problems.append("case %r split %r not in requested splits"
+                            % (cid, case_split(case)))
     for cid in run["attempts_by_case"]:
         if cid not in ds["case_by_id"]:
             problems.append("attempt for case %r absent from dataset" % cid)
