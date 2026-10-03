@@ -13,9 +13,11 @@ from types import SimpleNamespace
 
 from .. import contracts, schema
 from ..common.hashing import hash_obj, short
-from . import catalog, lineage as lineage_mod, recipes, render
+from . import (catalog, lineage as lineage_mod, plausibility, recipes, render,
+               style, temporal)
 from .errors import BuildError
 from .rng import stream
+from .world import World
 
 SCHEMA_VERSION = "v3.0"
 
@@ -35,8 +37,8 @@ DOMAINS = (PUBLIC_DOMAIN,) + PRIVATE_DOMAINS
 # Draft-data revisions. Bumped because this refresh changes the content
 # generator: previously generated draft datasets are INCOMPATIBLE and must be
 # regenerated (no scientific claim is made by any earlier draft).
-BUILDER_REVISION = "3.2-draft"
-DATA_REVISION = "3.2-draft"
+BUILDER_REVISION = "3.3-draft-world"
+DATA_REVISION = "3.3-draft-world"
 PROMPT_REVISION = "native-v3.0"
 
 SYNTHETIC_PROVENANCE_ID = "prov_synthetic_v3"
@@ -76,7 +78,7 @@ SITUATION_GROUP = {
     "order_request": "action", "document_request": "action",
     "event_registration": "action",
     "receipt_confirmation": "receipt", "invoice_receipt": "receipt",
-    "refund_status": "receipt", "payment_reminder": "receipt",
+    "refund_status": "receipt", "payment_reminder": "action",
     "newsletter_digest": "newsletter",
     "ambiguous_marketing": "promo", "legitimate_promo": "promo",
     "suspicious_phishing": "promo",
@@ -126,22 +128,6 @@ def _slug(text):
     return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-") or "x"
 
 
-def _amount(region, number):
-    return region["currency"] + number
-
-
-def _month_name(month_index):
-    return ["January", "February", "March", "April", "May", "June", "July",
-            "August", "September", "October", "November", "December"][month_index % 12]
-
-
-def _format_date(region, month_index, day):
-    name = _month_name(month_index)
-    if region.get("date_style") == "month_day":
-        return "%s %d, 2025" % (name, day)
-    return "%d %s 2025" % (day, name)
-
-
 def _fill(text, slots):
     """Fill authored ``{slot}`` placeholders; unknown slots are a build error."""
     missing = set()
@@ -167,65 +153,6 @@ def _fill_deep(value, slots):
     if isinstance(value, dict):
         return {k: _fill_deep(v, slots) for k, v in value.items()}
     return value
-
-
-def _fill_slots(kind, index, persona, region, seed, domain=PUBLIC_DOMAIN):
-    """Deterministic authored slot values for one root (no model, no RNG state).
-
-    The domain is part of the stream identifier, so a public root and a private
-    root never share a slot draw even when their index coincides.
-    """
-    rng = stream(seed, "domain:%s:slots:%s:%d" % (domain, kind, index))
-    v = recipes.vocab()
-    month_index = index % 12
-    day = (index % 27) + 1
-    deadlines = list(region["deadline"])
-    vendor = rng.pick(v["vendor"])
-    vendor2 = rng.pick(v["vendor"])
-    vendor3 = rng.pick(v["vendor"])
-    org = rng.pick(v["org"])
-    news_vendor = rng.pick(v["news_vendor"])
-    code = "%s%d" % (rng.pick(v["code_prefix"]), 100 + index)
-    prefix = rng.pick(v["ref_prefixes"])
-    item = rng.pick(v["item"])
-    sender = rng.pick(v["signer"])
-    return {
-        "owner_first": persona["first_name"],
-        "owner_addr": "%s@%s" % (_slug(persona["owner_name"]).replace("-", "."),
-                                 persona["domain"]),
-        "signer": rng.pick(v["signer"]),
-        "vendor": vendor, "vendor2": vendor2, "vendor3": vendor3,
-        "vendor_slug": _slug(vendor), "vendor2_slug": _slug(vendor2),
-        "vendor3_slug": _slug(vendor3),
-        "org": org, "org_slug": _slug(org),
-        "news_vendor": news_vendor, "news_slug": _slug(news_vendor),
-        "item": item, "service": rng.pick(v["service"]),
-        "detail": rng.pick(v["detail"]),
-        "place": rng.pick(v["place"]), "person": rng.pick(v["person"]),
-        "course": rng.pick(v["course"]), "event_name": rng.pick(v["event_name"]),
-        "month": _month_name(month_index),
-        "amount": _amount(region, rng.pick(v["amount_values"])),
-        "amount2": _amount(region, rng.pick(v["amount2_values"])),
-        "amount_late": _amount(region, rng.pick(v["amount_values"])),
-        "amount_soon": _amount(region, rng.pick(v["amount_values"])),
-        "amount_paid": _amount(region, rng.pick(v["amount_values"])),
-        "percent": rng.pick(v["percent"]),
-        "code": code,
-        "link": "https://%s.example/%s" % (_slug(vendor), code.lower()),
-        "ref1": "%s-%04d" % (prefix, 100 + index),
-        "ref2": "%s-%04d" % (rng.pick(v["ref_prefixes"]), 200 + index),
-        "ref3": "%s-%04d" % (rng.pick(v["ref_prefixes"]), 300 + index),
-        "ref": "%s-%04d" % (prefix, 100 + index),
-        "ticket": "%s-%04d" % (v["ticket_prefix"], 100 + index),
-        "date": _format_date(region, month_index, day),
-        "deadline": deadlines[0], "deadline2": deadlines[1],
-        "deadline_soon": deadlines[1], "deadline_late": deadlines[0],
-        "deadline_past": deadlines[0],
-        "hour": region["hour"],
-        "sender": sender, "sender_slug": _slug(sender),
-        "sender_domain": "mail.%s" % persona["domain"],
-        "sender_subject": "Can you reply about %s?" % item,
-    }
 
 
 def _category_for(policy, roles):
@@ -448,15 +375,20 @@ def _base_message(ctx):
     tmpl = variants[ctx.index % len(variants)]
     subject = _fill(tmpl["subject"], ctx.slots)
     body = _fill(tmpl["body"], ctx.slots)
+    body = style.restyle_greeting(
+        body, stream(ctx.seed, "style:%s" % ctx.root),
+        getattr(ctx, "style_profile", "standard"))
     if getattr(ctx, "situation", None):
         body = body + "\n\n" + _fill(ctx.situation, ctx.slots)
     ctx.slots["sender_subject"] = subject
+    sender = ctx.facts["sender"]
+    recipient = ctx.facts["recipient"]
     return {
         "message_id": "msg_%s" % ctx.root,
-        "from_addr": "%s@%s" % (_slug(ctx.slots["vendor_slug"]), ctx.persona["domain"]),
-        "to_addr": ctx.slots["owner_addr"],
+        "from_addr": sender["email"],
+        "to_addr": recipient["email"],
         "subject": subject,
-        "date": ctx.slots["date"],
+        "date": temporal.format_header(temporal.parse(ctx.facts["send"])),
         "snippet": body,
         "body": body,
     }
@@ -467,6 +399,9 @@ def _variant_message(ctx, base, variant, with_situation=True):
     if variant:
         out["subject"] = _fill(variant["subject"], ctx.slots)
         body = _fill(variant["body"], ctx.slots)
+        body = style.restyle_greeting(
+            body, stream(ctx.seed, "style:%s:%s" % (ctx.root, variant.get("subject", ""))),
+            getattr(ctx, "style_profile", "standard"))
         if with_situation and getattr(ctx, "situation", None):
             body = body + "\n\n" + _fill(ctx.situation, ctx.slots)
         out["body"] = body
@@ -478,6 +413,10 @@ def _variant_message(ctx, base, variant, with_situation=True):
 
 def _build_triage_root(ctx, include_variants):
     msg = _base_message(ctx)
+    # Plausibility is enforced before the message enters any rendered case.
+    problems = plausibility.check_scenario(ctx.facts, [msg], ctx.world)
+    if problems:
+        raise BuildError("implausible scenario:\n  " + "\n  ".join(problems))
     ctx.base_msg = msg
     ctx.message_ids = [msg["message_id"]]
     _emit(ctx, "native", contracts.NATIVE_PROFILE, ctx.policy, msg,
@@ -495,7 +434,9 @@ def _build_triage_root(ctx, include_variants):
           _variant_message(ctx, msg, fam.get("paraphrase")),
           "invariance", base_id, ["category", "needs_reply"], ["text:paraphrase"],
           ["paraphrase"])
-    sig_body = msg["body"] + "\n\n--\n" + ctx.persona["signature"] + \
+    sig_body = msg["body"] + "\n\n--\n" + \
+        "\n".join(ctx.facts["signer"].get("signature_lines") or
+                  [ctx.facts["signer"]["name"]]) + \
         "\nThis message and any attachments are confidential."
     sig = dict(msg, body=sig_body, snippet=sig_body)
     _emit(ctx, "sig", contracts.NATIVE_PROFILE, ctx.policy, sig,
@@ -518,7 +459,7 @@ def _build_triage_root(ctx, include_variants):
               evidence_templates=fam["resolved"].get("evidence", []))
     if fam.get("needs_reply"):
         other = dict(msg)
-        other["to_addr"] = "team@%s" % ctx.persona["domain"]
+        other["to_addr"] = "team@%s" % ctx.facts["recipient"]["domain"]
         other["body"] = msg["body"] + "\n\n(Note: this was forwarded to the wider team alias.)"
         other["snippet"] = other["body"]
         _emit(ctx, "recipient", contracts.NATIVE_PROFILE, ctx.policy, other,
@@ -593,7 +534,7 @@ def _fill_mailbox(ctx, fixture):
             "to_addr": _fill(m.get("to_addr", ""), ctx.slots),
             "subject": _fill(m.get("subject", ""), ctx.slots),
             "body": body,
-            "date": ctx.slots["date"],
+            "date": temporal.format_header(temporal.parse(ctx.facts["send"])),
             "folder": m.get("folder", "Inbox"),
         })
     return out
@@ -750,10 +691,12 @@ def _scenario(ctx, messages):
         "recipient": {"persona": ctx.persona["persona"],
                       "policy_id": ctx.policy_id,
                       "owner_name": ctx.persona["owner_name"]},
-        "frozen_time": "2025-09-%02dT09:00:00Z" % ((ctx.index % 27) + 1),
+        "frozen_time": ctx.facts.get("send"),
         "messages": messages,
         "relevant_facts": list(ctx.relevant_facts),
         "source_provenance": SYNTHETIC_PROVENANCE_ID,
+        "family": ctx.family_id,
+        "facts": dict(ctx.facts),
         "notes": "Authored synthetic scenario; no real mailbox or corpus content.",
     }
 
@@ -777,13 +720,27 @@ def _workflow_scenario_messages(ctx, mailbox):
 
 # --------------------------------------------------------------------------- context
 
-def _mk_ctx(kind, index, seed, persona, region, domain, shift_axis, family_id,
-            family, policy, variant_policy, policies, root_seed):
+def _mk_ctx(kind, index, seed, persona, domain, shift_axis, family_id,
+            family, policy, variant_policy, policies, root_seed, world):
     root = ("r%04d" if kind == "triage" else "w%04d") % index
+    if kind == "triage":
+        slots, facts, region, style_profile = world.build_scenario(
+            family_id, persona, index, root_seed, domain, shift_axis)
+    else:
+        slots, facts, region, style_profile = world.build_scenario(
+            "order_request", persona, index, root_seed, domain, shift_axis)
+        # A workflow sandbox has many senders, so it carries no single
+        # sender/signer identity; keep only its temporal facts for the weekday
+        # and domain-coherence checks.
+        for key in ("sender", "signer", "recipient", "signature_expected",
+                    "host", "venue", "event_name"):
+            facts.pop(key, None)
+        facts["family"] = "workflow"
     ctx = SimpleNamespace(
         kind=kind, index=index, seed=root_seed, persona=persona, region=region,
         domain=domain, split=domain, shift_axis=shift_axis, family_id=family_id,
-        family=family,
+        family=family, world=world, slots=slots, facts=facts,
+        style_profile=style_profile,
         policy=policy, variant_policy=variant_policy, policies=policies,
         policy_id=persona["policy_id"], root=root,
         scenario_id="scn_%s" % root, lineage_id="lin_%s" % root,
@@ -791,7 +748,6 @@ def _mk_ctx(kind, index, seed, persona, region, domain, shift_axis, family_id,
         relevant_facts=["family:%s" % family_id,
                         "needs_reply:%s" % family.get("needs_reply", None)],
     )
-    ctx.slots = _fill_slots(kind, index, persona, region, root_seed, domain)
     ctx.situation = _pick_situation(family_id, root_seed, index, domain)
     ctx.case_id = lambda tag: "case_%s_%s" % (root, tag)
     ctx.gold_id = lambda tag: "gold_%s_%s" % (root, tag)
@@ -822,8 +778,7 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
     dataset_id = private_dataset_id or public_dataset_id
 
     personas = recipes.personas()
-    regions = recipes.regions()
-    shift_regions = recipes.shift_regions()
+    world = World.build()
     fams = sorted(recipes.families().keys())
     policy_index = recipes.policy_index(include_variants=True)
 
@@ -863,7 +818,6 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
             if axis is None:
                 family_id = dev_families[(local // len(personas)) % len(dev_families)]
                 policy_id = persona["policy_id"]
-                region = regions[local % len(regions)]
                 variant_policy = recipes.variant_policy_for(policy_id)
             else:
                 fam_list = SHIFT_FAMILIES_BY_AXIS[axis]
@@ -873,16 +827,12 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
                     policy_id = personas[(local + 3) % len(personas)]["policy_id"]
                 else:
                     policy_id = persona["policy_id"]
-                if axis == "source_style_shift" and shift_regions:
-                    region = shift_regions[(local // len(personas)) % len(shift_regions)]
-                else:
-                    region = regions[local % len(regions)]
                 variant_policy = None
             family = recipes.families()[family_id]
             policy = policy_index[policy_id]
-            ctx = _mk_ctx("triage", idx, dseed, persona, region, domain, axis,
+            ctx = _mk_ctx("triage", idx, dseed, persona, domain, axis,
                           family_id, family, policy, variant_policy, policy_index,
-                          dseed)
+                          dseed, world)
             ctx.policy_id = policy_id
             _build_triage_root(ctx, include_variants)
             triage_ctxs.append(ctx)
@@ -908,10 +858,9 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
             persona = personas[local % len(personas)]
             recipe = pool[local % len(pool)]
             policy = policy_index[persona["policy_id"]]
-            ctx = _mk_ctx("workflow", idx, dseed, persona,
-                          regions[local % len(regions)], domain, axis, "workflow",
+            ctx = _mk_ctx("workflow", idx, dseed, persona, domain, axis, "workflow",
                           {"needs_reply": None, "templates": [{}], "resolved": None},
-                          policy, None, policy_index, dseed)
+                          policy, None, policy_index, dseed, world)
             _build_workflow_root(ctx, recipe)
             workflow_ctxs.append(ctx)
 

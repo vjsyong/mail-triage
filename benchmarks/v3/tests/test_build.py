@@ -450,13 +450,21 @@ class ShiftReservationTest(unittest.TestCase):
 
     def test_each_axis_reserves_its_own_resource(self):
         from benchmarks.v3.build import generate as G
+        from benchmarks.v3.build import recipes
         b = mechanism_bundle()
-        dev_pairs, dev_regions = set(), set()
+        dev_pairs = set()
         for case in b["cases"]:
             if case["task"] != "workflow" and case["split"] in (
                     "development", "calibration"):
                 dev_pairs.add((case["persona"], case["policy_id"]))
-                dev_regions.add(case["region"])
+        scn_facts = {s["scenario_id"]: (s.get("facts") or {})
+                     for s in b["scenarios"]}
+        reserved_orgs = set(
+            recipes.load_world("config.json").get("style_shift_org_ids") or [])
+        dev_profiles = {scn_facts.get(c["scenario_id"], {}).get("style_profile")
+                        for c in b["cases"]
+                        if c["split"] in ("development", "calibration")}
+        self.assertNotIn("shift", dev_profiles)
         for axis, families in G.SHIFT_FAMILIES_BY_AXIS.items():
             cases = [c for c in b["cases"] if c["task"] != "workflow"
                      and _axis_of(c) == axis]
@@ -466,7 +474,15 @@ class ShiftReservationTest(unittest.TestCase):
                 pairs = {(c["persona"], c["policy_id"]) for c in cases}
                 self.assertFalse(pairs & dev_pairs)
             if axis == "source_style_shift":
-                self.assertFalse({c["region"] for c in cases} & dev_regions)
+                # a reserved style profile and reserved org ids
+                profiles = {scn_facts.get(c["scenario_id"], {}).get("style_profile")
+                            for c in cases}
+                self.assertEqual(profiles, {"shift"})
+                org_ids = {scn_facts[c["scenario_id"]]["sender"].get("org_id")
+                           for c in cases
+                           if scn_facts[c["scenario_id"]]["sender"].get("kind") == "org"}
+                self.assertTrue(org_ids)
+                self.assertTrue(org_ids <= reserved_orgs)
 
     def test_workflow_shift_recipes_are_held_out(self):
         b = mechanism_bundle()
@@ -814,6 +830,213 @@ class DatasetIdBoundaryTest(unittest.TestCase):
         self.assertTrue(meta.get("data_revision"))
         self.assertTrue(meta.get("prompt_revision"))
         self.assertTrue(b["metadata"].get("public_dataset_id"))
+
+
+class WorldPlausibilityTest(unittest.TestCase):
+    """U1-U5: the world model makes the pilot defects impossible to emit."""
+
+    def _facts(self, bundle):
+        return [s.get("facts") or {} for s in bundle["scenarios"]]
+
+    def test_u1_send_days_are_not_clustered(self):
+        from benchmarks.v3.build import temporal
+        b = mechanism_bundle()
+        days = {}
+        for facts in self._facts(b):
+            send = temporal.parse(facts["send"])
+            days[send.day] = days.get(send.day, 0) + 1
+        total = sum(days.values())
+        self.assertGreaterEqual(len(days), 5)
+        self.assertLess(max(days.values()) / float(total), 0.25)
+
+    def test_u2_deadlines_are_after_send_and_bounded(self):
+        from benchmarks.v3.build import temporal
+        b = mechanism_bundle()
+        checked = 0
+        for facts in self._facts(b):
+            if facts.get("family") == "workflow":
+                continue
+            send = temporal.parse(facts["send"])
+            for field in ("due", "rsvp", "register_by", "until", "arrival",
+                          "meeting", "checkpoint", "milestone"):
+                if facts.get(field):
+                    dt = temporal.parse(facts[field])
+                    self.assertGreater(dt, send, facts.get("family"))
+                    self.assertLessEqual(
+                        temporal.business_days_between(send, dt),
+                        temporal.MAX_WINDOW_DAYS + 1)
+                    checked += 1
+        self.assertGreater(checked, 20)
+
+    def test_u3_u4_sender_uses_its_own_org_domain(self):
+        from benchmarks.v3.build import identity
+        from benchmarks.v3.build.world import World
+        b = mechanism_bundle()
+        tld = World.build().tld
+        for facts in self._facts(b):
+            sender = facts.get("sender") or {}
+            if not sender or sender.get("kind") != "org":
+                continue
+            expected = identity.org_domain(sender["org"], tld)
+            self.assertEqual(sender["domain"], expected, sender["org"])
+            local = sender["email"].split("@")[0]
+            self.assertTrue(local in identity.ROLE_LOCALPARTS
+                            or re.match(r"^[a-z]+\.[a-z]+$", local))
+            if facts.get("family") not in ("meeting_request",
+                                           "personal_invitation"):
+                self.assertNotEqual(sender["domain"],
+                                    facts["recipient"]["domain"])
+
+    def test_u5_host_matches_signer(self):
+        b = mechanism_bundle()
+        for facts in self._facts(b):
+            if facts.get("host"):
+                self.assertEqual(facts["host"]["person"],
+                                 facts["signer"]["name"], facts.get("family"))
+
+    # -- deliberate defect injection must be rejected by the lint ----------
+    def _mutated(self, bundle, mutate):
+        bad = copy.deepcopy(bundle)
+        mutate(bad)
+        return build.validate_dataset(bad)
+
+    def test_lint_rejects_clustered_days_u1(self):
+        from benchmarks.v3.build import temporal
+        b = mechanism_bundle()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if facts.get("send"):
+                    dt = temporal.parse(facts["send"]).replace(day=12)
+                    facts["send"] = dt.isoformat()
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("clustered" in p for p in problems), problems[:3])
+
+    def test_lint_rejects_deadline_before_send_u2(self):
+        from benchmarks.v3.build import temporal
+        b = mechanism_bundle()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if facts.get("due"):
+                    facts["due"] = temporal.parse(facts["send"]).isoformat()
+                    return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("before the send" in p or "outside" in p
+                            for p in problems), problems[:3])
+
+    def test_lint_rejects_recipient_domain_sender_u3(self):
+        b = mechanism_bundle()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if (facts.get("sender") or {}).get("kind") == "org":
+                    facts["sender"]["domain"] = facts["recipient"]["domain"]
+                    facts["sender"]["email"] = ("billing@%s"
+                                                % facts["recipient"]["domain"])
+                    return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("org domain" in p or "cross-org" in p
+                            for p in problems), problems[:3])
+
+    def test_lint_rejects_unbelievable_mailbox_u4(self):
+        b = mechanism_bundle()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if (facts.get("sender") or {}).get("kind") == "org":
+                    facts["sender"]["email"] = ("cedar-co@%s"
+                                                % facts["recipient"]["domain"])
+                    return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("org domain" in p or "neither a role" in p
+                            for p in problems), problems[:3])
+
+    def test_lint_rejects_host_signer_mismatch_u5(self):
+        b = mechanism_bundle()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if facts.get("host"):
+                    facts["host"] = {"person": "E. Fischer"}
+                    return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("does not match signer" in p for p in problems),
+                        problems[:3])
+
+    def test_lint_rejects_wrong_weekday(self):
+        from benchmarks.v3.build import temporal
+        b = mechanism_bundle()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if not facts.get("send"):
+                    continue
+                allowed = set()
+                for field in ("send", "due", "event", "deadline2"):
+                    if facts.get(field):
+                        dt = temporal.parse(facts[field])
+                        allowed.add(temporal.WEEKDAY_NAMES[dt.weekday()])
+                        allowed.add(temporal.WEEKDAY_NAMES[dt.weekday()][:3])
+                wrong = next(w for w in temporal.WEEKDAY_NAMES if w not in allowed)
+                scn["messages"][0]["body"] += "\n\nSee you on %s." % wrong
+                return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("weekday" in p for p in problems), problems[:3])
+
+    def test_lint_rejects_duplicated_words(self):
+        b = mechanism_bundle()
+
+        def mutate(bad):
+            bad["scenarios"][0]["messages"][0]["body"] += "\n\nthe the cat"
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("duplicated word" in p for p in problems),
+                        problems[:3])
+
+    def test_lint_rejects_unknown_domain(self):
+        b = mechanism_bundle()
+
+        def mutate(bad):
+            bad["scenarios"][0]["messages"][0]["from_addr"] = "x@evil-real.com"
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("not a world entity" in p for p in problems),
+                        problems[:3])
+
+
+class WorldFixtureTest(unittest.TestCase):
+    def test_world_entities_are_internally_consistent(self):
+        from benchmarks.v3.build import identity
+        from benchmarks.v3.build.world import World
+        world = World.build()
+        domains = [o["domain"] for o in world.orgs]
+        self.assertEqual(len(domains), len(set(domains)), "duplicate org domains")
+        slugs = [identity.org_slug(o["name"]) for o in world.orgs]
+        self.assertEqual(len(slugs), len(set(slugs)), "duplicate org slugs")
+        domain_set = set(domains)
+        for person in world.people:
+            self.assertIn(person["domain"], domain_set)
+            self.assertTrue(person["email"].endswith("@" + person["domain"]))
+        owner_domains = {o["domain"] for o in world.owners.values()}
+        self.assertFalse(owner_domains & domain_set,
+                         "owner domain collides with an org domain")
+        self.assertTrue(world.tld and world.tld != "com")
+
+    def test_style_fixture_is_aggregate_and_has_provenance(self):
+        from benchmarks.v3.build import recipes
+        style = recipes.style()
+        prov = style.get("provenance") or {}
+        self.assertTrue(prov.get("checksums_sha256"))
+        self.assertEqual(set(prov.get("per_corpus") or {}),
+                         {"enron", "ietf", "spamassassin", "nazario"})
+        self.assertTrue(style.get("greetings"))
+        blob = json.dumps(style)
+        self.assertNotIn("@", blob)  # no addresses/domains retained
 
 
 if __name__ == "__main__":

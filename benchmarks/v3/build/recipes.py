@@ -22,6 +22,22 @@ def _load(name):
     return _CACHE[name]
 
 
+WORLD_DIR = os.path.join(DATA_DIR, "world")
+
+
+def load_world(name):
+    """Load an authored world fixture (``fixtures/world/*.json``)."""
+    key = "world/" + name
+    if key not in _CACHE:
+        with open(os.path.join(WORLD_DIR, name), encoding="utf-8") as f:
+            _CACHE[key] = json.load(f)
+    return _CACHE[key]
+
+
+def style():
+    return _load("style.json")
+
+
 def personas():
     return _load("personas.json")["personas"]
 
@@ -32,11 +48,6 @@ def families():
 
 def regions():
     return _load("regions.json")["regions"]
-
-
-def shift_regions():
-    """Regional forms reserved for the source/style shift axis (never dev/cal)."""
-    return _load("regions.json").get("shift_regions", [])
 
 
 def policies():

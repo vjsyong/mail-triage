@@ -246,13 +246,81 @@ as independent samples.
   `authorization.authorized == False`. Any scenario that references an
   unauthorized public-corpus provenance fails lint (fail closed).
 
+## World model (A), scenarios (B), style (C), plausibility lint (D)
+
+The pilot was rejected for implausible content (mixed identities, clustered
+dates, hardcoded dates, borrowed domains, host/signer mismatch). Generation is
+now bottom-up from a coherent synthetic world rather than flat slot filling.
+
+**A. World** (`world.py`, `identity.py`, `fixtures/world/*.json`). Authored
+organizations (name, slug, derived domain, industry, region, address,
+departments, role mailboxes), people per org, the eight account owners, venues,
+events and a calendar. `identity.org_slug` strips legal suffixes and connectors
+(``"Cedar & Co."`` -> ``cedar``); `identity.org_domain` builds
+``<slug>.<tld>``; role mailboxes (`billing@`, `support@`, `orders@`,
+`no-reply@`, `accounts@`, ...) live on that org's domain. **TLD policy** is
+centralized in `fixtures/world/config.json`: `tld_profile: "reserved"` maps to
+`.example` so a generated address can never collide with a real registered
+domain (a `tld_profile` switch exists for other reserved profiles). Sender,
+recipient, cc/thread participants, signature person, host and reply-to all
+resolve to world entities; a sender never borrows the recipient's domain except
+for the explicitly personal/colleague families.
+
+**B. Bottom-up scenarios** (`world.World.build_scenario`, `generate.py`). Each
+family maps to a sender kind (org + relevant industry + role mailbox, or a
+person) and to a temporal window (`temporal.WINDOWS`). A world event
+(purchase->receipt, invoice->reminder, order->confirmation, shipping->update,
+event->invitation/registration, meeting->request, ...) drives the message; the
+envelope, greeting, body, signature, amounts, references, links and dates all
+derive from the same world selection, and every variant keeps its declared
+stable/changing fields.
+
+**Temporal engine** (`temporal.py`). No date string lives in any fixture. Every
+message has an absolute ISO datetime; named weekdays and deadlines are derived
+from it; deadlines are `send +` a bounded business-day window (1-14 for routine
+requests, bounded family exceptions up to 60); receipts carry a transaction date
+before send; events follow registrations; a payment reminder may carry a past
+due date. Locale date/currency formats come from the world region.
+
+**C. Corpus-guided style** (`style.py`, `fixtures/style.json`,
+`tools/mine_corpora.py`). The offline miner samples a bounded number of messages
+from `/home/xrim/datasets/email-corpora` (Enron maildir, IETF/Nazario mboxes,
+SpamAssassin dirs) and derives **aggregate** shapes only -- greeting/sign-off
+shapes, subject prefixes, body-length bands, quoting rate -- with checksums and
+license provenance in the fixture. No body, name, address or domain is copied.
+Runtime and tests never read the corpora; `style.restyle_greeting` uses the
+derived greeting pool, and the `source_style_shift` axis reserves a disjoint
+style profile and org ids.
+
+**D. Plausibility lint** (`plausibility.py`, enforced by `lint.validate_dataset`
+and before render in `generate._build_triage_root`). Checks and U-mapping:
+
+| check | rejects |
+|---|---|
+| day-of-month spread (no day > 25%) | U1 clustered dates |
+| `due/event/...` after send, 1..60 business days, txn before send | U2 temporal contradiction |
+| sender mailbox domain is its own org's domain; no cross-org sender/recipient domain for non-personal families | U3/U4 identity + domain |
+| role mailbox format / person address; domains must be world entities | U4 unbelievable domains |
+| host person == signer identity; signature appears where the template signs a person | U5 host/signer mismatch |
+| named weekday matches a fact; no duplicated words; no unknown domain in headers or body | artifact/template defects |
+
+Lint failures name the offending scenario and field. `test_build.py` reproduces
+each defect by injecting it into a real bundle and asserting the lint rejects it.
+
+**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.3-draft-world`; the
+content generator changed, so earlier draft datasets are incompatible and the
+dataset ids differ.
+
 ## Files
 
-`fixtures/` holds the authored recipes/vocabulary/policies/catalog plus the
-`situations.json` context clauses. They are agent-authored **drafts**: no human
-has reviewed or sealed them, and the "reviewed by hand" label must not be
-applied to this tree. `generate.py`, `render.py`, `lineage.py`, `lint.py`,
-`review.py`, `catalog.py`, `recipes.py`, `rng.py`, `errors.py` hold the logic.
+`fixtures/` holds the authored recipes/vocabulary/policies/catalog, the
+`situations.json` context clauses, the corpus-guided `style.json`, and
+`fixtures/world/` (orgs, owners, names, places, family mapping, config).
+`world.py`, `identity.py`, `temporal.py`, `style.py`, `plausibility.py` implement
+the world model; `generate.py`, `render.py`, `lineage.py`, `lint.py`,
+`review.py`, `catalog.py`, `recipes.py`, `rng.py`, `errors.py` hold the rest;
+`tools/mine_corpora.py` is the offline style miner (not runtime). They are
+agent-authored **drafts**: no human has reviewed or sealed them.
 
 (The directory is named `fixtures/`, not `data/`, because the repository
 `.gitignore` ignores any directory named `data`; authoring content must be

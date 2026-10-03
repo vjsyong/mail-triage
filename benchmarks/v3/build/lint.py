@@ -9,7 +9,7 @@ lineage records lie.
 from collections import Counter
 
 from .. import contracts, schema
-from . import catalog, lineage as lineage_mod
+from . import catalog, lineage as lineage_mod, plausibility
 
 SCHEMA_VERSION = "v3.0"
 
@@ -264,4 +264,10 @@ def validate_dataset(bundle):
             if gold.get("review_status") != "draft" or gold.get("human_seal"):
                 errs.append("draft bundle carries a reviewed/sealed gold %r"
                             % gold.get("gold_id"))
+
+    # -- world plausibility (U1-U5) ----------------------------------------
+    try:
+        errs.extend(plausibility.check_bundle(bundle))
+    except Exception as exc:  # a broken world must not crash the lint
+        errs.append("plausibility check failed: %s" % exc)
     return errs

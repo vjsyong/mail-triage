@@ -1,0 +1,21 @@
+{
+  "note": "Authored world venues and events by region. Event names carry a season hint so invitations/registrations stay context-coherent.",
+  "venues": {
+    "uk": ["The Riverside Hall", "The Old Mill Cafe", "Kingsway Community Centre", "The Library Meeting Room", "Northgate Civic Suite"],
+    "us": ["Elm Street Hall", "The Market Loft", "Harborview Centre", "The Library Auditorium", "Cedar Park Pavilion"],
+    "eu": ["Cafe Central", "The Atrium", "Stadhuis Zaal", "The River Terrace", "Kunsthal Room 2"],
+    "au": ["The Foundry Hall", "Pier 5 Function Room", "Wattle Street Studio", "The Arts Centre Foyer", "Harbour Pavilion"]
+  },
+  "cities": {
+    "uk": ["London", "Manchester", "Bristol", "Leeds", "Edinburgh"],
+    "us": ["Chicago", "Portland", "Austin", "San Francisco", "New York"],
+    "eu": ["Dublin", "Rotterdam", "Brussels", "Amsterdam", "Lisbon"],
+    "au": ["Sydney", "Melbourne", "Brisbane", "Perth", "Canberra"]
+  },
+  "events": {
+    "uk": [{"name": "the autumn fair", "season": "autumn"}, {"name": "the winter concert", "season": "winter"}, {"name": "the spring open day", "season": "spring"}, {"name": "the summer fete", "season": "summer"}],
+    "us": [{"name": "the fall fundraiser", "season": "autumn"}, {"name": "the holiday market", "season": "winter"}, {"name": "the spring showcase", "season": "spring"}, {"name": "the summer picnic", "season": "summer"}],
+    "eu": [{"name": "the herfstmarkt", "season": "autumn"}, {"name": "the winter reception", "season": "winter"}, {"name": "the spring expo", "season": "spring"}, {"name": "the summer terrace", "season": "summer"}],
+    "au": [{"name": "the spring festival", "season": "spring"}, {"name": "the summer street party", "season": "summer"}, {"name": "the autumn makers' day", "season": "autumn"}, {"name": "the winter fundraiser", "season": "winter"}]
+  }
+}

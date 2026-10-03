@@ -1,8 +1,52 @@
 {
-  "signer": ["J. Alvarez", "R. Okonkwo", "S. Nakamura", "E. Fischer", "M. Haddad", "T. Novak", "L. Moreau", "A. Balogun", "C. Petrov", "H. Lindqvist"],
-  "vendor": ["Northwind Supplies", "Helios Energy", "Bluepeak Travel", "Cedar & Co.", "Kestrel Logistics", "Orbit Software", "Harbor Freight EU", "Lumen Health", "Meridian Bank", "Stonebridge Lettings"],
-  "item": ["the Q3 equipment renewal", "the annual support contract", "the venue booking", "the consulting engagement", "the license upgrade", "the shipping upgrade", "the wellness plan", "the training package", "the kitchen refit", "the winter order"],
-  "service": ["cloud plan", "delivery route", "support tier", "data plan", "storage add-on", "insurance policy", "travel package", "meal plan", "training course", "energy tariff"],
+  "signer": [
+    "J. Alvarez",
+    "R. Okonkwo",
+    "S. Nakamura",
+    "E. Fischer",
+    "M. Haddad",
+    "T. Novak",
+    "L. Moreau",
+    "A. Balogun",
+    "C. Petrov",
+    "H. Lindqvist"
+  ],
+  "vendor": [
+    "Northwind Supplies",
+    "Helios Energy",
+    "Bluepeak Travel",
+    "Cedar & Co.",
+    "Kestrel Logistics",
+    "Orbit Software",
+    "Harbor Freight EU",
+    "Lumen Health",
+    "Meridian Bank",
+    "Stonebridge Lettings"
+  ],
+  "item": [
+    "Q3 equipment renewal",
+    "annual support contract",
+    "venue booking",
+    "consulting engagement",
+    "license upgrade",
+    "shipping upgrade",
+    "wellness plan",
+    "training package",
+    "kitchen refit",
+    "winter order"
+  ],
+  "service": [
+    "cloud plan",
+    "delivery route",
+    "support tier",
+    "data plan",
+    "storage add-on",
+    "insurance policy",
+    "travel package",
+    "meal plan",
+    "training course",
+    "energy tariff"
+  ],
   "detail": [
     "We can hold the current price only until then.",
     "The schedule is tight, so an early answer helps.",
@@ -10,17 +54,107 @@
     "Accounts have flagged this as priority.",
     "We have one slot left at this rate."
   ],
-  "place": ["the Riverside Hall", "the Old Mill Cafe", "12 Kingsway", "the community centre", "the Hotel Meridian", "the library meeting room", "the station concourse"],
-  "org": ["Riverside Community Trust", "Ashfield University", "Greenway School", "The Maker Society", "Northside Neighbours", "Harbour Arts Centre"],
-  "event_name": ["the autumn fair", "the charity run", "the science open day", "the winter concert", "the community clean-up"],
-  "news_vendor": ["The Weekly Ledger", "Byte & Byte", "Field Notes", "The Neighbourhood Post", "Signal & Noise"],
-  "person": ["Sam", "Ravi", "Elena", "Tom", "Bea", "Yusuf", "Nina", "Oscar"],
-  "course": ["CS401 Machine Learning", "STAT220 Inference", "DS310 Data Systems", "ECON210 Policy"],
-  "amount_values": ["1,250.00", "980.50", "2,400.00", "310.75", "640.00", "1,120.90", "75.99", "48.20", "3,450.00", "525.25", "860.40", "1,975.00"],
-  "amount2_values": ["900.00", "1,000.00", "2,000.00", "500.00", "1,500.00"],
-  "percent": ["10%", "15%", "20%", "25%"],
-  "code_prefix": ["SAVE", "WELCOME", "SPRING", "MEMBER"],
-  "month": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
-  "ref_prefixes": ["INV", "REF", "ORD", "TKT", "PO", "CASE"],
+  "place": [
+    "the Riverside Hall",
+    "the Old Mill Cafe",
+    "12 Kingsway",
+    "the community centre",
+    "the Hotel Meridian",
+    "the library meeting room",
+    "the station concourse"
+  ],
+  "org": [
+    "Riverside Community Trust",
+    "Ashfield University",
+    "Greenway School",
+    "The Maker Society",
+    "Northside Neighbours",
+    "Harbour Arts Centre"
+  ],
+  "event_name": [
+    "the autumn fair",
+    "the charity run",
+    "the science open day",
+    "the winter concert",
+    "the community clean-up"
+  ],
+  "news_vendor": [
+    "The Weekly Ledger",
+    "Byte & Byte",
+    "Field Notes",
+    "The Neighbourhood Post",
+    "Signal & Noise"
+  ],
+  "person": [
+    "Sam",
+    "Ravi",
+    "Elena",
+    "Tom",
+    "Bea",
+    "Yusuf",
+    "Nina",
+    "Oscar"
+  ],
+  "course": [
+    "CS401 Machine Learning",
+    "STAT220 Inference",
+    "DS310 Data Systems",
+    "ECON210 Policy"
+  ],
+  "amount_values": [
+    "1,250.00",
+    "980.50",
+    "2,400.00",
+    "310.75",
+    "640.00",
+    "1,120.90",
+    "75.99",
+    "48.20",
+    "3,450.00",
+    "525.25",
+    "860.40",
+    "1,975.00"
+  ],
+  "amount2_values": [
+    "900.00",
+    "1,000.00",
+    "2,000.00",
+    "500.00",
+    "1,500.00"
+  ],
+  "percent": [
+    "10%",
+    "15%",
+    "20%",
+    "25%"
+  ],
+  "code_prefix": [
+    "SAVE",
+    "WELCOME",
+    "SPRING",
+    "MEMBER"
+  ],
+  "month": [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ],
+  "ref_prefixes": [
+    "INV",
+    "REF",
+    "ORD",
+    "TKT",
+    "PO",
+    "CASE"
+  ],
   "ticket_prefix": "TKT"
 }

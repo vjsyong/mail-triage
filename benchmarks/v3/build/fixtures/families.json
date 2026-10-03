@@ -34,7 +34,7 @@
          "evidence": ["{amount}", "{ref}", "nothing you need to do"]}
       ],
       "paraphrase": {"subject": "Receipt #{ref}",
-        "body": "Hi {owner_first},\n\nThis confirms your {amount} payment to {vendor} on {date}, reference {ref}. It is an automated receipt only - no action required.\n\n{vendor} Accounts",
+        "body": "Hi {owner_first},\n\nThis confirms your {amount} payment to {vendor} on {date}, reference {ref}. It is an automated receipt only - no action required.\n\n{vendor} accounts team",
         "evidence": ["{amount}", "{ref}", "no action required"]}
     },
     "payment_reminder": {
@@ -43,14 +43,14 @@
       "templates": [
         {"id": "pay_reminder_a",
          "subject": "Payment due {deadline}: {ref}",
-         "body": "Dear {owner_first},\n\nOur records show that {amount} for {service} is still outstanding. Please arrange payment by {deadline} to avoid a late fee. Your reference is {ref}.\n\nIf you have already paid, reply to this message and we will check.\n\n{vendor} Billing",
+         "body": "Dear {owner_first},\n\nOur records show that {amount} for {service} is still outstanding. Please arrange payment by {deadline} to avoid a late fee. Your reference is {ref}.\n\nIf you have already paid, reply to this message and we will check.\n\n{vendor} billing team",
          "evidence": ["{amount}", "{deadline}", "{ref}"]}
       ],
       "paraphrase": {"subject": "Reminder: {amount} outstanding ({ref})",
-        "body": "Hi {owner_first},\n\nA quick reminder that {amount} for {service} remains unpaid. Could you settle it before {deadline}? Reference {ref}. Reply if the payment has already gone through.\n\nThanks,\n{vendor} Billing",
+        "body": "Hi {owner_first},\n\nA quick reminder that {amount} for {service} remains unpaid. Could you settle it before {deadline}? Reference {ref}. Reply if the payment has already gone through.\n\nThanks,\n{vendor} billing team",
         "evidence": ["{amount}", "{deadline}", "{ref}"]},
       "resolved": {"subject": "Re: Payment due {deadline}: {ref}",
-        "body": "Dear {owner_first},\n\nWe have now received {amount} against {ref}. Your account is up to date and no action is required. Ignore any earlier reminder.\n\n{vendor} Billing",
+        "body": "Dear {owner_first},\n\nWe have now received {amount} against {ref}. Your account is up to date and no action is required. Ignore any earlier reminder.\n\n{vendor} billing team",
         "evidence": ["up to date", "no action required"]}
     },
     "invoice_receipt": {
@@ -72,7 +72,7 @@
       "templates": [
         {"id": "refund_a",
          "subject": "Refund processed for {ref}",
-         "body": "Hi {owner_first},\n\nWe have processed your refund of {amount} for {item}. Reference {ref}. The funds should reach your original payment method within 5 working days. No action is needed.\n\n{vendor} Support",
+         "body": "Hi {owner_first},\n\nWe have processed your refund of {amount} for {item}. Reference {ref}. The funds should reach your original payment method within 5 working days. No action is needed.\n\n{vendor} support team",
          "evidence": ["{amount}", "{ref}", "No action"]}
       ],
       "paraphrase": {"subject": "Your refund is on its way ({ref})",
@@ -85,7 +85,7 @@
       "templates": [
         {"id": "news_a",
          "subject": "{org} monthly digest - {month}",
-         "body": "Hi {owner_first},\n\nHere is your {month} digest from {org}. This month we cover {detail}. You are receiving this because you subscribed; unsubscribe any time.\n\nRead online: {link}\n\n{org} Editorial",
+         "body": "Hi {owner_first},\n\nHere is your {month} digest from {org}. This month we cover {detail}. You are receiving this because you subscribed; unsubscribe any time.\n\nRead online: {link}\n\n{org} editorial team",
          "evidence": ["subscribed", "{link}"]}
       ],
       "paraphrase": {"subject": "What's new at {org} this {month}",
@@ -113,7 +113,7 @@
       "templates": [
         {"id": "promo_a",
          "subject": "{vendor}: {percent} off {service} until {deadline}",
-         "body": "Hi {owner_first},\n\nAs a valued customer, enjoy {percent} off {service} at {vendor} until {deadline}. Use code {code} at checkout. Prices include the current offer only.\n\nShop: {link}\n\n{vendor} Marketing",
+         "body": "Hi {owner_first},\n\nAs a valued customer, enjoy {percent} off {service} at {vendor} until {deadline}. Use code {code} at checkout. Prices include the current offer only.\n\nShop: {link}\n\n{vendor} team",
          "evidence": ["{percent}", "{code}", "{deadline}"]}
       ],
       "paraphrase": {"subject": "A little something from {vendor}",
@@ -126,7 +126,7 @@
       "templates": [
         {"id": "security_a",
          "subject": "New sign-in to your {vendor} account",
-         "body": "Hi {owner_first},\n\nWe noticed a new sign-in to your {vendor} account from {place} on {date}. If this was you, no action is needed. If not, secure your account and reset your password.\n\n{vendor} Security",
+         "body": "Hi {owner_first},\n\nWe noticed a new sign-in to your {vendor} account from {place} on {date}. If this was you, no action is needed. If not, secure your account and reset your password.\n\n{vendor} security team",
          "evidence": ["new sign-in", "no action"]}
       ],
       "paraphrase": {"subject": "Security alert: unrecognised device",
@@ -139,7 +139,7 @@
       "templates": [
         {"id": "shipping_a",
          "subject": "Your order {ref} is on its way",
-         "body": "Hi {owner_first},\n\nOrder {ref} from {vendor} has shipped and is expected on {deadline}. Track it here: {link}. No reply is needed.\n\n{vendor} Logistics",
+         "body": "Hi {owner_first},\n\nOrder {ref} from {vendor} has shipped and is expected on {deadline}. Track it here: {link}. No reply is needed.\n\n{vendor} team",
          "evidence": ["{ref}", "{deadline}", "No reply"]}
       ],
       "paraphrase": {"subject": "Tracking update for {ref}",
@@ -152,14 +152,14 @@
       "templates": [
         {"id": "support_a",
          "subject": "Ticket {ticket}: we need one detail from you",
-         "body": "Hi {owner_first},\n\nThanks for contacting {vendor} support about {item}. To resolve ticket {ticket}, could you confirm {detail}? Once we have that we can finish within 24 hours.\n\n{vendor} Support",
+         "body": "Hi {owner_first},\n\nThanks for contacting {vendor} support about {item}. To resolve ticket {ticket}, could you confirm {detail}? Once we have that we can finish within 24 hours.\n\n{vendor} support team",
          "evidence": ["{ticket}", "confirm"]}
       ],
       "paraphrase": {"subject": "Re: your support request {ticket}",
-        "body": "Hello {owner_first},\n\nWe are on ticket {ticket} regarding {item}. Before we can close it, please reply with {detail}. After that, resolution is usually same-day.\n\n{vendor} Support",
+        "body": "Hello {owner_first},\n\nWe are on ticket {ticket} regarding {item}. Before we can close it, please reply with {detail}. After that, resolution is usually same-day.\n\n{vendor} support team",
          "evidence": ["{ticket}", "reply"]},
       "resolved": {"subject": "Ticket {ticket} resolved",
-        "body": "Hi {owner_first},\n\nYour support ticket {ticket} about {item} has been resolved and closed. Nothing further is needed.\n\n{vendor} Support",
+        "body": "Hi {owner_first},\n\nYour support ticket {ticket} about {item} has been resolved and closed. Nothing further is needed.\n\n{vendor} support team",
         "evidence": ["resolved", "Nothing further"]}
     },
     "project_request": {
@@ -210,14 +210,14 @@
       "templates": [
         {"id": "school_a",
          "subject": "{org}: {item} on {deadline}",
-         "body": "Dear {owner_first},\n\nThis is a reminder that {item} takes place on {deadline} at {place}. Please confirm your attendance by {deadline2}, or let us know if you cannot make it.\n\n{org} Office",
+         "body": "Dear {owner_first},\n\nThis is a reminder that {item} takes place on {deadline} at {place}. Please confirm your attendance by {deadline2}, or let us know if you cannot make it.\n\n{org} office",
          "evidence": ["{deadline}", "{place}", "confirm"]}
       ],
       "paraphrase": {"subject": "RSVP for {item}",
          "body": "Hello {owner_first},\n\nA quick note from {org}: {item} is scheduled for {deadline} at {place}. Kindly reply by {deadline2} to confirm.\n\n{org}",
          "evidence": ["{deadline}", "{place}", "reply"]},
       "resolved": {"subject": "Re: {org}: {item} on {deadline}",
-         "body": "Dear {owner_first},\n\nThank you - your place at {item} is confirmed and no further response is required. We look forward to seeing you on {deadline} at {place}.\n\n{org} Office",
+         "body": "Dear {owner_first},\n\nThank you - your place at {item} is confirmed and no further response is required. We look forward to seeing you on {deadline} at {place}.\n\n{org} office",
          "evidence": ["confirmed", "no further response"]}
     },
     "operational_alert": {
@@ -226,11 +226,11 @@
       "templates": [
         {"id": "alert_a",
          "subject": "[{vendor}] {item} threshold exceeded",
-         "body": "Automated alert for {owner_first}:\n\n{item} crossed its configured threshold at {date}. Current value {amount} against a limit of {amount2}. {detail} No action is required unless this persists.\n\n{vendor} Monitoring",
+         "body": "Automated alert for {owner_first}:\n\n{item} crossed its configured threshold at {date}. Current value {amount} against a limit of {amount2}. {detail} No action is required unless this persists.\n\n{vendor} monitoring team",
          "evidence": ["threshold", "{amount}", "No action"]}
       ],
       "paraphrase": {"subject": "{item} alert - {date}",
-         "body": "Hi {owner_first},\n\nYour monitoring reported {item} above its threshold ({amount} vs {amount2}) at {date}. This is informational; nothing needs doing right now.\n\n{vendor} Monitoring",
+         "body": "Hi {owner_first},\n\nYour monitoring reported {item} above its threshold ({amount} vs {amount2}) at {date}. This is informational; nothing needs doing right now.\n\n{vendor} monitoring team",
          "evidence": ["threshold", "{amount}", "nothing needs doing"]}
     },
     "suspicious_phishing": {
@@ -240,7 +240,7 @@
       "templates": [
         {"id": "phish_a",
          "subject": "Urgent: verify your {vendor} account or lose access",
-         "body": "Dear customer,\n\nYour {vendor} account will be suspended within 24 hours. Click {link} and confirm your details and password immediately to avoid closure. Failure to act may result in permanent loss.\n\n{vendor} Security Team",
+         "body": "Dear customer,\n\nYour {vendor} account will be suspended within 24 hours. Click {link} and confirm your details and password immediately to avoid closure. Failure to act may result in permanent loss.\n\n{vendor} security team",
          "evidence": ["Urgent", "suspend", "confirm your details"]}
       ],
       "paraphrase": {"subject": "Action required: unusual activity on {vendor}",
@@ -301,14 +301,14 @@
       "templates": [
         {"id": "event_reg_a",
          "subject": "Register for {org} {event_name}",
-         "body": "Hi {owner_first},\n\nRegistration for {org} {event_name} on {deadline} at {place} is now open. Places are limited, so please confirm your attendance by {deadline2}.\n\n{org} Events",
+         "body": "Hi {owner_first},\n\nRegistration for {org} {event_name} on {deadline} at {place} is now open. Places are limited, so please confirm your attendance by {deadline2}.\n\n{org} events team",
          "evidence": ["{deadline}", "{place}", "confirm"]}
       ],
       "paraphrase": {"subject": "Your place at {event_name}?",
-         "body": "Hello {owner_first},\n\n{org} is running {event_name} on {deadline} at {place}. Would you like a place? Kindly reply by {deadline2}.\n\n{org} Events",
+         "body": "Hello {owner_first},\n\n{org} is running {event_name} on {deadline} at {place}. Would you like a place? Kindly reply by {deadline2}.\n\n{org} events team",
          "evidence": ["{deadline}", "{place}", "reply"]},
       "resolved": {"subject": "Re: Register for {org} {event_name}",
-         "body": "Hi {owner_first},\n\nYour registration for {event_name} on {deadline} at {place} is confirmed. No further reply is needed.\n\n{org} Events",
+         "body": "Hi {owner_first},\n\nYour registration for {event_name} on {deadline} at {place} is confirmed. No further reply is needed.\n\n{org} events team",
          "evidence": ["confirmed", "No further reply"]}
     }
   }
