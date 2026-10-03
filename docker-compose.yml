@@ -1,6 +1,8 @@
 services:
   mail-triage:
     build: .
+    # Stable tag: docker-compose.second.yml (a second instance) reuses this image.
+    image: mail-triage:local
     container_name: mail-triage
     restart: unless-stopped
     env_file: .env

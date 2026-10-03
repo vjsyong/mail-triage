@@ -42,6 +42,13 @@ RERANK_TIMEOUT = int(get("RERANK_TIMEOUT", "90"))
 UI_HOST = get("UI_HOST", "0.0.0.0")
 UI_PORT = int(get("UI_PORT", "8097"))
 
+# OAuth redirect callback port pool (embedded proxy, tailnet-mode accounts).
+# One pool per app instance: a second instance on the same host shifts the range
+# (e.g. PROXY_REDIRECT_POOL_START=41820) and publishes/serves the matching ports,
+# so the redirect URIs it generates land on its own listeners.
+PROXY_REDIRECT_POOL_START = int(get("PROXY_REDIRECT_POOL_START", "41810"))
+PROXY_REDIRECT_POOL_SIZE = int(get("PROXY_REDIRECT_POOL_SIZE", "10"))
+
 DATA_DIR = get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 DB_PATH = os.path.join(DATA_DIR, "triage.db")
 

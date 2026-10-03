@@ -13,8 +13,10 @@ Layout under DATA_DIR/emailproxy/:
   emailproxy-stdout.log child process stdout/stderr (startup problems land here)
 
 The proxy binds its listeners to 127.0.0.1 INSIDE this app's container; nothing is
-published except the OAuth callback ports (compose maps 41810-41819 on host loopback for
-tailnet-mode redirects; loopback-mode flows complete via the paste-back box).
+published except the OAuth callback ports (compose maps the redirect pool on host
+loopback for tailnet-mode redirects; loopback-mode flows complete via the paste-back
+box). The pool defaults to 41810-41819; a second instance on the same host shifts it
+via PROXY_REDIRECT_POOL_START so its redirect URIs land on its own published ports.
 """
 import configparser
 import importlib.util
@@ -132,8 +134,8 @@ PRESETS = {
     },
 }
 
-REDIRECT_POOL_START = 41810
-REDIRECT_POOL_SIZE = 10
+REDIRECT_POOL_START = config.PROXY_REDIRECT_POOL_START
+REDIRECT_POOL_SIZE = config.PROXY_REDIRECT_POOL_SIZE
 IMAP_LOCAL_BASE = 15400   # custom-provider IMAP local ports
 SMTP_LOCAL_BASE = 16400   # custom-provider SMTP local ports
 AUTH_DEADLINE = 660       # seconds the proxy keeps an authorisation window open

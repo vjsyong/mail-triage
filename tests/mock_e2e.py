@@ -2646,6 +2646,23 @@ def main():
     ok, rerr = proxy_mod.remove_account("acct@example.com")
     check("removing the last account is a clean outcome", ok and not rerr)
     check("account removed", proxy_mod.list_accounts() == [])
+    # Multi-instance: the redirect pool start is environment-configurable so a
+    # second instance's tailnet redirect URIs land on its own published ports.
+    _pool_tmp = tempfile.mkdtemp(prefix="mt-pool-")
+    _pool_env = dict(os.environ, DATA_DIR=_pool_tmp, PROXY_REDIRECT_POOL_START="41820",
+                     IMAP_USER="")
+    _pr = subprocess.run([
+        sys.executable, "-c",
+        "import store, proxy; store.init_db();"
+        " rec, err = proxy.account_from_form({'provider': 'outlook',"
+        " 'email': 'pool@example.com', 'password': 'pw', 'client_id': 'cid',"
+        " 'redirect_mode': 'tailnet'});"
+        " proxy.upsert_account(rec); print('POOL', rec['redirect_port'], err,"
+        " proxy.redirect_uri(rec),"
+        " 'redirect_listen_address = http://127.0.0.1:41820' in proxy.config_text())"],
+        capture_output=True, text=True, timeout=120, cwd=PROJECT, env=_pool_env)
+    check("redirect pool offset: env moves allocation, redirect URI and listener",
+          "POOL 41820 None https://localhost:41820 True" in (_pr.stdout or ""))
 
     section("T28 flows: multi-step builder, execution, dedupe, dry-run", "core", "ui")
     import app as app_mod2
