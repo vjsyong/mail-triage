@@ -39,29 +39,9 @@ def _profile_reasons(report, profile, prof, policy):
             reasons.append("coverage %.3f below minimum %.3f"
                            % (rate, gates["min_coverage"]))
 
-    cat = prof.get("category") or {}
-    if cat.get("n"):
-        if cat.get("macro_f1") is not None \
-                and cat["macro_f1"] < gates["min_category_macro_f1"]:
-            reasons.append("category macro-F1 %.3f below %.3f"
-                           % (cat["macro_f1"], gates["min_category_macro_f1"]))
-    else:
-        reasons.append("no single-label category gold")
-
-    reply = prof.get("needs_reply") or {}
-    if reply.get("denominator"):
-        if reply["f1"] < gates["min_reply_f1"]:
-            reasons.append("reply F1 %.3f below %.3f"
-                           % (reply["f1"], gates["min_reply_f1"]))
-        if reply.get("missed_reply_rate") is not None \
-                and reply["missed_reply_rate"] > gates["max_missed_reply"]:
-            reasons.append("missed-reply rate %.3f above %.3f"
-                           % (reply["missed_reply_rate"], gates["max_missed_reply"]))
-    else:
-        reasons.append("no reply gold")
-
     workflow = prof.get("workflow") or {}
-    if profile == "workflow" and workflow.get("cases"):
+    is_workflow = profile == "workflow" and bool(workflow.get("cases"))
+    if is_workflow:
         completion = workflow.get("task_completion_rate")
         if completion is not None and completion < gates["min_workflow_completion"]:
             reasons.append("workflow completion %.3f below %.3f"
@@ -72,6 +52,27 @@ def _profile_reasons(report, profile, prof, policy):
         if workflow.get("compliance_violations"):
             reasons.append("workflow compliance violations: %d"
                            % workflow["compliance_violations"])
+    else:
+        cat = prof.get("category") or {}
+        if cat.get("n"):
+            if cat.get("macro_f1") is not None \
+                    and cat["macro_f1"] < gates["min_category_macro_f1"]:
+                reasons.append("category macro-F1 %.3f below %.3f"
+                               % (cat["macro_f1"], gates["min_category_macro_f1"]))
+        else:
+            reasons.append("no single-label category gold")
+
+        reply = prof.get("needs_reply") or {}
+        if reply.get("denominator"):
+            if reply["f1"] < gates["min_reply_f1"]:
+                reasons.append("reply F1 %.3f below %.3f"
+                               % (reply["f1"], gates["min_reply_f1"]))
+            if reply.get("missed_reply_rate") is not None \
+                    and reply["missed_reply_rate"] > gates["max_missed_reply"]:
+                reasons.append("missed-reply rate %.3f above %.3f"
+                               % (reply["missed_reply_rate"], gates["max_missed_reply"]))
+        else:
+            reasons.append("no reply gold")
 
     if not report["scope"]["complete"]:
         reasons.append("requested scope incomplete")
