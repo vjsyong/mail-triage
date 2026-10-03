@@ -1,0 +1,45 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v3 scenario",
+ "type": "object",
+ "required": ["schema_version", "scenario_id", "recipient", "frozen_time",
+              "messages", "relevant_facts", "source_provenance", "lineage_id"],
+ "additionalProperties": true,
+ "properties": {
+  "schema_version": {"const": "v3.0"},
+  "scenario_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+  "lineage_id": {"type": "string", "minLength": 1},
+  "recipient": {
+   "type": "object",
+   "required": ["persona", "policy_id"],
+   "additionalProperties": true,
+   "properties": {
+    "persona": {"type": "string", "minLength": 1},
+    "policy_id": {"type": "string", "minLength": 1},
+    "owner_name": {"type": "string"}
+   }
+  },
+  "frozen_time": {"type": "string", "minLength": 1},
+  "messages": {
+   "type": "array",
+   "minItems": 1,
+   "items": {
+    "type": "object",
+    "required": ["message_id", "from_addr", "to_addr", "subject", "date"],
+    "additionalProperties": true,
+    "properties": {
+     "message_id": {"type": "string", "minLength": 1},
+     "from_addr": {"type": "string"},
+     "to_addr": {"type": "string"},
+     "subject": {"type": "string"},
+     "date": {"type": "string"},
+     "snippet": {"type": "string"},
+     "body_ref": {"type": ["string", "null"]}
+    }
+   }
+  },
+  "relevant_facts": {"type": "array", "items": {"type": "string"}},
+  "source_provenance": {"type": "string", "minLength": 1},
+  "notes": {"type": "string"}
+ }
+}

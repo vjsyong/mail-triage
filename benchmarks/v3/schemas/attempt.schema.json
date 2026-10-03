@@ -1,0 +1,31 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v3 attempt",
+ "type": "object",
+ "required": ["schema_version", "run_id", "case_id", "attempt", "adapter_id",
+              "status", "output", "field_provenance"],
+ "additionalProperties": true,
+ "properties": {
+  "schema_version": {"const": "v3.0"},
+  "run_id": {"type": "string", "minLength": 3},
+  "case_id": {"type": "string", "minLength": 1},
+  "attempt": {"type": "integer", "minimum": 1},
+  "adapter_id": {"type": "string", "minLength": 1},
+  "profile": {"enum": ["native", "policy_conditioned", "full_context", "workflow"]},
+  "status": {"enum": ["ok", "error", "timeout", "missing", "skipped"]},
+  "output": {
+   "type": "object",
+   "additionalProperties": true,
+   "properties": {
+    "raw": {},
+    "parsed": {"type": ["object", "null"]},
+    "error": {"type": ["string", "null"]}
+   }
+  },
+  "field_provenance": {"type": "object"},
+  "tool_events": {"type": "array", "items": {"type": "object"}},
+  "timings": {"type": "object"},
+  "resources": {"type": "object"},
+  "request_sha256": {"type": "string"}
+ }
+}

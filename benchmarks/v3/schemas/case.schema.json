@@ -1,0 +1,42 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v3 case",
+ "type": "object",
+ "required": ["schema_version", "case_id", "scenario_id", "lineage_id", "task",
+              "input_profile", "policy_id", "split", "rendered_input", "gold_id"],
+ "additionalProperties": true,
+ "properties": {
+  "schema_version": {"const": "v3.0"},
+  "case_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+  "scenario_id": {"type": "string", "minLength": 1},
+  "lineage_id": {"type": "string", "minLength": 1},
+  "task": {"enum": ["decision", "full_response", "workflow"]},
+  "input_profile": {"enum": ["native", "policy_conditioned", "full_context", "workflow"]},
+  "policy_id": {"type": "string", "minLength": 1},
+  "split": {"enum": ["development", "calibration", "private_test",
+                     "private_shift", "real_holdout"]},
+  "gold_id": {"type": "string", "minLength": 1},
+  "relation": {
+   "type": ["object", "null"],
+   "required": ["relation_type", "stable_fields", "changing_fields"],
+   "additionalProperties": true,
+   "properties": {
+    "relation_type": {"enum": ["root", "invariance", "counterfactual",
+                               "duplicate", "clip_variant"]},
+    "stable_fields": {"type": "array", "items": {"type": "string"}},
+    "changing_fields": {"type": "array", "items": {"type": "string"}}
+   }
+  },
+  "rendered_input": {
+   "type": "object",
+   "required": ["system", "user"],
+   "additionalProperties": true,
+   "properties": {
+    "profile": {"enum": ["native", "policy_conditioned", "full_context", "workflow"]},
+    "system": {"type": "string"},
+    "user": {"type": "string"}
+   }
+  },
+  "tags": {"type": "array", "items": {"type": "string"}}
+ }
+}

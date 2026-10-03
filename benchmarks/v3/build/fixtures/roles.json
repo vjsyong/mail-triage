@@ -1,0 +1,31 @@
+{
+  "note": "Global semantic roles for policy category names. A family declares role preferences; the builder resolves them against the active policy's categories (first category in policy order whose role set intersects the family's roles). Generic template/persona/policy sharing is a coverage axis and is deliberately NOT a lineage edge.",
+  "category_roles": {
+    "Action": ["action"],
+    "Client": ["action", "client"],
+    "Order": ["action", "order"],
+    "Coursework": ["action", "coursework"],
+    "Appointment": ["action", "appointment"],
+    "Event": ["action", "event"],
+    "Application": ["action", "application"],
+    "Incident": ["action", "incident"],
+    "Volunteer": ["action", "volunteer"],
+    "Notification": ["notification"],
+    "Admin": ["notification", "admin"],
+    "Review": ["notification", "review"],
+    "Supplier": ["notification", "supplier"],
+    "Recruiter": ["notification", "recruiter"],
+    "Account": ["security", "account"],
+    "Alert": ["alert", "incident", "notification"],
+    "Newsletter": ["newsletter"],
+    "Receipt": ["receipt"],
+    "Invoice": ["receipt", "invoice"],
+    "Bill": ["receipt", "bill"],
+    "Donation": ["receipt", "donation"],
+    "Personal": ["personal"],
+    "Family": ["personal", "family"],
+    "Social": ["social", "personal"],
+    "Promo": ["promo"],
+    "Marketing": ["promo", "marketing"]
+  }
+}
