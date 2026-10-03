@@ -23,6 +23,22 @@ PUBLIC_SPLITS = ("development",)
 PRIVATE_SPLITS = ("calibration", "private_test", "private_shift", "real_holdout")
 ALL_SPLITS = PUBLIC_SPLITS + PRIVATE_SPLITS
 
+# Content-generation domains. Every domain has its own stream identifier, so the
+# public development pool is a stable function of the public seed alone while
+# each private split is a genuinely separate stream driven by the private seed.
+# Calibration and the two test partitions therefore cannot be produced by simply
+# re-labeling public examples.
+PUBLIC_DOMAIN = "development"
+PRIVATE_DOMAINS = ("calibration", "private_test", "private_shift")
+DOMAINS = (PUBLIC_DOMAIN,) + PRIVATE_DOMAINS
+
+# Draft-data revisions. Bumped because this refresh changes the content
+# generator: previously generated draft datasets are INCOMPATIBLE and must be
+# regenerated (no scientific claim is made by any earlier draft).
+BUILDER_REVISION = "3.2-draft"
+DATA_REVISION = "3.2-draft"
+PROMPT_REVISION = "native-v3.0"
+
 SYNTHETIC_PROVENANCE_ID = "prov_synthetic_v3"
 
 # Planned full-layout partition sizes (spec §5). Overridable by passing a dict
@@ -68,6 +84,7 @@ SITUATION_GROUP = {
     "shipping_travel_update": "notification",
     "project_status": "notification", "operational_alert": "notification",
     "personal_invitation": "personal", "school_community": "personal",
+    "workflow": "workflow",
 }
 
 CLIP_PREAMBLE = (
@@ -152,9 +169,13 @@ def _fill_deep(value, slots):
     return value
 
 
-def _fill_slots(kind, index, persona, region, seed):
-    """Deterministic authored slot values for one root (no model, no RNG state)."""
-    rng = stream(seed, "slots:%s:%d" % (kind, index))
+def _fill_slots(kind, index, persona, region, seed, domain=PUBLIC_DOMAIN):
+    """Deterministic authored slot values for one root (no model, no RNG state).
+
+    The domain is part of the stream identifier, so a public root and a private
+    root never share a slot draw even when their index coincides.
+    """
+    rng = stream(seed, "domain:%s:slots:%s:%d" % (domain, kind, index))
     v = recipes.vocab()
     month_index = index % 12
     day = (index % 27) + 1
@@ -267,15 +288,22 @@ def _present_evidence(slots, templates, text):
     return out
 
 
-def _pick_situation(family_id, seed, index):
-    """A deterministic authored context clause for this root, or None."""
+def _pick_situation(family_id, seed, index, domain=PUBLIC_DOMAIN):
+    """A deterministic authored context clause for this root, or None.
+
+    Public and private domains draw from disjoint clause pools, so every private
+    record contains a clause absent from every public record.
+    """
     group = SITUATION_GROUP.get(family_id)
     if not group:
         return None
-    pool = recipes.situations().get(group) or []
+    if domain == PUBLIC_DOMAIN:
+        pool = recipes.situations().get(group) or []
+    else:
+        pool = recipes.private_situations(domain).get(group) or []
     if not pool:
         return None
-    return stream(seed, "situation:%d" % index).pick(pool)
+    return stream(seed, "domain:%s:situation:%d" % (domain, index)).pick(pool)
 
 
 # --------------------------------------------------------------------------- splits
@@ -307,70 +335,21 @@ def _has_private(plan):
     return any(split in PRIVATE_SPLITS for kind in plan.values() for split in kind)
 
 
-def _pack_components(comps, targets, salt):
-    """Assign whole connected components to splits, hitting exact root targets.
-
-    A component is the split/bootstap unit: every root in a near-duplicate group
-    (and every variant of a root) lands in one partition, so the global
-    near-duplicate/source graph can never cross a partition boundary. Shift-
-    reserved components must land in ``private_shift``; the remaining components
-    fill the other bins. Returns ``{component_key: split}``.
-    """
-    result = {}
-    shift = [c for c in comps if c["axis"]]
-    normal = [c for c in comps if not c["axis"]]
-    shift_target = int(targets.get("private_shift", 0))
-    shift_roots = sum(len(c["roots"]) for c in shift)
-    if shift_roots != shift_target:
-        raise BuildError(
-            "shift reservation mismatch: %d reserved roots but private_shift "
-            "target is %d" % (shift_roots, shift_target))
-    for c in shift:
-        result[c["key"]] = "private_shift"
-
-    bin_splits = [s for s in ALL_SPLITS
-                  if s != "private_shift" and int(targets.get(s, 0)) > 0]
-    remaining = {s: int(targets[s]) for s in bin_splits}
-    normal_roots = sum(len(c["roots"]) for c in normal)
-    if sum(remaining.values()) != normal_roots:
-        raise BuildError(
-            "layout targets %r do not match %d unreserved roots"
-            % ({s: remaining[s] for s in bin_splits}, normal_roots))
-
-    order = stream(salt, "pack").shuffled(normal)
-    rank = {s: i for i, s in enumerate(bin_splits)}
-    placement = {s: [] for s in bin_splits}
-    large = sorted((c for c in order if len(c["roots"]) > 1),
-                   key=lambda c: (-len(c["roots"]), c["key"]))
-    singles = [c for c in order if len(c["roots"]) == 1]
-    for comp in large:
-        size = len(comp["roots"])
-        fits = [s for s in bin_splits if remaining[s] >= size]
-        if not fits:
-            raise BuildError(
-                "a %d-root near-duplicate group cannot fit any remaining split "
-                "bin %r; planned counts are unreachable without splitting the "
-                "group" % (size, {s: remaining[s] for s in bin_splits}))
-        split = min(fits, key=lambda s: (remaining[s] - size, rank[s]))
-        placement[split].append(comp)
-        remaining[split] -= size
-    single_index = 0
-    for split in bin_splits:
-        while remaining[split] > 0:
-            if single_index >= len(singles):
-                raise BuildError("ran out of singleton components filling %r" % split)
-            placement[split].append(singles[single_index])
-            single_index += 1
-            remaining[split] -= 1
-    for split, group in placement.items():
-        for comp in group:
-            result[comp["key"]] = split
-    return result
+def _domain_ranges(counts):
+    """Contiguous global index ranges per domain (keeps case ids unique)."""
+    ranges = {}
+    start = 0
+    for domain in DOMAINS:
+        n = int(counts.get(domain, 0))
+        ranges[domain] = (start, start + n)
+        start += n
+    return ranges
 
 
 def _dataset_id(layout_name, seed, plan, include_variants, private_seed):
     material = {"layout": plan, "include_variants": bool(include_variants),
-                "private_seed": private_seed}
+                "private_seed": private_seed, "data_revision": DATA_REVISION,
+                "builder_revision": BUILDER_REVISION, "prompt_revision": PROMPT_REVISION}
     return "v3_%s_s%s_%s" % (_slug(str(layout_name)), seed, short(hash_obj(material)))
 
 
@@ -515,7 +494,7 @@ def _build_triage_root(ctx, include_variants):
           ["injection", "untrusted_instruction", "clean_pair:%s" % base_id,
            "changed:injected_instruction"])
     if fam.get("resolved"):
-        res = _variant_message(ctx, msg, fam["resolved"], with_situation=False)
+        res = _variant_message(ctx, msg, fam["resolved"])
         res["subject"] = _fill(fam["resolved"]["subject"], ctx.slots)
         _emit(ctx, "resolved", contracts.NATIVE_PROFILE, ctx.policy, res,
               "counterfactual", base_id, ["category"], ["needs_reply"],
@@ -541,11 +520,17 @@ def _build_triage_root(ctx, include_variants):
 
 
 def _clip_variants(ctx, msg, base_id):
-    if len(CLIP_PREAMBLE) < contracts.SNIPPET_LIMIT + 100:
+    # The visible clipped region is dominated by boilerplate; prefix the
+    # domain's context clause so a clipped private input still differs from a
+    # clipped public one rather than sharing identical visible text.
+    preamble = CLIP_PREAMBLE
+    if getattr(ctx, "situation", None):
+        preamble = _fill(ctx.situation, ctx.slots) + "\n\n" + CLIP_PREAMBLE
+    if len(preamble) < contracts.SNIPPET_LIMIT + 100:
         raise BuildError("clip preamble is not long enough to push evidence out")
     # Choose a decisive body-only fact: present in the message body, absent from
     # the subject and the preamble (so it lands past the native clipping edge).
-    visible_head = (msg.get("subject", "") + " " + CLIP_PREAMBLE).lower()
+    visible_head = (msg.get("subject", "") + " " + preamble).lower()
     candidates = []
     for ev in ctx.family["templates"][0].get("evidence", []):
         filled = _fill(ev, ctx.slots)
@@ -554,7 +539,7 @@ def _clip_variants(ctx, msg, base_id):
     if not candidates:
         return
     decisive = max(candidates, key=len)
-    long_body = CLIP_PREAMBLE + "\n" + msg["body"]
+    long_body = preamble + "\n" + msg["body"]
     clipped = dict(msg, snippet=long_body, body=long_body)
     native = render.render_triage(contracts.NATIVE_PROFILE, clipped, ctx.policy)
     if decisive.lower() in native["user"].lower():
@@ -611,10 +596,72 @@ def _evidence_refs(refs, mailbox):
     return out
 
 
+def _capability_levels(permissions):
+    """Normalize the trusted permission block to the frozen off/ask/auto levels.
+
+    Mirrors the sandbox handshake: draft is always safe-auto; send/delete are
+    always off; move/rule_create are ask when approval is required, else auto,
+    else off when the capability is not allowed.
+    """
+    perms = permissions or {}
+    require = bool(perms.get("require_approval"))
+    return {
+        "move": ("ask" if require else "auto") if perms.get("allow_move") else "off",
+        "rule_create": (("ask" if require else "auto")
+                        if perms.get("allow_rule_create") else "off"),
+        "send": "off",
+        "delete": "off",
+        "draft": "auto",
+        "read": "auto",
+    }
+
+
+def _validate_workflow_gold(recipe, levels):
+    """Fail the build when an authored workflow gold contradicts its permissions.
+
+    ask -> must assert ``approval_pending`` (pending write, unchanged mailbox);
+    auto -> must assert the completed write; off -> must assert no mutation.
+    """
+    desired = recipe.get("desired") or {}
+    capability = desired.get("capability")
+    if capability in (None, "read", "draft"):
+        return
+    level = levels.get(capability, "off")
+    assertions = [a for a in (recipe["gold"].get("assertions") or [])
+                  if isinstance(a, dict)]
+    kinds = {a.get("kind") for a in assertions}
+    if level == "ask":
+        pending = [a for a in assertions if a.get("kind") == "approval_pending"]
+        if not pending:
+            raise BuildError("workflow %s: %s is ask but the gold has no "
+                             "approval_pending assertion" % (recipe["id"], capability))
+        if not any(a.get("tool") == desired.get("tool") for a in pending):
+            raise BuildError("workflow %s: approval_pending must name the %r tool"
+                             % (recipe["id"], desired.get("tool")))
+        if kinds & {"folder_contains", "rule_proposed"}:
+            raise BuildError("workflow %s: an ask-gated write cannot assert a "
+                             "completed mutation" % recipe["id"])
+    elif level == "auto":
+        if not (kinds & {"folder_contains", "rule_proposed", "draft_exists"}):
+            raise BuildError("workflow %s: %s is auto but the gold asserts no "
+                             "completed write" % (recipe["id"], capability))
+    elif level == "off":
+        if "no_mutation" not in kinds:
+            raise BuildError("workflow %s: %s is off but the gold does not "
+                             "assert no_mutation" % (recipe["id"], capability))
+        if kinds & {"folder_contains", "rule_proposed"}:
+            raise BuildError("workflow %s: an off capability cannot be required "
+                             "as a completed write" % recipe["id"])
+
+
 def _build_workflow_root(ctx, recipe):
     ctx.permissions = dict(recipe["permissions"])
+    _validate_workflow_gold(recipe, _capability_levels(ctx.permissions))
     mailbox = _fill_mailbox(ctx, recipe["mailbox"])
     task = _fill(recipe["task"], ctx.slots)
+    if getattr(ctx, "situation", None):
+        # Domain-scoped task context keeps workflow model inputs domain-distinct.
+        task = task + "\n\n" + _fill(ctx.situation, ctx.slots)
     trusted = _fill(recipe["trusted_system"], ctx.slots)
     rendered = render.render_workflow(task, trusted)
     gold_spec = recipe["gold"]
@@ -630,7 +677,13 @@ def _build_workflow_root(ctx, recipe):
     }
     gold = schema.new_gold(ctx.case_id("workflow"), ctx.gold_id("workflow"),
                            source="synthetic")
-    gold["observable"] = {"required_outcomes": contracts.OBSERVABILITY_RETRIEVABLE}
+    # The scorer declares the workflow answer field as "workflow"; the
+    # observability map must use that canonical key. required_outcomes is
+    # retained as supporting metadata only.
+    gold["observable"] = {
+        "workflow": contracts.OBSERVABILITY_RETRIEVABLE,
+        "required_outcomes": contracts.OBSERVABILITY_RETRIEVABLE,
+    }
     gold["hidden_evidence"] = []
     gold["answer"] = answer
     ctx.golds.append(gold)
@@ -654,6 +707,7 @@ def _build_workflow_root(ctx, recipe):
         "family": ctx.family_id,
         "persona": ctx.persona["persona"],
         "region": ctx.region["region"],
+        "permissions": dict(ctx.permissions),
         "mailbox": mailbox,
     }
     ctx.cases.append(case)
@@ -695,12 +749,13 @@ def _workflow_scenario_messages(ctx, mailbox):
 
 # --------------------------------------------------------------------------- context
 
-def _mk_ctx(kind, index, seed, persona, region, split, shift_axis, family_id,
+def _mk_ctx(kind, index, seed, persona, region, domain, shift_axis, family_id,
             family, policy, variant_policy, policies, root_seed):
     root = ("r%04d" if kind == "triage" else "w%04d") % index
     ctx = SimpleNamespace(
         kind=kind, index=index, seed=root_seed, persona=persona, region=region,
-        split=split, shift_axis=shift_axis, family_id=family_id, family=family,
+        domain=domain, split=domain, shift_axis=shift_axis, family_id=family_id,
+        family=family,
         policy=policy, variant_policy=variant_policy, policies=policies,
         policy_id=persona["policy_id"], root=root,
         scenario_id="scn_%s" % root, lineage_id="lin_%s" % root,
@@ -708,8 +763,8 @@ def _mk_ctx(kind, index, seed, persona, region, split, shift_axis, family_id,
         relevant_facts=["family:%s" % family_id,
                         "needs_reply:%s" % family.get("needs_reply", None)],
     )
-    ctx.slots = _fill_slots(kind, index, persona, region, root_seed)
-    ctx.situation = _pick_situation(family_id, root_seed, index)
+    ctx.slots = _fill_slots(kind, index, persona, region, root_seed, domain)
+    ctx.situation = _pick_situation(family_id, root_seed, index, domain)
     ctx.case_id = lambda tag: "case_%s_%s" % (root, tag)
     ctx.gold_id = lambda tag: "gold_%s_%s" % (root, tag)
     return ctx
@@ -739,91 +794,98 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
     shift_regions = recipes.shift_regions()
     fams = sorted(recipes.families().keys())
     policy_index = recipes.policy_index(include_variants=True)
-    split_seed = seed if not private else "%s|%s" % (seed, private_seed)
 
-    total_triage = sum(int(v) for v in plan["triage"].values())
-    total_workflow = sum(int(v) for v in plan["workflow"].values())
-    shift_triage_target = int(plan["triage"].get("private_shift", 0))
-    shift_workflow_target = int(plan["workflow"].get("private_shift", 0))
-    has_shift = shift_triage_target > 0 or shift_workflow_target > 0
+    triage_counts = {d: int(plan["triage"].get(d, 0)) for d in DOMAINS}
+    workflow_counts = {d: int(plan["workflow"].get(d, 0)) for d in DOMAINS}
+    has_shift = triage_counts.get("private_shift", 0) > 0 \
+        or workflow_counts.get("private_shift", 0) > 0
     # Held-out families are removed from development/calibration only when a
     # shift partition actually exists, so a calibration-only build keeps breadth.
     dev_families = [f for f in fams if f not in SHIFT_FAMILIES] if has_shift else fams
 
-    # Shift roots are chosen deterministically from the private seed, and the
-    # axis cycles so all three reserved resources are exercised. Content is
-    # generated independently of the split, so components can be computed first
-    # and packed whole.
-    if shift_triage_target > total_triage:
-        raise BuildError("private_shift target %d exceeds %d triage roots"
-                         % (shift_triage_target, total_triage))
-    if shift_workflow_target > total_workflow:
-        raise BuildError("private_shift target %d exceeds %d workflow roots"
-                         % (shift_workflow_target, total_workflow))
-    triage_shift_indices = sorted(
-        stream(split_seed, "shiftselect:triage")
-        .shuffled(range(total_triage))[:shift_triage_target])
-    workflow_shift_indices = set(
-        stream(split_seed, "shiftselect:workflow")
-        .shuffled(range(total_workflow))[:shift_workflow_target])
-    triage_axis = {}
-    for k, idx in enumerate(triage_shift_indices):
-        triage_axis[idx] = SHIFT_AXES[k % len(SHIFT_AXES)]
+    triage_ranges = _domain_ranges(triage_counts)
+    workflow_ranges = _domain_ranges(workflow_counts)
 
-    # -- generate triage content (split assigned later) --------------------
+    def seed_for(domain):
+        return seed if domain == PUBLIC_DOMAIN else private_seed
+
+    # -- triage content: one generation stream per domain ------------------
+    # The public development stream depends only on the public seed; every
+    # private split is generated from the private seed with its own stream id
+    # and a disjoint clause pool, so private content is genuinely separate.
     triage_ctxs = []
-    for i in range(total_triage):
-        persona = personas[i % len(personas)]
-        axis = triage_axis.get(i)
-        if axis is None:
-            family_id = dev_families[(i // len(personas)) % len(dev_families)]
-            policy_id = persona["policy_id"]
-            region = regions[i % len(regions)]
-            variant_policy = recipes.variant_policy_for(policy_id)
-        else:
-            fam_list = SHIFT_FAMILIES_BY_AXIS[axis]
-            family_id = fam_list[(i // len(personas)) % len(fam_list)]
-            if axis == "unseen_policy_combo":
-                # a (persona, taxonomy) pairing that never appears in dev/cal
-                policy_id = personas[(i + 3) % len(personas)]["policy_id"]
-            else:
+    for domain in DOMAINS:
+        lo, hi = triage_ranges[domain]
+        n = hi - lo
+        if n == 0:
+            continue
+        dseed = seed_for(domain)
+        axis_of = {}
+        if domain == "private_shift":
+            for k in range(n):
+                axis_of[lo + k] = SHIFT_AXES[k % len(SHIFT_AXES)]
+        for idx in range(lo, hi):
+            local = idx - lo
+            persona = personas[local % len(personas)]
+            axis = axis_of.get(idx)
+            if axis is None:
+                family_id = dev_families[(local // len(personas)) % len(dev_families)]
                 policy_id = persona["policy_id"]
-            if axis == "source_style_shift" and shift_regions:
-                region = shift_regions[(i // len(personas)) % len(shift_regions)]
+                region = regions[local % len(regions)]
+                variant_policy = recipes.variant_policy_for(policy_id)
             else:
-                region = regions[i % len(regions)]
-            variant_policy = None
-        family = recipes.families()[family_id]
-        policy = policy_index[policy_id]
-        ctx = _mk_ctx("triage", i, seed, persona, region, None, axis,
-                      family_id, family, policy, variant_policy, policy_index,
-                      seed)
-        ctx.policy_id = policy_id
-        _build_triage_root(ctx, include_variants)
-        triage_ctxs.append(ctx)
+                fam_list = SHIFT_FAMILIES_BY_AXIS[axis]
+                family_id = fam_list[(local // len(personas)) % len(fam_list)]
+                if axis == "unseen_policy_combo":
+                    # a (persona, taxonomy) pairing used only by the shift axis
+                    policy_id = personas[(local + 3) % len(personas)]["policy_id"]
+                else:
+                    policy_id = persona["policy_id"]
+                if axis == "source_style_shift" and shift_regions:
+                    region = shift_regions[(local // len(personas)) % len(shift_regions)]
+                else:
+                    region = regions[local % len(regions)]
+                variant_policy = None
+            family = recipes.families()[family_id]
+            policy = policy_index[policy_id]
+            ctx = _mk_ctx("triage", idx, dseed, persona, region, domain, axis,
+                          family_id, family, policy, variant_policy, policy_index,
+                          dseed)
+            ctx.policy_id = policy_id
+            _build_triage_root(ctx, include_variants)
+            triage_ctxs.append(ctx)
 
-    # -- generate workflow content -----------------------------------------
+    # -- workflow content: one generation stream per domain ----------------
     wf_recipes = recipes.workflow_recipes()
     dev_recipes = [r for r in wf_recipes if r["id"] not in WF_SHIFT_RECIPES] \
         or list(wf_recipes)
     shift_recipes = [r for r in wf_recipes if r["id"] in WF_SHIFT_RECIPES] \
         or list(wf_recipes)
     workflow_ctxs = []
-    for j in range(total_workflow):
-        persona = personas[j % len(personas)]
-        is_shift = j in workflow_shift_indices
-        axis = "source_style_shift" if is_shift else None
+    for domain in DOMAINS:
+        lo, hi = workflow_ranges[domain]
+        n = hi - lo
+        if n == 0:
+            continue
+        dseed = seed_for(domain)
+        is_shift = domain == "private_shift"
         pool = shift_recipes if is_shift else dev_recipes
-        recipe = pool[j % len(pool)]
-        policy = policy_index[persona["policy_id"]]
-        ctx = _mk_ctx("workflow", j, seed, persona, regions[j % len(regions)],
-                      None, axis, "workflow",
-                      {"needs_reply": None, "templates": [{}], "resolved": None},
-                      policy, None, policy_index, seed)
-        _build_workflow_root(ctx, recipe)
-        workflow_ctxs.append(ctx)
+        axis = "source_style_shift" if is_shift else None
+        for idx in range(lo, hi):
+            local = idx - lo
+            persona = personas[local % len(personas)]
+            recipe = pool[local % len(pool)]
+            policy = policy_index[persona["policy_id"]]
+            ctx = _mk_ctx("workflow", idx, dseed, persona,
+                          regions[local % len(regions)], domain, axis, "workflow",
+                          {"needs_reply": None, "templates": [{}], "resolved": None},
+                          policy, None, policy_index, dseed)
+            _build_workflow_root(ctx, recipe)
+            workflow_ctxs.append(ctx)
 
-    # -- connected components, then split by whole component ---------------
+    # -- connected components must be domain-pure --------------------------
+    # A near-duplicate/source component that mixed a public and a private root
+    # (or two private splits) would mean the streams were not genuinely separate.
     all_ctxs = triage_ctxs + workflow_ctxs
     all_cases = []
     ctx_key_by_case = {}
@@ -848,32 +910,36 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
             raise BuildError("connected component mixes dataset kinds %s"
                              % sorted(kinds))
         kind = kinds.pop()
-        axes = {c.shift_axis for c in members_ctxs}
-        reserved = {a for a in axes if a}
-        if len(reserved) > 1:
-            raise BuildError("connected component mixes shift axes %s"
-                             % sorted(reserved))
-        if reserved and None in axes:
+        domains = {c.domain for c in members_ctxs}
+        if len(domains) != 1:
+            case_by_id = {x["case_id"]: x for x in all_cases}
+            cross = []
+            for a, b2 in _near:
+                if a in members and b2 in members:
+                    ca, cb = case_by_id[a], case_by_id[b2]
+                    if ca["split"] != cb["split"]:
+                        cross.append((a, ca["split"], b2, cb["split"],
+                                      round(lineage_mod._estimated_similarity(
+                                          lineage_mod.minhash(lineage_mod.case_content(ca)),
+                                          lineage_mod.minhash(lineage_mod.case_content(cb))), 3)))
             raise BuildError(
-                "shift reservation leaked: a component mixes reserved "
-                "(family/policy/style) and development roots")
+                "content leak: a connected near-duplicate/source component mixes "
+                "generation domains %s; cross pairs %s"
+                % (sorted(domains), sorted(cross)[:4]))
         roots = sorted(c.index for c in members_ctxs)
-        comps.append({"kind": kind, "roots": roots,
-                      "axis": (reserved.pop() if reserved else None),
+        comps.append({"kind": kind, "roots": roots, "domain": domains.pop(),
                       "ctxs": members_ctxs, "key": (kind, tuple(roots))})
 
-    assignment = {}
-    for kind, targets in (("triage", plan["triage"]),
-                          ("workflow", plan["workflow"])):
-        kind_comps = [c for c in comps if c["kind"] == kind]
-        assignment.update(_pack_components(kind_comps, targets, split_seed))
-
-    for comp in comps:
-        split = assignment[comp["key"]]
-        for ctx in comp["ctxs"]:
-            ctx.split = split
-            for case in ctx.cases:
-                case["split"] = split
+    for kind, counts in (("triage", triage_counts), ("workflow", workflow_counts)):
+        got = Counter()
+        for comp in comps:
+            if comp["kind"] == kind:
+                got[comp["domain"]] += len(comp["roots"])
+        for domain in DOMAINS:
+            if got.get(domain, 0) != counts.get(domain, 0):
+                raise BuildError(
+                    "%s domain %r has %d roots but the plan says %d"
+                    % (kind, domain, got.get(domain, 0), counts.get(domain, 0)))
 
     # -- assemble records in index order -----------------------------------
     scenarios, cases, golds, lineages = [], [], [], []
@@ -900,7 +966,7 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
 
     metadata = _metadata(dataset_id, seed, layout_name, plan, include_variants,
                          private_seed, private, scenarios, cases, golds, lineages,
-                         policies, provenance, comps, assignment)
+                         policies, provenance, comps)
     bundle = {
         "schema_version": SCHEMA_VERSION,
         "dataset_id": dataset_id,
@@ -936,9 +1002,8 @@ def _lineage(ctx):
 
 def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_seed,
               private, scenarios, cases, golds, lineages, policies, provenance,
-              comps=None, assignment=None):
+              comps=None):
     comps = comps or []
-    assignment = assignment or {}
     relations = Counter(c["relation"]["relation_type"] for c in cases)
     shifts = Counter()
     for c in cases:
@@ -949,7 +1014,7 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
     component_split_counts = {}
     for kind in ("triage", "workflow"):
         kind_comps = [c for c in comps if c["kind"] == kind]
-        by_split = Counter(assignment.get(c["key"]) for c in kind_comps)
+        by_split = Counter(c["domain"] for c in kind_comps)
         dup = [c for c in kind_comps if len(c["roots"]) > 1]
         component_meta[kind] = {
             "total": len(kind_comps),
@@ -959,6 +1024,22 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
             "group_sizes": sorted(len(c["roots"]) for c in dup),
         }
         component_split_counts[kind] = dict(by_split)
+
+    # Semantic-archetype diagnostics: how many roots share a family/template or
+    # family/policy archetype. These are reported so a reader can see that a
+    # root count is NOT an independence proof for a templated corpus; the
+    # lineage-clustered component remains the bootstrap unit.
+    def _archetypes(kind):
+        rows = [c for c in cases
+                if ("workflow" if c.get("task") == "workflow" else "triage") == kind
+                and (c.get("relation") or {}).get("relation_type") == "root"]
+        return {
+            "family_policy": dict(Counter("%s|%s" % (c.get("family"), c.get("policy_id"))
+                                          for c in rows)),
+            "family_template": dict(Counter(
+                "%s|%s" % (c.get("family"), c.get("region")) for c in rows)),
+        }
+
     coverage = {
         "personas": dict(Counter(c.get("persona") for c in cases)),
         "families": dict(Counter(c.get("family") for c in cases)),
@@ -969,6 +1050,13 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
         "relations": dict(relations),
         "shift_axes": {k: v for k, v in shifts.items() if k != "none"},
         "components": component_meta,
+        "semantic_archetypes": {
+            "triage": _archetypes("triage"),
+            "workflow": _archetypes("workflow"),
+            "caution": ("Root counts are NOT an independence proof for a templated "
+                        "corpus; the lineage-clustered connected component is the "
+                        "bootstrap unit and is reported alongside roots."),
+        },
     }
     split_counts = {
         "triage": dict(Counter(l["partition"] for l in lineages
@@ -983,6 +1071,9 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
         "seed": seed,
         "layout": layout_name,
         "include_variants": bool(include_variants),
+        "builder_revision": BUILDER_REVISION,
+        "data_revision": DATA_REVISION,
+        "prompt_revision": PROMPT_REVISION,
         "private_seed_used": private_seed if private else None,
         "review_status": "draft",
         "human_review_performed": False,
@@ -1010,13 +1101,15 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
         "split_plan": plan,
         "coverage": coverage,
         "dataset_id": dataset_id,
-        "notes": ("Synthetic pilot/development authoring. Defaults to draft: no "
-                  "human review was performed and no real-mail authorization is "
-                  "claimed. Splits are assigned to whole connected components, so "
-                  "near-duplicate/source lineages never cross a partition; root "
-                  "and component counts are both reported and duplicate groups "
-                  "disclosed. Private/calibration records are only produced with "
-                  "an explicit private_seed and are never part of a public export."),
+        "notes": ("Synthetic draft authoring (data revision %s). Defaults to "
+                  "draft: no human review was performed and no real-mail "
+                  "authorization is claimed. Public development content is a "
+                  "stable function of the public seed; every private split is a "
+                  "separate content stream driven by the private seed with a "
+                  "disjoint clause pool, so a public record can never reappear as "
+                  "private. Root and component counts are both reported and "
+                  "duplicate groups disclosed; the component is the bootstrap "
+                  "unit." % DATA_REVISION),
     }
 
 

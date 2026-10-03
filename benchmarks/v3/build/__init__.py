@@ -64,6 +64,10 @@ def _subset_bundle(bundle, splits):
     private_present = any(c.get("split") in PRIVATE_SPLITS for c in keep_cases)
     metadata["contains_private"] = private_present
     metadata["visibility"] = "private" if private_present else "public"
+    if not private_present:
+        # Never leak the secret private seed through a public artifact.
+        metadata.pop("private_seed_used", None)
+        metadata["private_seed_used"] = None
     components = summarize_components(keep_cases, keep_scenarios)
     counts = dict(metadata.get("counts") or {})
     counts.update({

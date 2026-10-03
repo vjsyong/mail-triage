@@ -55,6 +55,12 @@ def situations():
     return _load("situations.json")["groups"]
 
 
+def private_situations(domain):
+    """Domain-scoped situation clauses for a private split (disjoint from public)."""
+    pools = _load("situations.json").get("private_groups") or {}
+    return pools.get(domain) or {}
+
+
 def category_roles():
     return _load("roles.json")["category_roles"]
 
@@ -147,6 +153,41 @@ def validate_recipes():
         for key in ("id", "task", "trusted_system", "permissions", "mailbox", "gold"):
             if key not in r:
                 problems.append("workflow %r missing %r" % (r.get("id"), key))
+    problems.extend(_situation_disjointness_problems())
     if problems:
         raise BuildError("authored recipes invalid:\n  " + "\n  ".join(problems))
     return True
+
+
+def _situation_disjointness_problems():
+    """The public and each private clause pool must be pairwise disjoint.
+
+    This is what guarantees a private record always contains a clause absent
+    from every public record, so a previously published public example can never
+    reappear (byte-identically or normalised) as a private one.
+    """
+    problems = []
+    raw = _load("situations.json")
+    groups = raw.get("groups") or {}
+    private = raw.get("private_groups") or {}
+    for domain, pools in private.items():
+        for group, clauses in pools.items():
+            if group not in groups:
+                problems.append("private situations %r has unknown group %r"
+                                % (domain, group))
+                continue
+            public_set = set(groups[group])
+            if not clauses:
+                problems.append("private situations %r/%r is empty" % (domain, group))
+            if public_set & set(clauses):
+                problems.append("private situations %r/%r overlap the public pool"
+                                % (domain, group))
+    domains = list(private)
+    for i in range(len(domains)):
+        for j in range(i + 1, len(domains)):
+            a, b = domains[i], domains[j]
+            for group in set(private[a]) & set(private[b]):
+                if set(private[a][group]) & set(private[b][group]):
+                    problems.append("private situations %r and %r overlap on %r"
+                                    % (a, b, group))
+    return problems

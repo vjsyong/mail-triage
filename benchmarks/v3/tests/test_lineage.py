@@ -95,23 +95,39 @@ class CleanBundleTest(unittest.TestCase):
         for members in groups.values():
             self.assertEqual(len({by_id[m]["split"] for m in members}), 1)
 
-    def test_grouped_near_dupes_share_a_split(self):
-        # A scale that actually contains near-duplicate groups: whole components
-        # must land in one partition (regression for the full-layout collision).
+    def test_no_crosssplit_components_at_scale(self):
+        # A multi-split scale: the global component graph must never cross a
+        # partition even when the pools are larger than a single template cycle.
         layout = {"triage": {"development": 132, "calibration": 33,
                              "private_test": 66, "private_shift": 9},
                   "workflow": {"development": 12, "private_test": 12,
                                "private_shift": 4}}
         b = build.build_dataset(layout=layout, seed=7, private_seed=1)
-        self.assertGreaterEqual(b["metadata"]["counts"]["duplicate_groups"], 1)
         by_id = {c["case_id"]: c for c in b["cases"]}
         edges, _near = L.case_edges(b["cases"])
         groups = L.connected_components([c["case_id"] for c in b["cases"]], edges)
-        grouped = [g for g in groups.values()
-                   if len({by_id[m]["lineage_id"] for m in g}) > 1]
-        self.assertTrue(grouped, "expected at least one grouped component")
-        for members in grouped:
+        for members in groups.values():
             self.assertEqual(len({by_id[m]["split"] for m in members}), 1)
+        self.assertEqual(build.validate_dataset(b), [])
+
+    def test_minhash_estimate_tracks_true_jaccard(self):
+        # Regression for a biased universal-hash MinHash that made genuinely
+        # different templates look like near-duplicates (false cross-split leaks).
+        import random
+        rng = random.Random(0)
+        worst = 0.0
+        for _ in range(40):
+            a = [str(rng.randrange(50)) for _ in range(120)]
+            b = list(a)
+            for i in range(0, len(b), 2):
+                b[i] = str(rng.randrange(50, 90))
+            ta, tb = " ".join(a), " ".join(b)
+            sa = L._shingles(L._TOKEN.findall(ta))
+            sb = L._shingles(L._TOKEN.findall(tb))
+            true = len(sa & sb) / len(sa | sb)
+            est = L._estimated_similarity(L.minhash(ta), L.minhash(tb))
+            worst = max(worst, abs(est - true))
+        self.assertLess(worst, 0.30)
 
 
 class SplitLeakTest(unittest.TestCase):

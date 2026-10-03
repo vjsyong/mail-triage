@@ -9,9 +9,10 @@ dataset).
 import hashlib
 import re
 
-# MinHash / LSH parameters. 24 permutations in 6 bands of 4 rows is enough to
-# find cross-root duplicates and near-duplicates without O(n^2) all-pairs work.
-NUM_HASHES = 24
+# MinHash / LSH parameters. 48 permutations in 12 bands of 4 rows keeps the
+# Jaccard estimate tight enough (~0.07 stdev) that genuinely different
+# templates are not mistaken for near-duplicates, without any all-pairs work.
+NUM_HASHES = 48
 ROWS = 4
 DEFAULT_NEAR_DUPE = 0.90
 _TOKEN = re.compile(r"[a-z0-9]+")
@@ -26,12 +27,12 @@ def _splitmix(seed):
     return (z ^ (z >> 31)) & _MASK
 
 
-# Deterministic universal-hash permutations: one stable shingle hash is
-# computed per shingle and cheaply re-mixed per permutation. This keeps the
-# detection exact and run-stable (no ``hash()``) while making a full 12k-case
-# lint practical.
-_PERMS = tuple((_splitmix(2 * k + 1) | 1, _splitmix(2 * k + 2))
-               for k in range(NUM_HASHES))
+# One stable shingle hash, re-mixed per permutation with a nonlinear mixer.
+# ``h ^ seed`` then splitmix is an unbiased MinHash permutation family (a plain
+# ``h * a + b mod 2**64`` is *not*: its low bits are structured, which biases
+# the estimate upward and caused false near-duplicate merges). No ``hash()`` is
+# used, so results are stable across runs and interpreters.
+_PERM_SEEDS = tuple(_splitmix(2 * k + 1) for k in range(NUM_HASHES))
 
 
 def normalize_text(text):
@@ -65,8 +66,8 @@ def minhash(text, num_hashes=NUM_HASHES):
     if not shingles:
         return None
     base = [_shingle_hash(s) for s in shingles]
-    perms = _PERMS[:num_hashes]
-    return tuple(min(((h * a + b) & _MASK) for h in base) for a, b in perms)
+    seeds = _PERM_SEEDS[:num_hashes]
+    return tuple(min(_splitmix(h ^ s) for h in base) for s in seeds)
 
 
 def _estimated_similarity(sig_a, sig_b):

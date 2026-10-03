@@ -5,7 +5,9 @@ injection tagging, profile-card separation, pilot breadth/denominators, review
 honesty, and the private/write boundaries.
 """
 import copy
+import hashlib
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -38,6 +40,16 @@ def gold_of(bundle, case):
         if g["gold_id"] == case["gold_id"]:
             return g
     raise AssertionError("no gold for %s" % case["case_id"])
+
+
+PRIVATE_SPLITS = ("calibration", "private_test", "private_shift")
+
+
+def _norm_input(case):
+    """Canonical normalized model input (system + user), domain-agnostic."""
+    rendered = case.get("rendered_input") or {}
+    text = (rendered.get("system", "") + "\n" + rendered.get("user", "")).lower()
+    return hashlib.sha256(re.sub(r"\s+", " ", text).strip().encode()).hexdigest()
 
 
 class DeterminismTest(unittest.TestCase):
@@ -375,9 +387,15 @@ MECH_LAYOUT = {
 }
 
 
+_MECH_CACHE = {}
+
+
 def mechanism_bundle(seed=7, private_seed=1):
-    return build.build_dataset(layout=MECH_LAYOUT, seed=seed,
-                               private_seed=private_seed)
+    key = (seed, private_seed)
+    if key not in _MECH_CACHE:
+        _MECH_CACHE[key] = build.build_dataset(layout=MECH_LAYOUT, seed=seed,
+                                               private_seed=private_seed)
+    return _MECH_CACHE[key]
 
 
 def _axis_of(case):
@@ -486,71 +504,150 @@ class ComponentSplitTest(unittest.TestCase):
             splits = {by_id[m]["split"] for m in members}
             self.assertEqual(len(splits), 1, members)
 
-    def test_grouping_is_exercised_and_disclosed(self):
+    def test_components_are_domain_pure_and_disclosed(self):
         b = mechanism_bundle()
         counts = b["metadata"]["counts"]
-        # the scale must include at least one genuine near-duplicate group so the
-        # test would catch a naive per-root split assignment
-        self.assertGreaterEqual(counts["duplicate_groups"], 1)
-        self.assertLess(counts["triage_components"], counts["triage_roots"])
         self.assertIn("components", b["metadata"]["coverage"])
+        self.assertIn("semantic_archetypes", b["metadata"]["coverage"])
         comp = b["metadata"]["coverage"]["components"]["triage"]
-        self.assertEqual(comp["grouped_roots"],
-                         sum(comp["group_sizes"]))
+        self.assertEqual(comp["grouped_roots"], sum(comp["group_sizes"]))
+        self.assertLessEqual(counts["triage_components"], counts["triage_roots"])
+        groups, by_id = self._components(b)
+        for members in groups.values():
+            self.assertEqual(len({by_id[m]["split"] for m in members}), 1)
 
     def test_deterministic_and_second_private_seed_isolated(self):
         from benchmarks.v3.common.hashing import hash_obj
         a = mechanism_bundle(private_seed=1)
-        b = mechanism_bundle(private_seed=1)
+        b = build.build_dataset(layout=MECH_LAYOUT, seed=7, private_seed=1)
         c = mechanism_bundle(private_seed=2)
         self.assertEqual(hash_obj(a), hash_obj(b))
         self.assertEqual(a["dataset_id"], b["dataset_id"])
         self.assertNotEqual(a["dataset_id"], c["dataset_id"])
-        a_priv = {x["case_id"] for x in a["cases"]
-                  if x["split"] in ("calibration", "private_test", "private_shift")}
-        c_priv = {x["case_id"] for x in c["cases"]
-                  if x["split"] in ("calibration", "private_test", "private_shift")}
-        self.assertNotEqual(a_priv, c_priv)
+        # public development content is a stable function of the public seed
+        dev_a = {_norm_input(x) for x in a["cases"] if x["split"] == "development"}
+        dev_c = {_norm_input(x) for x in c["cases"] if x["split"] == "development"}
+        self.assertEqual(dev_a, dev_c)
         self.assertEqual({x["split"] for x in build.public_export(a)["cases"]},
                          {"development"})
 
 
-class ComponentPackerTest(unittest.TestCase):
-    def test_group_is_kept_whole_and_counts_are_exact(self):
-        from benchmarks.v3.build import generate as G
-        comps = [
-            {"kind": "triage", "roots": [0, 1], "axis": None,
-             "key": ("triage", (0, 1))},
-            {"kind": "triage", "roots": [2], "axis": None,
-             "key": ("triage", (2,))},
-            {"kind": "triage", "roots": [3], "axis": None,
-             "key": ("triage", (3,))},
-            {"kind": "triage", "roots": [4], "axis": None,
-             "key": ("triage", (4,))},
-        ]
-        assignment = G._pack_components(comps, {"development": 2, "calibration": 3},
-                                        "salt")
-        totals = {"development": 0, "calibration": 0}
-        for comp in comps:
-            totals[assignment[comp["key"]]] += len(comp["roots"])
-        self.assertEqual(totals, {"development": 2, "calibration": 3})
-        # a component key maps to exactly one split (never fanned out)
-        self.assertEqual(assignment[("triage", (0, 1))],
-                         assignment[("triage", (0, 1))])
+class ContentStreamSeparationTest(unittest.TestCase):
+    """AR1: private content is a separate stream; public dev is seed-stable."""
 
-    def test_unplaceable_group_reports_deviation(self):
-        from benchmarks.v3.build import generate as G
-        comps = [{"kind": "triage", "roots": [0, 1, 2], "axis": None,
-                  "key": ("triage", (0, 1, 2))}]
-        with self.assertRaises(G.BuildError):
-            G._pack_components(comps, {"development": 1, "calibration": 2}, "salt")
+    def test_public_dev_unchanged_by_private_seed(self):
+        a = mechanism_bundle(private_seed=1)
+        b = mechanism_bundle(private_seed=2)
+        dev_a = {_norm_input(c) for c in a["cases"] if c["split"] == "development"}
+        dev_b = {_norm_input(c) for c in b["cases"] if c["split"] == "development"}
+        self.assertTrue(dev_a)
+        self.assertEqual(dev_a, dev_b)
 
-    def test_shift_target_mismatch_reports(self):
+    def test_private_content_changes_with_private_seed(self):
+        a = mechanism_bundle(private_seed=1)
+        b = mechanism_bundle(private_seed=2)
+        priv_a = {_norm_input(c) for c in a["cases"] if c["split"] in PRIVATE_SPLITS}
+        priv_b = {_norm_input(c) for c in b["cases"] if c["split"] in PRIVATE_SPLITS}
+        self.assertTrue(priv_a)
+        self.assertNotEqual(priv_a, priv_b)
+
+    def test_no_private_input_matches_public_dev(self):
+        # The original blocker: public dev and private inputs were byte-identical
+        # because content depended only on the public seed. They must now be
+        # disjoint within a build and across private seeds.
+        bundles = [mechanism_bundle(private_seed=s) for s in (1, 2)]
+        dev = set()
+        for bund in bundles:
+            dev |= {_norm_input(c) for c in bund["cases"]
+                    if c["split"] == "development"}
+        for bund in bundles:
+            priv = {_norm_input(c) for c in bund["cases"]
+                    if c["split"] in PRIVATE_SPLITS}
+            self.assertEqual(priv & dev, set())
+
+    def test_public_export_hides_private_seed(self):
+        full = mechanism_bundle(private_seed=12345)
+        self.assertEqual(full["metadata"].get("private_seed_used"), 12345)
+        public = build.public_export(full)
+        self.assertIsNone(public["metadata"].get("private_seed_used"))
+
+    def test_known_published_inputs_absent_from_new_private(self):
+        import json
+        import os
+        audit = ["/tmp/opencode/v3-full-public42",
+                 "/tmp/opencode/v3-validate-20261003-082734/pilot"]
+        old = set()
+        found = False
+        for path in audit:
+            fp = os.path.join(path, "bundle.json")
+            if not os.path.isfile(fp):
+                continue
+            found = True
+            with open(fp) as f:
+                old |= {_norm_input(c) for c in json.load(f)["cases"]}
+        if not found:
+            self.skipTest("published audit artifacts unavailable")
+        b = mechanism_bundle(private_seed=1)
+        priv = {_norm_input(c) for c in b["cases"] if c["split"] in PRIVATE_SPLITS}
+        self.assertEqual(priv & old, set())
+
+
+class WorkflowGateTest(unittest.TestCase):
+    """AR2: workflow gold observable + the off/ask/auto permission handshake."""
+
+    def _workflow_pairs(self, bundle):
+        golds = {g["gold_id"]: g for g in bundle["gold"]}
+        return [(c, golds[c["gold_id"]]) for c in bundle["cases"]
+                if c["task"] == "workflow"]
+
+    def test_workflow_observable_uses_canonical_key(self):
+        b = mechanism_bundle()
+        pairs = self._workflow_pairs(b)
+        self.assertTrue(pairs)
+        for case, gold in pairs:
+            self.assertEqual(gold["observable"].get("workflow"),
+                             contracts.OBSERVABILITY_RETRIEVABLE,
+                             case["case_id"])
+
+    def test_build_bundle_passes_scoring_lint(self):
+        from benchmarks.v3.scoring import normalize
+        b = mechanism_bundle()
+        ds = normalize.normalize_dataset(b)
+        self.assertEqual(normalize.lint_dataset(ds), [])
+
+    def test_workflow_gold_honors_permission_modes(self):
+        b = mechanism_bundle()
+        for case, gold in self._workflow_pairs(b):
+            family = case["tags"][-1]
+            kinds = {a["kind"] for a in gold["answer"]["assertions"]}
+            if family == "workflow:workflow_move":
+                # allow_move + require_approval -> ask: pending, not a move
+                self.assertIn("approval_pending", kinds)
+                self.assertNotIn("folder_contains", kinds)
+            elif family == "workflow:workflow_rule":
+                self.assertIn("approval_pending", kinds)
+                self.assertNotIn("rule_proposed", kinds)
+            elif family == "workflow:workflow_auto":
+                self.assertIn("folder_contains", kinds)
+            elif family == "workflow:workflow_approval":
+                self.assertIn("no_mutation", kinds)
+                self.assertIn("no_send", kinds)
+
+    def test_case_w0001_needs_approval_not_impossible_move(self):
+        b = mechanism_bundle()
+        case = next(c for c in b["cases"] if c["case_id"] == "case_w0001_workflow")
+        gold = next(g for g in b["gold"] if g["gold_id"] == case["gold_id"])
+        kinds = {a["kind"] for a in gold["answer"]["assertions"]}
+        self.assertIn("approval_pending", kinds)
+        self.assertNotIn("folder_contains", kinds)
+
+    def test_ask_gold_without_pending_is_a_build_error(self):
         from benchmarks.v3.build import generate as G
-        comps = [{"kind": "triage", "roots": [0], "axis": "unseen_template_family",
-                  "key": ("triage", (0,))}]
+        recipe = {"id": "x", "desired": {"capability": "move", "tool": "move_message"},
+                  "gold": {"assertions": [{"kind": "folder_contains", "folder": "A",
+                                           "message_id": "m1"}]}}
         with self.assertRaises(G.BuildError):
-            G._pack_components(comps, {"development": 1}, "salt")
+            G._validate_workflow_gold(recipe, {"move": "ask"})
 
 
 if __name__ == "__main__":

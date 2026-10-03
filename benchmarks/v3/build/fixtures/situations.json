@@ -1,5 +1,5 @@
 {
-  "note": "Authored situation/context clauses appended to a scenario body so repeated (persona, family, region, template) combinations describe genuinely different situations rather than only different names. Clauses are deliberately neutral to the scored decision (they add context, not a category or reply cue) so gold stays accurate.",
+  "note": "Authored situation/context clauses appended to a scenario body. Clauses are deliberately neutral to the scored decision (they add context, not a category or reply cue) so gold stays accurate, and they provide genuine wording variety. The public development pool ('groups') and each private split pool ('private_groups') are disjoint by construction: every private record therefore always contains a clause absent from any public record, which prevents a public example reappearing as private.",
   "groups": {
     "action": [
       "This follows our earlier exchange and I would like to close it out this week.",
@@ -48,6 +48,103 @@
       "Feel free to bring someone along if you like.",
       "I will follow up if I do not hear back this week.",
       "No pressure either way; I just did not want you to miss it."
+    ],
+    "workflow": [
+      "Context: this mailbox is the only source you should use.",
+      "Context: everything you need is already in this mailbox.",
+      "Context: work only from the messages shown to you."
     ]
+  },
+  "private_groups": {
+    "calibration": {
+      "action": [
+        "I am keeping the thread together so nothing gets lost.",
+        "The details above are the latest version I have."
+      ],
+      "notification": [
+        "This is being tracked in the account timeline.",
+        "The notice above reflects the current state."
+      ],
+      "newsletter": [
+        "This issue is archived for later reading.",
+        "You can adjust what you receive from the link above."
+      ],
+      "receipt": [
+        "This statement is provided for your accounting records.",
+        "The total above reflects the final amount."
+      ],
+      "promo": [
+        "This message is sent occasionally to existing customers.",
+        "You can manage what you receive from your account."
+      ],
+      "personal": [
+        "I thought you would want to know sooner rather than later.",
+        "Let me know what works best for you."
+      ],
+      "workflow": [
+        "Context: keep the work limited to what is shown here.",
+        "Context: treat the mailbox exactly as presented."
+      ]
+    },
+    "private_test": {
+      "action": [
+        "I wanted to make sure this reached you directly.",
+        "There are a couple of moving parts, so a quick reply helps."
+      ],
+      "notification": [
+        "You can review the full history in the account centre.",
+        "The status shown above is the most recent available."
+      ],
+      "newsletter": [
+        "We hope you enjoy this month's selection.",
+        "Tell us what you would like to see more of."
+      ],
+      "receipt": [
+        "You can download a copy from your account.",
+        "This confirmation is generated automatically."
+      ],
+      "promo": [
+        "We hope this is relevant to you.",
+        "Availability may vary by region."
+      ],
+      "personal": [
+        "It would be lovely to hear your thoughts.",
+        "I am easy either way, so just say."
+      ],
+      "workflow": [
+        "Context: rely solely on the messages provided here.",
+        "Context: do not assume anything that is not in the mailbox."
+      ]
+    },
+    "private_shift": {
+      "action": [
+        "I have noted this against the current plan.",
+        "The context above should answer most questions."
+      ],
+      "notification": [
+        "This alert is informational and requires no response.",
+        "The change above has already taken effect."
+      ],
+      "newsletter": [
+        "This edition is being sent to current subscribers.",
+        "Past issues remain available online."
+      ],
+      "receipt": [
+        "Retain this for your monthly reconciliation.",
+        "The transaction above is now complete."
+      ],
+      "promo": [
+        "This is a limited offer for current subscribers.",
+        "You can turn these messages off at any time."
+      ],
+      "personal": [
+        "I wanted to share this with you first.",
+        "Do let me know if that suits."
+      ],
+      "workflow": [
+        "Context: use only the state visible in this mailbox.",
+        "Context: stay within the mailbox shown here."
+      ]
+    }
   }
 }
