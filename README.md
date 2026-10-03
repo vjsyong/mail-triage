@@ -2,17 +2,58 @@
 
 **Your mailbox. Your machine. Your rules.**
 
-Mail Triage is a self-hosted email assistant that turns a busy inbox into a
-manageable workflow. Connect your institutional OAuth2 account, let a local AI
-agent help you find and organize mail, and build automations that handle the
-repetitive work. Keep using your usual email client.
+Mail Triage is a **local-first AI email assistant** combining a tool-calling
+agent, hybrid retrieval for RAG, and interpretable ML classifiers. Deterministic
+rules handle predictable mail; an LLM handles the rest. Search, organize, draft,
+and build automations while keeping your usual email client.
 
-It combines **local-first AI, a visual flow builder, natural-language actions,
-and an extensible plugin system** in one app.
+I built it to solve my own cluttered inbox and use it as my daily mail agent.
+The project explores a practical applied-AI question: **which tasks need an LLM,
+which can be handled by smaller models or rules, and how do you evaluate the
+tradeoffs before letting automation act?**
 
 ![Mail Triage dashboard: system status, triage metrics, recent filings, and recent mail](docs/img/dashboard.png)
 
-[Quick start](#quick-start) · [Features](#why-mail-triage) · [Documentation](docs/README.md) · [Write a plugin](docs/plugins-authoring.md)
+[Quick start](#quick-start) · [Engineering highlights](#engineering-highlights) · [Evaluation](#evaluation-and-model-selection) · [Features](#why-mail-triage) · [Documentation](docs/README.md)
+
+## Engineering highlights
+
+| Area | Implementation |
+| --- | --- |
+| **Agentic workflows** | A streaming tool-calling agent for mailbox operations, automation proposals, and classifier management. Bounded tool rounds and result budgets, per-capability permissions, approval queues, and persisted action logs. |
+| **Hybrid retrieval / RAG** | Metadata filtering, SQLite FTS5/BM25 lexical search, `sqlite-vec` vector search, reciprocal rank fusion (RRF), and cross-encoder reranking. Local embeddings and reranking run on CPU through FastEmbed/ONNX. |
+| **Applied ML** | Decision-list and Naive Bayes fast paths, plus a learning subsystem with feature-engineered logistic regression, versioned model artifacts, label provenance, calibration metrics, and shadow evaluation before promotion. |
+| **LLM evaluation** | Workload-specific model benchmarking with frozen cases, production prompts and tool schemas, deterministic expected answers, severity-weighted scoring, and adversarial probes. |
+| **Local deployment** | A Dockerized Python/Flask application with SQLite persistence, a background worker, an embedded OAuth mail proxy, and a separately configured OpenAI-compatible LLM endpoint. |
+| **Testing and extensibility** | Mock end-to-end tests across mail, models, retrieval, and plugins; an extension SDK with supervised worker processes, resource limits, and permission-gated host APIs. |
+
+## Evaluation and model selection
+
+Model choice is evaluated against **this application's workload**, rather than
+general leaderboard scores alone. A [model right-sizing study](docs/model-evaluation.md)
+dated October 2, 2026 compared **seven local models on 196 frozen cases** covering
+classification, assistant tool use, drafting, rule learning, simulation, and
+thought summarization.
+
+- **Test design:** a synthetic mailbox with explicit ground truth, production
+  prompts and tool schemas, and deterministic scoring rather than model-generated
+  expected answers or an LLM judge.
+- **Reliability:** schema validity, prompt-injection compliance, honest no-match
+  behavior, and guard-rule semantics; failures receive severity weights of
+  1 / 3 / 9 / 27 rather than being treated as equally costly.
+- **Deployment tradeoffs:** classification latency, memory footprint, serving
+  configuration, and model-specific adaptations alongside task scores.
+
+One useful finding: **smaller did not reliably mean safer or faster**. Several
+smaller candidates were faster at classification but followed instructions
+embedded in email content; every evaluated model exhibited some no-match failures.
+Those results informed a concrete hardening backlog and model-selection
+recommendations, with configuration differences and evaluation limits documented
+in the report. This is a workload-specific study, not a general model ranking.
+
+The [in-app model benchmark](docs/model-bench-plugin.md) provides a separate,
+bounded synthetic probe suite for checking a configured endpoint's compatibility,
+classification behavior, and latency.
 
 ## Why Mail Triage?
 
@@ -171,6 +212,32 @@ then files or suggests according to your settings. Flows add ordered actions whe
 their conditions match. Each decision keeps an audit trail so you can see what
 happened and why.
 
+### Retrieval pipeline
+
+```text
+Query → sender/date/exact-term hints → metadata prefilter
+      → BM25 + vector candidates → RRF fusion → cross-encoder reranking
+      → ranked mail for search and assistant context
+```
+
+Email-specific preprocessing strips quoted history where appropriate to reduce
+duplicate context. SQLite keeps lexical search, vectors, and message metadata
+close together; the default embedding and reranking path needs no GPU or separate
+model service. LLM inference has its own hardware requirements.
+
+### Learning lifecycle
+
+The learning subsystem separates **LLM-generated weak labels from explicit human
+labels** and records model/feature versions and prediction evidence. Logistic
+regression specialists expose per-feature contributions; evaluation includes
+precision/recall, average precision, Brier score, and reliability buckets.
+
+Specialists start in **shadow mode** so their predictions can be evaluated before
+they influence behavior. This is an implemented first slice, with broader routing
+and model kinds tracked separately in the
+[learning-loop design](docs/mail-intelligence/design.md) and
+[improvement roadmap](docs/mail-intelligence/improvement-roadmap.md).
+
 ## Stay in control
 
 - **AI auto-filing is opt-in.** Rules act live by default; use dry-run mode to
@@ -217,6 +284,8 @@ and proxy log. Back up this directory; see the
 | [Deployment](docs/deployment.md) | Ports, TLS, backups, and upgrades |
 | [Plugin authoring](docs/plugins-authoring.md) · [SDK](sdk/README.md) | Write, install, and test extensions |
 | [Plugin architecture](docs/plugin-architecture.md) | Extension types, sandboxing, and assistant integration |
+| [Model evaluation](docs/model-evaluation.md) | Seven-model right-sizing study, failure analysis, and deployment tradeoffs |
+| [Model benchmark plugin](docs/model-bench-plugin.md) | Synthetic endpoint probes, scoring, and resumable benchmark execution |
 | [Learning loop](docs/mail-intelligence/design.md) | Model lifecycle, evaluation, and decision provenance |
 | [Docs index](docs/README.md) | All guides, design records, and research |
 
@@ -236,6 +305,14 @@ Run the mock end-to-end suites with the project's Python environment:
 
 On a dirty working tree the app suite auto-runs only the domains its changed
 files touch; a clean tree runs everything. `--all` forces the full suite.
+
+### Project ownership and development approach
+
+I defined the product concept, directed the technical questions, and designed the
+experiments. Implementation was carried out through AI-assisted development
+workflows. Daily use of the app informs the practical requirements; the linked
+design records and evaluation reports document the engineering decisions and
+experimental evidence.
 
 ## License and acknowledgments
 
