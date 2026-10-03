@@ -990,13 +990,16 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
 .px-main:hover{text-decoration:none}
 .px-nm{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-weight:600;font-size:.95rem;color:var(--fg)}
 .px-dz{display:block;color:var(--dim);font-size:.83rem;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.px-sw{display:inline-flex;align-items:center;cursor:pointer;margin:0;position:relative}
+/* toggle switch: strict square corners, knob inset by --sw-pad on every side */
+.px-sw{--sw-w:36px;--sw-h:21px;--sw-knob:15px;--sw-pad:2px;--sw-bw:1px;
+  --sw-travel:calc(var(--sw-w) - var(--sw-knob) - 2*var(--sw-pad) - 2*var(--sw-bw));
+  display:inline-flex;align-items:center;cursor:pointer;margin:0;position:relative}
 .px-sw input{position:absolute;opacity:0;width:1px;height:1px}
 form.px-swf{display:flex;align-items:center}
-.px-sw .px-tr{width:36px;height:21px;border:1px solid var(--line2);background:var(--card2);position:relative;transition:background .12s,border-color .12s;display:inline-block}
-.px-sw .px-tr::after{content:"";box-sizing:border-box;position:absolute;top:2px;left:2px;width:15px;height:15px;background:#fff;border:1px solid var(--line2);transition:transform .12s,border-color .12s}
+.px-sw .px-tr{width:var(--sw-w);height:var(--sw-h);border:var(--sw-bw) solid var(--line2);background:var(--line);border-radius:0;position:relative;display:inline-block;transition:background-color .15s ease,border-color .15s ease}
+.px-sw .px-tr::after{content:"";box-sizing:border-box;position:absolute;top:var(--sw-pad);left:var(--sw-pad);width:var(--sw-knob);height:var(--sw-knob);background:var(--card);border:var(--sw-bw) solid var(--line2);border-radius:0;transition:transform .15s ease,border-color .15s ease}
 .px-sw input:checked+.px-tr{background:var(--acc);border-color:var(--acc)}
-.px-sw input:checked+.px-tr::after{transform:translateX(15px);border-color:transparent}
+.px-sw input:checked+.px-tr::after{transform:translateX(var(--sw-travel));border-color:transparent}
 .px-sw input:focus-visible+.px-tr{outline:2px solid var(--acc);outline-offset:2px}
 .px-go{color:var(--dim);font-size:1.2rem;line-height:1;padding:0 2px}
 .px-go:hover{color:var(--fg);text-decoration:none}
