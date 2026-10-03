@@ -5334,6 +5334,37 @@ def main():
     for _k, _v in _l_front2.items():
         store.set_setting(_k, _v if _v is not None else "")
 
+    section("T61 fusion proxy: transparent OpenAI facade helpers", "plugins")
+    import fusion.server as fusion_proxy
+    _fsys = ("You triage incoming email for Alex. Reply with a single JSON object and nothing "
+             'else. Shape: {"category": one of [Action, Notification, Receipt], '
+             '"needs_reply": true|false, "confidence": 0.0-1.0, "summary": "...", "reason": "..."}')
+    check("classify-prompt detection (positive and negative)",
+          fusion_proxy.is_classification([{"role": "system", "content": _fsys},
+                                          {"role": "user", "content": "x"}])
+          and not fusion_proxy.is_classification([{"role": "system",
+                                                   "content": "You are a helpful assistant"}])
+          and not fusion_proxy.is_classification([]))
+    check("categories are parsed out of the production prompt",
+          fusion_proxy.extract_categories([{"role": "system", "content": _fsys}])
+          == ["Action", "Notification", "Receipt"])
+    _fv = fusion_proxy.verdict_content({"category": "Action", "category_confidence": 0.8,
+                                        "needs_reply": True, "needs_reply_confidence": 0.6,
+                                        "summary": "s", "reason": "r"})
+    check("fusion result maps to the production classify JSON shape",
+          _fv == {"category": "Action", "needs_reply": True, "confidence": 0.6,
+                  "summary": "s", "reason": "r"})
+    check("a half-failed fusion result refuses to masquerade as a verdict",
+          fusion_proxy.verdict_content({"category": "Action", "category_confidence": 0.8,
+                                        "needs_reply": None}) is None)
+    _fresp = fusion_proxy.openai_completion(json.dumps(_fv), "fusion",
+                                            {"prompt_tokens": 1, "completion_tokens": 2,
+                                             "total_tokens": 3})
+    check("OpenAI completion envelope is well formed",
+          _fresp["object"] == "chat.completion"
+          and _fresp["choices"][0]["message"]["content"] == json.dumps(_fv)
+          and _fresp["usage"]["total_tokens"] == 3)
+
     # ==== suite tail (always runs, even in a partial run) ====
     if globals().get("_PARTIAL_NOTE"):
         print("\n" + globals()["_PARTIAL_NOTE"])

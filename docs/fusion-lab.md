@@ -60,6 +60,25 @@ boilerplate mail (TinyJev category drops; a >4k-char fallback fixes it) and the
 4. For the primary/fallback comparison configure both endpoints under
    Settings → AI Settings → LLM endpoint.
 
+## Transparent mode (no host changes)
+
+The sidecar also exposes an OpenAI-compatible facade, so the fusion can be used
+without the plugin, the endpoint selector, or any app modification: point a
+client's base URL at `http://fusion:8098/v1` (model list comes from `/v1/models`).
+
+- requests whose system prompt is the production classify prompt (detected and
+  parsed for its category list) are answered by the fusion: TinyJev picks the
+  category, the 2B's direct recall prompt fills `needs_reply`/summary/reason,
+  and the reply is the production JSON shape;
+- every other chat request is proxied verbatim to `FUSION_LLM_BASE_URL`
+  (streaming included), so the same endpoint still behaves as the plain 2B;
+- if the needs_reply half fails, the facade returns a 502 instead of a fake
+  verdict, letting the caller's normal fallback handle it.
+
+This is what "the model is a fusion" looks like from the app's perspective: one
+ordinary OpenAI endpoint whose classification calls happen to be decided by the
+decision head. The Fusion Lab plugin and `/classify` remain available for A/B.
+
 ## Caveats
 
 - This is a classification experiment, not a complete six-suite model acceptance
