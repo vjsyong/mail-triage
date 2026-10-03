@@ -83,9 +83,11 @@ function _ask(ctx, system, state, endpoint) {
   var t0 = Date.now();
   try {
     var out = ctx.llm.complete({ system: system, prompt: state, json: true,
-                                 max_tokens: 400, endpoint: endpoint, thinking: true });
-    return { ok: true, verdict: _json(out.text), raw: _clip(out.text, 500),
-             ms: Date.now() - t0, error: null };
+                                 max_tokens: 4096, endpoint: endpoint, thinking: true });
+    var verdict = _json(out.text);
+    return { ok: !!verdict, verdict: verdict, raw: _clip(out.text, 500),
+             ms: Date.now() - t0,
+             error: verdict ? null : "empty or unparsable JSON verdict" };
   } catch (e) {
     return { ok: false, verdict: null, raw: "", ms: Date.now() - t0,
              error: String((e && e.message) || e) };
