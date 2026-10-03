@@ -77,6 +77,32 @@ class BuildManifestTests(unittest.TestCase):
         errs = identity.validate_identity(_fields(dataset_id=""))
         self.assertTrue(any("dataset_id" in e for e in errs))
 
+    def test_scope_entries_must_be_nonempty_strings(self):
+        for bad in (["case_0001", None], ["case_0001", ""], ["case_0001", "   "],
+                    [None]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(identity.IdentityError):
+                    identity.build_manifest(**_fields(requested_case_ids=bad))
+
+    def test_original_model_identity_is_hashed(self):
+        slashed = identity.build_manifest(**_fields(model_key="openbmb/MiniCPM5-2B"))
+        hyphen = identity.build_manifest(**_fields(model_key="openbmb-MiniCPM5-2B"))
+        # sanitised only for run_id; the hashed identity keeps the original value
+        self.assertNotEqual(slashed["config_hash"], hyphen["config_hash"])
+        self.assertEqual(slashed["model_key"], "openbmb/MiniCPM5-2B")
+        self.assertNotIn("/", slashed["run_id"])
+
+    def test_malicious_model_key_yields_safe_run_id(self):
+        m = identity.build_manifest(**_fields(model_key="../../etc/passwd"))
+        self.assertNotIn("/", m["run_id"])
+        self.assertNotIn("..", m["run_id"])
+        self.assertEqual(m["model_key"], "../../etc/passwd")
+        self.assertTrue(m["run_id"].split("-")[-2:])
+        # path components never escape: safe() maps it to a simple slug
+        self.assertEqual(identity.safe_run_component("../../etc/passwd"), "etc-passwd")
+        self.assertEqual(identity.safe_run_component(".."), "model")
+        self.assertEqual(identity.safe_run_component(""), "model")
+
 
 class ResumeTests(unittest.TestCase):
     def test_same_identity_resumes(self):
@@ -110,6 +136,36 @@ class ResumeTests(unittest.TestCase):
             identity.resolve_resume(a, {"run_id": "x", "config_hash": None})
         with self.assertRaises(identity.IdentityError):
             identity.resolve_resume(a, {"run_id": "x"})
+
+    def test_changed_body_with_copied_hash_rejected(self):
+        a = identity.build_manifest(**_fields())
+        tampered = dict(a)
+        tampered["prompt_sha256"] = "0" * 64  # body changed, old hash/run_id kept
+        with self.assertRaises(identity.IdentityError):
+            identity.resolve_resume(tampered, tampered)
+        with self.assertRaises(identity.IdentityError):
+            identity.resolve_resume(a, tampered)
+
+    def test_invalid_old_manifest_with_matching_hash_rejected(self):
+        a = identity.build_manifest(**_fields())
+        broken = dict(a)
+        broken["dataset_sha256"] = ""  # identity invalid, hash untouched
+        with self.assertRaises(identity.IdentityError):
+            identity.resolve_resume(a, broken)
+
+    def test_tampered_run_id_rejected(self):
+        a = identity.build_manifest(**_fields())
+        wrong = dict(a)
+        wrong["run_id"] = "someone-elses-run"
+        with self.assertRaises(identity.IdentityError):
+            identity.resolve_resume(a, wrong)
+
+    def test_tampered_requested_hash_rejected(self):
+        a = identity.build_manifest(**_fields())
+        b = dict(a)
+        b["config_hash"] = "f" * 64  # requested manifest stale hash
+        with self.assertRaises(identity.IdentityError):
+            identity.resolve_resume(b, a)
 
 
 if __name__ == "__main__":

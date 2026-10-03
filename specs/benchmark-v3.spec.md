@@ -39,14 +39,16 @@ use of model outputs as gold. v2 remains a frozen regression track.
 | Native triage | Performance through the current application boundary | Production prompt/settings, headers, cleaned `snippet[:1500]` | `native` |
 | Policy-conditioned triage | Adaptation to recipient, taxonomy, filing preferences | Same information budget + explicit trusted policy card | `policy_conditioned` |
 | Robustness | Stability under irrelevant change; correct response to meaningful change | Paired cases within the applicable profile | (relation metadata) |
-| Bounded workflows | Search, grounded answers, drafts, rule proposals/simulation | Synthetic mailbox, declared permissions/tools | (workflow) |
+| Bounded workflows | Search, grounded answers, drafts, rule proposals/simulation | Synthetic mailbox, declared permissions/tools | `workflow` |
 | Full-context diagnostic | Performance lost to clipping/missing context | Explicitly richer input; reported separately | `full_context` |
 | CPU deployment | Latency, memory, throughput, resource failures | Fixed envelope and workload | (deployment) |
 
 **Native and policy-conditioned results must remain separate.** A policy card
 is an extension to the classifier prompt, never described as
 production-equivalent. A full-context result is never pooled with native
-triage.
+triage. The `workflow` profile names the sandbox track: retrieval gold is
+answerable only there, and this foundation defines the name without shipping a
+workflow renderer or granting it native-parser credit.
 
 ---
 
@@ -212,11 +214,18 @@ systems cannot win.
 A run manifest hash covers dataset/case manifest, prompt, model
 (`model_key` + revision **or** artifact digest), adapter, scorer, policy,
 engine-contract fingerprint, calibrator, generation/runtime config, and the
-requested case/split/profile ids. Every fingerprint must be non-empty; a
-`None`/empty hash cannot support a resume. Equality is canonical-hash equality;
-`run_id` is stable. `resolve_resume` refuses to continue a partial run whose
-identity differs -- changing corpus, prompt, weights, requested subset, scorer,
-runtime or calibrator starts a fresh run.
+requested case/split/profile ids. Every fingerprint must be non-empty and each
+requested scope element must be a non-empty string; a `None`/empty hash cannot
+support a resume. Equality is canonical-hash equality; `run_id` is stable.
+
+`resolve_resume` is tamper-evident: it revalidates both manifests' identities
+and **recomputes** the canonical digest over the hashed identity fields before
+comparing, so a changed body still carrying its old `config_hash`, an invalid
+prior manifest whose hash matches a requested one, and a stored `run_id` that
+does not match its identity are rejected. Changing corpus, prompt, weights,
+requested subset, scorer, runtime or calibrator starts a fresh run. `run_id` is
+a path-safe slug even for a Hugging Face id containing `/` or a traversal-like
+string, while the original model identity values are what get hashed.
 
 ---
 
@@ -236,6 +245,10 @@ quality references (e.g. Gemma) are not edge comparisons.
 ## 10. Private data, annotation and review gates
 
 - Dataset review **defaults to `draft`**; `human_seal` is never auto-asserted.
+- Review state is internally consistent: a `draft` may not carry
+  `human_seal=true`; a sealed record needs a non-blank named reviewer; and a
+  sealed real-mail record needs `authorized=true`. These are enforced both by
+  `assert_draft_honest` and as errors from `validate_artifact("gold", ...)`.
 - Independent double review of the pilot; revise ambiguous policies; review
   every final gold item; double-review all ambiguous/safety-sensitive cases and
   a random subset of ordinary ones; then freeze synthetic test partitions.

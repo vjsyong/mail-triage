@@ -32,7 +32,7 @@ OBSERVABILITY = ("visible", "retrievable", "full_context", "ambiguous", "unavail
 FIELD_PROVENANCE = ("produced", "derived", "missing")
 REVIEW_STATUS = ("draft", "reviewed", "sealed")
 PROVENANCE_SOURCES = ("synthetic", "real_mail", "public_corpus")
-PROFILES = ("native", "policy_conditioned", "full_context")
+PROFILES = ("native", "policy_conditioned", "full_context", "workflow")
 SPLITS = ("development", "calibration", "private_test", "private_shift", "real_holdout")
 
 __all__ = [
@@ -48,6 +48,32 @@ class SealError(ValueError):
     """Raised when a gold record is sealed without the required gates."""
 
 
+def _nonblank(value):
+    return isinstance(value, str) and value.strip() != ""
+
+
+def _review_gate_errors(gold):
+    """Review-honesty problems for a gold record ([] when consistent)."""
+    errs = []
+    status = gold.get("review_status")
+    human = gold.get("human_seal")
+    reviewer = gold.get("reviewer")
+    source = gold.get("source")
+    if human and status != "sealed":
+        errs.append("$.human_seal: true requires review_status=sealed "
+                    "(a draft cannot carry a seal)")
+    if status == "sealed" and not human:
+        errs.append("$.review_status: sealed requires human_seal=true")
+    if status == "sealed" and not _nonblank(reviewer):
+        errs.append("$.reviewer: sealed requires a non-empty reviewer")
+    if reviewer is not None and not _nonblank(reviewer):
+        errs.append("$.reviewer: must be a non-empty string or null")
+    if source == "real_mail" and (status == "sealed" or human) and not gold.get("authorized"):
+        errs.append("$.authorized: real-mail gold must be explicitly authorized "
+                    "before seal")
+    return errs
+
+
 def validate_artifact(kind, instance):
     """Validate one v3.0 artifact; return a list of error strings."""
     if kind not in ARTIFACT_KINDS:
@@ -57,15 +83,26 @@ def validate_artifact(kind, instance):
     errs = validate(instance, schema)
     if isinstance(instance, dict):
         if kind == "gold":
-            for field, level in (instance.get("observable") or {}).items():
-                if level not in OBSERVABILITY:
-                    errs.append("$.observable.%s: %r not in %s"
-                                % (field, level, list(OBSERVABILITY)))
+            observable = instance.get("observable")
+            if observable is not None and not isinstance(observable, dict):
+                errs.append("$.observable: expected object, got %s"
+                            % type(observable).__name__)
+            elif isinstance(observable, dict):
+                for field, level in observable.items():
+                    if level not in OBSERVABILITY:
+                        errs.append("$.observable.%s: %r not in %s"
+                                    % (field, level, list(OBSERVABILITY)))
+            errs = errs + _review_gate_errors(instance)
         if kind == "attempt":
-            for field, value in (instance.get("field_provenance") or {}).items():
-                if value not in FIELD_PROVENANCE:
-                    errs.append("$.field_provenance.%s: %r not in %s"
-                                % (field, value, list(FIELD_PROVENANCE)))
+            provenance = instance.get("field_provenance")
+            if provenance is not None and not isinstance(provenance, dict):
+                errs.append("$.field_provenance: expected object, got %s"
+                            % type(provenance).__name__)
+            elif isinstance(provenance, dict):
+                for field, value in provenance.items():
+                    if value not in FIELD_PROVENANCE:
+                        errs.append("$.field_provenance.%s: %r not in %s"
+                                    % (field, value, list(FIELD_PROVENANCE)))
     if kind == "run_manifest":
         errs = errs + identity.validate_identity(instance)
     return errs
@@ -112,9 +149,9 @@ def new_gold(case_id, gold_id, **fields):
 
 
 def can_seal(gold):
-    """Whether the record may be sealed: explicit human reviewer, and for
-    real-mail material a separate authorization."""
-    if not gold.get("reviewer"):
+    """Whether the record may be sealed: an explicit, non-blank human reviewer,
+    and for real-mail material a separate authorization."""
+    if not _nonblank(gold.get("reviewer")):
         return False
     if gold.get("source") == "real_mail" and not gold.get("authorized"):
         return False
@@ -128,7 +165,7 @@ def seal_gold(gold, reviewer, authorized=False):
     real-mail material is sealed without a separate authorization.  Authorization
     is never inferred from downloadability or from the presence of the data.
     """
-    if not reviewer:
+    if not _nonblank(reviewer):
         raise SealError("cannot seal gold without a named human reviewer")
     if gold.get("source") == "real_mail" and not authorized:
         raise SealError("cannot seal real-mail gold without explicit authorization")
@@ -142,15 +179,17 @@ def seal_gold(gold, reviewer, authorized=False):
 
 
 def assert_draft_honest(gold):
-    """A sealed record must carry a human reviewer; a draft must not claim one."""
-    status = gold.get("review_status")
-    if status == "sealed":
-        if not gold.get("human_seal"):
-            raise SealError("review_status=sealed requires human_seal=true")
-        if not gold.get("reviewer"):
-            raise SealError("review_status=sealed requires a named reviewer")
-    if gold.get("human_seal") and not gold.get("reviewer"):
-        raise SealError("human_seal=true requires a named reviewer")
+    """Reject contradictory review state.
+
+    A sealed record must carry a non-blank human reviewer; a record with
+    ``human_seal=true`` must actually be ``sealed`` (a draft cannot carry a
+    seal); and real-mail material must be explicitly authorized before any seal
+    is accepted.  This is the same gate
+    :func:`validate_artifact` applies when validating a gold record.
+    """
+    errs = _review_gate_errors(gold)
+    if errs:
+        raise SealError("; ".join(errs))
     return True
 
 

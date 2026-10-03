@@ -291,6 +291,17 @@ class ObservabilityTests(unittest.TestCase):
         self.assertFalse(C.observable_in(C.OBSERVABILITY_AMBIGUOUS, C.NATIVE_PROFILE))
         self.assertFalse(C.observable_in(C.OBSERVABILITY_UNAVAILABLE, C.NATIVE_PROFILE))
 
+    def test_workflow_profile_is_explicit(self):
+        self.assertIn(C.WORKFLOW_PROFILE, C.BENCHMARK_PROFILES)
+        self.assertEqual(C.WORKFLOW_PROFILE, "workflow")
+        self.assertTrue(C.observable_in(C.OBSERVABILITY_RETRIEVABLE,
+                                        C.WORKFLOW_PROFILE))
+        for triage in C.TRIAGE_PROFILES:
+            self.assertFalse(C.observable_in(C.OBSERVABILITY_RETRIEVABLE, triage))
+        # no native parser/renderer credit for workflow
+        self.assertNotEqual(C.WORKFLOW_PROFILE, C.NATIVE_PROFILE)
+        self.assertEqual(C.build_native_request(_msg("x"))["profile"], C.NATIVE_PROFILE)
+
     def test_projection(self):
         obs = {"category": "visible", "needs_reply": "full_context"}
         proj = C.project_observable_fields(obs, C.NATIVE_PROFILE)

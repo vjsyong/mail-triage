@@ -35,7 +35,12 @@ from .common.mime import clean_snippet
 NATIVE_PROFILE = "native"
 POLICY_PROFILE = "policy_conditioned"
 FULL_CONTEXT_PROFILE = "full_context"
-BENCHMARK_PROFILES = (NATIVE_PROFILE, POLICY_PROFILE, FULL_CONTEXT_PROFILE)
+WORKFLOW_PROFILE = "workflow"
+TRIAGE_PROFILES = (NATIVE_PROFILE, POLICY_PROFILE, FULL_CONTEXT_PROFILE)
+BENCHMARK_PROFILES = TRIAGE_PROFILES + (WORKFLOW_PROFILE,)
+# Retrieval only exists inside the workflow sandbox; the triage profiles never
+# claim it.  This package defines the name but ships no workflow renderer.
+WORKFLOW_PROFILES = (WORKFLOW_PROFILE,)
 
 # Native input contract (must match engine.LLMClient.classify).
 SNIPPET_LIMIT = 1500
@@ -254,7 +259,7 @@ def observable_in(level, profile):
         return True
     if level == OBSERVABILITY_RETRIEVABLE:
         # Retrieval only exists in the workflow sandbox, not in triage profiles.
-        return profile in ("workflow", "workflow_sandbox")
+        return profile in WORKFLOW_PROFILES
     if level == OBSERVABILITY_FULL_CONTEXT:
         return profile == FULL_CONTEXT_PROFILE
     return False

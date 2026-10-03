@@ -12,6 +12,7 @@ for _p in (ROOT, V3):
         sys.path.insert(0, _p)
 
 from benchmarks.v3 import schema  # noqa: E402
+from benchmarks.v3 import contracts  # noqa: E402
 from benchmarks.v3.common import identity  # noqa: E402
 
 
@@ -149,6 +150,34 @@ class MalformedArtifactsTest(unittest.TestCase):
         errs = schema.validate_artifact("gold", bad)
         self.assertTrue(any("observable" in e for e in errs))
 
+    def test_wrong_shaped_observable_returns_errors(self):
+        for bad_shape in (["visible"], "visible", 5):
+            with self.subTest(shape=type(bad_shape).__name__):
+                bad = _gold()
+                bad["observable"] = bad_shape
+                errs = schema.validate_artifact("gold", bad)  # must not raise
+                self.assertTrue(any("observable" in e for e in errs))
+
+    def test_wrong_shaped_field_provenance_returns_errors(self):
+        for bad_shape in (["produced"], "produced", 5):
+            with self.subTest(shape=type(bad_shape).__name__):
+                bad = _attempt()
+                bad["field_provenance"] = bad_shape
+                errs = schema.validate_artifact("attempt", bad)  # must not raise
+                self.assertTrue(any("field_provenance" in e for e in errs))
+
+    def test_workflow_profile_accepted(self):
+        self.assertIn("workflow", schema.PROFILES)
+        self.assertEqual(set(schema.PROFILES), set(contracts.BENCHMARK_PROFILES))
+        case = _case()
+        case["task"] = "workflow"
+        case["input_profile"] = "workflow"
+        case["rendered_input"] = {"profile": "workflow", "system": "s", "user": "u"}
+        self.assertEqual(schema.validate_artifact("case", case), [])
+        att = _attempt()
+        att["profile"] = "workflow"
+        self.assertEqual(schema.validate_artifact("attempt", att), [])
+
     def test_field_provenance_enum_enforced(self):
         bad = _attempt()
         bad["field_provenance"] = {"category": "invented"}
@@ -199,6 +228,43 @@ class ReviewGateTest(unittest.TestCase):
         with self.assertRaises(schema.SealError):
             schema.assert_draft_honest({"review_status": "sealed",
                                         "human_seal": False, "reviewer": None})
+
+    def test_draft_cannot_carry_seal(self):
+        g = _gold()
+        g["review_status"] = "draft"
+        g["human_seal"] = True
+        g["reviewer"] = "name"
+        with self.assertRaises(schema.SealError):
+            schema.assert_draft_honest(g)
+        self.assertTrue(any("human_seal" in e
+                            for e in schema.validate_artifact("gold", g)))
+
+    def test_sealed_requires_nonblank_reviewer(self):
+        g = _gold()
+        g["review_status"] = "sealed"
+        g["human_seal"] = True
+        g["reviewer"] = "   "
+        with self.assertRaises(schema.SealError):
+            schema.assert_draft_honest(g)
+        self.assertFalse(schema.can_seal(dict(g, reviewer="   ")))
+        self.assertFalse(schema.can_seal(dict(g, reviewer=None)))
+
+    def test_real_mail_sealed_requires_authorization_in_validation(self):
+        g = _gold()
+        g["source"] = "real_mail"
+        g["review_status"] = "sealed"
+        g["human_seal"] = True
+        g["reviewer"] = "human-1"
+        g["authorized"] = False
+        errs = schema.validate_artifact("gold", g)
+        self.assertTrue(any("authorized" in e for e in errs))
+        with self.assertRaises(schema.SealError):
+            schema.assert_draft_honest(g)
+
+    def test_new_gold_defaults_authorized_false_and_serializable(self):
+        g = schema.new_gold("case_0001", "gold_0001")
+        self.assertFalse(g["authorized"])
+        self.assertEqual(schema.validate_artifact("gold", g), [])
 
 
 if __name__ == "__main__":

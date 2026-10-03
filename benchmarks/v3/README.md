@@ -45,11 +45,14 @@ implemented here** -- the interfaces below are what their authors target.
 | `contracts.NATIVE_PROFILE` | `native` | Production prompt/settings, headers, cleaned `snippet[:1500]` |
 | `contracts.POLICY_PROFILE` | `policy_conditioned` | Same budget + an explicit trusted policy card |
 | `contracts.FULL_CONTEXT_PROFILE` | `full_context` | Explicitly richer input; diagnostic only |
+| `contracts.WORKFLOW_PROFILE` | `workflow` | Sandbox mailbox, declared permissions/tools; WP3 owns execution |
 
 `native` and `policy_conditioned` results are reported separately and never
 pooled; a `full_context` result is never pooled with native triage.
 `native` reproduces the pinned `engine.LLMClient.classify`; a more tolerant
 parser is a separately named diagnostic and never receives `native` credit.
+`workflow` names the sandbox profile so retrieval gold is only answerable there;
+this foundation ships **no workflow renderer or parser** (WP3/WP4 own it).
 
 ## Frozen `contracts` API
 
@@ -87,11 +90,15 @@ assert_no_gold_leakage(model_input, gold) -> True | raises GoldLeakageError
 
 observable_in(level, profile) -> bool
 project_observable_fields({field: level}, profile) -> {field: bool}
+# retrievable evidence is true only in WORKFLOW_PROFILES; triage profiles never
+# claim retrieval
 ```
 
 Constants: `SNIPPET_LIMIT=1500`, `FULL_CONTEXT_LIMIT=6000`, `DEFAULT_CATEGORIES`,
 `NATIVE_MAX_TOKENS`, `NATIVE_RETRY_MAX_TOKENS`, `FIELD_PRODUCED/DERIVED/MISSING`,
-`OBSERVABILITY_*`, `ContractError`, `NativeParseError`, `GoldLeakageError`.
+`OBSERVABILITY_*`, `NATIVE_PROFILE`, `POLICY_PROFILE`, `FULL_CONTEXT_PROFILE`,
+`WORKFLOW_PROFILE`, `TRIAGE_PROFILES`, `BENCHMARK_PROFILES`, `WORKFLOW_PROFILES`,
+`ContractError`, `NativeParseError`, `GoldLeakageError`.
 
 **Parser parity is intentional, including failure.** `parse_native_response`
 uses the same greedy `re.search(r"\{.*\}", content, re.S)` + strict
@@ -116,7 +123,12 @@ schema.assert_draft_honest(gold) -> True | raises SealError
 ```
 
 Enums exported for builders/scorers: `OBSERVABILITY`, `FIELD_PROVENANCE`,
-`REVIEW_STATUS`, `PROVENANCE_SOURCES`, `PROFILES`, `SPLITS`.
+`REVIEW_STATUS`, `PROVENANCE_SOURCES`, `PROFILES` (includes `workflow`),
+`SPLITS`.
+
+`validate_artifact` returns error strings (never raises on shape) for a
+wrong-shaped `observable` or `field_provenance`, applies the gold review gate
+below, and appends identity problems for a run manifest.
 
 ## Run identity (`common.identity`)
 
@@ -133,11 +145,21 @@ Required non-empty fingerprints: `dataset_id`, `dataset_sha256`,
 Model identity needs `model_revision` **or** `model_artifact_sha256`.
 `generation_config` and `runtime_config` are required mappings; the requested
 `requested_case_ids`, `requested_splits` and `requested_profiles` are required
-non-empty lists and are part of the hash. A `None`/empty hash can never support
-a resume.
+non-empty lists of non-empty strings and are part of the hash. A `None`/empty
+hash can never support a resume.
 
 Changing the corpus, prompt, weights, requested subset, scorer, runtime **or
 calibrator** changes `config_hash` and blocks resume.
+
+`resolve_resume` is tamper-evident: it revalidates both manifests' required
+identities and **recomputes** the canonical digest over `HASHED_FIELDS` before
+comparing. A changed body still carrying its old `config_hash`, an invalid prior
+manifest whose hash matches a requested one, and a stored `run_id` that does not
+match its identity are all rejected. `run_id` is a path-safe slug
+(`safe_run_component`); a Hugging Face id like `openbmb/MiniCPM5-2B` becomes
+`openbmb-MiniCPM5-2B` and `../../etc/passwd` never escapes, while the **original**
+model identity values are what get hashed (a slashed and a hyphenated id hash
+differently).
 
 ## Statistics protocol (frozen defaults; WP5 implements)
 
@@ -168,8 +190,14 @@ calibrator** changes `config_hash` and blocks resume.
 - Gold is **never** part of model-facing input: `assert_no_gold_leakage` is a
   required build check.
 - Dataset review **defaults to `draft`**. `human_seal` is never auto-asserted;
-  `seal_gold` demands a named human reviewer, and real-mail material demands a
-  **separate authorization**. Neither gate is inferred from downloadability.
+  `seal_gold` and `can_seal` demand a non-blank named human reviewer, and
+  real-mail material demands a **separate authorization**. Neither gate is
+  inferred from downloadability.
+- Review state is internally consistent: `human_seal=true` with
+  `review_status=draft`, a blank/missing reviewer on a sealed record, and a
+  sealed real-mail record without `authorized` are rejected by
+  `assert_draft_honest` **and** returned as errors by
+  `validate_artifact("gold", ...)`.
 - Private-test human review, real-mail intake authorization and CPU hardware
   qualification **cannot be fabricated** by a synthetic-only tree; when they
   are absent the report says so.
