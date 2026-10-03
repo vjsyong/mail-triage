@@ -324,6 +324,8 @@ def _aggregate(results, policy, calibrator):
         "reliability": calmod.reliability(records, policy["calibration"]["bins"]),
         "selective": calmod.selective_risk(records, threshold),
         "calibrated": calibrator is not None,
+        "calibrator_revision": (calibrator or {}).get("revision"),
+        "calibrator_sha256": (calibrator or {}).get("artifact_sha256"),
     }
 
     prose = {"cases": 0, "complete": 0, "missing": 0, "fabricated": 0,
