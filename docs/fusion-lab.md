@@ -101,6 +101,32 @@ fused classification p50 ~5.6 s, ~7 emails/min, ~2.7 GB model memory. A
 Raspberry-Pi-class core is 2-4x slower again, so treat this as the optimistic
 bound for weak hardware.
 
+## Potato / Raspberry Pi mode
+
+Classification can run with **zero generation** - only TinyJev's single forward
+pass. `FUSION_NR_MODE` selects the needs_reply engine:
+
+| mode | what it does |
+|---|---|
+| `llm` (default) | 2B answers needs_reply with the recall prompt; best recall |
+| `cascade` | answers false locally for `FUSION_CASCADE_CATEGORIES` (default Notification/Newsletter/Receipt/Promo), asks the 2B only for the rest |
+| `tiny` | TinyJev's Noul head answers in the same forward pass; the 2B is never called |
+
+Measured on the v2 suite (dev+acceptance, 228 non-junk cases) on 4 x86 cores:
+
+| mode | nr F1 | replies missed /53 | 2B calls | per-email (4 cores) |
+|---|---:|---:|---:|---:|
+| `llm` | .610 | 10 | 100% | ~4.0 s |
+| `cascade` | **.651** | 12 | 41% | ~2.3 s |
+| `tiny` | .571 | 27 | 0% | **~1.8 s** |
+
+In `cascade`/`tiny` modes `summary`/`reason` are empty (the app's heuristic path
+ships empty summaries too). `FUSION_NR_THRESHOLD` (default 0.40) trades TinyJev
+recall: lower flags more replies. In `tiny` mode the 2B server is not needed at
+all; memory is ~1.2 GB for TinyJev fp16. A Raspberry Pi 5 is roughly 2-3x
+slower again (expect ~4-8 s/email; a 4 GB board should dedicate it to the
+sidecar + app).
+
 ## Caveats
 
 - This is a classification experiment, not a complete six-suite model acceptance

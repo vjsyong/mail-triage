@@ -5360,6 +5360,16 @@ def main():
     _fresp = fusion_proxy.openai_completion(json.dumps(_fv), "fusion",
                                             {"prompt_tokens": 1, "completion_tokens": 2,
                                              "total_tokens": 3})
+    check("mode helpers: cascade gate + Noul decision",
+          fusion_proxy.cascade_skip("Notification") is True
+          and fusion_proxy.cascade_skip("Action") is False
+          and fusion_proxy.noul_decision(0.80, 0.40) == (True, 0.8)
+          and fusion_proxy.noul_decision(0.20, 0.40) == (False, 0.8))
+    check("defaults keep the validated mode and thresholds",
+          fusion_proxy.NR_MODE == "llm"
+          and fusion_proxy.CASCADE_CATEGORIES == {"Notification", "Newsletter",
+                                                  "Receipt", "Promo"}
+          and abs(fusion_proxy.NR_THRESHOLD - 0.40) < 1e-9)
     check("the fusion carries its system name and maps the alias for proxying",
           fusion_proxy.FUSION_NAME == "MiniCPM5-2B-TinyJev-Fusion"
           and fusion_proxy.upstream_model(fusion_proxy.FUSION_NAME) == fusion_proxy.LLM_MODEL

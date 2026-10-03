@@ -38,6 +38,10 @@ services:
       FUSION_LLM_MODEL: "${FUSION_LLM_MODEL:-minicpm5-2b}"
       FUSION_USER_NAME: "${FUSION_USER_NAME:-Sean}"
       TINYJEV_DEVICE: "cpu"
+      # needs_reply engine: llm (default) | cascade | tiny (Potato/Pi mode)
+      FUSION_NR_MODE: "${FUSION_NR_MODE:-llm}"
+      FUSION_NR_THRESHOLD: "${FUSION_NR_THRESHOLD:-0.40}"
+      FUSION_CASCADE_CATEGORIES: "${FUSION_CASCADE_CATEGORIES:-Notification,Newsletter,Receipt,Promo}"
       OMP_NUM_THREADS: "${FUSION_THREADS:-4}"
       MKL_NUM_THREADS: "${FUSION_THREADS:-4}"
     extra_hosts:
