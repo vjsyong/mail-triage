@@ -3076,6 +3076,31 @@ ASSISTANT_TOOLS = [
          "subject": {"type": "string", "description": "Subject value (optional; overrides the generated example)"},
          "body": {"type": "string", "description": "Body value (optional; overrides the generated example)"},
          "use_llm": {"type": "boolean", "description": "tick 'Ask the classifier' (omit to leave it as-is)"}}),
+    _fn("fill_flow",
+        "Fill the FLOW EDITOR form open in the user's browser (the canvas builder at /flows/new or /flows/<id>/edit) - the fields update live, so never paste the flow in chat instead. Use ONLY while the flow editor is open, and prefer it over propose_flow there: the user reviews the filled form and presses Save flow themselves. Pass just the fields to write: name, match_mode, enabled, conditions (filters) and/or steps. conditions and steps REPLACE the form's current lists, so pass the complete intended list. Nothing is saved by the tool.",
+        {"name": {"type": "string", "description": "flow name"},
+         "match_mode": {"type": "string", "enum": ["all", "any"], "description": "match all / any of the filters"},
+         "enabled": {"type": "boolean", "description": "enable the flow (omit to leave the toggle as-is)"},
+         "conditions": {"type": "array", "description": "WHEN filters, complete replacement list (1-5). Deterministic: {field, op, value}. FUZZY: {kind:'category', value:'<category>'} or {kind:'topic', value:'<description with its boundary>', threshold:0.2-0.95}", "items": {
+             "type": "object",
+             "properties": {
+                 "kind": {"type": "string", "enum": ["field", "category", "topic"]},
+                 "field": {"type": "string", "enum": ["from", "to", "subject", "body"]},
+                 "op": {"type": "string", "enum": ["contains", "equals", "regex", "plugin"]},
+                 "value": {"type": "string"},
+                 "plugin": {"type": "string", "description": "op=plugin only: a matcher plugin id"},
+                 "min_confidence": {"type": "number", "description": "category conditions: minimum classifier confidence 0-1"},
+                 "threshold": {"type": "number", "description": "topic conditions: similarity threshold 0.2-0.95 (default 0.45)"}}}},
+         "steps": {"type": "array", "description": "THEN steps, complete replacement list, in order (1-10)", "items": {
+             "type": "object",
+             "properties": {
+                 "type": {"type": "string", "enum": ["move", "draft", "tag", "mark_read", "flag"]},
+                 "folder": {"type": "string", "description": "for move steps"},
+                 "mode": {"type": "string", "enum": ["fixed", "template", "llm", "plugin"], "description": "for draft steps"},
+                 "body": {"type": "string", "description": "literal message for a fixed draft"},
+                 "template_id": {"type": "integer", "description": "for template/llm/plugin drafts"},
+                 "instructions": {"type": "string", "description": "for llm draft steps: what the reply should say (tone, points to include)"},
+                 "tag": {"type": "string", "description": "for tag steps"}}}}}),
 ]
 
 
@@ -3645,11 +3670,35 @@ def _assistant_context():
     )
 
 
-def assistant_page_context(path):
+def _flow_editor_live_text(live_state):
+    """Prompt block for the unsaved flow-editor form state sent by the browser."""
+    if not live_state:
+        return ""
+    try:
+        st = json.loads(live_state)
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(st, dict):
+        return ""
+    name = str(st.get("name") or "").strip()[:120] or "(blank)"
+    mode = "any" if str(st.get("match_mode") or "").lower() == "any" else "all"
+    conds = st.get("conditions") if isinstance(st.get("conditions"), list) else []
+    steps = st.get("steps") if isinstance(st.get("steps"), list) else []
+    when = _flow_when_text({"conditions": json.dumps(conds or []),
+                            "match_mode": mode}) if conds else "(no filters yet)"
+    return ("\n\nCURRENT EDITOR DRAFT (unsaved - this is exactly what the form shows right now):\n"
+            "name: %s\nenabled: %s, match %s\nWHEN: %s\nTHEN: %s\n"
+            "Fill only what the user asks about; a flow needs at least one filter and one step to save."
+            % (name, "yes" if st.get("enabled") else "no", mode,
+               when, _flow_steps_text(steps or [])))
+
+
+def assistant_page_context(path, live_state=""):
     """The page the user is looking at, for the assistant's system prompt.
     Returns (kind, short_desc, block, key). Never includes credentials. The key is
     a compact context id (message:3563, flow:15, ...) used by the drawer to scope
-    chat sessions to the page."""
+    chat sessions to the page. live_state is the unsaved flow-editor form snapshot
+    the browser sends along, used only for flow editor pages."""
     path = (path or "").strip()[:300]
     p = path.split("?", 1)[0]
     q = path.split("?", 1)[1] if "?" in path else ""
@@ -3685,6 +3734,20 @@ def assistant_page_context(path):
                time.strftime("%Y-%m-%d %H:%M", time.localtime(row["snoozed_until"])) if row.get("snoozed_until") else "no",
                row["id"], row["id"]))
         return "message", "message \u00b7 %s" % ((row.get("subject") or "(no subject)")[:70]), block, "message:%d" % row["id"]
+    m = re.match(r"^/flows/(\d+)/edit", p)
+    if m:
+        fl = store.get_flow(int(m.group(1)))
+        if fl:
+            block = ("CURRENT PAGE: the user is in the FLOW EDITOR for flow #%d below (the canvas "
+                     "builder: name, Enabled, WHEN filters, THEN steps). The form on screen is the "
+                     "draft they will save. When they ask to build, complete or change this flow, "
+                     "CALL fill_flow with the fields to write into the form - the fields update live "
+                     "in their browser and they review and press Save flow. Never paste the flow in "
+                     "chat instead, and do not call propose_flow while this editor is open.\n\n%s"
+                     % (fl["id"], _flows_to_text([fl])))
+            block += _flow_editor_live_text(live_state)
+            return ("flow", "flow editor \u00b7 %s" % ((fl.get("name") or ("#%d" % fl["id"]))[:60]),
+                    block, "flow:%d" % fl["id"])
     m = re.match(r"^/flows/(\d+)", p)
     if m:
         fl = store.get_flow(int(m.group(1)))
@@ -3694,10 +3757,13 @@ def assistant_page_context(path):
                      % (fl["id"], _flows_to_text([fl])))
             return "flow", "flow \u00b7 %s" % ((fl.get("name") or ("#%d" % fl["id"]))[:70]), block, "flow:%d" % fl["id"]
     if p == "/flows/new":
-        return ("flow", "new flow editor",
-                "CURRENT PAGE: the user is in the NEW FLOW editor building a draft flow. A bare "
-                "\u201cthis flow\u201d refers to that draft; they likely want help designing conditions "
-                "and steps.", "flow:new")
+        block = ("CURRENT PAGE: the user is in the NEW FLOW editor - the canvas builder for a new "
+                 "flow (name, WHEN filters, THEN steps). When they ask to design, complete or fill "
+                 "it, CALL fill_flow with the fields to write into their form live; they review and "
+                 "press Save flow. Never paste the flow in chat instead, and do not call "
+                 "propose_flow while this editor is open.")
+        block += _flow_editor_live_text(live_state)
+        return ("flow", "new flow editor", block, "flow:new")
     m = re.match(r"^/rules/(\d+)", p)
     if m:
         ru = store.get_rule(int(m.group(1)))
@@ -3965,10 +4031,11 @@ class AssistantAgent:
     RESULT_CHARS = 4500       # max JSON chars of a tool result fed back to the model
     TRANSCRIPT_BUDGET = 30000  # cumulative tool-result chars before hard truncation
 
-    def __init__(self, session_id=0, page_path=None):
+    def __init__(self, session_id=0, page_path=None, page_state=""):
         self.mc = None
         self.session_id = int(session_id or 0)
         self.page_path = (page_path or "").strip()[:300]
+        self.page_state = (page_state or "").strip()[:60000]
         self.proposals = []
         self.tools_log = []
         self.perms = agent_permissions()
@@ -4856,7 +4923,7 @@ class AssistantAgent:
                                       "permissions": agent_permissions_text()}
                   + "\n\n" + _assistant_context())
         if self.page_path:
-            _kind, _desc, _block, _key = assistant_page_context(self.page_path)
+            _kind, _desc, _block, _key = assistant_page_context(self.page_path, self.page_state)
             if _block:
                 system += "\n\n" + _block
         convo = [{"role": m["role"], "content": m["content"]}
@@ -5275,6 +5342,77 @@ class AssistantAgent:
                            "note": "The fields update live in the browser; press Run simulation to test them."},
                 "ui": {"action": "fill_simulator", "fields": fields,
                        "note": "Draft filled from the assistant \u2014 review it, then Run simulation."}}
+
+    def _tool_fill_flow(self, a):
+        """Fill the flow editor form live in the browser (nothing is saved)."""
+        p = (self.page_path or "").split("?", 1)[0].rstrip("/")
+        # page_state is the live form snapshot the editor page sends with every
+        # chat turn; it is empty on any page that does not have the form on screen.
+        if not ((p == "/flows/new" or re.match(r"^/flows/\d+/edit$", p)) and self.page_state):
+            return {"ok": False,
+                    "summary": "the flow editor is not open in this browser",
+                    "result": {"error": "not_on_flow_editor",
+                               "note": ("The flow form can only be filled live while the flow editor "
+                                        "is open (/flows/new or /flows/<id>/edit). Give the user the "
+                                        "flow details in your reply instead, or use propose_flow for a "
+                                        "one-click proposal on other pages.")}}
+        provided = [k for k in ("name", "match_mode", "enabled", "conditions", "steps")
+                    if k in a and a.get(k) not in (None, "")]
+        if not provided:
+            return {"ok": False,
+                    "summary": "nothing to fill - pass name, match_mode, enabled, conditions or steps",
+                    "result": {"error": "no_fields"}}
+        norm, errors = _validate_flow({"name": a.get("name") or "Editor flow",
+                                       "match_mode": a.get("match_mode") or "all",
+                                       "conditions": a.get("conditions") or [],
+                                       "steps": a.get("steps") or []})
+        if errors:
+            return {"ok": False,
+                    "summary": "flow fields invalid: " + "; ".join(errors[:3]),
+                    "result": {"errors": errors,
+                               "hint": ("Fix the invalid conditions/steps and call fill_flow again. "
+                                        "Conditions: {kind: field|category|topic, field, op, value, "
+                                        "min_confidence|threshold}. Steps: move/draft/tag/mark_read/flag. "
+                                        "You can also call fill_flow again with the valid fields only.")}}
+        fields = {}
+        if "name" in a:
+            fields["name"] = norm["name"]
+        if "match_mode" in a:
+            fields["match_mode"] = norm["match_mode"]
+        if "enabled" in a:
+            en = _as_bool(a.get("enabled"))
+            if en is not None:
+                fields["enabled"] = en
+        if "conditions" in a and a.get("conditions") is not None:
+            fields["conditions"] = (norm["conditions"] or [])[:5]
+        if "steps" in a and a.get("steps") is not None:
+            fields["steps"] = (norm["steps"] or [])[:10]
+        if not fields:
+            return {"ok": False,
+                    "summary": "nothing to fill - pass name, match_mode, enabled, conditions or steps",
+                    "result": {"error": "no_fields"}}
+        labels = []
+        if "name" in fields:
+            labels.append("name")
+        if "enabled" in fields:
+            labels.append("enabled" if fields["enabled"] else "disabled")
+        if "match_mode" in fields:
+            labels.append("match %s" % fields["match_mode"])
+        if "conditions" in fields:
+            labels.append("%d filter(s)" % len(fields["conditions"]))
+        if "steps" in fields:
+            labels.append("%d step(s)" % len(fields["steps"]))
+        return {"ok": True,
+                "summary": "filled the flow editor (%s) - review it, then press Save flow"
+                           % ", ".join(labels),
+                "result": {"filled": sorted(fields),
+                           "conditions": fields.get("conditions"),
+                           "steps_text": (_flow_steps_text(fields["steps"])
+                                          if "steps" in fields else ""),
+                           "note": ("The form updates live in the browser; the flow is not saved "
+                                    "until the user presses Save flow.")},
+                "ui": {"action": "fill_flow", "fields": fields,
+                       "note": "Flow form filled from the assistant \u2014 review it, then press Save flow."}}
 
     def _summarize_thoughts(self, reasoning_text):
         """One short sentence describing what the reasoning was about (best-effort)."""

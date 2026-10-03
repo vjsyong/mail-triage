@@ -68,3 +68,16 @@ buttons) - the traceability of a graph with the direction of a sentence.
   go through it.
 - POST contract unchanged (cond_kind_i / cond_field_i / cond_op_i / cond_value_i /
   cond_score_i + steps_json) - the new UI is presentation + interaction.
+
+## Follow-up: AI autofill (collaborative)
+When the editor is open, the assistant can write into the form instead of
+proposing a flow: the new `fill_flow` tool (mirrors `fill_simulator`) validates
+name / match_mode / enabled / conditions / steps with `_validate_flow` and emits
+a `ui.action=fill_flow` event; `window.mtFlowFill` applies it live (fields,
+filter chips, step cards, preview) and the user reviews and presses Save flow.
+The tool refuses unless the editor is both in the page path (`/flows/new`,
+`/flows/<id>/edit`) and actually live: every chat turn from the editor sends an
+unsaved-form snapshot (`window.mtCtxState`) which lands in the prompt as
+"CURRENT EDITOR DRAFT", so the AI can see what is already typed and fill the
+blanks. The editor page context tells the model to prefer `fill_flow` over
+`propose_flow` there.

@@ -1638,6 +1638,9 @@ window.assistantChat = function(opts){
         if(d.ui && d.ui.action==='fill_simulator' && window.mtSimFill){
           try{ window.mtSimFill(d.ui.fields||{}, d.ui.note||''); }catch(e){}
         }
+        if(d.ui && d.ui.action==='fill_flow' && window.mtFlowFill){
+          try{ window.mtFlowFill(d.ui.fields||{}, d.ui.note||''); }catch(e){}
+        }
         toolDone(d.id,d.ok,d.summary,d.dry_run,d.pending,d.card); label('thinking\u2026');
       }
       else if(ev==='proposals'){ proposals=d.proposals||[]; }
@@ -1653,11 +1656,14 @@ window.assistantChat = function(opts){
       scrollBottom();
     }
     var _ep = regen ? '/assistant/regenerate' : '/assistant/stream';
+    var _state = window.mtCtxState ? window.mtCtxState() : '';
     var _body = regen
         ? ('session='+encodeURIComponent(sid)+'&mid='+encodeURIComponent(regen.mid||0)
-           +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : ''))
+           +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : '')
+           +'&state='+encodeURIComponent(_state))
         : ('message='+encodeURIComponent(text)+'&session='+encodeURIComponent(sid)
-           +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : ''));
+           +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : '')
+           +'&state='+encodeURIComponent(_state));
     fetch(_ep, { method:'POST',
         headers: {'Content-Type':'application/x-www-form-urlencoded'},
         body: _body,
@@ -5355,6 +5361,87 @@ if(enBox && stPill){
   enBox.addEventListener('change', paintState); paintState();
 }
 render(); condEmpty();
+function condReset(row){
+  row.querySelector('.k-val').value = '';
+  row.querySelector('.k-score').value = '';
+  row.querySelector('.k-sel').value = 'field';
+  condKind(row.querySelector('.k-sel'));
+  row.classList.add('extra');
+}
+window.mtCtxState = function(){
+  if(!document.getElementById('flowform')) return '';
+  var conds = [];
+  document.querySelectorAll('.cond-row').forEach(function(row){
+    var kind = row.querySelector('.k-sel').value;
+    var val = row.querySelector('.k-val').value.trim();
+    if(!val) return;
+    var o = {kind: kind, value: val};
+    var sc = row.querySelector('.k-score').value;
+    if(kind === 'field'){
+      o.field = row.querySelector('[name^="cond_field_"]').value;
+      o.op = row.querySelector('[name^="cond_op_"]').value;
+    } else if(sc){
+      if(kind === 'category') o.min_confidence = parseFloat(sc);
+      else o.threshold = parseFloat(sc);
+    }
+    conds.push(o);
+  });
+  var mm = document.querySelector('input[name=match_mode]:checked');
+  return JSON.stringify({
+    name: document.getElementById('f-name').value,
+    enabled: document.getElementById('f-enabled').checked,
+    match_mode: mm ? mm.value : 'all',
+    conditions: conds,
+    steps: steps.map(function(s){ var o = {}; for(var k in s){ if(k.charAt(0) !== '_') o[k] = s[k]; } return o; })
+  });
+};
+window.mtFlowFill = function(fields, note){
+  fields = fields || {};
+  if(typeof fields.name === 'string'){ document.getElementById('f-name').value = fields.name; }
+  if(typeof fields.enabled === 'boolean'){
+    var cb = document.getElementById('f-enabled');
+    cb.checked = fields.enabled;
+    cb.dispatchEvent(new Event('change'));
+  }
+  if(fields.match_mode === 'all' || fields.match_mode === 'any'){
+    document.querySelectorAll('input[name=match_mode]').forEach(function(r){ r.checked = (r.value === fields.match_mode); });
+    renderSummary();
+  }
+  if(Array.isArray(fields.conditions)){
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.cond-row'));
+    fields.conditions.forEach(function(c, i){
+      var row = rows[i]; if(!row) return;
+      var kind = c.kind || 'field';
+      if(kind !== 'field' && kind !== 'category' && kind !== 'topic') kind = 'field';
+      if(kind === 'field'){
+        row.querySelector('[name^="cond_field_"]').value = c.field || 'subject';
+        row.querySelector('[name^="cond_op_"]').value = c.op || 'contains';
+      }
+      row.querySelector('.k-val').value = (c.value == null) ? '' : String(c.value);
+      row.querySelector('.k-score').value = (c.min_confidence != null) ? c.min_confidence
+                                             : ((c.threshold != null) ? c.threshold : '');
+      row.classList.remove('extra');
+      row.querySelector('.k-sel').value = kind;
+      condKind(row.querySelector('.k-sel'));
+    });
+    rows.slice(fields.conditions.length).forEach(condReset);
+    condEmpty(); renderSummary();
+  }
+  if(Array.isArray(fields.steps)){
+    steps = fields.steps.map(function(s){
+      var o = {}; for(var k in s){ if(k.charAt(0) !== '_') o[k] = s[k]; }
+      o._open = false; return o;
+    });
+    render();
+  }
+  var canvas = document.querySelector('.flowcanvas');
+  if(canvas){
+    canvas.style.transition = 'box-shadow .35s';
+    canvas.style.boxShadow = '0 0 0 2px var(--acc)';
+    setTimeout(function(){ canvas.style.boxShadow = ''; }, 1800);
+  }
+  if(note && window.toast) toast(note, 'ok');
+};
 </script>
 """
 
@@ -7229,11 +7316,23 @@ def _suggestions_for_path(path):
         fl = store.get_flow(fid)
         if fl:
             nm = (fl.get("name") or "#%d" % fid)[:60]
-            return [
-                {"label": "Test it in the simulator \u2192", "href": "/simulate?flow=%d" % fid},
+            chips = [{"label": "Test it in the simulator \u2192", "href": "/simulate?flow=%d" % fid}]
+            if len(parts) >= 3 and parts[2] == "edit":
+                chips.append({"label": "Complete this form with AI",
+                              "prompt": ("Look at the flow draft I have open and fill in the missing or weak "
+                                         "parts of the form (filters and steps) with fill_flow, then tell me in "
+                                         "one line what you changed.")})
+            chips += [
                 {"label": "Explain this flow", "prompt": "Explain what flow #%d (\u201c%s\u201d) does, in two lines." % (fid, nm)},
                 {"label": "When does it fire?", "prompt": "Walk me through when flow #%d (\u201c%s\u201d) fires and what each step does." % (fid, nm)},
             ]
+            return chips
+    if key == "flows" and len(parts) >= 2 and parts[1] == "new":
+        return [
+            {"label": "Fill an example flow", "prompt": ("Fill this new-flow form with a simple example flow - a filter plus "
+                                                          "two steps - using fill_flow, then tell me in one line what you filled.")},
+            {"label": "Explain the canvas", "prompt": "Explain the parts of the flow editor I am looking at: filters, match all/any, and the step types."},
+        ]
     if key == "rules" and len(parts) >= 2 and parts[1].isdigit():
         rid = int(parts[1])
         ru = store.get_rule(rid)
@@ -7394,13 +7493,14 @@ def assistant_stream():
     text = (request.form.get("message") or "").strip()
     sid = _assistant_sid_from_form()
     page_path = request.form.get("path") or ""
+    page_state = (request.form.get("state") or "")[:60000]
 
     def gen():
         yield _sse("session", {"sid": sid})
         if not text:
             yield _sse("error", {"message": "empty message"})
             return
-        agent = engine.AssistantAgent(session_id=sid, page_path=page_path)
+        agent = engine.AssistantAgent(session_id=sid, page_path=page_path, page_state=page_state)
         try:
             for ev in agent.stream(text):
                 etype = ev.pop("type")
@@ -7428,6 +7528,7 @@ def assistant_regenerate():
     is replaced by a fresh run of the same user turn (no duplicate user row)."""
     sid = _assistant_sid_from_form()
     page_path = request.form.get("path") or ""
+    page_state = (request.form.get("state") or "")[:60000]
     try:
         mid = int(request.form.get("mid") or 0)
     except (TypeError, ValueError):
@@ -7444,7 +7545,7 @@ def assistant_regenerate():
             yield _sse("error", {"message": "nothing to regenerate"})
             return
         store.delete_assistant_message(last["id"])
-        agent = engine.AssistantAgent(session_id=sid, page_path=page_path)
+        agent = engine.AssistantAgent(session_id=sid, page_path=page_path, page_state=page_state)
         try:
             for ev in agent.stream(prev["content"], store_user=False):
                 etype = ev.pop("type")
