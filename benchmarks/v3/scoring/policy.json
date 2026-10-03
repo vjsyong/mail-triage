@@ -1,0 +1,45 @@
+{
+ "schema_version": "v3.0",
+ "policy_id": "scoring_default",
+ "revision": "3.0",
+ "bootstrap": {
+  "B": 4000,
+  "seed": 20251003,
+  "alpha": 0.05,
+  "margin": 0.03,
+  "min_lineages": 10
+ },
+ "probability_semantics": {
+  "category_confidence": {"field": "confidence", "kind": "probability", "range": [0.0, 1.0]},
+  "reply_probability": {"field": null, "kind": "probability", "range": [0.0, 1.0]}
+ },
+ "calibration": {
+  "bins": 10,
+  "split": "calibration",
+  "min_calibration_cases": 20,
+  "min_accepted": 5,
+  "target_precision": 0.8,
+  "coverage_threshold": 0.6
+ },
+ "gates": {
+  "min_coverage": 0.5,
+  "min_category_macro_f1": 0.5,
+  "min_reply_f1": 0.5,
+  "max_missed_reply": 0.5,
+  "min_workflow_completion": 0.5,
+  "min_lineages": 10,
+  "min_cases": 20,
+  "require_reviewed_for_test": true,
+  "require_authorization_for_real_mail": true,
+  "require_hardware_receipt_for_cpu": true
+ },
+ "relations": {
+  "root_weighting": "lineage_cluster",
+  "require_parent": true
+ },
+ "splits": {
+  "development": ["development"],
+  "calibration": ["calibration"],
+  "test": ["private_test", "private_shift", "real_holdout"]
+ }
+}
