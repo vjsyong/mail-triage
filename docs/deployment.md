@@ -10,11 +10,41 @@ State lives on disk under `data/` (SQLite) and `ragmodels/` (CPU models).
 | port | what | exposure |
 |---|---|---|
 | 8097 | the UI | **loopback by default** (`127.0.0.1:8097:8097`). Reach it remotely through a reverse proxy or VPN - never publish it raw. |
-| 41810-41819 | OAuth callback ports (used by some account modes) | loopback; map externally only if your callback setup needs it (see below). |
+| 41810-41819 | OAuth callback ports (used by some account modes; a second instance shifts this pool - see Multiple instances) | loopback; map externally only if your callback setup needs it (see below). |
 | 1993 | the embedded email-oauth2-proxy's plain-IMAP listener | internal to the container (`127.0.0.1` inside); nothing to expose. |
 
 The app has no built-in auth. Treat the port like a shell: give it TLS and an
 auth layer, or keep it VPN-only.
+
+## Multiple instances
+
+One instance serves one mailbox. To run a second one on the same host, use the
+shipped `docker-compose.second.yml` as the template: it runs the same image
+(`mail-triage:local`, built from this checkout) as a second container with its
+own state, UI port and OAuth callback pool.
+
+```bash
+docker compose -f docker-compose.second.yml up -d --build   # UI on 127.0.0.1:8099
+```
+
+What must differ per instance:
+
+- **state** - its own data directory (`data2/` in the example); never share
+  `triage.db` between instances.
+- **UI port** - published on a distinct loopback port (8099 here), behind the
+  same TLS/VPN treatment as the first.
+- **OAuth callback pool** - `PROXY_REDIRECT_POOL_START` shifts the redirect
+  pool (41820 for the second instance) and the ports are published 1:1, so
+  tailnet-mode redirect URIs (`https://<node>:4182x`) land on the right
+  instance. Register the redirect URI shown on the second instance's Accounts
+  page with its OAuth app, exactly as for the first.
+- **network** - the example joins the first project's compose network
+  (`mail-triage_default`, external) so shared services stay reachable by name;
+  drop that block for full isolation.
+
+Rebuilds are shared: both compose files build the same image tag, so one
+`docker compose build` produces the image the second instance picks up on its
+next `up -d`.
 
 ## TLS and remote access
 

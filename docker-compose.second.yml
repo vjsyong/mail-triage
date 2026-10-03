@@ -1,0 +1,44 @@
+# Second Mail Triage instance - same app, a different mailbox, its own state.
+#
+#   docker compose -f docker-compose.second.yml up -d --build
+#
+# Built from this same checkout (image mail-triage:local, shared with the main
+# compose project - rebuild via either file) as container mail-triage-2:
+#   - UI: 127.0.0.1:8099 (host) -> 8097 (container)
+#   - state: ./data2 (SQLite, generated proxy config, OAuth token cache)
+#   - OAuth callback pool 41820-41829 (PROXY_REDIRECT_POOL_START), published 1:1
+#     on host loopback: tailnet-mode redirect URIs are https://<node>:4182x and
+#     must land on THIS instance, never on the first one's 41810-41819
+#   - joins the main project's network (mail-triage_default) so shared services
+#     (e.g. the fusion fallback endpoint at http://fusion:8098) stay resolvable
+#
+# Never point both instances at the same data directory.
+name: mail-triage-2
+
+services:
+  mail-triage:
+    build: .
+    image: mail-triage:local
+    container_name: mail-triage-2
+    restart: unless-stopped
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8099:8097"
+      - "127.0.0.1:41820-41829:41820-41829"
+    environment:
+      FASTEMBED_CACHE_PATH: /ragmodels
+      PROXY_REDIRECT_POOL_START: "41820"
+      # no mailbox identity inherited from the shared .env: the account added on
+      # this instance's Accounts page supplies it (fill in the address here once
+      # known if search/learning "me" detection matters for this inbox)
+      IMAP_USER: ""
+    volumes:
+      - ./data2:/data
+      - ./ragmodels:/ragmodels
+
+networks:
+  default:
+    name: mail-triage_default
+    external: true
