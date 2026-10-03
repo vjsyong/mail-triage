@@ -73,6 +73,7 @@ app.secret_key = os.environ.get("APP_SECRET", "mail-triage-local")
 worker = engine.Worker()
 indexer = rag.Indexer()
 classifier = engine.ClassifyJob()
+llm_health = engine.LLMHealthMonitor()
 
 _TZ_CACHE = {"at": 0.0, "off": 8.0}  # display timezone offset cache (see tz_offset_hours)
 
@@ -2302,11 +2303,13 @@ DASH_TMPL = """
       </div>
     </div>
     <div class="sysitem">
-      <span class="dot {{ 'ok' if llm.base else 'err' }}"></span>
+      <span class="dot {{ lh.dot }}" id="llm-dot"></span>
       <div>
         <b>LLM</b>
         {% if llm.base %}
-        <span class="sub">{{ llm.model }} · {{ llm_used }}/{{ settings.max_llm_per_hour }} calls this hour{% if llm.fallback %} · fallback {{ llm.fallback.model }}{% endif %}</span>
+        <span class="sub{{ ' syserr' if lh.down else '' }}" id="llm-txt" data-ok="{{ llm.model }} · {{ llm_used }}/{{ settings.max_llm_per_hour }} calls this hour{% if llm.fallback %} · fallback {{ llm.fallback.model }}{% endif %}">{% if lh.down %}unreachable{% if lh.error %} — {{ lh.error[:90] }}{% endif %}{% if llm.fallback %} · fallback {{ llm.fallback.model }}{% endif %}{% else %}{{ llm.model }} · {{ llm_used }}/{{ settings.max_llm_per_hour }} calls this hour{% if llm.fallback %} · fallback {{ llm.fallback.model }}{% endif %}{% endif %}</span>
+        <span class="sub" id="llm-settings"{% if not lh.down %} hidden{% endif %}>· <a href="{{ url_for('settings') }}">settings</a></span>
+        <span class="sub" id="llm-checked"{% if not lh.checked_at %} hidden{% endif %}>· checked {{ lh.checked_r }}</span>
         {% else %}
         <span class="sub syserr">not configured — <a href="{{ url_for('settings') }}">settings</a></span>
         {% endif %}
@@ -2467,6 +2470,35 @@ DASH_TMPL = """
   var aw=document.querySelector('.actwrap'); if(aw) aw.removeAttribute('open');
 })();
 </script>
+<script>
+(function(){
+  var dot=document.getElementById('llm-dot'), txt=document.getElementById('llm-txt'),
+      lnk=document.getElementById('llm-settings'), chk=document.getElementById('llm-checked');
+  if(!dot||!txt) return;
+  function show(el, on){
+    if(!el) return;
+    if(on) el.removeAttribute('hidden'); else el.setAttribute('hidden','');
+  }
+  function paint(d){
+    if(!d || d.configured===false) return;
+    if(d.reachable===true){
+      dot.className='dot ok'; txt.classList.remove('syserr');
+      txt.textContent=txt.getAttribute('data-ok')||txt.textContent;
+    } else if(d.reachable===false){
+      dot.className='dot err'; txt.classList.add('syserr');
+      txt.textContent='unreachable'+(d.error?' — '+String(d.error).slice(0,90):'')
+        +(d.fallback?' · fallback '+d.fallback:'');
+    }
+    show(lnk, d.reachable===false);
+    if(chk){ chk.textContent='· checked '+(d.checked_r||''); show(chk, !!d.checked_r); }
+  }
+  function poll(){
+    fetch('/llm/health.json',{headers:{'Accept':'application/json'}})
+      .then(function(r){return r.json();}).then(paint).catch(function(){});
+  }
+  setInterval(function(){ if(!document.hidden) poll(); }, 15000);
+})();
+</script>
 {% if ix.running %}<script>(function(){ var me=location.pathname; (function r(){ setTimeout(function(){ if(location.pathname!==me) return; if(document.hidden){ r(); } else { location.reload(); } }, 8000); })(); })();</script>{% endif %}
 """
 
@@ -2505,6 +2537,11 @@ def dashboard():
               "last_error": repr(exc)}
     px["listener_rows"] = [{"port": port} for port, _up in sorted((px.get("ports") or {}).items())]
     llm_cfg = engine.llm_config()
+    lh = dict(llm_health.state)
+    lh["checked_r"] = rel_time(lh.get("checked_at"))
+    lh["down"] = bool(llm_cfg.get("base")) and lh.get("reachable") is False
+    lh["dot"] = "ok" if (llm_cfg.get("base") and lh.get("reachable")) else (
+        "warn" if (llm_cfg.get("base") and lh.get("reachable") is None) else "err")
     ix_st = index_status()
     filings = store.recent_moves(limit=8)
     for f in filings:
@@ -2512,11 +2549,12 @@ def dashboard():
         f["who"] = {"rule": "rule", "flow": "flow", "auto-file": "LLM", "assistant": "assistant",
                     "manual": "you", "trash": "→ Trash"}.get(f.get("source") or "", f.get("source") or "move")
     sys_alert = bool(ws.get("last_error") or not px.get("running")
-                     or ix_st.get("last_error") or not llm_cfg.get("base"))
+                     or ix_st.get("last_error") or not llm_cfg.get("base")
+                     or lh.get("down"))
     return render(_render_src(
         DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
         settings=store.all_settings(), ix=ix_st, px=px, filings=filings,
-        llm=llm_cfg, llm_used=store.llm_count_last_hour(), sys_alert=sys_alert,
+        llm=llm_cfg, lh=lh, llm_used=store.llm_count_last_hour(), sys_alert=sys_alert,
         setup=setup_state()))
 
 
@@ -7860,7 +7898,7 @@ def _save_llm_settings():
         store.set_setting("llm_timeout", _form_int("llm_timeout", 0, lo=0))
     _save_secret("llm_api_key")
     _save_secret("llm_fallback_api_key")
-
+    llm_health.trigger()  # re-probe now instead of waiting for the next poll
 
 
 def _save_rag_settings():
@@ -9909,6 +9947,15 @@ def healthz():
     return jsonify({"ok": True, "worker": worker.state.get("last_ok"), "error": worker.state.get("last_error")})
 
 
+@app.route("/llm/health.json")
+def llm_health_json():
+    """Cached result of the background LLM reachability poll - the dashboard
+    polls this to keep the LLM dot current without a page reload."""
+    st = dict(llm_health.state)
+    st["checked_r"] = rel_time(st.get("checked_at"))
+    return jsonify(st)
+
+
 if __name__ == "__main__":
     store.init_db()
     try:
@@ -10005,6 +10052,7 @@ if __name__ == "__main__":
     worker.start()
     indexer.start()
     classifier.start()
+    llm_health.start()
     proxy.supervisor.start()  # keeps the embedded emailproxy running (embedded mode only)
     plugin_rt.scheduler.start()  # fires due plugin onSchedule() entrypoints
     app.run(host=config.UI_HOST, port=config.UI_PORT, threaded=True)

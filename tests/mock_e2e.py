@@ -5485,6 +5485,53 @@ def main():
           and _fresp["choices"][0]["message"]["content"] == json.dumps(_fv)
           and _fresp["usage"]["total_tokens"] == 3)
 
+    section("T62 LLM health: reachability probe + dashboard polling", "core", "ui")
+    _lh = eng_mod.llm_health()
+    check("llm_health probes the configured endpoint as reachable",
+          _lh.get("configured") and _lh.get("reachable") is True
+          and _lh.get("latency_ms") is not None)
+    check("llm_health reports the probed base with no error",
+          _lh.get("base", "").endswith("/v1") and not _lh.get("error"))
+    # a dead endpoint reports unreachable, it must not raise
+    _prev_base = store.get_setting("llm_base_url")
+    try:
+        store.set_setting("llm_base_url", "http://127.0.0.1:9/v1")
+        _dead = eng_mod.llm_health(timeout=1)
+        check("llm_health reports a dead endpoint as unreachable without raising",
+              _dead.get("configured") and _dead.get("reachable") is False
+              and bool(_dead.get("error")))
+    finally:
+        store.set_setting("llm_base_url", _prev_base if _prev_base is not None else "")
+    # the monitor publishes the probe result on the same state shape the UI reads
+    _mon = eng_mod.LLMHealthMonitor(interval=15)
+    check("LLMHealthMonitor starts with an unpolled state",
+          _mon.state.get("reachable") is None and _mon.state.get("checked_at") == 0)
+    _mon.start()
+    _polled = False
+    for _ in range(80):
+        if _mon.state.get("reachable") is not None:
+            _polled = True
+            break
+        time.sleep(0.1)
+    _mon.trigger()  # must be safe while the thread waits
+    _mon.stop_flag.set()
+    _mon.wake.set()
+    check("LLMHealthMonitor periodically polls and publishes reachability",
+          _polled and _mon.state.get("reachable") is True
+          and _mon.state.get("configured") is True)
+    app_mod.llm_health.state = dict(_mon.state)  # the boot monitor in the test rig
+    r = client.get("/llm/health.json")
+    _hj = r.get_json() or {}
+    check("llm health JSON exposes configured/reachable state",
+          r.status_code == 200 and r.is_json and _hj.get("configured") is True
+          and _hj.get("reachable") is True and "checked_r" in _hj)
+    r = client.get("/")
+    check("dashboard LLM dot renders a reachability hook",
+          r.status_code == 200 and b'id="llm-dot"' in r.data
+          and b'id="llm-txt"' in r.data and b'id="llm-checked"' in r.data)
+    check("dashboard polls the LLM health endpoint",
+          b"/llm/health.json" in r.data)
+
     # ==== suite tail (always runs, even in a partial run) ====
     if globals().get("_PARTIAL_NOTE"):
         print("\n" + globals()["_PARTIAL_NOTE"])

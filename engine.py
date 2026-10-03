@@ -1122,6 +1122,41 @@ def llm_config():
     return cfg
 
 
+def llm_health(timeout=None):
+    """Cheap reachability probe for the configured LLM endpoint.
+
+    Hits GET {base}/models - the health endpoint every OpenAI-compatible server
+    answers, and far lighter than a chat completion (no tokens, no generation).
+    Never raises: an unreachable endpoint is a normal result, so a poller can
+    record it. Returns {configured, reachable (None until probed), checked_at,
+    base, model, latency_ms|error}."""
+    st = {"configured": False, "reachable": None, "checked_at": int(time.time())}
+    try:
+        cfg = llm_config()
+    except Exception as exc:
+        st["error"] = repr(exc)[:160]
+        return st
+    base = (cfg.get("base") or "").rstrip("/")
+    st.update(base=base, model=cfg.get("model") or "",
+              fallback=(cfg.get("fallback") or {}).get("model") or "",
+              configured=bool(base))
+    if not base:
+        return st
+    key = cfg.get("key") or ""
+    headers = {"Authorization": "Bearer " + key} if key else {}
+    t0 = time.time()
+    try:
+        r = requests.get(base + "/models", headers=headers,
+                         timeout=timeout or min(int(cfg.get("timeout") or 10), 10))
+        r.raise_for_status()
+        st["reachable"] = True
+        st["latency_ms"] = int((time.time() - t0) * 1000)
+    except Exception as exc:
+        st["reachable"] = False
+        st["error"] = repr(exc)[:160]
+    return st
+
+
 def fetch_model_ids(base, key="", timeout=15):
     """Model ids from an OpenAI-compatible /models endpoint. Raises on any
     connection/HTTP error so callers can fall back to a manual text field."""
@@ -1473,6 +1508,36 @@ class Worker(threading.Thread):
                     store.log_event("info", "heuristic %r retrained (+%d new label(s))" % (hname, delta))
         except Exception as exc:
             store.log_event("error", "heuristic auto-refine failed: %r" % exc)
+
+
+LLM_HEALTH_INTERVAL = 60  # seconds between LLM reachability probes
+
+
+class LLMHealthMonitor(threading.Thread):
+    """Polls the configured LLM endpoint on a timer so the dashboard's LLM dot
+    reflects whether the endpoint actually answers, not merely that a base URL
+    is set. State mirrors the Worker/Indexer dicts for the UI; it is only ever
+    replaced by a finished probe (including a config error), never left half
+    written."""
+
+    def __init__(self, interval=LLM_HEALTH_INTERVAL):
+        super().__init__(daemon=True, name="triage-llm-health")
+        self.interval = interval
+        self.stop_flag = threading.Event()
+        self.wake = threading.Event()
+        self.state = {"configured": False, "reachable": None, "checked_at": 0}
+
+    def trigger(self):
+        """Ask the loop to probe again now (e.g. after the endpoint changes)."""
+        self.wake.set()
+
+    def run(self):
+        store.init_db()
+        self.stop_flag.wait(3)  # let the UI come up first
+        while not self.stop_flag.is_set():
+            self.state = llm_health()
+            self.wake.wait(max(15, int(self.interval)))
+            self.wake.clear()
 
 
 def _fields_for(meta):
