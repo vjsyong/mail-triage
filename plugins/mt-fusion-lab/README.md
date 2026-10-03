@@ -7,8 +7,9 @@ A/B lab for classifier verdicts, built on the plugin SDK's trusted-page tier.
   side by side with timing and the stored verdict.
 - Two hidden, read-only tools back the page: `list_messages`, `compare_message`.
 
-The fusion half is served by the sidecar in `/fusion` (TinyJev-0.6B for the
-category + a MiniCPM5-2B *direct needs_reply* prompt with thinking off). The
+The fusion half is served by the sidecar in `/fusion` - the
+**MiniCPM5-2B-TinyJev-Fusion** system (TinyJev-0.6B for the category + a
+MiniCPM5-2B *direct needs_reply* prompt with thinking off). The
 primary/fallback halves use whatever endpoints are configured under
 Settings → AI Settings, via the host LLM capability (endpoint selector
 `primary`/`fallback`). Nothing is written, moved or sent.

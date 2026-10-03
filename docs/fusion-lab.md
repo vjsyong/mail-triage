@@ -6,7 +6,9 @@ user runs it from the Fusion Lab page.
 
 ## What it is
 
-A local decision system that splits classification into two cheap jobs:
+The system is named **MiniCPM5-2B-TinyJev-Fusion** (`FUSION_NAME`; it is the
+first model id on the OpenAI facade). It splits classification into two cheap
+jobs:
 
 | job | model | why |
 |---|---|---|
@@ -64,7 +66,8 @@ boilerplate mail (TinyJev category drops; a >4k-char fallback fixes it) and the
 
 The sidecar also exposes an OpenAI-compatible facade, so the fusion can be used
 without the plugin, the endpoint selector, or any app modification: point a
-client's base URL at `http://fusion:8098/v1` (model list comes from `/v1/models`).
+client's base URL at `http://fusion:8098/v1` and select
+`MiniCPM5-2B-TinyJev-Fusion` (the alias is listed first by `/v1/models`).
 
 - requests whose system prompt is the production classify prompt (detected and
   parsed for its category list) are answered by the fusion: TinyJev picks the
@@ -78,6 +81,51 @@ client's base URL at `http://fusion:8098/v1` (model list comes from `/v1/models`
 This is what "the model is a fusion" looks like from the app's perspective: one
 ordinary OpenAI endpoint whose classification calls happen to be decided by the
 decision head. The Fusion Lab plugin and `/classify` remain available for A/B.
+
+## CPU-only weak-system test (4 cores)
+
+To simulate a machine with no GPU - and a small one - run all three pieces pinned
+to the same four cores:
+
+1. **2B on CPU, 4 threads, no GPU offload** (the exact command is in
+   `fusion/docker-compose.yml`): `-ngl 0 --threads 4 -c 16384 --parallel 1`
+   plus `--cpuset-cpus 4-7`.
+2. **Sidecar**: `FUSION_CPUSET` (default `4-7`) and `FUSION_THREADS` (default 4,
+   applied as `OMP_NUM_THREADS`/`MKL_NUM_THREADS`) pin TinyJev to the same cores.
+3. **App**: `docker update --cpuset-cpus 4-7 mail-triage` to make the whole stack
+   share four cores; revert with the full core list (`nproc` -> `0-43`).
+
+Expected latency from the measured 4-core profile: TinyJev category p50 ~1.0 s
+(p90 2.0 s); 2B direct needs_reply p50 ~4.5 s (p90 ~23.7 s, long emails);
+fused classification p50 ~5.6 s, ~7 emails/min, ~2.7 GB model memory. A
+Raspberry-Pi-class core is 2-4x slower again, so treat this as the optimistic
+bound for weak hardware.
+
+## Potato / Raspberry Pi mode
+
+Classification can run with **zero generation** - only TinyJev's single forward
+pass. `FUSION_NR_MODE` selects the needs_reply engine:
+
+| mode | what it does |
+|---|---|
+| `llm` (default) | 2B answers needs_reply with the recall prompt; best recall |
+| `cascade` | answers false locally for `FUSION_CASCADE_CATEGORIES` (default Notification/Newsletter/Receipt/Promo), asks the 2B only for the rest |
+| `tiny` | TinyJev's Noul head answers in the same forward pass; the 2B is never called |
+
+Measured on the v2 suite (dev+acceptance, 228 non-junk cases) on 4 x86 cores:
+
+| mode | nr F1 | replies missed /53 | 2B calls | per-email (4 cores) |
+|---|---:|---:|---:|---:|
+| `llm` | .610 | 10 | 100% | ~4.0 s |
+| `cascade` | **.651** | 12 | 41% | ~2.3 s |
+| `tiny` | .571 | 27 | 0% | **~1.8 s** |
+
+In `cascade`/`tiny` modes `summary`/`reason` are empty (the app's heuristic path
+ships empty summaries too). `FUSION_NR_THRESHOLD` (default 0.40) trades TinyJev
+recall: lower flags more replies. In `tiny` mode the 2B server is not needed at
+all; memory is ~1.2 GB for TinyJev fp16. A Raspberry Pi 5 is roughly 2-3x
+slower again (expect ~4-8 s/email; a 4 GB board should dedicate it to the
+sidecar + app).
 
 ## Caveats
 

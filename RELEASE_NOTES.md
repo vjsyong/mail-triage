@@ -1,8 +1,11 @@
 # Release notes
 
-## v0.1.0-beta.1 — initial public beta (draft)
+## v0.1.0-beta.1 — initial public beta
 
-Prepared October 3, 2026. This release is a draft pending publication.
+Published October 3, 2026:
+[v0.1.0-beta.1](https://github.com/vjsyong/mail-triage/releases/tag/v0.1.0-beta.1).
+This entry describes the validated release at `9d39648`; `master` may include
+later experimental changes.
 
 Mail Triage is a self-hosted assistant for **one mailbox**, used daily by its
 author. This release packages the current application and its engineering

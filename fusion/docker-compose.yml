@@ -8,6 +8,15 @@
 # For the fusion prompt note that thinking is disabled per request; no extra
 # server flags are needed.
 #
+# CPU-only / weak-system test (no GPU anywhere; the whole stack on 4 cores):
+#   docker run -d --name mt-2b-cpu --cpuset-cpus 4-7 -p 8042:8000 \
+#     -v /path/to/minicpm5-2b-q4km:/models:ro --shm-size 16g \
+#     ghcr.io/ggml-org/llama.cpp:server-cuda \
+#     -m /models/MiniCPM5-2B-Q4_K_M.gguf --alias minicpm5-2b --host 0.0.0.0 --port 8000 \
+#     -ngl 0 --threads 4 -c 16384 --jinja --parallel 1 --no-reasoning-preserve
+# The sidecar is pinned to the same 4 cores by default (FUSION_CPUSET) and uses
+# FUSION_THREADS torch threads; override both to use the whole machine again.
+#
 # The TinyJev model is baked into the image; the port opens immediately while
 # the model loads in the background (~8s), /healthz returns 503 until ready.
 #
@@ -20,13 +29,21 @@ services:
     build: .
     image: mail-triage-fusion:latest
     container_name: mail-triage-fusion
+    cpuset: "${FUSION_CPUSET:-4-7}"
     ports:
       - "127.0.0.1:8098:8098"
     environment:
+      FUSION_NAME: "${FUSION_NAME:-MiniCPM5-2B-TinyJev-Fusion}"
       FUSION_LLM_BASE_URL: "${FUSION_LLM_BASE_URL:-http://host.docker.internal:8042/v1}"
       FUSION_LLM_MODEL: "${FUSION_LLM_MODEL:-minicpm5-2b}"
       FUSION_USER_NAME: "${FUSION_USER_NAME:-Sean}"
       TINYJEV_DEVICE: "cpu"
+      # needs_reply engine: llm (default) | cascade | tiny (Potato/Pi mode)
+      FUSION_NR_MODE: "${FUSION_NR_MODE:-llm}"
+      FUSION_NR_THRESHOLD: "${FUSION_NR_THRESHOLD:-0.40}"
+      FUSION_CASCADE_CATEGORIES: "${FUSION_CASCADE_CATEGORIES:-Notification,Newsletter,Receipt,Promo}"
+      OMP_NUM_THREADS: "${FUSION_THREADS:-4}"
+      MKL_NUM_THREADS: "${FUSION_THREADS:-4}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

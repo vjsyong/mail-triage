@@ -870,6 +870,29 @@ class LLMHandler(BaseHTTPRequestHandler):
                                                "total_tokens": 10}})
             self.sse_done()
             return
+        if "fill the flow form" in (user or "").lower():
+            self.sse_start()
+            self.delta(role="assistant")
+            if step == 0:
+                self.delta(reasoning="The flow editor is open; I will fill the form directly.")
+                self.tool_delta(0, "fill_flow",
+                                {"name": "Lunch requests",
+                                 "match_mode": "any",
+                                 "conditions": [{"kind": "topic",
+                                                 "value": "lunch requests and invitations",
+                                                 "threshold": 0.5}],
+                                 "steps": [{"type": "move", "folder": "Networking"},
+                                           {"type": "draft", "mode": "fixed",
+                                            "body": "Thanks for the invite."}]},
+                                "call_%d_0" % step)
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            else:
+                self.delta(content="Filled the flow form - review it and press Save flow.")
+                self.sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            self.sse({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 5,
+                                               "total_tokens": 10}})
+            self.sse_done()
+            return
         self.sse_start()
         self.delta(role="assistant")
         if step == 0:
@@ -3431,6 +3454,71 @@ def main():
     check("assistant stream carries the fill UI event",
           "event: tool_end" in sbf and '"action": "fill_simulator"' in sbf
           and '"from_addr"' in sbf and "event: done" in sbf)
+    editor_state = json.dumps({"name": "Half done", "enabled": True, "match_mode": "all",
+                               "conditions": [{"kind": "field", "field": "subject",
+                                               "op": "contains", "value": "lunch"}],
+                               "steps": []})
+    age = engine.AssistantAgent(page_path="/flows/%d/edit" % fctx_id, page_state=editor_state)
+    ra = age.call_tool("fill_flow", {
+        "name": "Lunch requests",
+        "match_mode": "any",
+        "conditions": [{"kind": "topic", "value": "lunch requests and invitations", "threshold": 0.5}],
+        "steps": [{"type": "move", "folder": "Networking"},
+                  {"type": "draft", "mode": "fixed", "body": "Thanks for the invite."}]})
+    check("fill_flow returns a live UI fill action",
+          ra["ok"] and (ra.get("ui") or {}).get("action") == "fill_flow"
+          and ra["ui"]["fields"].get("name") == "Lunch requests"
+          and ra["ui"]["fields"]["conditions"][0].get("kind") == "topic"
+          and ra["ui"]["fields"]["steps"][0].get("folder") == "Networking")
+    ra_new = engine.AssistantAgent(page_path="/flows/new", page_state=editor_state).call_tool(
+        "fill_flow", {"name": "From scratch", "steps": [{"type": "flag"}]})
+    check("fill_flow also works in the new-flow editor",
+          ra_new["ok"] and ra_new["ui"]["fields"].get("name") == "From scratch")
+    ra_bad = age.call_tool("fill_flow",
+                           {"conditions": [{"field": "nope", "op": "contains", "value": "x"}]})
+    check("fill_flow rejects invalid fields", not ra_bad["ok"])
+    rnf = engine.AssistantAgent().call_tool("fill_flow", {"name": "x"})
+    check("fill_flow refuses off the editor page",
+          not rnf["ok"] and rnf["result"].get("error") == "not_on_flow_editor")
+    rnf2 = engine.AssistantAgent(page_path="/flows").call_tool("fill_flow", {"name": "x"})
+    check("fill_flow refuses on the flows list",
+          not rnf2["ok"] and rnf2["result"].get("error") == "not_on_flow_editor")
+    rnf3 = engine.AssistantAgent(page_path="/flows/%d/edit" % fctx_id).call_tool(
+        "fill_flow", {"name": "x"})
+    check("fill_flow refuses when the editor form is not live",
+          not rnf3["ok"] and rnf3["result"].get("error") == "not_on_flow_editor")
+    check("flow editor context teaches fill_flow",
+          "fill_flow" in block3 and "FLOW EDITOR" in block3
+          and "propose_flow" in block3)
+    page_fe = client.get("/flows/%d/edit" % fctx_id).data
+    check("flow editor ships the live fill hook",
+          b"window.mtFlowFill" in page_fe and b"window.mtCtxState" in page_fe
+          and b"d.ui.action==='fill_flow'" in page_fe)
+    check("flow editor closes its form so the drawer form parses",
+          page_fe.count(b"<form") == page_fe.count(b"</form>") and b"</form>" in page_fe)
+    rstreamflow = client.post("/assistant/stream",
+                              data={"message": "Please fill the flow form for lunch mail",
+                                    "session": "0", "path": "/flows/%d/edit" % fctx_id,
+                                    "state": json.dumps({"name": "Half done", "enabled": True,
+                                                         "match_mode": "all",
+                                                         "conditions": [{"kind": "field", "field": "subject",
+                                                                         "op": "contains", "value": "lunch"}],
+                                                         "steps": []})})
+    sff = rstreamflow.data.decode()
+    check("assistant stream carries the flow fill UI event",
+          "event: tool_end" in sff and '"action": "fill_flow"' in sff
+          and '"Networking"' in sff and "event: done" in sff)
+    editor_hit = any("CURRENT EDITOR DRAFT" in (c.get("system") or "")
+                     and "Half done" in (c.get("system") or "")
+                     and 'subject contains "lunch"' in (c.get("system") or "")
+                     for c in llm_server.calls)
+    check("unsaved editor draft reached the model's system prompt", editor_hit)
+    sg3 = app_mod._suggestions_for_path("/flows/%d/edit" % fctx_id)
+    check("flow editor suggests the AI fill chip",
+          any("fill_flow" in (c.get("prompt") or "") for c in sg3))
+    sg4 = app_mod._suggestions_for_path("/flows/new")
+    check("new-flow editor suggests filling an example",
+          any("fill_flow" in (c.get("prompt") or "") for c in sg4))
     r = client.get("/flows?test=%d" % fctx_id)
     check("flows page shows the 'test it' banner after saving",
           b"Simulate a draft that tests it" in r.data
@@ -5360,6 +5448,21 @@ def main():
     _fresp = fusion_proxy.openai_completion(json.dumps(_fv), "fusion",
                                             {"prompt_tokens": 1, "completion_tokens": 2,
                                              "total_tokens": 3})
+    check("mode helpers: cascade gate + Noul decision",
+          fusion_proxy.cascade_skip("Notification") is True
+          and fusion_proxy.cascade_skip("Action") is False
+          and fusion_proxy.noul_decision(0.80, 0.40) == (True, 0.8)
+          and fusion_proxy.noul_decision(0.20, 0.40) == (False, 0.8))
+    check("defaults keep the validated mode and thresholds",
+          fusion_proxy.NR_MODE == "llm"
+          and fusion_proxy.CASCADE_CATEGORIES == {"Notification", "Newsletter",
+                                                  "Receipt", "Promo"}
+          and abs(fusion_proxy.NR_THRESHOLD - 0.40) < 1e-9)
+    check("the fusion carries its system name and maps the alias for proxying",
+          fusion_proxy.FUSION_NAME == "MiniCPM5-2B-TinyJev-Fusion"
+          and fusion_proxy.upstream_model(fusion_proxy.FUSION_NAME) == fusion_proxy.LLM_MODEL
+          and fusion_proxy.upstream_model("minicpm5-2b") == "minicpm5-2b"
+          and fusion_proxy.upstream_model("") == fusion_proxy.LLM_MODEL)
     check("OpenAI completion envelope is well formed",
           _fresp["object"] == "chat.completion"
           and _fresp["choices"][0]["message"]["content"] == json.dumps(_fv)

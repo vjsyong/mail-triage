@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """TinyJev + MiniCPM fusion sidecar for Mail Triage.
 
-The "fusion system" measured on the v2 classification suite:
+The system is named MiniCPM5-2B-TinyJev-Fusion (FUSION_NAME). It was measured
+on the v2 classification suite as:
   category   : TinyJev-0.6B (Qwen3-0.6B + pointer head, Choice over the app's
                categories with one-line descriptions) - CPU friendly.
   needs_reply: MiniCPM5-2B, *direct* needs_reply prompt, thinking OFF (the
@@ -27,6 +28,11 @@ The 2B endpoint is any OpenAI-compatible server (llama.cpp / vLLM):
 Optional: FUSION_LLM_API_KEY, FUSION_USER_NAME (default "Sean"),
 TINYJEV_MODEL (default "TinyJev-0.6B"), TINYJEV_DEVICE (default "cpu"),
 PORT (default 8098), HF_HOME for the model cache.
+
+Modes (FUSION_NR_MODE): llm = 2B answers needs_reply (default); cascade =
+local false for FUSION_CASCADE_CATEGORIES, 2B for the rest; tiny = TinyJev's
+Noul head answers in the same forward pass (no generation - Potato/Pi mode).
+FUSION_NR_THRESHOLD (default 0.40) sets the Noul decision threshold.
 
 Models stay loaded; the service is single-purpose and local. It never writes
 anything and never sees credentials beyond the optional LLM API key.
@@ -66,6 +72,7 @@ RECALL_SYSTEM = (
 
 CLASSIFY_MARK = "triage incoming email for"
 
+FUSION_NAME = os.environ.get("FUSION_NAME") or "MiniCPM5-2B-TinyJev-Fusion"
 LLM_BASE = (os.environ.get("FUSION_LLM_BASE_URL") or "").rstrip("/")
 LLM_MODEL = os.environ.get("FUSION_LLM_MODEL") or "minicpm5-2b"
 LLM_KEY = os.environ.get("FUSION_LLM_API_KEY") or ""
@@ -74,6 +81,18 @@ TINYJEV_MODEL = os.environ.get("TINYJEV_MODEL") or "TinyJev-0.6B"
 TINYJEV_DEVICE = os.environ.get("TINYJEV_DEVICE") or "cpu"
 PORT = int(os.environ.get("PORT") or 8098)
 LLM_TIMEOUT = float(os.environ.get("FUSION_LLM_TIMEOUT") or 60)
+# needs_reply engine:
+#   llm     - ask the 2B (full recall prompt); best quality, slowest
+#   cascade - answer false locally for categories that rarely need replies,
+#             ask the 2B only for the rest (measured: 41% of calls, best F1)
+#   tiny    - TinyJev's Noul head answers in the same forward pass; zero
+#             generation, Potato/Raspberry-Pi friendly, ~half the replies found
+NR_MODE = (os.environ.get("FUSION_NR_MODE") or "llm").strip().lower()
+NR_THRESHOLD = float(os.environ.get("FUSION_NR_THRESHOLD") or 0.40)
+CASCADE_CATEGORIES = {c.strip() for c in
+                      (os.environ.get("FUSION_CASCADE_CATEGORIES")
+                       or "Notification,Newsletter,Receipt,Promo").split(",") if c.strip()}
+NOUL_INSTRUCTIONS = "Does this email need a reply from the account owner?"
 
 _lock = threading.Lock()
 _agent = None
@@ -103,6 +122,26 @@ def extract_categories(messages):
             return [c.strip().strip('"').strip("'") for c in mt.group(1).split(",")
                     if c.strip().strip('"').strip("'")]
     return []
+
+
+def cascade_skip(category):
+    """Categories whose mail is answered needs_reply=false without the 2B."""
+    return str(category or "") in CASCADE_CATEGORIES
+
+
+def noul_decision(p_true, threshold=None):
+    """TinyJev's Noul head -> (needs_reply, confidence)."""
+    threshold = NR_THRESHOLD if threshold is None else threshold
+    p = float(p_true)
+    return bool(p >= threshold), round(max(p, 1.0 - p), 3)
+
+
+def upstream_model(requested):
+    """Clients may target the fusion alias for every call; proxying maps it back."""
+    req = str(requested or "").strip()
+    if not req or req == FUSION_NAME:
+        return LLM_MODEL
+    return req
 
 
 def last_user(messages):
@@ -198,40 +237,54 @@ def classify(state, categories):
     cats = [c for c in (categories or CATEGORIES) if isinstance(c, str) and c.strip()]
     cats = cats or CATEGORIES
     criteria = {c: DESC.get(c, "") for c in cats}
+    questions = {"category": {
+        "type": "choice",
+        "instructions": "Which category does this email belong to?",
+        "criteria": criteria,
+    }}
+    if NR_MODE == "tiny":
+        questions["needs_reply"] = {"type": "noul", "instructions": NOUL_INSTRUCTIONS}
     t0 = time.perf_counter()
     with _lock:
-        out = _agent.predict({
-            "state": state,
-            "questions": {
-                "category": {
-                    "type": "choice",
-                    "instructions": "Which category does this email belong to?",
-                    "criteria": criteria,
-                }
-            },
-        })
+        out = _agent.predict({"state": state, "questions": questions})
         tiny_ms = out["execution"]["model_ms"]
-        ans = out["states"][0]["answers"]["category"]
+        ans = out["states"][0]["answers"]
+        cat_ans = ans["category"]
+        cat = cat_ans["choice"]
         result = {
-            "category": ans["choice"],
-            "category_confidence": float(ans["confidence"]),
-            "category_probabilities": ans["probabilities"],
+            "model": FUSION_NAME,
+            "category": cat,
+            "category_confidence": float(cat_ans["confidence"]),
+            "category_probabilities": cat_ans["probabilities"],
             "components": {"tinyjev_ms": round(tiny_ms, 1), "tinyjev_model": TINYJEV_MODEL,
-                           "llm_ms": None},
+                           "llm_ms": None, "nr_mode": NR_MODE},
         }
         error = None
-        try:
-            llm = _llm_call(state)
-            result.update({
-                "needs_reply": bool(llm.get("needs_reply")),
-                "needs_reply_confidence": llm.get("confidence"),
-                "summary": llm.get("summary") or "",
-                "reason": llm.get("reason") or "",
-            })
-        except Exception as exc:  # noqa: BLE001
-            error = "%s: %s" % (type(exc).__name__, exc)
-            result.update({"needs_reply": None, "needs_reply_confidence": None,
-                           "summary": "", "reason": ""})
+        if NR_MODE == "tiny":
+            p_true = float(ans["needs_reply"]["p_true"])
+            nr, conf = noul_decision(p_true)
+            result.update({"needs_reply": nr, "needs_reply_confidence": conf,
+                           "summary": "", "reason": "TinyJev Noul decision"})
+            result["components"]["tinyjev_nr_p_true"] = round(p_true, 3)
+        elif NR_MODE == "cascade" and cascade_skip(cat):
+            result.update({"needs_reply": False, "needs_reply_confidence": None,
+                           "summary": "",
+                           "reason": "category gate: %s rarely needs replies" % cat})
+            result["components"]["nr_source"] = "cascade"
+        else:
+            try:
+                llm = _llm_call(state)
+                result.update({
+                    "needs_reply": bool(llm.get("needs_reply")),
+                    "needs_reply_confidence": llm.get("confidence"),
+                    "summary": llm.get("summary") or "",
+                    "reason": llm.get("reason") or "",
+                })
+                result["components"]["nr_source"] = "llm"
+            except Exception as exc:  # noqa: BLE001
+                error = "%s: %s" % (type(exc).__name__, exc)
+                result.update({"needs_reply": None, "needs_reply_confidence": None,
+                               "summary": "", "reason": ""})
         result["error"] = error
         result["latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
         return result
@@ -268,8 +321,9 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path in ("/healthz", "/health"):
             if _ready.is_set():
-                self._send(200, {"ok": True, "model": TINYJEV_MODEL, "llm": LLM_BASE or None,
-                                 "llm_model": LLM_MODEL})
+                self._send(200, {"ok": True, "model": TINYJEV_MODEL, "fusion": FUSION_NAME,
+                                 "llm": LLM_BASE or None, "llm_model": LLM_MODEL,
+                                 "nr_mode": NR_MODE})
             else:
                 self._send(503, {"ok": False, "loading": True, "model": TINYJEV_MODEL})
         elif path == "/v1/models":
@@ -293,6 +347,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         if not ids:
             ids = [LLM_MODEL]
+        ids = [FUSION_NAME] + [i for i in ids if i and i != FUSION_NAME]
         self._send(200, {"object": "list",
                          "data": [{"id": i, "object": "model", "owned_by": "fusion"}
                                   for i in ids]})
@@ -352,7 +407,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "type": "upstream_error"}})
             return
         text = json.dumps(content, ensure_ascii=False)
-        model = raw.get("model") or LLM_MODEL
+        model = FUSION_NAME
         usage = {"prompt_tokens": _est_tokens(state), "completion_tokens": _est_tokens(text),
                  "total_tokens": _est_tokens(state) + _est_tokens(text)}
         if raw.get("stream"):
@@ -386,6 +441,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _proxy_chat(self, raw, stream):
+        raw = dict(raw)
+        raw["model"] = upstream_model(raw.get("model"))
         if not LLM_BASE:
             self._send(502, {"error": {"message": "FUSION_LLM_BASE_URL is not configured",
                                        "type": "upstream_error"}})
