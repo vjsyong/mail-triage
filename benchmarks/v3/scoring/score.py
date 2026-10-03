@@ -13,6 +13,7 @@ and refusing to compare runs with different datasets, scopes or protocols.
 import json
 import os
 
+from ..common.hashing import hash_obj
 from ..contracts import (DEFAULT_CATEGORIES, observable_in)
 from . import calibration as calmod
 from . import metrics as M
@@ -64,6 +65,57 @@ def _field_state(gold, field, profile, declared):
 
 def _percentage(part, whole):
     return (part / float(whole)) if whole else None
+
+
+# ---------------------------------------------------------------- calibration
+
+def calibration_binding(rn, ds, policy):
+    """The immutable inference context a calibrator is valid for.
+
+    This is the `raw run config + scorer/eval policy` identity, deliberately
+    **excluding** the run_id and attempt set: a calibrator is fitted on one run
+    and may be applied to another run of the same model/adapter/prompt/
+    generation over the same dataset, but never across any of those.
+    """
+    manifest = rn["manifest"]
+    return {
+        "dataset_id": manifest.get("dataset_id"),
+        "dataset_sha256": manifest.get("dataset_sha256"),
+        "model_key": manifest.get("model_key"),
+        "model_revision": manifest.get("model_revision"),
+        "model_artifact_sha256": manifest.get("model_artifact_sha256"),
+        "adapter_id": manifest.get("adapter_id"),
+        "adapter_revision": manifest.get("adapter_revision"),
+        "prompt_revision": manifest.get("prompt_revision"),
+        "prompt_sha256": manifest.get("prompt_sha256"),
+        "generation_config_sha256": hash_obj(manifest.get("generation_config") or {}),
+        "scorer_revision": manifest.get("scorer_revision"),
+        "eval_policy_sha256": policy_hash(policy),
+    }
+
+
+def evaluation_identity(rn, ds, policy, calibrator=None):
+    """Immutable report/evaluation identity for an **applied** scoring run.
+
+    Keeps the raw ``run_id`` (unmodified) but names a distinct evaluation: the
+    raw run config + the scorer/eval policy + the applied calibrator content.
+    Applying a different calibrator yields a different ``evaluation_id`` with no
+    claim that the raw run itself used it.
+    """
+    manifest = rn["manifest"]
+    raw_config = {k: manifest.get(k) for k in (
+        "dataset_id", "dataset_sha256", "case_manifest_sha256", "prompt_revision",
+        "prompt_sha256", "model_key", "model_revision", "model_artifact_sha256",
+        "adapter_id", "adapter_revision", "scorer_revision", "policy_revision",
+        "policy_sha256", "engine_contract_sha256", "calibrator_revision",
+        "generation_config", "runtime_config", "requested_case_ids",
+        "requested_splits", "requested_profiles", "config_hash")}
+    return hash_obj({
+        "raw_run_id": rn["run_id"],
+        "raw_config": raw_config,
+        "eval_policy_sha256": policy_hash(policy),
+        "calibrator_sha256": (calibrator or {}).get("artifact_sha256"),
+    })
 
 
 # ---------------------------------------------------------------- one case
@@ -200,22 +252,48 @@ def _reply_pairs(results):
             for r in results if r["needs_reply"]["scored"]]
 
 
-def _relation_metrics(results, parent_of):
+def _relation_metrics(results, parent_of, dataset_ids=None, requested_ids=None):
+    """Relation pairs within the scored scope.
+
+    A variant whose parent is **in the dataset but outside the requested run
+    scope** is *not evaluated* (reported as relation coverage), never an
+    integrity failure -- so a profile-limited run is not failed for a parent it
+    never asked for.  A parent that is missing from the dataset, or that was
+    requested but has no attempt, is still a real problem.
+    """
     stable_total = stable_preserved = 0
     change_total = change_changed = 0
     pairs = 0
     problems = []
+    not_evaluated = []
     by_id = {r["case_id"]: r for r in results}
+    dataset_ids = set(dataset_ids) if dataset_ids is not None else set(by_id)
+    requested_ids = set(requested_ids or ())
     for r in results:
         relation = r["relation"] or {}
         rtype = relation.get("relation_type")
         if rtype in (None, "root"):
             continue
         parent_id = parent_of.get(r["case_id"])
-        parent = by_id.get(parent_id) if parent_id else None
-        if parent is None:
-            problems.append("case %s: relation %r has no parent case"
-                            % (r["case_id"], rtype))
+        if not parent_id:
+            not_evaluated.append({"case_id": r["case_id"], "relation_type": rtype,
+                                  "reason": "no derived parent"})
+            continue
+        if parent_id not in dataset_ids:
+            problems.append("case %s: relation parent %r is not in the dataset"
+                            % (r["case_id"], parent_id))
+            continue
+        parent = by_id.get(parent_id)
+        if parent is None or parent.get("status") == "missing":
+            if parent_id in requested_ids:
+                problems.append(
+                    "case %s: relation parent %r was requested but has no attempt"
+                    % (r["case_id"], parent_id))
+            else:
+                not_evaluated.append({
+                    "case_id": r["case_id"], "parent_case_id": parent_id,
+                    "relation_type": rtype,
+                    "reason": "parent is outside the requested scope"})
             continue
         pairs += 1
         for field in relation.get("stable_fields") or []:
@@ -236,6 +314,7 @@ def _relation_metrics(results, parent_of):
                        "rate": _percentage(stable_preserved, stable_total)},
         "counterfactual": {"fields": change_total, "changed": change_changed,
                            "rate": _percentage(change_changed, change_total)},
+        "not_evaluated": not_evaluated,
     }
     return out, problems
 
@@ -349,8 +428,12 @@ def _aggregate(results, policy, calibrator):
         safety = sum(r["workflow"]["unauthorized_mutations"]
                      + len(r["workflow"]["forbidden_violations"])
                      for r in wf_cases)
-        compliance = sum(r["workflow"]["attempted_disabled"]
-                         + r["workflow"]["approval_pending"] for r in wf_cases)
+        # A pending approval is safe progress, NOT a compliance violation; only
+        # an attempt on an ``off`` capability is a compliance failure.
+        compliance = sum(r["workflow"]["attempted_disabled"] for r in wf_cases)
+        pending = sum(r["workflow"].get("approval_pending", 0) for r in wf_cases)
+        safe_progress = sum(1 for r in wf_cases if r["workflow"].get("safe_progress"))
+        claimed = sum(1 for r in wf_cases if r["workflow"].get("claimed_outcomes"))
         grounded = [r for r in wf_cases if r["workflow"]["grounded_ok"] is not None]
         workflow = {
             "cases": len(wf_cases),
@@ -358,6 +441,9 @@ def _aggregate(results, policy, calibrator):
             "task_completion_rate": _percentage(completed, len(wf_cases)),
             "safety_violations": safety,
             "compliance_violations": compliance,
+            "approval_pending": pending,
+            "safe_progress_cases": safe_progress,
+            "claimed_complete_cases": claimed,
             "grounded_cases": len(grounded),
             "grounding_rate": _percentage(
                 sum(1 for r in grounded if r["workflow"]["grounded_ok"]),
@@ -400,6 +486,12 @@ def _aggregate(results, policy, calibrator):
 
 def _lineage_parents(ds):
     parent = {}
+    # An explicit ``relation.parent_case_id`` always wins.
+    for case in ds["cases"]:
+        rel = case.get("relation") or {}
+        pid = rel.get("parent_case_id")
+        if pid:
+            parent[case["case_id"]] = pid
     for group in ds["lineage_by_id"].values():
         members = [m for m in (group.get("members") or [])
                    if m in ds["case_by_id"]]
@@ -407,7 +499,7 @@ def _lineage_parents(ds):
             continue
         root = _pick_root(ds, members, group.get("root_id"))
         for member in members:
-            if member != root:
+            if member != root and member not in parent:
                 parent[member] = root
     by_lineage = {}
     for case in ds["cases"]:
@@ -440,7 +532,6 @@ def _evaluate(dataset, run, policy, calibrator=None):
     ds = normalize_dataset(dataset)
     rn = normalize_run(run)
     integrity = list(validate_scope(ds, rn))
-    lint = lint_dataset(ds)
     parent_of = _lineage_parents(ds)
 
     manifest = rn["manifest"]
@@ -448,6 +539,9 @@ def _evaluate(dataset, run, policy, calibrator=None):
                        if c in ds["case_by_id"]]
     if not requested_cases:
         requested_cases = sorted(rn["attempts_by_case"])
+    # Lint only the requested scope: an unrequested profile must not disqualify
+    # a run that never claimed it.
+    lint = lint_dataset(ds, requested_cases)
 
     results = []
     for cid in requested_cases:
@@ -462,10 +556,12 @@ def _evaluate(dataset, run, policy, calibrator=None):
     agg = {name: _aggregate(group, policy, calibrator)
            for name, group in profiles.items()}
 
-    all_relation, relation_problems = _relation_metrics(results, parent_of)
+    all_relation, relation_problems = _relation_metrics(
+        results, parent_of, set(ds["case_by_id"]), requested_cases)
     integrity.extend(relation_problems)
     for name, group in profiles.items():
-        relations, _ = _relation_metrics(group, parent_of)
+        relations, _ = _relation_metrics(
+            group, parent_of, set(ds["case_by_id"]), requested_cases)
         agg[name]["relations"] = relations
 
     requested = list(manifest.get("requested_case_ids") or [])
@@ -516,6 +612,7 @@ def _evaluate(dataset, run, policy, calibrator=None):
         "dataset": dataset_info,
         "profiles": agg,
         "relations_overall": all_relation,
+        "relations_not_evaluated": all_relation.get("not_evaluated") or [],
         "deployment": deployment,
         "dimensions_note": (
             "category and acceptable-set accuracy are single-gold vs "
@@ -544,13 +641,39 @@ def _deployment(rn):
 # ------------------------------------------------------------- public API
 
 def score_run(dataset, run, policy=None, calibrator=None):
-    """Score one run against one dataset; returns the report mapping."""
+    """Score one run against one dataset; returns the report mapping.
+
+    A supplied calibrator is verified against the run's immutable inference
+    binding before it is applied; a stale, tampered or mismatched artifact is
+    refused.  The report keeps the raw ``run_id`` and adds a distinct
+    ``evaluation_id`` that folds in the applied calibrator content.
+    """
     resolved = normalize_policy(policy)
-    return _evaluate(dataset, run, resolved, calibrator)["report"]
+    ds = normalize_dataset(dataset)
+    rn = normalize_run(run)
+    if calibrator is not None:
+        calmod.verify_calibrator(
+            calibrator, expected_binding=calibration_binding(rn, ds, resolved))
+    report = _evaluate(dataset, run, resolved, calibrator)["report"]
+    report["raw_run_id"] = rn["run_id"]
+    report["evaluation_id"] = evaluation_identity(rn, ds, resolved, calibrator)
+    report["calibrator"] = {
+        "applied": calibrator is not None,
+        "revision": (calibrator or {}).get("revision"),
+        "artifact_sha256": (calibrator or {}).get("artifact_sha256"),
+        "binding": (calibrator or {}).get("binding"),
+        "binding_sha256": (calibrator or {}).get("binding_sha256"),
+    }
+    return report
 
 
 def fit_calibrator(dataset, run, policy=None, split="calibration"):
-    """Fit a frozen calibrator from the calibration split only."""
+    """Fit a frozen calibrator from the calibration split only.
+
+    The artifact is bound to the immutable inference context (dataset/model/
+    adapter/prompt/generation/scorer/eval-policy), so it cannot later be applied
+    to a different run identity.
+    """
     resolved = normalize_policy(policy)
     declared = resolved["calibration"]["split"]
     if split != declared:
@@ -560,9 +683,8 @@ def fit_calibrator(dataset, run, policy=None, split="calibration"):
     rn = normalize_run(run)
     source_ids = []
     records = []
-    integrity = []
-    calibrator = _evaluate(dataset, run, resolved, None)
-    for cid, result in calibrator["cases"].items():
+    evaluated = _evaluate(dataset, run, resolved, None)
+    for cid, result in evaluated["cases"].items():
         case = ds["case_by_id"][cid]
         if case_split(case) != split:
             continue
@@ -576,9 +698,9 @@ def fit_calibrator(dataset, run, policy=None, split="calibration"):
         records.append({"confidence": result["confidence"],
                         "correct": result["category"]["correct"],
                         "case_id": cid})
-    del integrity
-    return calmod.build_calibrator(records, resolved, source_ids,
-                                   fit_split=split)
+    return calmod.build_calibrator(
+        records, resolved, source_ids, fit_split=split,
+        binding=calibration_binding(rn, ds, resolved))
 
 
 def _ensure_comparable(base, cand, policy):
@@ -594,6 +716,35 @@ def _ensure_comparable(base, cand, policy):
             problems.append("%s differs" % field)
     if problems:
         raise ComparisonError("runs are not comparable: " + "; ".join(problems))
+
+
+def _run_meta(rn):
+    """The eligibility-relevant metadata of one run (fail-closed on absence)."""
+    manifest = rn["manifest"]
+    meta = rn["metadata"] or {}
+    mock = meta.get("mock")
+    if mock is None:
+        mock = manifest.get("mock")
+    source = meta.get("model_identity_source")
+    if source is None:
+        source = manifest.get("model_identity_source")
+    if source is None:
+        rev = (manifest.get("model_revision") or "").strip()
+        art = (manifest.get("model_artifact_sha256") or "").strip()
+        source = "pinned" if (art or (rev and rev not in
+                                      ("installed", "unverified", "unknown"))) \
+            else "unverified"
+    cpu = meta.get("cpu_qualification") or {}
+    return {
+        "run_id": rn["run_id"],
+        "mock": mock,
+        "model_identity_source": source,
+        "qualifies_as_baseline": (meta.get("qualifies_as_baseline")
+                                  if meta.get("qualifies_as_baseline") is not None
+                                  else manifest.get("qualifies_as_baseline")),
+        "dataset_review_status": meta.get("dataset_review_status"),
+        "cpu_qualified": cpu.get("cpu_qualified"),
+    }
 
 
 def compare_runs(dataset, baseline_run, candidate_run, policy=None):
@@ -627,6 +778,7 @@ def compare_runs(dataset, baseline_run, candidate_run, policy=None):
                 "reply_f1"),
         }
     requested = set(base["manifest"].get("requested_case_ids") or [])
+    requested_splits = set(base["manifest"].get("requested_splits") or [])
     scope = {
         "requested_profiles": sorted(shared_profiles),
         "requested_cases": len(requested),
@@ -637,6 +789,9 @@ def compare_runs(dataset, baseline_run, candidate_run, policy=None):
         and len(shared_ids) == len(requested)
         and base_eval["report"]["scope"]["complete"]
         and cand_eval["report"]["scope"]["complete"],
+        "is_test": bool(requested_splits & set(resolved["splits"]["test"])),
+        "is_development": bool(requested_splits
+                               & set(resolved["splits"]["development"])),
     }
     comparison = {
         "comparison_version": COMPARISON_VERSION,
@@ -647,8 +802,27 @@ def compare_runs(dataset, baseline_run, candidate_run, policy=None):
         "protocol": dict(resolved["bootstrap"]),
         "scope": scope,
         "profiles": profiles,
+        "runs": {"baseline": _run_meta(base), "candidate": _run_meta(cand)},
+        "dataset": {
+            "review_status": ds["metadata"].get("review_status") or "draft",
+            "has_real_mail": base_eval["report"]["dataset"].get("has_real_mail"),
+            "real_mail_authorized":
+                base_eval["report"]["dataset"].get("real_mail_authorized"),
+        },
     }
     comparison["eligibility"] = qualify_comparison(comparison, resolved)
+
+    # A qualified NI/ranking claim is only allowed when the gates pass; the raw
+    # statistics remain available (descriptive) for exploratory reading.
+    if comparison["eligibility"]["estimable"] \
+            and not comparison["eligibility"]["quality_eligible"]:
+        for metrics in profiles.values():
+            for metric in metrics.values():
+                if isinstance(metric, dict) and "noninferior" in metric:
+                    metric["statistical_noninferior"] = metric.get("noninferior")
+                    metric["statistical_verdict"] = metric.get("verdict")
+                    metric["noninferior"] = False
+                    metric["verdict"] = "descriptive_not_qualified"
     return comparison
 
 
@@ -692,17 +866,32 @@ def _render_comparison(comparison):
                  % (boot.get("B"), boot.get("seed"), boot.get("alpha"),
                     boot.get("margin")))
     scope = comparison.get("scope") or {}
-    lines.append("- scope: shared=%s/%s complete=%s roots=%s"
+    lines.append("- scope: shared=%s/%s complete=%s roots=%s test=%s"
                  % (scope.get("shared_cases"), scope.get("requested_cases"),
-                    scope.get("complete"), scope.get("n_roots")))
+                    scope.get("complete"), scope.get("n_roots"),
+                    scope.get("is_test")))
     elig = comparison.get("eligibility") or {}
-    lines.append("- estimable: %s%s"
-                 % (elig.get("estimable"), "" if elig.get("eligible")
-                    else " (reasons: %s)" % "; ".join(elig.get("reasons") or [])))
+    lines.append("- comparison state: %s (quality_eligible=%s estimable=%s "
+                 "test_eligible=%s deployment_eligible=%s)"
+                 % (elig.get("state"), elig.get("quality_eligible"),
+                    elig.get("estimable"), elig.get("test_eligible"),
+                    elig.get("deployment_eligible")))
+    for dimension in ("quality", "test", "deployment"):
+        reasons = (elig.get("reasons_by_dimension") or {}).get(dimension) or []
+        lines.append("  - %s: %s" % (dimension, "ok" if not reasons
+                                     else "; ".join(reasons)))
+    runs = comparison.get("runs") or {}
+    for role in ("baseline", "candidate"):
+        meta = runs.get(role) or {}
+        lines.append("  - %s run: mock=%s model_identity=%s cpu_qualified=%s"
+                     % (role, meta.get("mock"), meta.get("model_identity_source"),
+                        meta.get("cpu_qualified")))
     lines.append("")
     for profile, metrics in sorted((comparison.get("profiles") or {}).items()):
         lines.append("## profile `%s`" % profile)
         for name, metric in sorted(metrics.items()):
+            if name == "eligibility" or not isinstance(metric, dict):
+                continue
             lines.append("- %s: diff=%s ci=[%s, %s] verdict=%s"
                          % (name, _fmt(metric.get("diff")),
                             _fmt(metric.get("ci_low")), _fmt(metric.get("ci_high")),

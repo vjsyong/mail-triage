@@ -109,7 +109,8 @@ def attempt(case_id, run_id=None, number=1, *, profile="native",
 def manifest(*, dataset_id="ds-test", model_key="fake-model",
              scorer_revision="3.0", requested_case_ids=("case_0001",),
              requested_profiles=("native",), requested_splits=("development",),
-             **overrides):
+             mock=False, model_identity_source="pinned",
+             qualifies_as_baseline=True, **overrides):
     fields = dict(
         dataset_id=dataset_id, dataset_sha256="a" * 64,
         case_manifest_sha256="b" * 64, prompt_revision="native-v3.0",
@@ -123,7 +124,11 @@ def manifest(*, dataset_id="ds-test", model_key="fake-model",
         requested_splits=list(requested_splits),
         requested_profiles=list(requested_profiles))
     fields.update(overrides)
-    return identity.build_manifest(**fields)
+    record = identity.build_manifest(**fields)
+    record["mock"] = mock
+    record["model_identity_source"] = model_identity_source
+    record["qualifies_as_baseline"] = qualifies_as_baseline
+    return record
 
 
 def dataset(cases, golds, *, policies=(), lineage=(), metadata=None,

@@ -115,9 +115,26 @@ def select_cases(dataset, requested_case_ids=None, requested_splits=None,
                 and by_id[cid].get("input_profile") in profiles]
     if not selected:
         raise RunnerError("no cases match the requested scope")
-    return selected, {"requested_case_ids": list(ids),
-                      "requested_splits": list(splits),
-                      "requested_profiles": list(profiles)}
+    if requested_case_ids:
+        selected_ids = {c["case_id"] for c in selected}
+        outside = [cid for cid in ids if cid not in selected_ids]
+        if outside:
+            raise RunnerError(
+                "requested case(s) %s are outside the requested split/profile"
+                % ", ".join(outside))
+        requested_ids = list(ids)
+    else:
+        # A profile/split-only scope requests exactly the cases it selects; it
+        # must never silently expand the budget to the whole dataset.
+        requested_ids = [c["case_id"] for c in selected]
+    return selected, {
+        "requested_case_ids": requested_ids,
+        "requested_splits": list(splits) if requested_splits else
+        sorted({c.get("split") for c in selected if c.get("split")}),
+        "requested_profiles": list(profiles) if requested_profiles else
+        sorted({c.get("input_profile") for c in selected
+                if c.get("input_profile")}),
+    }
 
 
 def gold_for(dataset, case):

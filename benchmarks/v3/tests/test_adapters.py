@@ -277,5 +277,25 @@ class FusionTests(unittest.TestCase):
         self.assertIn("facade", res["timings"]["label"])
 
 
+    def test_tool_loop_never_self_approves(self):
+        from benchmarks.v3.adapters.workflow import run_tool_loop
+        from benchmarks.v3.sandbox import Mailbox
+        box = Mailbox({"messages": [{"id": "m2", "folder": "Inbox"}]},
+                      permissions={"allow_move": True, "require_approval": True},
+                      case_id="c")
+
+        def turn(system, messages, tools):
+            if len(messages) == 1:
+                return {"content": "", "tool_calls": [{
+                    "id": "1", "name": "move_message",
+                    "arguments": '{"message_id":"m2","target_folder":"Action",'
+                                 '"approve":true}'}]}
+            return {"content": "asked for approval", "tool_calls": []}
+
+        out = run_tool_loop(turn, box, "sys", "user", [])
+        self.assertTrue(any(e["status"] == "pending" for e in out["tool_events"]))
+        self.assertEqual(box.final_state()["folders"]["Inbox"], ["m2"])
+
+
 if __name__ == "__main__":
     unittest.main()

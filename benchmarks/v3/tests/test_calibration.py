@@ -11,9 +11,9 @@ for _p in (ROOT, V3):
         sys.path.insert(0, _p)
 
 from benchmarks.v3.scoring import (  # noqa: E402
-    CalibrationError, ProbabilityError, apply_calibrator, confidence_field,
-    default_policy, fit_calibrator, reliability, selective_risk,
-    validate_probability,
+    CalibrationError, ProbabilityError, apply_calibrator, calibration_binding,
+    confidence_field, default_policy, fit_calibrator, reliability, score_run,
+    selective_risk, validate_probability, verify_calibrator,
 )
 from benchmarks.v3.scoring import testing as T  # noqa: E402
 
@@ -86,6 +86,66 @@ class CalibratorTest(unittest.TestCase):
         self.assertEqual(apply_calibrator(artifact, 0.1), 0.25)
         self.assertEqual(apply_calibrator(artifact, 0.9), 0.75)
         self.assertIsNone(apply_calibrator(artifact, None))
+
+
+class CalibratorIdentityTest(unittest.TestCase):
+    def _bundle(self, model_key="model-a", dataset_id="ds-test"):
+        cases = [T.case("case_0001", split="calibration"),
+                 T.case("case_0002", split="development")]
+        golds = [T.gold("case_0001", category="Action"),
+                 T.gold("case_0002", category="Action")]
+        ds = T.dataset(cases, golds, dataset_id=dataset_id)
+        manifest = T.manifest(model_key=model_key,
+                              requested_case_ids=["case_0001", "case_0002"],
+                              requested_splits=["calibration", "development"])
+        run = T.run(manifest, [T.attempt("case_0001", category="Action",
+                                         confidence=0.9),
+                               T.attempt("case_0002", category="Promo",
+                                         confidence=0.9)])
+        return ds, run
+
+    def test_artifact_is_bound_and_verifies(self):
+        ds, run = self._bundle()
+        artifact = fit_calibrator(ds, run)
+        policy = default_policy()
+        from benchmarks.v3.scoring.normalize import normalize_run
+        binding = calibration_binding(normalize_run(run), ds, policy)
+        self.assertEqual(artifact["binding"], binding)
+        self.assertTrue(verify_calibrator(artifact, expected_binding=binding))
+
+    def test_tampered_or_mismatched_artifact_refused(self):
+        ds, run = self._bundle()
+        artifact = fit_calibrator(ds, run)
+        tampered = dict(artifact)
+        tampered["threshold"] = 0.01
+        with self.assertRaises(CalibrationError):
+            verify_calibrator(tampered)
+        # a calibrator fitted for model-a cannot be applied to model-b
+        other_ds, other_run = self._bundle(model_key="model-b")
+        policy = default_policy()
+        from benchmarks.v3.scoring.normalize import normalize_run
+        other_binding = calibration_binding(normalize_run(other_run), other_ds,
+                                            policy)
+        with self.assertRaises(CalibrationError):
+            verify_calibrator(artifact, expected_binding=other_binding)
+
+    def test_score_run_refuses_mismatched_calibrator(self):
+        ds, run = self._bundle(model_key="model-a")
+        artifact = fit_calibrator(ds, run)
+        other_ds, other_run = self._bundle(model_key="model-b")
+        with self.assertRaises(CalibrationError):
+            score_run(other_ds, other_run, calibrator=artifact)
+
+    def test_evaluation_identity_is_distinct_and_keeps_raw_run_id(self):
+        ds, run = self._bundle()
+        artifact = fit_calibrator(ds, run)
+        plain = score_run(ds, run)
+        applied = score_run(ds, run, calibrator=artifact)
+        self.assertEqual(applied["raw_run_id"], plain["raw_run_id"])
+        self.assertNotEqual(applied["evaluation_id"], plain["evaluation_id"])
+        self.assertTrue(applied["calibrator"]["applied"])
+        self.assertEqual(applied["calibrator"]["artifact_sha256"],
+                         artifact["artifact_sha256"])
 
 
 class ReliabilityTest(unittest.TestCase):

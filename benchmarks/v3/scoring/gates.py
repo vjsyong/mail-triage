@@ -145,15 +145,106 @@ def qualify_cpu(deployment, policy):
     }
 
 
-def qualify_comparison(comparison, policy):
-    """A comparison is usable only when its scope is complete and clustered."""
-    scope = comparison["scope"]
+def _run_quality_reasons(role, meta):
+    """Per-run reasons a comparison cannot make a qualified claim."""
     reasons = []
+    meta = meta or {}
+    if meta.get("mock") is True:
+        reasons.append("%s run used a mock adapter" % role)
+    elif meta.get("mock") is None:
+        reasons.append("%s run mock status is unknown" % role)
+    source = meta.get("model_identity_source")
+    if source == "unverified":
+        reasons.append("%s model identity is unverified" % role)
+    elif source is None:
+        reasons.append("%s model identity is unknown" % role)
+    return reasons
+
+
+def qualify_comparison(comparison, policy):
+    """Per-dimension comparison eligibility (quality / test / deployment).
+
+    Statistical calculations stay usable (``estimable``) but a **qualified**
+    NI/ranking claim (``eligible`` / ``quality_eligible``) requires both runs to
+    be real (non-mock, verified model identity) over reviewed/sealed data with a
+    complete paired scope.  A GPU quality reference that is not CPU-qualified may
+    still compare for *quality*; it simply cannot approve a CPU *deployment*.
+    Missing or draft evidence is fail-closed, never a free pass.
+    """
+    scope = comparison.get("scope") or {}
+    runs = comparison.get("runs") or {}
+    data = comparison.get("dataset") or {}
+    profiles = comparison.get("profiles") or {}
+
+    scope_reasons = []
     if not scope.get("complete"):
-        reasons.append("paired scope incomplete")
+        scope_reasons.append("paired scope incomplete")
     if scope.get("n_roots", 0) < int(policy["bootstrap"]["min_lineages"]):
-        reasons.append("too few shared lineage roots (%d < %d)"
-                       % (scope.get("n_roots", 0),
-                          policy["bootstrap"]["min_lineages"]))
-    return {"eligible": _eligible(reasons), "reasons": reasons,
-            "estimable": _eligible(reasons)}
+        scope_reasons.append("too few shared lineage roots (%d < %d)"
+                             % (scope.get("n_roots", 0),
+                                policy["bootstrap"]["min_lineages"]))
+
+    quality_reasons = list(scope_reasons)
+    for role in ("baseline", "candidate"):
+        quality_reasons.extend(_run_quality_reasons(role, runs.get(role)))
+    review = data.get("review_status")
+    if review not in ("reviewed", "sealed"):
+        quality_reasons.append("dataset review_status is %r (not reviewed/sealed)"
+                               % review)
+    if data.get("has_real_mail") and not data.get("real_mail_authorized"):
+        quality_reasons.append("real-mail material is not authorized")
+
+    # Per-profile scientific eligibility propagates the same two-run gates and
+    # additionally requires at least one estimable paired metric for that
+    # profile.
+    for profile, metrics in profiles.items():
+        profile_reasons = list(quality_reasons)
+        metric_list = [m for m in metrics.values() if isinstance(m, dict)]
+        if not metric_list:
+            profile_reasons.append("profile %r has no paired metrics" % profile)
+        elif not any(m.get("estimable") for m in metric_list):
+            profile_reasons.append(
+                "profile %r has no estimable paired metric" % profile)
+        if isinstance(metrics, dict):
+            metrics["eligibility"] = {
+                "quality_eligible": _eligible(profile_reasons),
+                "reasons": profile_reasons,
+            }
+
+    quality_eligible = _eligible(quality_reasons)
+    estimable = _eligible(scope_reasons)
+
+    test_reasons = list(quality_reasons)
+    if not scope.get("is_test"):
+        test_reasons.append("scope is not a test split")
+    test_eligible = _eligible(test_reasons)
+
+    deployment_reasons = []
+    candidate = runs.get("candidate") or {}
+    if candidate.get("cpu_qualified") is not True:
+        deployment_reasons.append(
+            "candidate CPU hardware receipt is not verified/qualified")
+    baseline_meta = runs.get("baseline") or {}
+    if baseline_meta.get("cpu_qualified") is False:
+        deployment_reasons.append("baseline is not CPU-qualified (quality "
+                                  "comparison unaffected)")
+    deployment_eligible = _eligible(deployment_reasons)
+
+    state = ("qualified" if quality_eligible
+             else "exploratory" if estimable else "not_estimable")
+    return {
+        "eligible": quality_eligible,
+        "estimable": estimable,
+        "quality_eligible": quality_eligible,
+        "test_eligible": test_eligible,
+        "deployment_eligible": deployment_eligible,
+        "exploratory": bool(estimable and not quality_eligible),
+        "state": state,
+        # Flat list kept for report/markdown compatibility (quality reasons).
+        "reasons": quality_reasons,
+        "reasons_by_dimension": {
+            "quality": quality_reasons,
+            "test": test_reasons,
+            "deployment": deployment_reasons,
+        },
+    }

@@ -58,11 +58,19 @@ def declared_fields(gold, task):
 def observable_level(gold, field):
     """The documented observability level for a field, or ``None`` when the
     metadata is absent (which is a lint/qualification failure, not an excuse to
-    auto-exclude)."""
+    auto-exclude).
+
+    The workflow field is declared as ``"workflow"``; an older builder emitted
+    the same evidence under ``"required_outcomes"``, which is accepted as a
+    compatibility alias so a mixed/unfixed bundle cannot silently fail lint.
+    """
     obs = gold.get("observable")
     if not isinstance(obs, dict):
         return None
-    return obs.get(field)
+    level = obs.get(field)
+    if level is None and field == "workflow":
+        level = obs.get("required_outcomes")
+    return level
 
 
 # ---------------------------------------------------------------- dataset
@@ -335,15 +343,24 @@ def validate_scope(ds, run):
     return problems
 
 
-def lint_dataset(ds):
+def lint_dataset(ds, case_ids=None):
     """Documented dataset lint problems ([] when clean).
 
     Observable gold missing its documented observability level is a real lint
     failure: it is surfaced here and disqualifies the run instead of letting the
     field be silently dropped from the denominator.
+
+    ``case_ids`` scopes the lint to the requested cases so an unrequested
+    profile (e.g. a workflow root in a native-only run) cannot disqualify a run
+    that never claimed it.
     """
     problems = []
-    for case in ds["cases"]:
+    if case_ids is None:
+        cases = list(ds["cases"])
+    else:
+        cases = [ds["case_by_id"][cid] for cid in case_ids
+                 if cid in ds["case_by_id"]]
+    for case in cases:
         cid = case["case_id"]
         gold = ds["gold_by_case"][cid]
         task = case_task(case)

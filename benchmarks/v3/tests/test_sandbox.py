@@ -221,5 +221,15 @@ class FinalStateTests(unittest.TestCase):
         self.assertTrue(mb.events[-1]["permission"]["approved"])
 
 
+    def test_args_cannot_self_approve(self):
+        mb = Mailbox(fixture(), permissions={"move": "ask"}, case_id="c")
+        res = mb.execute("move_message", {"message_id": "m2",
+                                          "target_folder": "Receipts",
+                                          "approve": True})
+        self.assertEqual(res["status"], "pending")
+        self.assertFalse(mb.events[-1]["permission"]["approved"])
+        self.assertEqual(mb.final_state()["folders"]["INBOX"], ["1", "m2"])
+
+
 if __name__ == "__main__":
     unittest.main()

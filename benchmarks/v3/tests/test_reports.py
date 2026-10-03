@@ -129,6 +129,41 @@ class ComparisonTest(unittest.TestCase):
         second = compare_runs(ds, baseline, candidate, policy=COMPARE_POLICY)
         self.assertEqual(first, second)
 
+    def test_mock_comparison_is_descriptive_not_qualified(self):
+        ds, baseline = build(n=12, correct=False)
+        _, candidate = build(n=12, correct=True, model_key="model-b")
+        baseline["manifest"]["mock"] = True
+        candidate["manifest"]["mock"] = True
+        comparison = compare_runs(ds, baseline, candidate, policy=COMPARE_POLICY)
+        elig = comparison["eligibility"]
+        self.assertFalse(elig["eligible"])
+        self.assertEqual(elig["state"], "exploratory")
+        self.assertTrue(elig["estimable"])  # statistics still usable
+        self.assertIn("mock", " ".join(elig["reasons"]))
+        metric = comparison["profiles"]["native"]["category_macro_f1"]
+        self.assertFalse(metric["noninferior"])          # no NI PASS without gates
+        self.assertEqual(metric["verdict"], "descriptive_not_qualified")
+
+    def test_draft_dataset_comparison_not_qualified(self):
+        ds, baseline = build(n=12, correct=False)
+        _, candidate = build(n=12, correct=True, model_key="model-b")
+        ds["metadata"]["review_status"] = "draft"
+        elig = compare_runs(ds, baseline, candidate,
+                            policy=COMPARE_POLICY)["eligibility"]
+        self.assertFalse(elig["eligible"])
+        self.assertIn("not reviewed/sealed", " ".join(elig["reasons"]))
+
+    def test_quality_can_qualify_while_deployment_cannot(self):
+        ds, baseline = build(n=12, correct=False)
+        _, candidate = build(n=12, correct=True, model_key="model-b")
+        comparison = compare_runs(ds, baseline, candidate, policy=COMPARE_POLICY)
+        elig = comparison["eligibility"]
+        self.assertTrue(elig["quality_eligible"])
+        # no CPU receipt is attached to these fixture runs
+        self.assertFalse(elig["deployment_eligible"])
+        self.assertTrue(elig["reasons_by_dimension"]["deployment"])
+        self.assertTrue(comparison["eligibility"]["eligible"])
+
 
 if __name__ == "__main__":
     unittest.main()

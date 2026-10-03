@@ -219,7 +219,6 @@ def cmd_score(args):
                                             split=args.fit_split)
         with open(args.fit_calibrator, "w") as f:
             json.dump(calibrator, f, indent=1, sort_keys=True)
-        args.calibrator_revision = calibrator.get("revision")
 
     report = scoring.score_run(bundle, run, policy=None, calibrator=calibrator)
     if args.out:

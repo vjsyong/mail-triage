@@ -175,7 +175,38 @@ class ScoreCompareTests(_Integrated):
         code, out, err = self._run(["compare", self.pilot_dir, out_dir, out2,
                                     "--json"])
         self.assertEqual(code, 0, err)
-        self.assertIn("scope", json.loads(out))
+        comparison = json.loads(out)
+        self.assertIn("scope", comparison)
+        # offline-fake is a mock: the comparison must not be a qualified claim
+        elig = comparison["eligibility"]
+        self.assertFalse(elig["eligible"])
+        self.assertFalse(elig["quality_eligible"])
+        self.assertIn(elig["state"], ("exploratory", "not_estimable"))
+        self.assertIn("mock", " ".join(elig["reasons"]))
+        metric = comparison["profiles"]["native"]["category_macro_f1"]
+        self.assertFalse(metric["noninferior"])
+
+    def test_profile_only_scope_does_not_expand_budget(self):
+        pred = self._write_json("wf-pred.json", self.predictions)
+        out_dir = os.path.join(self.tmp.name, "runs-wf")
+        code, out, err = self._run([
+            "run", self.pilot_dir, "--adapter", "offline-fake", "--out", out_dir,
+            "--predictions", pred, "--profile", "workflow", "--allow-draft",
+            "--json"])
+        self.assertEqual(code, 0, err)
+        from benchmarks.v3.runner import load_run
+        loaded = load_run(out_dir)
+        requested = loaded["manifest"]["requested_case_ids"]
+        self.assertTrue(requested)
+        self.assertTrue(all(cid.endswith("_workflow") for cid in requested),
+                        requested)
+        self.assertEqual(loaded["manifest"]["requested_profiles"], ["workflow"])
+        # scoring the scoped run reports a complete native-free scope
+        code, out, err = self._run(["score", self.pilot_dir, out_dir, "--json"])
+        self.assertEqual(code, 0, err)
+        report = json.loads(out)
+        self.assertTrue(report["scope"]["complete"], report["scope"])
+        self.assertEqual(sorted(report["profiles"]), ["workflow"])
 
 
 class CalibrationTests(_Integrated):

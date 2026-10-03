@@ -138,12 +138,17 @@ def _choose_threshold(records, policy):
     return float(cal["coverage_threshold"]), False
 
 
-def build_calibrator(records, policy, source_case_ids, fit_split="calibration"):
+def build_calibrator(records, policy, source_case_ids, fit_split="calibration",
+                     binding=None):
     """Fit a reproducible bin calibrator from calibration records only.
 
-    ``records`` is a list of ``{"confidence","correct","case_id"}``.  Raises
-    :class:`CalibrationError` when asked to fit from anything but the declared
-    calibration split, or when no finite confidence exists.
+    ``records`` is a list of ``{"confidence","correct","case_id"}``.  ``binding``
+    is the immutable inference context the artifact is valid for (dataset /
+    model / adapter / prompt / generation / scorer / eval policy).  It is folded
+    into the artifact hash so a stale or tampered artifact can be refused, and so
+    a calibrator fitted for one model/adapter can never be silently applied to
+    another.  Raises :class:`CalibrationError` when asked to fit from anything but
+    the declared calibration split, or when no finite confidence exists.
     """
     declared = policy["calibration"]["split"]
     if fit_split != declared:
@@ -167,11 +172,53 @@ def build_calibrator(records, policy, source_case_ids, fit_split="calibration"):
         "estimable": table["n"] >= int(policy["calibration"]["min_calibration_cases"]),
         "source_case_ids": sorted(source_case_ids),
     }
+    if binding is not None:
+        payload["binding"] = binding
+        payload["binding_sha256"] = hash_obj(binding)
     digest = hash_obj(payload)
     artifact = dict(payload)
     artifact["artifact_sha256"] = digest
     artifact["revision"] = "cal3.0-" + digest[:12]
     return artifact
+
+
+def _artifact_payload(artifact):
+    return {k: v for k, v in artifact.items()
+            if k not in ("artifact_sha256", "revision")}
+
+
+def verify_calibrator(artifact, expected_binding=None, require_identity=True):
+    """Refuse a stale, tampered or mismatched calibrator; returns ``True``.
+
+    The digest is **recomputed** over the artifact body (never trusted from the
+    stored field).  When ``expected_binding`` is supplied the artifact's binding
+    must equal it exactly, so a calibrator fitted for one model / adapter /
+    prompt / generation cannot be applied to a run with a different identity.
+    """
+    if not isinstance(artifact, dict):
+        raise CalibrationError("calibrator artifact must be a mapping")
+    digest = artifact.get("artifact_sha256")
+    if not digest:
+        if require_identity:
+            raise CalibrationError("calibrator artifact has no artifact_sha256")
+        return False
+    recomputed = hash_obj(_artifact_payload(artifact))
+    if recomputed != digest:
+        raise CalibrationError(
+            "calibrator artifact hash is stale or tampered (stored %s != "
+            "recomputed %s)" % (str(digest)[:12], recomputed[:12]))
+    if artifact.get("revision") != "cal3.0-" + digest[:12]:
+        raise CalibrationError("calibrator revision does not match its hash")
+    if expected_binding is not None:
+        binding = artifact.get("binding")
+        if binding != expected_binding:
+            raise CalibrationError(
+                "calibrator binding does not match the run identity; refusing "
+                "to apply a calibrator fitted for a different dataset/model/"
+                "adapter/prompt/generation")
+        if artifact.get("binding_sha256") != hash_obj(expected_binding):
+            raise CalibrationError("calibrator binding hash is stale or tampered")
+    return True
 
 
 def apply_calibrator(artifact, confidence):

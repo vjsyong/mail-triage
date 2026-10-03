@@ -164,10 +164,49 @@ class ComparisonGateTest(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertFalse(result["estimable"])
 
+    def _runs(self, mock=False, source="pinned", cpu=False):
+        return {"baseline": {"mock": mock, "model_identity_source": source},
+                "candidate": {"mock": mock, "model_identity_source": source,
+                              "cpu_qualified": cpu}}
+
     def test_adequate_comparison_eligible(self):
-        comparison = {"scope": {"complete": True, "n_roots": 12}}
+        comparison = {"scope": {"complete": True, "n_roots": 12},
+                      "runs": self._runs(), "profiles": {},
+                      "dataset": {"review_status": "reviewed"}}
         result = gates.qualify_comparison(comparison, self.policy)
         self.assertTrue(result["eligible"])
+        self.assertTrue(result["quality_eligible"])
+        self.assertTrue(result["estimable"])
+
+    def test_mock_or_draft_or_unverified_comparison_not_qualified(self):
+        comparison = {"scope": {"complete": True, "n_roots": 12},
+                      "runs": self._runs(mock=True), "profiles": {},
+                      "dataset": {"review_status": "reviewed"}}
+        result = gates.qualify_comparison(comparison, self.policy)
+        self.assertFalse(result["eligible"])
+        self.assertFalse(result["quality_eligible"])
+        self.assertTrue(result["estimable"])  # exploratory statistics still usable
+        self.assertTrue(result["exploratory"])
+        self.assertIn("mock", " ".join(result["reasons"]))
+
+        unseen = {"scope": {"complete": True, "n_roots": 12},
+                  "runs": self._runs(source="unverified"), "profiles": {},
+                  "dataset": {"review_status": "reviewed"}}
+        self.assertFalse(gates.qualify_comparison(unseen, self.policy)["eligible"])
+
+        draft = {"scope": {"complete": True, "n_roots": 12},
+                 "runs": self._runs(), "profiles": {},
+                 "dataset": {"review_status": "draft"}}
+        self.assertFalse(gates.qualify_comparison(draft, self.policy)["eligible"])
+
+    def test_quality_eligible_but_deployment_separate(self):
+        comparison = {"scope": {"complete": True, "n_roots": 12},
+                      "runs": self._runs(cpu=False), "profiles": {},
+                      "dataset": {"review_status": "reviewed"}}
+        result = gates.qualify_comparison(comparison, self.policy)
+        self.assertTrue(result["quality_eligible"])
+        self.assertFalse(result["deployment_eligible"])
+        self.assertTrue(result["reasons_by_dimension"]["deployment"])
 
 
 if __name__ == "__main__":
