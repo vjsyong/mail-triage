@@ -382,4 +382,14 @@ def test_calibration_ece():
     assert out["reliability"]["ece"] < 0.2
 
 
+def test_calibration_skips_non_numeric_confidence():
+    from scoring import calibrate
+    rows = [{"confidence": "0.0 - 1.0", "correct": False},
+            {"confidence": None, "correct": False},
+            {"confidence": 2.5, "correct": True},
+            {"confidence": 0.9, "correct": True}]
+    out = calibrate.build([dict(r, suite="classification") for r in rows])
+    assert out["reliability"]["n"] == 1
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

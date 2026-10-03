@@ -94,8 +94,10 @@ def score_run(run_id, split=None, results=RESULTS):
                         nr_conf[str(t_nr)][str(p_nr)] += 1
                     correct = junk or \
                         cat in (case["expect"].get("acceptable") or [case["expect"].get("category")])
-                    if signals.get("confidence") is not None:
-                        calib_rows.append({"confidence": signals["confidence"],
+                    conf_sig = signals.get("confidence")
+                    if isinstance(conf_sig, (int, float)) and not isinstance(conf_sig, bool) \
+                            and 0 <= conf_sig <= 1:
+                        calib_rows.append({"confidence": conf_sig,
                                            "correct": bool(correct), "suite": "classification"})
             else:
                 s_quality_fixed.append(0.0)

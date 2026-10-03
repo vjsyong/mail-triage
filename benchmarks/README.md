@@ -206,6 +206,37 @@ Running it `auto` dropped drafting to 60.8 and rules to 13.3 with empty outputs
   wrong action outcomes / wrong tool args in the assistant suite, plus the two
   injections. Not suitable for triage; c8 mean 7.97 s.
 
+### B3. MiniCPM5 fine-tunes (probed 2026-10-03)
+
+Survey of all 98 MiniCPM5-2B Hub repos: the rest are quant/format clones,
+abliterated/uncensored variants, or language/code SFTs. Two genuinely different
+fine-tunes were tested:
+
+- **`GnLOLot/MiniCPM5-2B-Claude-Fable5-1-Thinking-Agentic` (Q4_K_M)** — SFT on
+  Claude/agent traces. Tool calls work, but classification is *worse* than stock
+  (76.7 vs 84.3 with the same adapted prompt; Personal recall 9/29). Not a
+  classification remedy.
+- **`ewin-reg/MiniCPM5-1B-Agentic-Tooluse-v3` (Q4_K_M)** — full v2 run
+  (`minicpm5-1b-tooluse-500845398794`): quality **46.8**, classification
+  **14.2**, assistant 67.9, drafting 71.7, rules 61.0; 2 infra results
+  (llama.cpp HTTP 500 on malformed tool-call args). The tool-calling SFT
+  overfits tool syntax: on classify prompts it emits extraction JSON
+  (`{"sender":…,"message":…}`) or copies the schema string as `confidence`, and
+  it runs away to `finish=length` (mean 3838 completion tokens vs stock 1B's
+  1387). Not usable; per the tightened completeness rule the run is ineligible
+  for ranking.
+
+No email/classification-specific MiniCPM5-2B fine-tune exists. The only
+classification-specialized model (`usejul/minicpm5-2b-decision`) is a
+non-generative pointer-head model with no llama.cpp path. **The remedy for 2B
+classification is the prompt/decoding study, not a fine-tune** (see the
+prompt-variant results in the session record: definitions + few-shot + thinking
+off + JSON-schema enum → 84.6 vs stock 72.3).
+
+Harness fixes surfaced by the tool-use run: calibration now skips non-numeric
+`confidence` values, and `coverage.complete` now requires **0 infra** as well as
+0 missing (matching the acceptance policy).
+
 Historical 16K sequential snapshot (different case set; `v2/reports/acceptance.md`):
 baseline 87.1 / E4B 88.2 (6 crit) / Qwen9B 87.7.
 

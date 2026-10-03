@@ -166,7 +166,8 @@ def coverage(run_id, results=RESULTS, cases_dir=CASES):
         "missing": sum(v["missing"] for v in out.values()),
         "infra": sum(v["infra"] for v in out.values()),
     }
-    out["_totals"]["complete"] = out["_totals"]["missing"] == 0
+    out["_totals"]["complete"] = (out["_totals"]["missing"] == 0
+                                  and out["_totals"]["infra"] == 0)
     return out
 
 

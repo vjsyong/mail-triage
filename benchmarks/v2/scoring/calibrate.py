@@ -16,7 +16,16 @@ import os
 
 
 def _load_signals(rows):
-    return [r for r in rows if r.get("confidence") is not None]
+    """Keep only finite numeric confidences in [0,1]; models sometimes echo the
+    schema string (e.g. "0.0 - 1.0") and that must not break the report."""
+    out = []
+    for r in rows:
+        c = r.get("confidence")
+        if isinstance(c, bool) or not isinstance(c, (int, float)):
+            continue
+        if 0 <= c <= 1:
+            out.append(r)
+    return out
 
 
 def calibration(records, bins=10):
