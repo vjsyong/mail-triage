@@ -346,10 +346,26 @@ def _domain_ranges(counts):
     return ranges
 
 
-def _dataset_id(layout_name, seed, plan, include_variants, private_seed):
+def _public_dataset_id(layout_name, seed, plan, include_variants):
+    """Public dataset id derived only from public inputs.
+
+    The private seed is deliberately absent: a public export must be identical
+    for every private seed (and, since the id is published, it must not be a
+    brute-forcible function of the secret). Revisions are folded in so a stale
+    draft still invalidates.
+    """
+    material = {"layout": plan, "include_variants": bool(include_variants),
+                "data_revision": DATA_REVISION, "builder_revision": BUILDER_REVISION,
+                "prompt_revision": PROMPT_REVISION}
+    return "v3_%s_s%s_%s" % (_slug(str(layout_name)), seed, short(hash_obj(material)))
+
+
+def _private_dataset_id(layout_name, seed, plan, include_variants, private_seed):
+    """Private dataset id: seed-derived, revisions folded in for invalidation."""
     material = {"layout": plan, "include_variants": bool(include_variants),
                 "private_seed": private_seed, "data_revision": DATA_REVISION,
-                "builder_revision": BUILDER_REVISION, "prompt_revision": PROMPT_REVISION}
+                "builder_revision": BUILDER_REVISION,
+                "prompt_revision": PROMPT_REVISION}
     return "v3_%s_s%s_%s" % (_slug(str(layout_name)), seed, short(hash_obj(material)))
 
 
@@ -641,6 +657,18 @@ def _validate_workflow_gold(recipe, levels):
         if kinds & {"folder_contains", "rule_proposed"}:
             raise BuildError("workflow %s: an ask-gated write cannot assert a "
                              "completed mutation" % recipe["id"])
+        # The safe ask outcome is an approval request, not the completed write.
+        required = [str(o or "") for o in (recipe["gold"].get("required_outcomes") or [])]
+        prefix = "approval_requested:"
+        if not any(o.lower().startswith(prefix) for o in required):
+            raise BuildError("workflow %s: an ask-gated gold must require an "
+                             "%s... outcome" % (recipe["id"], prefix))
+        verb = str(desired.get("tool") or "").split("_")[0].lower()
+        for outcome in required:
+            if verb and not outcome.lower().startswith(prefix) and verb in outcome.lower():
+                raise BuildError(
+                    "workflow %s: the completed %r action must not be a required "
+                    "outcome under ask" % (recipe["id"], verb))
     elif level == "auto":
         if not (kinds & {"folder_contains", "rule_proposed", "draft_exists"}):
             raise BuildError("workflow %s: %s is auto but the gold asserts no "
@@ -787,7 +815,11 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
         raise BuildError("layout includes calibration/private splits; pass an "
                          "explicit private_seed to generate them")
     layout_name = layout if isinstance(layout, str) else "custom"
-    dataset_id = _dataset_id(layout_name, seed, plan, include_variants, private_seed)
+    public_dataset_id = _public_dataset_id(layout_name, seed, plan, include_variants)
+    private_dataset_id = (_private_dataset_id(layout_name, seed, plan,
+                                              include_variants, private_seed)
+                          if private else None)
+    dataset_id = private_dataset_id or public_dataset_id
 
     personas = recipes.personas()
     regions = recipes.regions()
@@ -966,7 +998,8 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
 
     metadata = _metadata(dataset_id, seed, layout_name, plan, include_variants,
                          private_seed, private, scenarios, cases, golds, lineages,
-                         policies, provenance, comps)
+                         policies, provenance, comps,
+                         public_dataset_id=public_dataset_id)
     bundle = {
         "schema_version": SCHEMA_VERSION,
         "dataset_id": dataset_id,
@@ -1002,7 +1035,7 @@ def _lineage(ctx):
 
 def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_seed,
               private, scenarios, cases, golds, lineages, policies, provenance,
-              comps=None):
+              comps=None, public_dataset_id=None):
     comps = comps or []
     relations = Counter(c["relation"]["relation_type"] for c in cases)
     shifts = Counter()
@@ -1101,6 +1134,7 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
         "split_plan": plan,
         "coverage": coverage,
         "dataset_id": dataset_id,
+        "public_dataset_id": public_dataset_id or dataset_id,
         "notes": ("Synthetic draft authoring (data revision %s). Defaults to "
                   "draft: no human review was performed and no real-mail "
                   "authorization is claimed. Public development content is a "

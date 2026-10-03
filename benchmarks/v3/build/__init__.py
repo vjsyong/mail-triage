@@ -66,9 +66,9 @@ def _subset_bundle(bundle, splits):
     metadata["contains_private"] = private_present
     metadata["visibility"] = "private" if private_present else "public"
     if not private_present:
-        # Never leak the secret private seed through a public artifact.
+        # Never leak the secret private seed (or a private-only id) through a
+        # public artifact: remove the key entirely.
         metadata.pop("private_seed_used", None)
-        metadata["private_seed_used"] = None
     components = summarize_components(keep_cases, keep_scenarios)
     counts = dict(metadata.get("counts") or {})
     counts.update({
@@ -97,10 +97,17 @@ def _subset_bundle(bundle, splits):
     coverage = dict(metadata.get("coverage") or {})
     coverage["components"] = components
     metadata["coverage"] = coverage
+    if private_present:
+        subset_id = bundle.get("dataset_id")
+    else:
+        # The public export id is seed-independent and reveals nothing about the
+        # private seed; never fall back to the private id.
+        subset_id = metadata.get("public_dataset_id") or bundle.get("dataset_id")
+    metadata["dataset_id"] = subset_id
     subset = dict(bundle)
     subset.update({
         "cases": keep_cases, "gold": keep_golds, "scenarios": keep_scenarios,
-        "lineage": keep_lineage, "metadata": metadata,
+        "lineage": keep_lineage, "metadata": metadata, "dataset_id": subset_id,
     })
     return subset
 
@@ -180,11 +187,11 @@ def write_dataset(bundle, path, *, private_root=None):
         return {"public": _write_dir(bundle, path, bundle["dataset_id"])}
     _assert_private_root(private_root, path)
     public_bundle = _subset_bundle(bundle, PUBLIC_SPLITS)
-    paths = {"public": _write_dir(public_bundle, path, bundle["dataset_id"])}
+    paths = {"public": _write_dir(public_bundle, path, public_bundle["dataset_id"])}
     if private_cases:
         private_bundle = _subset_bundle(bundle, PRIVATE_SPLITS)
         paths["private"] = _write_dir(private_bundle, private_root,
-                                      bundle["dataset_id"])
+                                      private_bundle["dataset_id"])
     return paths
 
 
