@@ -3494,6 +3494,8 @@ def main():
     check("flow editor ships the live fill hook",
           b"window.mtFlowFill" in page_fe and b"window.mtCtxState" in page_fe
           and b"d.ui.action==='fill_flow'" in page_fe)
+    check("flow editor closes its form so the drawer form parses",
+          page_fe.count(b"<form") == page_fe.count(b"</form>") and b"</form>" in page_fe)
     rstreamflow = client.post("/assistant/stream",
                               data={"message": "Please fill the flow form for lunch mail",
                                     "session": "0", "path": "/flows/%d/edit" % fctx_id,

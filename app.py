@@ -5098,6 +5098,7 @@ FLOW_EDIT_TMPL = """
   <a class="btn" href="{{ url_for('flows') }}">Cancel</a>
   <span class="fl-save-hint">A flow only moves, tags, marks, stars, or drafts — it never deletes mail.</span>
 </div>
+</form>
 <script>
 var stepsEl = document.getElementById('steps');
 var stepsInput = document.getElementById('steps_json');
