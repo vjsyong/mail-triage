@@ -1,0 +1,26 @@
+{
+  "note": "Maps each synthetic email family to the world entity kind that sends it: an org (with preferred industries and a role mailbox) or a person (colleague/friend). Drives coherent sender/domain/signature selection.",
+  "family_world": {
+    "receipt_confirmation": {"kind": "org", "industries": ["retail", "utility", "travel", "software", "health", "food", "telecom"], "role": "billing"},
+    "invoice_receipt": {"kind": "org", "industries": ["retail", "software", "logistics", "insurance", "property"], "role": "billing"},
+    "payment_reminder": {"kind": "org", "industries": ["utility", "telecom", "property", "insurance"], "role": "billing"},
+    "refund_status": {"kind": "org", "industries": ["retail", "travel", "software"], "role": "support"},
+    "newsletter_digest": {"kind": "org", "industries": ["media"], "role": "no-reply"},
+    "legitimate_promo": {"kind": "org", "industries": ["retail", "marketing"], "role": "offers"},
+    "ambiguous_marketing": {"kind": "org", "industries": ["retail", "marketing"], "role": "no-reply"},
+    "suspicious_phishing": {"kind": "org", "industries": ["finance", "utility", "retail"], "role": "security", "sketchy": true},
+    "security_notification": {"kind": "org", "industries": ["finance", "software", "telecom"], "role": "security"},
+    "shipping_travel_update": {"kind": "org", "industries": ["logistics", "travel"], "role": "tracking"},
+    "support_exchange": {"kind": "org", "industries": ["software", "retail", "telecom", "health"], "role": "support"},
+    "document_request": {"kind": "org", "industries": ["property", "insurance", "government"], "role": "accounts"},
+    "order_request": {"kind": "org", "industries": ["retail", "food", "property"], "role": "orders"},
+    "request_approval": {"kind": "org", "industries": ["marketing", "retail", "software"], "role": "accounts"},
+    "project_request": {"kind": "org", "industries": ["software", "marketing", "retail"], "role": "accounts"},
+    "project_status": {"kind": "org", "industries": ["software", "marketing"], "role": "no-reply"},
+    "operational_alert": {"kind": "org", "industries": ["software", "utility", "telecom"], "role": "no-reply"},
+    "meeting_request": {"kind": "person", "context": "colleague"},
+    "personal_invitation": {"kind": "person", "context": "friend"},
+    "school_community": {"kind": "org", "industries": ["education", "community"], "role": "office"},
+    "event_registration": {"kind": "org", "industries": ["events", "community", "education"], "role": "events"}
+  }
+}

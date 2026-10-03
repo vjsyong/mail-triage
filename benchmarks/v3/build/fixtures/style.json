@@ -1,0 +1,89 @@
+{
+  "body_words": {
+    "median": 413,
+    "p25": 261,
+    "p75": 680
+  },
+  "closings": [
+    "thanks",
+    "thank you"
+  ],
+  "greetings": [
+    "hi",
+    "hello",
+    "dear"
+  ],
+  "note": "Corpus-guided aggregate style. Derived offline by tools/mine_corpora.py; committed so runtime/tests never read the corpora. No verbatim real-data content.",
+  "provenance": {
+    "checksums_sha256": "30e48b75c127e12354a0e9eef2e07aa7be29c827256f3db128abe5dd6de59855",
+    "license_note": "Enron (public record, redacted), IETF (IETF Trust), SpamAssassin (Apache project), Nazario (CC-BY-4.0); aggregate statistics only",
+    "method": "aggregate counts of greeting/sign-off/subject shapes, length bands and quoting rate; no verbatim text, names, addresses or domains are retained",
+    "per_corpus": {
+      "enron": {
+        "body_words": {
+          "median": 100,
+          "p25": 62,
+          "p75": 168
+        },
+        "closings": {
+          "thank you": 1,
+          "thanks": 3
+        },
+        "greetings": {},
+        "quoted_rate": 0.0,
+        "sampled_messages": 150,
+        "subject_prefixes": {
+          "re:": 47
+        }
+      },
+      "ietf": {
+        "body_words": {
+          "median": 739,
+          "p25": 431,
+          "p75": 1027
+        },
+        "closings": {},
+        "greetings": {},
+        "quoted_rate": 0.76,
+        "sampled_messages": 150,
+        "subject_prefixes": {
+          "[tag]": 8,
+          "re:": 23
+        }
+      },
+      "nazario": {
+        "body_words": {
+          "median": 556,
+          "p25": 409,
+          "p75": 660
+        },
+        "closings": {},
+        "greetings": {},
+        "quoted_rate": 0.213,
+        "sampled_messages": 150,
+        "subject_prefixes": {}
+      },
+      "spamassassin": {
+        "body_words": {
+          "median": 377,
+          "p25": 313,
+          "p75": 496
+        },
+        "closings": {},
+        "greetings": {},
+        "quoted_rate": 0.58,
+        "sampled_messages": 150,
+        "subject_prefixes": {
+          "[tag]": 34,
+          "re:": 67
+        }
+      }
+    },
+    "source_root": "/home/xrim/datasets/email-corpora"
+  },
+  "quoted_rate": 0.388,
+  "subject_prefixes": [
+    "re:",
+    "[tag]"
+  ]
+}
