@@ -6968,7 +6968,7 @@ ASSISTANT_TMPL = r"""
   <div class="assistant-main">
     <div class="chat-head">
       <button type="button" class="iconbtn" id="ahist" aria-label="Chat history"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button>
-      <div class="ch-title">Assistant</div>
+      <div class="ch-title">Assistant{% if asst_fb %} <span class="badge" title="Assistant is answering from the fallback endpoint">fallback: {{ asst_fb_model }}</span>{% endif %}</div>
       <a class="iconbtn" href="{{ url_for('assistant') }}" aria-label="New chat"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></a>
     </div>
     <div class="assistant-flex">
@@ -7302,9 +7302,12 @@ def _assistant_page(sid):
             row = plugins.get(pid)
             label = plugins.action_label(row) if row else pid
             spec[lvl].append({"label": label or pid, "plug": True})
+    _lc = engine.llm_config()
+    asst_fb = bool(_lc.get("assistant_use_fallback") and _lc.get("fallback"))
+    asst_fb_model = (_lc["fallback"] or {}).get("model") if asst_fb else ""
     return render(_render_src(
         ASSISTANT_TMPL, sid=sid, sessions=sessions, convo=convo, convo_html=convo_html,
-        llm=engine.llm_config(), pending=pending, spec=spec))
+        llm=_lc, pending=pending, spec=spec, asst_fb=asst_fb, asst_fb_model=asst_fb_model))
 
 
 @app.route("/assistant/s/<int:sid>")
@@ -7925,6 +7928,16 @@ SETTINGS_TMPL = """
     </div>
   </div>
 
+  <div class="card" id="ai-assistant-model">
+    <div class="card-h"><h3>Assistant model</h3><span class="sub">which endpoint answers in the assistant chat</span></div>
+    <form method="post" action="{{ url_for('settings_assistant_model') }}">
+      <input type="hidden" name="next" value="{{ url_for('settings') }}#ai">
+      <div class="setrow"><div class="st-l"><b>Use the fallback model for the assistant</b><span class="sub">Test the assistant against the fallback endpoint; the primary stays the safety net. Classification and drafting keep using the primary.</span></div>
+        <div class="st-c"><label class="px-sw" title="Use the fallback model for the assistant"><input type="checkbox" name="assistant_use_fallback" value="1" {{ 'checked' if s.assistant_use_fallback else '' }} onchange="this.form.requestSubmit()" aria-label="Use the fallback model for the assistant"><span class="px-tr"></span></label></div></div>
+      {% if not llm.fallback %}<div class="sub" style="padding:0 14px 12px">No fallback endpoint configured - add one in the LLM endpoint card above.</div>{% endif %}
+    </form>
+  </div>
+
   <div class="card" id="ai-classify">
     <div class="card-h"><h3>Classification</h3><span class="sub">rules first, then classifiers, then the LLM</span></div>
     <form method="post">
@@ -8416,6 +8429,23 @@ def settings_rag_models():
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc), "models": []})
     return jsonify({"ok": True, "models": models})
+
+
+@app.route("/settings/assistant-model", methods=["POST"])
+def settings_assistant_model():
+    on = (request.form.get("assistant_use_fallback") or "0") == "1"
+    store.set_setting("assistant_use_fallback", 1 if on else 0)
+    if on and not engine.llm_config().get("fallback"):
+        flash("Assistant set to the fallback model, but no fallback endpoint is "
+              "configured - the primary will answer.", "warn")
+    else:
+        flash("Assistant now answers with the %s model." % ("fallback" if on else "primary"),
+              "ok")
+    nxt = (request.form.get("next") or "").strip()
+    dest = nxt if (nxt.startswith("/") and not nxt.startswith("//")) else url_for("settings")
+    if "#" not in dest:
+        dest += "#ai"
+    return redirect(dest)
 
 
 @app.route("/settings/test-llm", methods=["POST"])

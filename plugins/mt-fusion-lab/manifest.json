@@ -1,0 +1,77 @@
+{
+  "id": "mt-fusion-lab",
+  "name": "Fusion Lab",
+  "action": "Compare classifiers",
+  "version": "0.1.0",
+  "description": "A/B lab: compare the primary LLM, the fallback LLM and the TinyJev+MiniCPM fusion on any indexed email.",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "engines": { "sdk": ">=0.2 <1.0" },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": ["tool"],
+  "permissions": ["mailbox.read", "llm.complete", "net.http"],
+  "required_llm_capability": "llm.complete",
+  "net": {
+    "hosts": ["fusion", "127.0.0.1", "localhost"],
+    "allow_config_hosts": true,
+    "max_requests_per_day": 5000
+  },
+  "limits": { "memory_mb": 64, "timeout_ms": 30000 },
+  "config": {
+    "type": "object",
+    "properties": {
+      "fusion_url": { "type": "string", "title": "Fusion service URL",
+        "description": "Base URL of the TinyJev+MiniCPM sidecar (see fusion/docker-compose.yml)",
+        "default": "http://fusion:8098" },
+      "categories": { "type": "string", "title": "Categories",
+        "description": "Comma-separated categories used in the comparison prompts",
+        "default": "Action,Notification,Newsletter,Receipt,Personal,Promo" },
+      "allowed_hosts": { "type": "array", "items": { "type": "string" },
+        "title": "Extra allowed hosts",
+        "description": "Add the fusion host here when it is not fusion/127.0.0.1/localhost",
+        "default": [] }
+    }
+  },
+  "tools": [
+    {
+      "name": "list_messages",
+      "description": "List recent indexed messages for the Fusion Lab picker.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "optional free-text filter" },
+          "limit": { "type": "integer", "description": "max rows (default 30, capped at 40)" }
+        }
+      },
+      "side_effects": "none",
+      "surface": "hidden"
+    },
+    {
+      "name": "compare_message",
+      "description": "Classify one indexed message with the primary LLM, the fallback LLM and the TinyJev+MiniCPM fusion; returns every verdict with timings.",
+      "parameters": {
+        "type": "object",
+        "properties": { "message_id": { "type": "integer" } },
+        "required": ["message_id"]
+      },
+      "side_effects": "none",
+      "surface": "hidden"
+    }
+  ],
+  "ui": {
+    "mode": "trusted",
+    "entrypoint": "ui/page.js",
+    "pages": [
+      { "id": "lab", "title": "Fusion Lab",
+        "description": "Pick an email, compare classifier verdicts side by side" }
+    ],
+    "navigation": [
+      { "page": "lab", "label": "Fusion Lab", "group": "system", "icon": "sparkles", "order": 30 }
+    ],
+    "operations": ["list_messages", "compare_message"]
+  },
+  "assistant": {
+    "when_to_use": "comparing classifier verdicts (primary vs fallback vs fusion) for one email"
+  }
+}

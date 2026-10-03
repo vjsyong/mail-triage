@@ -209,8 +209,22 @@ def _llm_complete(payload):
         max_tokens = 512
     if not prompt.strip():
         raise _HostError("invalid_args", "prompt is required")
-    text = LLMClient()._chat(system, prompt, json_mode=bool(payload.get("json")),
-                             max_tokens=max_tokens)
+    endpoint = str(payload.get("endpoint") or "primary").strip().lower()
+    if endpoint not in ("primary", "fallback"):
+        raise _HostError("invalid_args", "endpoint must be 'primary' or 'fallback'")
+    thinking = bool(payload.get("thinking"))
+    client = LLMClient()
+    if endpoint == "fallback":
+        if not client.fallback:
+            raise _HostError("invalid_args", "no fallback endpoint is configured")
+        fb_base, fb_key, fb_model = client.fallback
+        text = client._chat_once(fb_base, fb_key, fb_model, system,
+                                 [{"role": "user", "content": prompt}],
+                                 json_mode=bool(payload.get("json")), max_tokens=max_tokens,
+                                 thinking=thinking)
+    else:
+        text = client._chat(system, prompt, json_mode=bool(payload.get("json")),
+                            max_tokens=max_tokens, thinking=thinking)
     if not isinstance(text, str):
         text = json.dumps(text, ensure_ascii=False)
     return {"text": text}

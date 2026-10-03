@@ -78,8 +78,11 @@ export interface PluginMail {
 
 export interface PluginLLM {
   // requires permission: llm.complete / llm.embed
+  // endpoint: "primary" (default) or "fallback" - explicit selection for A/B tools;
+  // asks the host to use that configured endpoint even when both are healthy.
   complete(req: { prompt: string; system?: string; max_tokens?: number;
-                  json?: boolean }): { text: string };
+                  json?: boolean; endpoint?: "primary" | "fallback";
+                  thinking?: boolean }): { text: string };
   embed(texts: string[]): number[][];
 }
 

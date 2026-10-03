@@ -1,0 +1,29 @@
+# Fusion sidecar for Mail Triage's Fusion Lab plugin.
+#
+#   docker compose -f fusion/docker-compose.yml up -d --build
+#
+# The 2B needs to be served separately (any OpenAI-compatible endpoint), e.g.
+# the repo's llama.cpp helper:
+#   benchmarks/serving/serve_llamacpp.sh /path/to/MiniCPM5-2B-Q4_K_M.gguf minicpm5-2b 8042 32768 4 --no-reasoning-preserve
+# For the fusion prompt note that thinking is disabled per request; no extra
+# server flags are needed.
+services:
+  fusion:
+    build: .
+    image: mail-triage-fusion:latest
+    container_name: mail-triage-fusion
+    ports:
+      - "127.0.0.1:8098:8098"
+    environment:
+      FUSION_LLM_BASE_URL: "${FUSION_LLM_BASE_URL:-http://host.docker.internal:8042/v1}"
+      FUSION_LLM_MODEL: "${FUSION_LLM_MODEL:-minicpm5-2b}"
+      FUSION_USER_NAME: "${FUSION_USER_NAME:-Sean}"
+      TINYJEV_DEVICE: "cpu"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - fusion-hf:/data/hf
+    restart: unless-stopped
+
+volumes:
+  fusion-hf:

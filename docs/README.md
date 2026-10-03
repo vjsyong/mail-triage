@@ -49,6 +49,9 @@ How this folder is organised: by what you need, not by when it was written.
 - [model-evaluation.md](model-evaluation.md) - local-model right-sizing study
   (2026-10): 7 models on 196 frozen app-workload cases; injection compliance,
   no-match honesty, hardening backlog, recommended operating points (2026-10-02)
+- [fusion-lab.md](fusion-lab.md) - TinyJev+MiniCPM local fusion (try-out rig):
+  the A/B Fusion Lab plugin, the fusion sidecar, the assistant
+  primary/fallback switch, and the measured v2 numbers (2026-10-03)
 - [flows-builder-v2.md](flows-builder-v2.md) - flow canvas (trigger -> filters -> steps)
 - [flows-fuzzy-classifier.md](flows-fuzzy-classifier.md) - AI category + about-topic
   conditions for flows
