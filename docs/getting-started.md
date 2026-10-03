@@ -1,15 +1,19 @@
 # Getting started
 
 Self-hosted triage for a single mailbox. No GPU is required: rules and semantic
-search run on CPU, and the only thing an LLM adds is classification and drafting.
+search run on CPU; LLM classification, assistant chat, and AI drafting need a
+separately configured model endpoint.
 This guide covers the install, how to pick an LLM for your machine, and the
 first-run checklist.
 
 ## 1. Requirements
 
 - Docker Engine + Compose v2.
-- ~2GB RAM and a few GB of disk for the app; the search index adds roughly the
-  size of your mail archive; a local LLM server is extra.
+- Budget several GB of RAM and disk for CPU retrieval models in addition to the
+  app and mail index. In the measured deployment, the embedder alone used about
+  1.9 GB RAM after load; bulk indexing can use substantially more. See the
+  [retrieval resource notes](rag-lite-report.md#resource-tradeoffs). A local LLM
+  server is extra.
 - A mailbox reachable over IMAP. The embedded email-oauth2-proxy handles OAuth
   providers (Gmail, Outlook/Microsoft 365 and most university providers) and
   owns the token refresh; look in `data/emailproxy/` after first run.
@@ -17,9 +21,11 @@ first-run checklist.
 ## 2. Install
 
 ```bash
-git clone <this repo> && cd mail-triage
+git clone https://github.com/vjsyong/mail-triage.git
+cd mail-triage
 cp .env.example .env
-# edit .env: set LLM_BASE_URL + LLM_MODEL (see section 3), everything else can stay blank
+# Optional: set LLM_BASE_URL + LLM_MODEL (see section 3).
+# Leave them blank to start without LLM features.
 docker compose up -d --build
 # open http://localhost:8097
 ```
@@ -45,8 +51,9 @@ detection shows on the **Get started** page (`/welcome`).
 
 ### No GPU (or a small one)
 
-Everything except classification and drafting works out of the box. Two ways to
-get an LLM:
+Rules, the UI, and CPU search work without an LLM once the mailbox is connected
+and indexed. Assistant chat, classification, AI drafting, and other LLM-backed
+features need a compatible endpoint. Two ways to get one:
 
 1. **A hosted OpenAI-compatible API** (usually the best quality). Example `.env`:
 
@@ -72,8 +79,11 @@ get an LLM:
    LLM_MODEL=qwen2.5:7b-instruct
    ```
 
-   Quality is modest (shorter summaries, more classification misses) but fully
-   private and free. Note `host.docker.internal` requires Docker 20.10+.
+   This is a connection example, not an evaluated model recommendation. CPU
+   latency and tool-calling quality depend on the model and hardware. Compose
+   supplies the `host.docker.internal` host-gateway mapping on Linux; the model
+   server must also listen on an interface reachable from Docker. A server bound
+   only to host `127.0.0.1` is not reachable through the Linux bridge gateway.
 
 ### 8-16GB GPU
 
@@ -88,10 +98,10 @@ LLM_MODEL=qwen2.5:14b-instruct
 ```
 
 > Benchmarked (2026-10): small local models were measured against this app's own
-> workload. The smallest model that behaved safely was the Gemma-4-E4B class;
-> 4B-class models are much faster but were observed obeying instructions embedded
-> in email content. Read [model-evaluation.md](model-evaluation.md) before
-> picking a model for automated filing.
+> workload. The current benchmark does **not** establish a drop-in smaller-model
+> replacement, and prompt-injection failures occurred in both a small candidate
+> and the larger baseline. Read [model-evaluation.md](model-evaluation.md) before
+> choosing an endpoint; parameter count alone is not a reliability guarantee.
 
 ### 24GB+ GPU
 
@@ -108,12 +118,13 @@ LLM_BASE_URL=http://<this-host>:8040/v1
 LLM_MODEL=gemma-4-26b-a4b
 ```
 
-Any other model that fits works the same way; the folder is an example, not a
-requirement.
+Other models use the same endpoint configuration, but chat templates, tool
+calling, structured output, and thinking settings can require adaptations. The
+folder is an example, not a requirement.
 
-> Tip: keep `LLM_FALLBACK_*` pointed at a hosted API if you run a local model -
-> the app uses it only when the primary endpoint fails, so a crashed GPU server
-> degrades instead of stopping.
+> Optional fallback: `LLM_FALLBACK_*` can point at a second endpoint if the
+> primary fails. A hosted fallback receives the message content included in those
+> requests. Leave it blank for local-only processing.
 
 ## 4. First run
 

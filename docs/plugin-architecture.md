@@ -5,7 +5,7 @@ contract, sandbox strategy, and a 4-phase rollout plan.
 
 - Status: **draft for review** (analysis + interface contracts only; no implementation)
 - Date: 2026-10-02
-- Scope: `~/mail-triage` @ `ce0b5e9` (suite: 557 checks green)
+- Scope: Mail Triage @ `ce0b5e9` (suite: 557 checks green)
 - Companion reading: `docs/agent-permissions.md` (the assistant permission matrix this
   design deliberately extends), `docs/app-inventory.md`, `AGENTS.md` (workflow rules)
 

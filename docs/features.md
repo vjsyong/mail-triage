@@ -172,9 +172,9 @@ hybrid+rerank     97.9%  100.0%   100.0%   0.990   1188
 ```
 
 The legacy stack scored hybrid+rerank R@1 89.6 / MRR 0.941 on the same set (its
-index never exceeded ~60% coverage). Prototype evaluation (0.6B parity with the 4B,
-small-reranker comparison incl. the 34 exact-query set) - `docs/rag-lite-report.md`
-on branch `rag-lite-eval` in `~/mail-triage-rag`.
+index never exceeded ~60% coverage), so this live comparison does not isolate
+model quality. See the [RAG evaluation report](rag-lite-report.md) for the
+full-coverage prototype controls, small-reranker comparison, and limitations.
 
 CPU query cost (live): ~150 ms query embed, ~0.2 s end-to-end without rerank,
 ~1.2 s with; ~1.9 GB RSS, zero VRAM. For a first full backfill, point the embed

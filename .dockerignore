@@ -5,3 +5,10 @@ __pycache__
 *.pyc
 .env
 .git
+.codegraph
+ragmodels
+benchmarks
+docs
+qa
+gemma
+embed

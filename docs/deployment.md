@@ -20,14 +20,9 @@ auth layer, or keep it VPN-only.
 
 Two approaches that work well:
 
-**Reverse proxy (Caddy example).** Caddy terminates TLS and forwards to the
-loopback port; nothing else needs changing.
-
-```
-triage.example.com {
-    reverse_proxy 127.0.0.1:8097
-}
-```
+**Reverse proxy.** Terminate TLS and require authentication before forwarding to
+the loopback port. TLS alone does not restrict access to the mailbox UI. Configure
+authentication in your proxy or identity gateway; Mail Triage has no login layer.
 
 For OAuth callbacks that must land on a public hostname (some providers require
 an `https://` redirect URI that is not localhost), publish the callback port(s)
@@ -35,8 +30,9 @@ alongside and register the matching URL - the Accounts page shows the exact
 redirect URI it expects and reports token status.
 
 **VPN / overlay network** (Tailscale, WireGuard): leave the compose ports on
-loopback, join the host to the network, and browse to the device name. This
-keeps the app off the public internet entirely; OAuth can complete via the
+loopback and use the VPN's forwarding facility or an authenticated tunnel to
+reach it. Joining a VPN alone does not expose a loopback-bound port. This
+keeps the app off the public internet; OAuth can complete via the
 paste-back box when the provider's page is loaded from the same device.
 
 ## Backups
@@ -72,10 +68,12 @@ edits always require a rebuild, and the image bakes the app.
 
 ## Resource notes
 
-- **CPU/RAM**: the app is light (a few hundred MB); the CPU embedding/reranker
-  models add ~1GB and use spare cores during indexing.
-- **Disk**: the SQLite database plus index is roughly the size of the mail
-  archive; `ragmodels/` is ~0.5GB; a local LLM server is separate.
+- **CPU/RAM**: the app is light compared with inference. The measured CPU
+  embedder used about 1.9 GB RAM after load; bulk backfills can use much more.
+  CPU count, thread settings, and corpus size affect indexing and query latency.
+- **Disk**: reserve several GB for `ragmodels/` (the evaluated 0.6B fp32 ONNX
+  embedding model alone is about 2.4 GB), plus the database and index. A local LLM
+  server and its weights are separate. See [RAG evaluation](rag-lite-report.md).
 - **GPU (optional)**: only for serving an LLM or the legacy GPU RAG backend
   (`embed/`). The app itself needs no GPU.
 - **LLM concurrency**: classification is batched by the worker; a local vLLM
@@ -98,12 +96,15 @@ edits always require a rebuild, and the image bakes the app.
   footer of the Settings page and the plugin pages say which.
 - Rules and flows act live by default (dry-run toggle in Settings); LLM
   auto-filing starts off; guard rules can pin mail in place.
-- The assistant, plugins and the learning loop share one rule: nothing is ever
-  deleted, and every automated action is logged and undoable.
+- The app does not permanently delete mail. The optional Trash capability moves
+  messages to the server's Trash folder; the provider's own retention policy still
+  applies. Sending and Trash are disabled by default. Actions are logged, but
+  sending mail and external plugin effects are not reversible through Undo.
 
 ## Running without Docker
 
-`python app.py` works directly (a venv with `requirements.txt`, plus
-`DATA_DIR=/somewhere` and a CORS-free browser for the UI). The container is
-still the supported path: it bundles the OAuth proxy and pins the environment,
-and the suite (`tests/mock_e2e.py`) is built to run against it.
+For development, create a Python 3.12 venv and install `requirements.txt`, then
+run `DATA_DIR=/path/to/dev-data UI_HOST=127.0.0.1 python app.py`. Use a separate
+development data directory. Docker is the documented deployment path and bundles
+the OAuth proxy. Python dependencies have version ranges, so builds are not
+fully locked; the mock suites validate the installed environment.

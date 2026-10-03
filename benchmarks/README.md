@@ -272,8 +272,8 @@ baseline 87.1 / E4B 88.2 (6 crit) / Qwen9B 87.7.
 4. Stability repeats (3×) on the finalists before any decision.
 
 The in-app `mt-model-bench` plugin now embeds **v2.1** (see
-`docs/model-bench-plugin.md`); regenerate with
-`benchmarks/v2/harness/gen_plugin_data.py --write` after any case-set change.
+[plugin design](../docs/model-bench-plugin.md)); regenerate with
+`python benchmarks/v2/harness/gen_plugin_data.py --write` from the repo root after any case-set change.
 The v2 parity test (`benchmarks/v2/tests/test_plugin_data.py`) keeps the embedded
 subset locked to the frozen cases.
 

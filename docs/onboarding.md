@@ -40,7 +40,7 @@ Living examples (self-hosted products):
 
 1. **Full-screen takeover.** `/welcome` renders without the sidebar, topbar,
    assistant rail, or mobile tab bar (body class `setup`). First-run is a mode,
-   not a page among pages. An "Exit setup" link is always visible, and the whole
+   not a page among pages. An "Exit setup" action is always visible, and the whole
    wizard is skippable.
 2. **Three steps, two bookends.** Steps: Mailbox, LLM, Search index. Bookends: a
    welcome hero (only when nothing is done) and a finish recap. The rail lists
@@ -63,7 +63,10 @@ Living examples (self-hosted products):
 6. **Skip affordances.** Every step is deferrable ("Do this later"); the banner
    on the dashboard is the persistent resume entry, the More page carries the
    same link, and a fresh install lands on the wizard automatically (only when
-   nothing is configured: no accounts, no LLM, no mail).
+   nothing is configured: no accounts, no LLM, no mail). Explicitly exiting or
+   skipping sets `welcome_skipped`, preventing another automatic takeover while
+   keeping the incomplete-setup banner. `welcome_done` separately hides the banner;
+   resetting setup clears both preferences.
 7. **It complements the app.** Everything the wizard does exists on the normal
    pages; the wizard is a guided path, per ui-patterns' "allow alternatives".
 8. **Narrow screens.** The same flow, single column; the rail stays a compact
@@ -73,10 +76,11 @@ Living examples (self-hosted products):
 ## Implementation map
 
 - `app.py`: `WELCOME_TMPL` (the wizard), route `/welcome` (`?s=N` deep links,
-  POST `dismiss`/`reset`), `POST /welcome/test-llm` (save + probe in one step),
+  POST `skip`/`dismiss`/`reset`), `POST /welcome/test-llm` (save + probe in one step),
   `GET /welcome/state.json` (live step/state polling
   for the index step), `render(..., setup=True)` (chrome-free shell),
   `setup_state()` (3 steps), `_fresh_install()` + dashboard redirect, `next`
   redirects on the settings / test-llm / index endpoints.
 - Suite: T51 pins the wizard structure, start-step logic, state.json, `next`
-  redirects, banner, dismiss/reset, and the fresh-install redirect.
+  redirects, banner, skip/dismiss/reset, and the fresh-install redirect, including
+  a regression check for exiting with no mailbox or LLM configured.

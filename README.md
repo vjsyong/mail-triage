@@ -16,6 +16,11 @@ tradeoffs before letting automation act?**
 
 [Quick start](#quick-start) · [Engineering highlights](#engineering-highlights) · [Evaluation](#evaluation-and-model-selection) · [Features](#why-mail-triage) · [Documentation](docs/README.md)
 
+**Release scope:** a single-mailbox, self-hosted application, used daily by its
+author. The UI is bound to localhost and has no built-in authentication; use an
+authenticated reverse proxy or VPN for remote access. See
+[release notes](RELEASE_NOTES.md) for supported scope and known limitations.
+
 ## Engineering highlights
 
 | Area | Implementation |
@@ -30,26 +35,35 @@ tradeoffs before letting automation act?**
 ## Evaluation and model selection
 
 Model choice is evaluated against **this application's workload**, rather than
-general leaderboard scores alone. A [model right-sizing study](docs/model-evaluation.md)
-dated October 2, 2026 compared **seven local models on 196 frozen cases** covering
-classification, assistant tool use, drafting, rule learning, simulation, and
-thought summarization.
+general leaderboard scores alone. The current [model benchmark](benchmarks/README.md)
+has **600 frozen cases across six suites**, with scenario-family dev/acceptance
+splits. It covers classification, assistant tool use, drafting, rule learning,
+simulation, and thought summarization.
 
 - **Test design:** a synthetic mailbox with explicit ground truth, production
   prompts and tool schemas, and deterministic scoring rather than model-generated
   expected answers or an LLM judge.
 - **Reliability:** schema validity, prompt-injection compliance, honest no-match
-  behavior, and guard-rule semantics; failures receive severity weights of
-  1 / 3 / 9 / 27 rather than being treated as equally costly.
+  behavior, and guard-rule semantics. Task quality, failure counts, and a
+  severity-weighted cost index are reported separately.
+- **Comparison discipline:** incomplete runs are ineligible for ranking;
+  paired, family-clustered bootstrap confidence intervals and pre-registered
+  noninferiority margins test replacement claims.
 - **Deployment tradeoffs:** classification latency, memory footprint, serving
   configuration, and model-specific adaptations alongside task scores.
 
-One useful finding: **smaller did not reliably mean safer or faster**. Several
-smaller candidates were faster at classification but followed instructions
-embedded in email content; every evaluated model exhibited some no-match failures.
-Those results informed a concrete hardening backlog and model-selection
-recommendations, with configuration differences and evaluation limits documented
-in the report. This is a workload-specific study, not a general model ranking.
+One useful finding: **strong tool use does not imply reliable classification**.
+On the corrected case set, the 4B AgentMercury candidate passed assistant and
+rule-learning noninferiority tests, but failed the classification margin. Both it
+and the larger baseline followed some label instructions embedded in email.
+MiniCPM5-2B passed assistant and drafting noninferiority tests, but did not qualify
+as a drop-in replacement either. See the [evaluation summary](docs/model-evaluation.md)
+for results, measurement limits, and the historical 196-case study.
+
+Retrieval was evaluated separately: [the RAG study](docs/rag-lite-report.md)
+compares lexical, dense, hybrid, and reranked search, including CPU/GPU tradeoffs
+and index-coverage effects. These are workload-specific studies, not general model
+rankings or guarantees of behavior on other mailboxes.
 
 The [in-app model benchmark](docs/model-bench-plugin.md) provides a separate,
 bounded synthetic probe suite for checking a configured endpoint's compatibility,
@@ -284,23 +298,32 @@ and proxy log. Back up this directory; see the
 | [Deployment](docs/deployment.md) | Ports, TLS, backups, and upgrades |
 | [Plugin authoring](docs/plugins-authoring.md) · [SDK](sdk/README.md) | Write, install, and test extensions |
 | [Plugin architecture](docs/plugin-architecture.md) | Extension types, sandboxing, and assistant integration |
-| [Model evaluation](docs/model-evaluation.md) | Seven-model right-sizing study, failure analysis, and deployment tradeoffs |
+| [Model evaluation](docs/model-evaluation.md) · [Benchmark](benchmarks/README.md) | Current 600-case evaluation, comparison snapshots, and historical study |
+| [RAG evaluation](docs/rag-lite-report.md) | Retrieval ablations, CPU deployment tradeoffs, and measurement limits |
 | [Model benchmark plugin](docs/model-bench-plugin.md) | Synthetic endpoint probes, scoring, and resumable benchmark execution |
 | [Learning loop](docs/mail-intelligence/design.md) | Model lifecycle, evaluation, and decision provenance |
 | [Docs index](docs/README.md) | All guides, design records, and research |
+| [Release notes](RELEASE_NOTES.md) · [Release procedure](docs/releasing.md) | Release scope, known limitations, and validation commands |
 
 The core lives in `app.py` (UI), `engine.py` (mail and automation), `store.py`
 (SQLite), and `proxy.py` (OAuth proxy management). Search lives in `rag.py` /
 `rag_lite.py`; learning in `learning.py` / `heuristics.py`; the plugin system in
 `plugins.py`, `plugin_rt.py`, and `plugin_worker.py`.
 
-Run the mock end-to-end suites with the project's Python environment:
+Create a development environment (Python 3.12, matching the container), then run
+the offline suites. No real mailbox or LLM endpoint is required:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
 
 ```bash
 .venv/bin/python tests/mock_e2e.py     # app suite: mock IMAP, LLM, and embeddings
 .venv/bin/python tests/mock_e2e.py --list   # sections and their domain groups
 .venv/bin/python tests/mock_e2e.py --only core,rag   # partial run by domain
 .venv/bin/python tests/proxy_e2e.py    # proxy suite: mock OAuth and IMAP
+.venv/bin/python benchmarks/v2/tests/run_v2_tests.py  # benchmark integrity + scoring
 ```
 
 On a dirty working tree the app suite auto-runs only the domains its changed

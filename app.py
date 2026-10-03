@@ -313,7 +313,7 @@ def setup_state():
 def _fresh_install():
     """True when a brand-new install has nothing configured (first-run takeover)."""
     try:
-        if store.get_setting("welcome_done", 0):
+        if store.get_setting("welcome_done", 0) or store.get_setting("welcome_skipped", 0):
             return False
         if proxy.list_accounts():
             return False
@@ -2960,7 +2960,10 @@ body.setup .bottom-nav{display:none !important}
 <div class="wz" id="wz" data-start="{{ start }}">
   <header class="wz-top">
     <span class="wz-brand">Mail Triage<span class="sub">setup</span></span>
-    <a class="wz-exit" href="{{ url_for('dashboard') }}">Exit setup</a>
+    <form method="post" action="{{ url_for('welcome') }}" class="inline">
+      <input type="hidden" name="action" value="skip">
+      <button type="submit" class="wz-linkbtn wz-exit">Exit setup</button>
+    </form>
   </header>
 
   <ol class="wz-rail" id="wz-rail" aria-label="Setup steps">
@@ -2983,7 +2986,10 @@ body.setup .bottom-nav{display:none !important}
           <li>Mail is never deleted. Worst case, it moves to a folder</li>
         </ul>
         <button type="button" class="btn" data-go="1">Set up my mailbox &#8594;</button>
-        <a class="wz-skip" href="{{ url_for('dashboard') }}">Skip setup - take me to the app</a>
+        <form method="post" action="{{ url_for('welcome') }}" class="inline">
+          <input type="hidden" name="action" value="skip">
+          <button type="submit" class="wz-linkbtn wz-skip">Skip setup - take me to the app</button>
+        </form>
       </div>
     </section>
 
@@ -3088,7 +3094,10 @@ body.setup .bottom-nav{display:none !important}
         <div class="wz-note">Tip: tag messages as you triage. Your tags train the learning loop, and new
         rules can be learned straight from them.</div>
         <div class="wz-actions">
-          <a class="btn" href="{{ url_for('dashboard') }}">Open the dashboard</a>
+          <form method="post" action="{{ url_for('welcome') }}" class="inline">
+            <input type="hidden" name="action" value="skip">
+            <button type="submit" class="btn">Open the dashboard</button>
+          </form>
           <a class="wz-skip" href="{{ url_for('messages') }}">Browse your mail</a>
           <form method="post" action="{{ url_for('welcome') }}" class="inline">
             <input type="hidden" name="action" value="dismiss">
@@ -3404,12 +3413,17 @@ def plugin_detail(pid):
 def welcome():
     if request.method == "POST":
         act = (request.form.get("action") or "").strip()
+        if act == "skip":
+            store.set_setting("welcome_skipped", 1)
+            flash("Setup deferred - continue it from the dashboard or More page.", "ok")
+            return redirect(url_for("dashboard"))
         if act == "dismiss":
             store.set_setting("welcome_done", 1)
             flash("Setup help hidden - reopen it from the More page any time.", "ok")
             return redirect(url_for("dashboard"))
         if act == "reset":
             store.set_setting("welcome_done", 0)
+            store.set_setting("welcome_skipped", 0)
             return redirect(url_for("welcome"))
     st = setup_state()
     start = 0 if st["done"] == 0 else next((i + 1 for i, x in enumerate(st["steps"]) if not x["done"]), 4)

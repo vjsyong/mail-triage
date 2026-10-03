@@ -16,6 +16,8 @@ How this folder is organised: by what you need, not by when it was written.
 - [deployment.md](deployment.md) - ports, TLS, backups, upgrades for real
   deployments
 - [features.md](features.md) - the full feature tour
+- [../RELEASE_NOTES.md](../RELEASE_NOTES.md) - initial public release scope and limitations
+- [releasing.md](releasing.md) - release validation and publication procedure
 - [onboarding.md](onboarding.md) - research + decisions behind the setup wizard
   (`/welcome`)
 - [assistant-page.md](assistant-page.md) - research + decisions for the assistant
@@ -46,9 +48,12 @@ How this folder is organised: by what you need, not by when it was written.
 - [model-bench-plugin.md](model-bench-plugin.md) - the in-app model benchmark
   (`mt-model-bench`): frozen eval subset, slice/resume under the 30s sandbox
   clock, severity scoring, reference anchors (2026-10-02)
-- [model-evaluation.md](model-evaluation.md) - local-model right-sizing study
-  (2026-10): 7 models on 196 frozen app-workload cases; injection compliance,
-  no-match honesty, hardening backlog, recommended operating points (2026-10-02)
+- [model-evaluation.md](model-evaluation.md) - current model-evaluation summary,
+  comparison snapshots, and links to the historical study
+- [../benchmarks/README.md](../benchmarks/README.md) - model benchmark findings;
+  600-case v2 methodology, acceptance policy, and offline reproduction
+- [rag-lite-report.md](rag-lite-report.md) - consolidated RAG evaluation:
+  retrieval ablations, CPU tradeoffs, live validation, and limitations
 - [flows-builder-v2.md](flows-builder-v2.md) - flow canvas (trigger -> filters -> steps)
 - [flows-fuzzy-classifier.md](flows-fuzzy-classifier.md) - AI category + about-topic
   conditions for flows
@@ -79,5 +84,6 @@ How this folder is organised: by what you need, not by when it was written.
 - [dashboard-mobile.md](dashboard-mobile.md), [messages-mobile.md](messages-mobile.md),
   [assistant-mobile.md](assistant-mobile.md) - per-page mobile rethinks (2026-10-01)
 
-Related: the RAG evaluation report lives on the `rag-lite-eval` branch
-(`docs/rag-lite-report.md` there).
+Historical benchmark v1 is preserved under
+[../benchmarks/legacy/](../benchmarks/legacy/README.md). Its scores are not
+comparable with v2.

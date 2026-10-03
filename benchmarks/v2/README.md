@@ -11,7 +11,7 @@ their evidence, and model rankings were reported without uncertainty.  V2 fixes
 those before adding coverage.
 
 > **V1 and V2 scores are not comparable.**  Read each only against its own
-> baseline.  V1 lives in the parent directory; its reports are historical.
+> baseline. V1 lives in [`../legacy/`](../legacy/README.md); its reports are historical.
 
 ## Measurement model
 
@@ -68,7 +68,7 @@ v2/
 | simulate | 12 | condition satisfaction |
 | summary | 8 | length, single-line, no quotes |
 
-Split: **331 dev / 269 acceptance**, assigned by a hash of the **scenario
+Split: **340 dev / 260 acceptance** in the committed case manifest, assigned by a hash of the **scenario
 family** (thread id + scenario), so no scenario leaks across the split.
 
 The mailbox is a coherent fictional world (Westgate University + four
@@ -95,10 +95,13 @@ python tests/run_v2_tests.py           # scorer fixtures, integrity, lint, stats
 python harness/mock_run.py            # oracle must score 100; flawed is caught
 python harness/parity.py              # production-fidelity checks
 
-# live run against an OpenAI-compatible endpoint
-python harness/runner.py --run-id mymodel-v2 --suite classification \
+# create an immutable run manifest; use the printed run_id below
+python harness/new_run.py --model-key mymodel-v2 --concurrency 1 \
+    --model-revision <revision> --runtime-image <image-digest> --hardware <hardware>
+
+# live run against an OpenAI-compatible endpoint (repeat for each suite)
+python harness/runner.py --run-id <run_id> --suite classification \
     --base http://127.0.0.1:8045/v1 --model-name <model> --split acceptance
-# create the run first (init_run) and record manifest — see harness/run_manager.py
 python scoring/score.py --run <run_id> --split acceptance
 python harness/report.py --baseline <baseline_run> --candidate <run_id> --split acceptance
 ```
@@ -150,8 +153,8 @@ which profile a run used.
 
 ## Out of scope / next
 
-- In-app `mt-model-bench` plugin still embeds v1 scoring; migrate it with
-  regenerated anchors and its own parity tests (separate package).
+- In-app `mt-model-bench` now embeds a bounded v2.1 subset with parity tests;
+  it is an endpoint probe, not a replacement for the full acceptance suite.
 - Live acceptance runs on GPU 1 require booting vLLM; the offline suite is the
   gate to run first.
 - Blinded human rubric for drafting is a placeholder (`signals.rubric = null`);

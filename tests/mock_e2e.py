@@ -4468,6 +4468,46 @@ def main():
     check("dismiss persists", store.get_setting("welcome_done", 0) == 1)
     client.post("/welcome", data={"action": "reset"}, follow_redirects=True)
     check("setup can be reopened", store.get_setting("welcome_done", 0) == 0)
+    # Exercise the real takeover predicate with no configured services, rather
+    # than mocking _fresh_install: otherwise the exit-to-dashboard loop is hidden.
+    _welcome_sources = (app_mod.proxy.list_accounts, eng_mod.llm_config, store.count_messages)
+    _welcome_flags = (store.get_setting("welcome_done", 0),
+                      store.get_setting("welcome_skipped", 0))
+    try:
+        app_mod.proxy.list_accounts = lambda: []
+        eng_mod.llm_config = lambda: {"base": "", "model": ""}
+        store.count_messages = lambda: 0
+        store.set_setting("welcome_done", 0)
+        store.set_setting("welcome_skipped", 0)
+        r = client.get("/")
+        check("unconfigured install takes over before an explicit skip",
+              r.status_code == 302 and r.headers["Location"].endswith("/welcome"))
+        from bs4 import BeautifulSoup as _WelcomeSoup
+        _wizard = _WelcomeSoup(client.get("/welcome").data, "html.parser")
+        _exit_buttons = [_wizard.find("button", string=label) for label in
+                         ("Exit setup", "Skip setup - take me to the app", "Open the dashboard")]
+        check("all wizard exits submit the explicit skip action",
+              all(button and button.find_parent("form").get("method") == "post"
+                  and button.find_parent("form").get("action") == "/welcome"
+                  and button.find_parent("form").find("input", attrs={"name": "action", "value": "skip"})
+                  for button in _exit_buttons))
+        r = client.post("/welcome", data={"action": "skip"}, follow_redirects=True)
+        check("skip reaches the dashboard without looping back to setup",
+              r.status_code == 200 and r.request.path == "/" and b"Dashboard" in r.data)
+        check("skip persists without hiding incomplete setup help",
+              store.get_setting("welcome_skipped", 0) == 1
+              and store.get_setting("welcome_done", 0) == 0
+              and b"Getting started" in r.data and b"Continue setup" in r.data)
+        check("skipped setup remains reopenable", client.get("/welcome").status_code == 200)
+        client.post("/welcome", data={"action": "reset"})
+        r = client.get("/")
+        check("reset clears skip and restores fresh-install takeover",
+              store.get_setting("welcome_skipped", 0) == 0
+              and r.status_code == 302 and r.headers["Location"].endswith("/welcome"))
+    finally:
+        app_mod.proxy.list_accounts, eng_mod.llm_config, store.count_messages = _welcome_sources
+        store.set_setting("welcome_done", _welcome_flags[0])
+        store.set_setting("welcome_skipped", _welcome_flags[1])
     r = client.get("/more")
     check("More page links the setup wizard", b'href="/welcome"' in r.data)
     hw = eng_mod.detect_hardware()
