@@ -204,7 +204,7 @@ def _llm_complete(payload):
     system = str(payload.get("system") or
                  "You are a helpful assistant inside a local email app. Answer concisely.")[:4000]
     try:
-        max_tokens = max(16, min(int(payload.get("max_tokens") or 512), 2048))
+        max_tokens = max(16, min(int(payload.get("max_tokens") or 512), 4096))
     except (TypeError, ValueError):
         max_tokens = 512
     if not prompt.strip():

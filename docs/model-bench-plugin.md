@@ -71,7 +71,9 @@ displayed from the embedded `DATA.reference` (regenerated with `--write`).
   `response_format: json_object` for classify probes, **no thinking flag**
   (production classify runs `enable_thinking=true`). Timings therefore differ
   from the full benchmark; the card mentions the plugin path.
-- `max_tokens` is 2048 (host clamp) vs 4096 + 8192-retry in production.
+- Classification probes request `max_tokens=2048`, versus 4096 + 8192-retry
+  in production. The plugin host now permits up to 4096 tokens, but this probe
+  retains its own smaller request budget.
 - If the endpoint rejects `response_format`, the app strips it automatically;
   that shows up as reduced JSON-parseability rather than an error — which is
   exactly what the user would experience.
