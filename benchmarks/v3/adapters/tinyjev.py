@@ -8,21 +8,26 @@ Wraps the installed TinyJev API (:mod:`tinyjev`, lazily imported) described in
 
 Contract care:
 
-* the category enum order is **stable and recorded**, so a report can tell which
-  option index a probability belongs to;
+* the category enum is built from the **case's declared categories** (falling
+  back to the trusted policy card's categories, then the app defaults), and the
+  exact option order is recorded so a report can map a probability back to its
+  option;
 * the two uncertainty values have **separately declared meanings**; the native
-  single ``confidence`` field is a declared combination, never silently treated
-  as both;
+  single ``confidence`` field is a declared combination and is never treated as
+  two calibrated signals;
 * the head is decision-only: ``summary`` and ``reason`` are recorded ``missing``
-  and are **never fabricated** (unlike the exploratory spike, which synthesized
-  strings for schema convenience).
+  and are **never fabricated**;
+* ``raw`` preserves the actual model answer returned by the head (not the
+  request payload); the request payload digest is recorded separately as
+  ``wire_sha256`` and the semantic rendered-input hash as ``request_sha256``.
 """
 from __future__ import annotations
 
 import json
 
 from ..common.hashing import canonical, sha256_text
-from ..contracts import DEFAULT_CATEGORIES, decision_only_provenance
+from ..contracts import DEFAULT_CATEGORIES, decision_only_provenance, \
+    rendered_input_hash
 from . import base as B
 
 DEFAULT_DESCRIPTIONS = {
@@ -35,13 +40,17 @@ DEFAULT_DESCRIPTIONS = {
 }
 
 CATEGORY_INSTRUCTIONS = "Which category does this email belong to?"
-REPLY_INSTRUCTIONS = "Does this email need a reply from the account owner?"
+REPLY_INSTRUCTIONS = ("Does this email need a reply from the account owner? "
+                      "Answer for {owner}.")
 
+# The category answer and the reply answer are two separate signals.  The native
+# ``confidence`` field is a declared combination of them, NOT a calibrated pair.
 CONFIDENCE_MEANING = {
-    "category": "choice answer confidence over the recorded option order",
-    "needs_reply": "p_true for the boolean/noul answer",
-    "combined": "min(category_confidence, max(p_true, 1 - p_true)); a declared "
-                "single value, not both uncertainties at once",
+    "category": "choice-answer confidence over the recorded option order",
+    "needs_reply": "p_true from the boolean/noul answer",
+    "native_confidence": "min(category_confidence, max(p_true, 1-p_true)): a "
+                         "declared single uncertainty, not both signals and not "
+                         "a calibrated probability",
 }
 
 
@@ -70,29 +79,52 @@ class TinyJevAdapter(B.Adapter):
         self.model = model
         self.device = device
         self.model_key = model
-        self.model_revision = model_revision or "installed"
+        self.model_revision = model_revision
         self.model_artifact_sha256 = model_artifact_sha256
         self.temperature = temperature
         self._agent = agent
 
     def _load_agent(self):
-        if self._agent is not None:
-            return self._agent
-        try:
-            import tinyjev  # noqa: PLC0415 - optional dependency, lazy by design
-        except ImportError as exc:  # pragma: no cover - environment dependent
-            raise B.AdapterError("TinyJev is not installed: %s" % exc) from exc
-        return tinyjev.load(self.model, device=self.device)
+        """Load and **cache** the TinyJev agent (never reload per case)."""
+        if self._agent is None:
+            try:
+                import tinyjev  # noqa: PLC0415 - optional dependency, lazy by design
+            except ImportError as exc:  # pragma: no cover - environment dependent
+                raise B.AdapterError("TinyJev is not installed: %s" % exc) from exc
+            self._agent = tinyjev.load(self.model, device=self.device)
+        return self._agent
 
-    def _payload(self, user):
+    def _render_context(self, view):
+        rendered = view.get("rendered_input") or {}
+        policy = view.get("policy") or {}
+        cats = list(rendered.get("categories") or []) or \
+            list(self.categories)
+        if not cats:
+            for entry in policy.get("categories") or []:
+                name = entry.get("name") if isinstance(entry, dict) else entry
+                if name:
+                    cats.append(str(name))
+        if not cats:
+            cats = list(DEFAULT_CATEGORIES)
+        desc = dict(DEFAULT_DESCRIPTIONS)
+        for entry in policy.get("categories") or []:
+            if isinstance(entry, dict) and entry.get("name"):
+                desc[str(entry["name"])] = str(entry.get("description") or
+                                              desc.get(str(entry["name"]), ""))
+        descriptions = {c: desc.get(c, "") for c in cats}
+        owner = rendered.get("owner") or policy.get("owner") or ""
+        return cats, descriptions, owner
+
+    def _payload(self, user, cats, descriptions, owner):
         return {
             "state": user,
             "questions": {
                 "category": {"type": "choice",
                              "instructions": CATEGORY_INSTRUCTIONS,
-                             "criteria": dict(self.descriptions)},
+                             "criteria": dict(descriptions)},
                 "needs_reply": {"type": "noul",
-                                "instructions": REPLY_INSTRUCTIONS},
+                                "instructions": REPLY_INSTRUCTIONS.format(
+                                    owner=owner or "the account owner")},
             },
         }
 
@@ -103,8 +135,14 @@ class TinyJevAdapter(B.Adapter):
                 error="tinyjev adapter is decision-only",
                 field_provenance=decision_only_provenance(confidence="missing"),
                 capabilities_used={"decision": True})
-        user = (view.get("rendered_input") or {}).get("user") or ""
-        payload = self._payload(user)
+        rendered = view.get("rendered_input") or {}
+        user = rendered.get("user") or ""
+        cats, descriptions, owner = self._render_context(view)
+        payload = self._payload(user, cats, descriptions, owner)
+        semantic_hash = rendered_input_hash(rendered,
+                                            mailbox=view.get("mailbox"),
+                                            tools=view.get("tools"))
+        wire_hash = sha256_text(canonical(payload))
         try:
             agent = self._load_agent()
             out = agent.predict(payload, temperature=self.temperature)
@@ -118,29 +156,30 @@ class TinyJevAdapter(B.Adapter):
                 status=B.STATUS_ERROR, raw=canonical(payload), parsed=None,
                 error="%s: %s" % (type(exc).__name__, exc),
                 field_provenance=decision_only_provenance(confidence="missing"),
-                failure_class=B.FAIL_MODEL,
-                request_sha256=sha256_text(canonical(payload)))
+                failure_class=B.FAIL_MODEL, request_sha256=semantic_hash,
+                output_extra={"wire_sha256": wire_hash})
 
         combined = round(min(cat_conf, max(p_true, 1.0 - p_true)), 3)
         parsed = {"category": cat, "needs_reply": p_true >= 0.5,
                   "confidence": combined}
         provenance = decision_only_provenance(confidence="derived")
         output_extra = {
+            "wire_sha256": wire_hash,
             "tinyjev": {
                 "category_probabilities": choice.get("probabilities"),
                 "category_confidence": cat_conf,
                 "needs_reply_p_true": p_true,
-                "option_order": list(self.categories),
+                "option_order": list(cats),
                 "confidence_meaning": CONFIDENCE_MEANING,
                 "model_ms": (out.get("execution") or {}).get("model_ms"),
                 "backend": (out.get("model") or {}).get("backend"),
                 "synthesized_summary_reason": False,
-            }
+            },
         }
         return B.make_result(
-            status=B.STATUS_OK, raw=canonical(payload), parsed=parsed, error=None,
+            status=B.STATUS_OK, raw=canonical(out), parsed=parsed, error=None,
             field_provenance=provenance,
             timings={"measured": "warm", "label": "tinyjev typed decision"},
-            request_sha256=sha256_text(canonical(payload)),
+            request_sha256=semantic_hash,
             output_extra=output_extra,
             capabilities_used={"decision": True, "prose": False})

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from ..contracts import parse_native_response, native_output
+from ..contracts import parse_native_response, native_output, rendered_input_hash
 from . import base as B
 
 
@@ -46,7 +46,10 @@ class FakeAdapter(B.Adapter):
 
     # -------------------------------------------------------------- helpers
 
-    def _decision_result(self, spec):
+    def _decision_result(self, view, spec):
+        semantic_hash = rendered_input_hash(view.get("rendered_input") or {},
+                                            mailbox=view.get("mailbox"),
+                                            tools=view.get("tools"))
         raw, parsed, error = None, None, None
         if isinstance(spec, str):
             raw = spec
@@ -57,7 +60,7 @@ class FakeAdapter(B.Adapter):
                 return B.make_result(
                     status=B.STATUS_ERROR, raw=raw, parsed=None, error=error,
                     field_provenance=B.provenance_for(None),
-                    failure_class=B.FAIL_MODEL,
+                    failure_class=B.FAIL_MODEL, request_sha256=semantic_hash,
                     timings={"wall_s": 0.0, "measured": "simulated", "label": "scripted"})
         elif isinstance(spec, dict) and "raw" in spec:
             raw = spec["raw"]
@@ -81,6 +84,7 @@ class FakeAdapter(B.Adapter):
             status=status, raw=raw, parsed=parsed, error=error,
             field_provenance=B.provenance_for(parsed),
             failure_class=B.FAIL_MODEL if error else None,
+            request_sha256=semantic_hash,
             timings={"wall_s": 0.0, "measured": "simulated", "label": "scripted"},
             capabilities_used={"decision": True,
                                "prose": bool(parsed and parsed.get("summary") is not None)})
@@ -100,11 +104,14 @@ class FakeAdapter(B.Adapter):
                             approve=bool(step.get("approve")))
         reply = self.workflow_replies.get(case_id, "")
         raw = json.dumps({"script": script, "reply": reply}, sort_keys=True)
-        parsed = {"task": "workflow", "completed": bool(script)}
+        parsed = {"task": "workflow", "completed": bool(script), "answer": reply}
         return B.make_result(
             status=B.STATUS_OK, raw=raw, parsed=parsed, error=None,
             field_provenance=B.provenance_for(None),
             tool_events=list(sandbox.events),
+            request_sha256=rendered_input_hash(
+                view.get("rendered_input") or {},
+                mailbox=view.get("mailbox"), tools=view.get("tools")),
             timings={"wall_s": 0.0, "measured": "simulated",
                      "label": "scripted workflow"},
             capabilities_used={"tools": True})
@@ -122,5 +129,7 @@ class FakeAdapter(B.Adapter):
                 error="no scripted prediction for %s" % view.get("case_id"),
                 field_provenance=B.provenance_for(None),
                 failure_class=B.FAIL_MODEL,
+                request_sha256=rendered_input_hash(
+                    view.get("rendered_input") or {}),
                 timings={"wall_s": 0.0, "measured": "simulated", "label": "scripted"})
-        return self._decision_result(spec)
+        return self._decision_result(view, spec)

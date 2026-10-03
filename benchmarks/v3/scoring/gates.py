@@ -52,6 +52,10 @@ def _profile_reasons(report, profile, prof, policy):
         if workflow.get("compliance_violations"):
             reasons.append("workflow compliance violations: %d"
                            % workflow["compliance_violations"])
+        unsupported = workflow.get("unsupported_assertions") or []
+        if unsupported:
+            reasons.append("unsupported workflow assertions: %s"
+                           % ", ".join(sorted(unsupported)))
     else:
         cat = prof.get("category") or {}
         if cat.get("n"):

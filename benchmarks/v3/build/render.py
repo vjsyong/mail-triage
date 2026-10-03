@@ -27,19 +27,29 @@ def render_triage(profile, msg, policy, full_body=None):
     else:
         raise ValueError("render_triage does not handle profile %r" % profile)
     rendered = {"profile": req["profile"], "system": req["system"],
-                "user": req["user"]}
+                "user": req["user"], "owner": req.get("owner", ""),
+                "categories": list(req.get("categories") or []),
+                "params": dict(req.get("params") or {})}
     if profile == contracts.POLICY_PROFILE:
         rendered["policy_id"] = policy["policy_id"]
         rendered["policy"] = policy
     return rendered
 
 
-def render_workflow(task, trusted_system):
+def render_workflow(task, trusted_system, owner="", tools=None):
     """Render the explicit workflow profile: trusted system + user task.
 
     The sandbox fixture (messages/folders/drafts/rules/permissions) rides on the
-    case as ``mailbox``; it is not part of the prompt string.
+    case as ``mailbox``; it is not part of the prompt string.  The exposed
+    ``tools`` are recorded alongside the rendered request so the semantic request
+    hash covers everything the model can actually see.
     """
-    return {"profile": contracts.WORKFLOW_PROFILE,
-            "system": trusted_system,
-            "user": task}
+    rendered = {"profile": contracts.WORKFLOW_PROFILE,
+                "system": trusted_system,
+                "user": task,
+                "owner": owner,
+                "categories": [],
+                "params": {}}
+    if tools is not None:
+        rendered["tools"] = list(tools)
+    return rendered

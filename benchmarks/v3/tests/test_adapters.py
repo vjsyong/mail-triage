@@ -8,7 +8,6 @@ and the local-endpoint / no-network defaults.
 import os
 import sys
 import unittest
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 V3 = os.path.abspath(os.path.join(HERE, ".."))
@@ -179,35 +178,95 @@ class TinyJevTests(unittest.TestCase):
         res = adapter.run_case(view(task="workflow"))
         self.assertEqual(res["status"], "skipped")
 
+    def test_agent_is_cached_not_reloaded(self):
+        import types
+        loads = {"n": 0}
+        module = types.ModuleType("tinyjev")
+
+        def load(model, device=None):
+            loads["n"] += 1
+            return FakeAgent()
+
+        module.load = load
+        old = sys.modules.get("tinyjev")
+        sys.modules["tinyjev"] = module
+        try:
+            adapter = TinyJevAdapter(model="m", model_revision="rev")
+            adapter.run_case(view())
+            adapter.run_case(view())
+            self.assertEqual(loads["n"], 1)
+        finally:
+            if old is None:
+                sys.modules.pop("tinyjev", None)
+            else:
+                sys.modules["tinyjev"] = old
+
+    def test_uses_case_categories_and_raw_is_model_answer(self):
+        adapter = TinyJevAdapter(agent=FakeAgent())
+        res = adapter.run_case(view())  # view declares categories Action,Promo
+        self.assertEqual(res["output"]["tinyjev"]["option_order"], ["Action", "Promo"])
+        # raw is the actual model answer (a JSON object), not the request payload
+        self.assertIn("states", res["output"]["raw"])
+        self.assertNotIn("\"questions\"", res["output"]["raw"])
+        self.assertTrue(res["output"]["wire_sha256"])
+
+    def test_request_sha256_is_semantic_rendered_hash(self):
+        adapter = TinyJevAdapter(agent=FakeAgent())
+        v = view()
+        res = adapter.run_case(v)
+        self.assertEqual(res["request_sha256"],
+                         contracts.rendered_input_hash(v["rendered_input"]))
+
+    def test_identity_is_unverified_without_a_pin(self):
+        self.assertEqual(TinyJevAdapter(agent=FakeAgent()).model_identity(),
+                         "unverified")
+        pinned = TinyJevAdapter(agent=FakeAgent(), model_revision="rev-1")
+        self.assertEqual(pinned.model_identity(), "pinned")
+
 
 class FusionTests(unittest.TestCase):
     def _prose_transport(self, text):
         return lambda payload: {"content": text, "finish_reason": "stop"}
 
-    def test_composition_provenance(self):
+    def test_category_from_decision_reply_and_prose_from_prose(self):
+        # Components deliberately disagree: category is TinyJev's, needs_reply
+        # and prose are the generative component's.
         decision = FakeAdapter(predictions={
-            "case_0001": {"category": "Action", "needs_reply": True, "confidence": 0.8}})
+            "case_0001": {"category": "Action", "confidence": 0.8}})
         prose = OpenAICompatAdapter(
             base_url="http://127.0.0.1:8000/v1", model="p", model_revision="r",
             transport=self._prose_transport(
-                '{"category":"Promo","needs_reply":false,"confidence":0.5,'
+                '{"category":"Promo","needs_reply":false,"confidence":0.4,'
                 '"summary":"sum","reason":"why"}'))
         fusion = FusionAdapter(decision_adapter=decision, prose_adapter=prose)
         res = fusion.run_case(view())
         self.assertEqual(res["output"]["parsed"]["category"], "Action")
+        self.assertEqual(res["output"]["parsed"]["needs_reply"], False)
         self.assertEqual(res["output"]["parsed"]["summary"], "sum")
-        self.assertEqual(res["field_provenance"]["category"], "produced")
+        self.assertEqual(res["output"]["parsed"]["confidence"], 0.8)
+        comp = res["output"]["component_provenance"]
+        self.assertEqual(comp["category"], "decision")
+        self.assertEqual(comp["needs_reply"], "prose")
+        self.assertEqual(comp["summary"], "prose")
+        self.assertEqual(res["field_provenance"]["needs_reply"], "produced")
         self.assertEqual(res["field_provenance"]["summary"], "produced")
-        self.assertIn("components", res["output"])
 
     def test_missing_prose_is_missing_not_fabricated(self):
         decision = FakeAdapter(predictions={
-            "case_0001": {"category": "Action", "needs_reply": True}})
+            "case_0001": {"category": "Action"}})
         fusion = FusionAdapter(decision_adapter=decision, prose_adapter=None)
         res = fusion.run_case(view())
         self.assertEqual(res["status"], "ok")
         self.assertEqual(res["field_provenance"]["summary"], "missing")
+        self.assertEqual(res["field_provenance"]["needs_reply"], "missing")
         self.assertFalse(contracts.has_fabricated_prose(res["field_provenance"]))
+
+    def test_component_fingerprints_are_identity(self):
+        decision = FakeAdapter(predictions={"case_0001": {"category": "Action"}})
+        fusion = FusionAdapter(decision_adapter=decision, prose_adapter=None)
+        fp = fusion.fingerprint()
+        self.assertIn("decision", fp["component_fingerprints"])
+        self.assertIn("components", fp["generation_config"])
 
     def test_facade_is_labelled_read_only(self):
         fusion = FusionAdapter(facade=lambda v: {

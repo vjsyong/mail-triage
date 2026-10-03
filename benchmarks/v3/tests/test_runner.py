@@ -289,5 +289,53 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(loaded["attempts"]), 3)
 
 
+class IntegrationCorrectionTests(unittest.TestCase):
+    def test_workflow_final_state_attached_and_scoreable(self):
+        run = run_dataset(_bundle(), _adapter(), allow_draft=True)
+        wf = next(a for a in run["attempts"] if a["case_id"] == "case_0003")
+        state = wf["output"]["final_state"]
+        # build/README shape: folders map to message ids, plus counts
+        self.assertIsInstance(state["folders"]["Receipts"], list)
+        self.assertIn("m1", state["folders"]["Receipts"])
+        self.assertNotIn("m1", state["folders"]["INBOX"])
+        self.assertEqual(state["draft_count"], 0)
+
+    def test_attempt_request_hash_matches_rendered_input(self):
+        run = run_dataset(_bundle(), _adapter(), allow_draft=True)
+        for attempt in run["attempts"]:
+            case = next(c for c in _bundle()["cases"]
+                        if c["case_id"] == attempt["case_id"])
+            expected = contracts.rendered_input_hash(
+                case["rendered_input"], mailbox=case.get("mailbox"),
+                tools=case.get("tools"))
+            self.assertEqual(attempt["request_sha256"], expected)
+
+    def test_unverified_model_identity_refused_then_declared(self):
+        tiny = TinyJevAdapter()  # no revision -> unverified
+        with self.assertRaises(Exception):
+            run_dataset(_bundle(), tiny, allow_draft=True)
+        run = run_dataset(_bundle(), tiny, allow_draft=True,
+                          allow_unverified_model=True)
+        self.assertTrue(run["metadata"]["model_identity_unverified"])
+        self.assertFalse(run["metadata"]["qualifies_as_baseline"])
+
+    def test_deployment_receipt_is_present_and_honest(self):
+        run = run_dataset(_bundle(), _adapter(), allow_draft=True, resource_probe={})
+        deployment = run["metadata"]["deployment"]
+        self.assertIn("hardware_receipt", deployment)
+        self.assertFalse(deployment["hardware_receipt"]["verified"])
+        self.assertEqual(deployment["state"], "unverified")
+
+    def test_external_endpoint_is_never_cpu_qualified(self):
+        probe = {"/sys/fs/cgroup/cpuset.cpus.effective": "0-3",
+                 "/sys/fs/cgroup/memory.max": "8589934592"}
+        run = run_dataset(_bundle(), _adapter(), allow_draft=True,
+                          resource_probe=probe, endpoint_class="external_warm")
+        receipt = run["metadata"]["deployment"]["hardware_receipt"]
+        self.assertTrue(receipt["shared"])
+        self.assertTrue(receipt["warm_endpoint"])
+        self.assertFalse(receipt["verified"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -62,7 +62,8 @@ def provenance_for(parsed):
             for field in NATIVE_OUTPUT_FIELDS}
 
 
-def make_result(status=STATUS_OK, raw=None, parsed=None, error=None,                field_provenance=None, tool_events=None, timings=None,
+def make_result(status=STATUS_OK, raw=None, parsed=None, error=None,
+                field_provenance=None, tool_events=None, timings=None,
                 resources=None, request_sha256="", failure_class=None,
                 capabilities_used=None, output_extra=None):
     """Build the adapter result dict the runner turns into an attempt."""
@@ -97,6 +98,8 @@ class Adapter(object):
     model_revision = None
     model_artifact_sha256 = None
     prompt_revision = ""
+    # "pinned" (a real revision/artifact digest) / "observed" / "unverified".
+    model_identity_source = None
 
     def __init__(self, generation_config=None, runtime_config=None):
         self.generation_config = dict(generation_config or {})
@@ -110,6 +113,27 @@ class Adapter(object):
         if path and os.path.exists(path):
             return sha256_file(path)
         return sha256_text(type(self).__module__ + ":" + type(self).__qualname__)
+
+    def model_identity(self):
+        """Whether the model identity is a real pin, observed, or unverified.
+
+        A literal placeholder (``installed``/``unverified``) or an absent
+        revision/artifact is **not** a pinned identity and must never qualify a
+        run as a real baseline.
+        """
+        if self.model_identity_source:
+            return self.model_identity_source
+        revision = (self.model_revision or "").strip()
+        artifact = (self.model_artifact_sha256 or "").strip()
+        if artifact:
+            return "pinned"
+        if revision and revision not in ("installed", "unverified", "unknown"):
+            return "pinned"
+        return "unverified"
+
+    def component_fingerprints(self):
+        """Optional per-component identity for composed adapters (e.g. fusion)."""
+        return {}
 
     def fingerprint(self):
         src = self._source_sha256()
@@ -127,6 +151,8 @@ class Adapter(object):
             "model_key": self.model_key or self.adapter_id,
             "model_revision": self.model_revision,
             "model_artifact_sha256": self.model_artifact_sha256,
+            "model_identity_source": self.model_identity(),
+            "component_fingerprints": self.component_fingerprints(),
         }
 
     # ------------------------------------------------------------ capability

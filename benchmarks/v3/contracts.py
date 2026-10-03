@@ -27,7 +27,7 @@ Function/data-shape contract (frozen here, see ``README.md`` for the summary):
 import json
 import re
 
-from .common.hashing import canonical
+from .common.hashing import canonical, hash_obj
 from .common.mime import clean_snippet
 
 # ----------------------------------------------------------------- profiles
@@ -188,6 +188,42 @@ def build_full_context_request(msg, full_body, categories=None, owner=""):
                     (full_body or "")[:FULL_CONTEXT_LIMIT])),
         "params": base["params"],
     }
+
+
+# ----------------------------------------------------------------- wire hash
+
+def rendered_input_hash(rendered, mailbox=None, tools=None):
+    """Canonical hash of the **declared model-facing** rendered input.
+
+    This is the one semantic request hash shared by the runner (attempt
+    ``request_sha256``) and the scorer (``normalize.request_hash``): every field
+    a model can actually see is included -- ``profile``/``system``/``user`` and,
+    when present, ``owner``, the category enum, the generation ``params`` and the
+    **trusted policy card**.  For workflow cases the sandbox ``mailbox`` and the
+    exposed ``tools`` are model-facing too and are folded in.
+
+    An adapter's own wire payload (HTTP body, TinyJev request) is hashed
+    separately, because it may legitimately differ (e.g. the policy card is
+    appended to the system string on the wire).  The semantic hash must not.
+    """
+    rendered = rendered if isinstance(rendered, dict) else {}
+    payload = {
+        "profile": rendered.get("profile"),
+        "owner": rendered.get("owner", ""),
+        "system": rendered.get("system", ""),
+        "user": rendered.get("user", ""),
+        "categories": list(rendered.get("categories") or []),
+        "params": rendered.get("params") or {},
+    }
+    if rendered.get("policy") is not None:
+        payload["policy"] = rendered.get("policy")
+    mailbox = mailbox if mailbox is not None else rendered.get("mailbox")
+    tools = tools if tools is not None else rendered.get("tools")
+    if mailbox is not None:
+        payload["mailbox"] = mailbox
+    if tools is not None:
+        payload["tools"] = tools
+    return hash_obj(payload)
 
 
 # ----------------------------------------------------------------- native parsing

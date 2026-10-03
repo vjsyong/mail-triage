@@ -1,9 +1,9 @@
-"""CLI tests (WP4/WP7 plumbing).
+"""Integrated CLI tests (WP2/WP4/WP5/WP7).
 
-Covers command discovery, JSON validate/run, the offline fake complete flow via
-the CLI, draft gating, the non-local endpoint refusal, and informative preflight
-output.  Commands owned by not-yet-integrated packages (build/scoring/review)
-must fail with a clear message rather than a stack trace.
+These run the **actual** build/scoring packages through the CLI (no mocks, no
+raw-JSON fallbacks): build -> validate -> run offline-fake -> score -> compare
+-> review -> export/import, plus the fail-closed guarantees (invalid bundle,
+rejected import destination, unverified model identity, external endpoint).
 """
 import io
 import json
@@ -21,47 +21,28 @@ for _p in (ROOT, V3):
         sys.path.insert(0, _p)
 
 from benchmarks.v3 import cli  # noqa: E402
+from benchmarks.v3 import build as B  # noqa: E402
+
+VALID = ('{"category": "Action", "needs_reply": true, "confidence": 0.9, '
+         '"summary": "s", "reason": "r"}')
 
 
-def _case(cid, task, profile, extra=None):
-    case = {
-        "schema_version": "v3.0", "case_id": cid, "scenario_id": "sc_" + cid,
-        "lineage_id": "ln_" + cid, "task": task, "input_profile": profile,
-        "policy_id": "default", "split": "development", "gold_id": "g_" + cid,
-        "rendered_input": {"profile": profile, "system": "SYS",
-                           "user": "USER " + cid, "categories": ["Action"],
-                           "params": {"max_tokens": 4096, "json_mode": True}},
-    }
-    if extra:
-        case.update(extra)
-    return case
+class _Integrated(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.pilot_dir = os.path.join(cls.tmp.name, "pilot")
+        bundle = B.build_dataset(triage_roots=6, workflow_roots=2, layout="pilot")
+        B.write_dataset(bundle, cls.pilot_dir)
+        cls.bundle = B.load_dataset(cls.pilot_dir)
+        # an honest constant mock (never derived from gold)
+        cls.predictions = {c["case_id"]: VALID for c in cls.bundle["cases"]
+                           if c["task"] != "workflow"}
+        cls.runs_dir = os.path.join(cls.tmp.name, "runs")
 
-
-def _bundle(review_status="sealed"):
-    return {
-        "schema_version": "v3.0", "dataset_id": "dev_min",
-        "cases": [_case("case_0001", "decision", "native"),
-                  _case("case_0002", "workflow", "workflow", extra={
-                      "mailbox": {"messages": [{"message_id": "m1",
-                                                "folder": "INBOX"}]},
-                      "tools": ["move_message"],
-                      "permissions": {"move": "auto"}})],
-        "gold": [{"schema_version": "v3.0", "gold_id": "g_%s" % c,
-                  "case_id": "case_000" + str(i + 1), "review_status": "draft",
-                  "human_seal": False, "observable": {}, "answer": {}}
-                 for i, c in enumerate(("1", "2"))],
-        "scenarios": [], "policies": [], "lineage": [], "provenance": [],
-        "metadata": {"review_status": review_status},
-    }
-
-
-class _CLI(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.dataset_path = os.path.join(self.tmp.name, "bundle.json")
-        with open(self.dataset_path, "w") as f:
-            json.dump(_bundle(), f)
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
 
     def _run(self, argv):
         out, err = io.StringIO(), io.StringIO()
@@ -76,7 +57,7 @@ class _CLI(unittest.TestCase):
         return path
 
 
-class ParserTests(_CLI):
+class ParserTests(_Integrated):
     def test_help_lists_commands(self):
         text = cli.build_parser().format_help()
         for command in ("build", "validate", "run", "score", "compare",
@@ -89,83 +70,202 @@ class ParserTests(_CLI):
         self.assertIn("usage", out.lower())
 
 
-class ValidateTests(_CLI):
-    def test_valid_dataset(self):
-        code, out, _ = self._run(["validate", self.dataset_path, "--json"])
+class ValidateTests(_Integrated):
+    def test_valid_written_dataset(self):
+        code, out, _ = self._run(["validate", self.pilot_dir, "--json"])
         self.assertEqual(code, 0)
         self.assertTrue(json.loads(out)["valid"])
 
-    def test_invalid_dataset(self):
-        bad = os.path.join(self.tmp.name, "bad.json")
-        with open(bad, "w") as f:
+    def test_invalid_bundle_fails_closed(self):
+        bad = os.path.join(self.tmp.name, "bad")
+        os.makedirs(bad)
+        with open(os.path.join(bad, "bundle.json"), "w") as f:
             json.dump({"schema_version": "v3.0", "dataset_id": "x", "cases": []}, f)
         code, out, _ = self._run(["validate", bad, "--json"])
         self.assertEqual(code, 1)
         self.assertFalse(json.loads(out)["valid"])
 
 
-class RunTests(_CLI):
+class RunTests(_Integrated):
+    def _pred_path(self):
+        return self._write_json("pred.json", self.predictions)
+
     def test_offline_fake_run(self):
-        pred = self._write_json("pred.json", {
-            "case_0001": '{"category":"Action","needs_reply":true,'
-                         '"confidence":0.9,"summary":"s","reason":"r"}'})
-        wf = self._write_json("wf.json", {
-            "case_0002": [{"tool": "move_message",
-                           "args": {"message_id": "m1",
-                                    "target_folder": "Receipts"}}]})
-        out_dir = os.path.join(self.tmp.name, "runs")
+        pred = self._pred_path()
         code, out, _ = self._run([
-            "run", self.dataset_path, "--adapter", "offline-fake",
-            "--out", out_dir, "--predictions", pred, "--workflow-script", wf,
+            "run", self.pilot_dir, "--adapter", "offline-fake",
+            "--out", self.runs_dir, "--predictions", pred, "--allow-draft",
             "--json"])
         self.assertEqual(code, 0)
         summary = json.loads(out)
-        self.assertEqual(summary["cases"], 2)
+        self.assertEqual(summary["cases"], len(self.bundle["cases"]))
         from benchmarks.v3.runner import load_run
-        loaded = load_run(out_dir)
-        self.assertEqual(len(loaded["attempts"]), 2)
+        loaded = load_run(self.runs_dir)
+        self.assertEqual(len(loaded["attempts"]), len(self.bundle["cases"]))
 
     def test_preflight_is_informative(self):
-        pred = self._write_json("pred.json", {"case_0001": "{}"})
-        out_dir = os.path.join(self.tmp.name, "runs2")
+        pred = self._pred_path()
         code, out, _ = self._run([
-            "run", self.dataset_path, "--adapter", "offline-fake",
-            "--out", out_dir, "--predictions", pred])
+            "run", self.pilot_dir, "--adapter", "offline-fake",
+            "--out", os.path.join(self.tmp.name, "runs2"), "--predictions", pred,
+            "--allow-draft"])
         self.assertEqual(code, 0)
         self.assertIn("preflight", out)
-        self.assertIn("offline-fake", out)
+        self.assertIn("model_identity_source", out)
 
     def test_draft_requires_allow_draft(self):
-        draft = os.path.join(self.tmp.name, "draft.json")
-        with open(draft, "w") as f:
-            json.dump(_bundle("draft"), f)
+        pred = self._pred_path()
         out_dir = os.path.join(self.tmp.name, "runs3")
-        code, _, err = self._run(["run", draft, "--out", out_dir])
+        code, _, err = self._run([
+            "run", self.pilot_dir, "--out", out_dir, "--predictions", pred])
         self.assertEqual(code, 1)
         self.assertIn("allow-draft", err)
-        code, _, _ = self._run(["run", draft, "--out", out_dir, "--allow-draft"])
+        code, _, _ = self._run([
+            "run", self.pilot_dir, "--out", out_dir, "--predictions", pred,
+            "--allow-draft"])
         self.assertEqual(code, 0)
 
-    def test_non_local_endpoint_requires_remote_flag(self):
+    def test_unverified_model_identity_refused(self):
+        out_dir = os.path.join(self.tmp.name, "runs-tiny")
+        code, _, err = self._run([
+            "run", self.pilot_dir, "--adapter", "tinyjev-decision",
+            "--out", out_dir, "--allow-draft"])
+        self.assertEqual(code, 1)
+        self.assertIn("identity", err.lower())
+
+    def test_external_endpoint_requires_remote_flag(self):
         out_dir = os.path.join(self.tmp.name, "runs4")
         code, _, err = self._run([
-            "run", self.dataset_path, "--adapter", "generative-openai",
-            "--endpoint", "http://example.com:8000/v1", "--out", out_dir])
+            "run", self.pilot_dir, "--adapter", "generative-openai",
+            "--endpoint", "http://example.com:8000/v1", "--out", out_dir,
+            "--allow-draft"])
         self.assertEqual(code, 1)
         self.assertIn("remote", err.lower())
 
+    def test_loopback_endpoint_is_external_warm(self):
+        args = cli.build_parser().parse_args([
+            "run", "d", "--adapter", "generative-openai",
+            "--endpoint", "http://127.0.0.1:8042/v1", "--out", "o",
+            "--model", "m", "--model-revision", "r"])
+        self.assertEqual(cli._endpoint_class(args), "external_warm")
 
-class UnintegratedPackageTests(_CLI):
-    def test_build_reports_missing_package(self):
-        code, _, err = self._run(["build", "--out", os.path.join(self.tmp.name, "d")])
-        self.assertEqual(code, 1)
-        self.assertIn("build package", err)
 
-    def test_review_reports_missing_package(self):
-        code, _, err = self._run(["review", self.dataset_path, "--export",
-                                  os.path.join(self.tmp.name, "r.json")])
+class ScoreCompareTests(_Integrated):
+    def _run_pilot(self, prefix):
+        pred = self._write_json(prefix + "-pred.json", self.predictions)
+        out_dir = os.path.join(self.tmp.name, prefix + "-runs")
+        code, _, _ = self._run([
+            "run", self.pilot_dir, "--adapter", "offline-fake",
+            "--out", out_dir, "--predictions", pred, "--allow-draft"])
+        self.assertEqual(code, 0)
+        from benchmarks.v3.runner import load_run
+        run_dir = load_run(out_dir)  # single-run dir
+        return out_dir, run_dir
+
+    def test_score_and_compare(self):
+        out_dir, _ = self._run_pilot("score")
+        code, out, err = self._run(["score", self.pilot_dir, out_dir, "--json"])
+        self.assertEqual(code, 0, err)
+        report = json.loads(out)
+        self.assertIn("integrity", report)
+        self.assertIn("gates", report)
+
+        # compare two independent runs
+        out2, _ = self._run_pilot("score2")
+        code, out, err = self._run(["compare", self.pilot_dir, out_dir, out2,
+                                    "--json"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("scope", json.loads(out))
+
+
+class CalibrationTests(_Integrated):
+    def test_fit_calibrator_from_calibration_split(self):
+        layout = {"triage": {"development": 3, "calibration": 3}, "workflow": {}}
+        bundle = B.build_dataset(triage_roots=0, workflow_roots=0, layout=layout,
+                                 private_seed=11)
+        public_dir = os.path.join(self.tmp.name, "cal")
+        private_dir = os.path.join(self.tmp.name, "cal-private")
+        B.write_dataset(bundle, public_dir, private_root=private_dir)
+        # calibration lives only in the private subset
+        pred = self._write_json("cal-pred.json", {
+            c["case_id"]: VALID for c in bundle["cases"] if c["task"] != "workflow"})
+        runs = os.path.join(self.tmp.name, "cal-runs")
+        code, _, err = self._run([
+            "run", private_dir, "--adapter", "offline-fake", "--out", runs,
+            "--predictions", pred, "--allow-draft"])
+        self.assertEqual(code, 0, err)
+        art = os.path.join(self.tmp.name, "calibrator.json")
+        code, out, err = self._run(["score", private_dir, runs,
+                                    "--fit-calibrator", art, "--json"])
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.exists(art))
+        artifact = json.load(open(art))
+        self.assertTrue(artifact.get("revision") or artifact.get("artifact_sha256"))
+        self.assertEqual(artifact.get("fit_split"), "calibration")
+
+
+class ReviewTests(_Integrated):
+    def test_export_and_import_worksheet(self):
+        worksheet = os.path.join(self.tmp.name, "worksheet.json")
+        code, out, _ = self._run([
+            "review", self.pilot_dir, "--export-worksheet", worksheet, "--json"])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(worksheet))
+        ws = json.load(open(worksheet))
+        self.assertEqual(ws["review_status"], "draft")
+        self.assertFalse(ws["human_seal"])
+
+        # import accept judgements for every item (named reviewer required)
+        judgements = [{"gold_id": i["gold_id"], "decision": "accept",
+                       "reviewer": "A. Reviewer"} for i in ws["items"]]
+        jpath = self._write_json("judgements.json", judgements)
+        out_dir = os.path.join(self.tmp.name, "reviewed")
+        code, out, err = self._run([
+            "review", self.pilot_dir, "--worksheet", worksheet,
+            "--import", jpath, "--out", out_dir, "--json"])
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)
+        self.assertEqual(len(result["reviewed"]), len(ws["items"]))
+        self.assertEqual(result["review_status"], "reviewed")
+
+    def test_import_without_reviewer_fails_closed(self):
+        worksheet = os.path.join(self.tmp.name, "worksheet2.json")
+        self._run(["review", self.pilot_dir, "--export-worksheet", worksheet])
+        ws = json.load(open(worksheet))
+        judgements = [{"gold_id": ws["items"][0]["gold_id"], "decision": "accept"}]
+        jpath = self._write_json("judgements2.json", judgements)
+        code, _, err = self._run([
+            "review", self.pilot_dir, "--worksheet", worksheet, "--import", jpath])
         self.assertEqual(code, 1)
-        self.assertIn("build package", err)
+        self.assertIn("reviewer", err.lower())
+
+    def test_seal_requires_reviewer(self):
+        code, _, err = self._run([
+            "review", self.pilot_dir, "--seal", "--out",
+            os.path.join(self.tmp.name, "sealed")])
+        self.assertEqual(code, 1)
+
+
+class ExportImportTests(_Integrated):
+    def test_export_and_import(self):
+        out = os.path.join(self.tmp.name, "copy")
+        code, _, _ = self._run(["export", self.pilot_dir, out, "--json"])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(os.path.join(out, "bundle.json")))
+        out2 = os.path.join(self.tmp.name, "copy2")
+        code, _, _ = self._run(["import", out, out2, "--json"])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(os.path.join(out2, "bundle.json")))
+
+    def test_import_invalid_does_not_create_destination(self):
+        bad = os.path.join(self.tmp.name, "bad2")
+        os.makedirs(bad)
+        with open(os.path.join(bad, "bundle.json"), "w") as f:
+            json.dump({"schema_version": "v3.0", "dataset_id": "x", "cases": []}, f)
+        dest = os.path.join(self.tmp.name, "never")
+        code, _, _ = self._run(["import", bad, dest])
+        self.assertEqual(code, 1)
+        self.assertFalse(os.path.exists(dest))
 
 
 if __name__ == "__main__":

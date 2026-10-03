@@ -362,6 +362,15 @@ def _aggregate(results, policy, calibrator):
                 len(grounded)),
             "required_missing": sum(len(r["workflow"]["required_missing"])
                                     for r in wf_cases),
+            "assertions_total": sum(r["workflow"].get("assertions_total", 0)
+                                    for r in wf_cases),
+            "assertions_passed": sum(r["workflow"].get("assertions_passed", 0)
+                                     for r in wf_cases),
+            "assertion_failures": sum(len(r["workflow"].get("assertion_failures") or [])
+                                      for r in wf_cases),
+            "unsupported_assertions": sorted(
+                {kind for r in wf_cases
+                 for kind in (r["workflow"].get("unsupported_assertions") or [])}),
         }
 
     loss = {
@@ -669,8 +678,41 @@ def _metric_item(result, metric):
 
 # --------------------------------------------------------------- reports
 
+def _render_comparison(comparison):
+    lines = ["# Benchmark v3 run comparison", ""]
+    lines.append("- dataset: `%s`" % comparison.get("dataset_id"))
+    lines.append("- baseline: `%s`" % comparison.get("baseline_run_id"))
+    lines.append("- candidate: `%s`" % comparison.get("candidate_run_id"))
+    lines.append("- scoring policy: `%s`"
+                 % comparison.get("scoring_policy"))
+    boot = comparison.get("protocol") or {}
+    lines.append("- bootstrap: B=%s seed=%s alpha=%s margin=%s"
+                 % (boot.get("B"), boot.get("seed"), boot.get("alpha"),
+                    boot.get("margin")))
+    scope = comparison.get("scope") or {}
+    lines.append("- scope: shared=%s/%s complete=%s roots=%s"
+                 % (scope.get("shared_cases"), scope.get("requested_cases"),
+                    scope.get("complete"), scope.get("n_roots")))
+    elig = comparison.get("eligibility") or {}
+    lines.append("- estimable: %s%s"
+                 % (elig.get("estimable"), "" if elig.get("eligible")
+                    else " (reasons: %s)" % "; ".join(elig.get("reasons") or [])))
+    lines.append("")
+    for profile, metrics in sorted((comparison.get("profiles") or {}).items()):
+        lines.append("## profile `%s`" % profile)
+        for name, metric in sorted(metrics.items()):
+            lines.append("- %s: diff=%s ci=[%s, %s] verdict=%s"
+                         % (name, _fmt(metric.get("diff")),
+                            _fmt(metric.get("ci_low")), _fmt(metric.get("ci_high")),
+                            metric.get("verdict")))
+        lines.append("")
+    return "\n".join(lines)
+
+
 def render_markdown(report):
     """Render a truthful Markdown report (absent states are named)."""
+    if "comparison_version" in report:
+        return _render_comparison(report)
     lines = []
     lines.append("# Benchmark v3 scoring report")
     lines.append("")

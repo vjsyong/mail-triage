@@ -30,7 +30,7 @@ import re
 
 from .common.hashing import hash_obj, sha256_file
 from .common import identity
-from .contracts import assert_no_gold_leakage
+from .contracts import assert_no_gold_leakage, rendered_input_hash
 from .sandbox import Mailbox
 
 MANIFEST_NAME = "manifest.json"
@@ -173,12 +173,11 @@ def prompt_sha256(cases):
     entries = []
     for case in sorted(cases, key=lambda c: c.get("case_id") or ""):
         rendered = case.get("rendered_input") or {}
-        entries.append({"case_id": case.get("case_id"),
-                        "system": rendered.get("system"),
-                        "user": rendered.get("user"),
-                        "policy_id": (rendered.get("policy") or {}).get("policy_id")
-                        if isinstance(rendered.get("policy"), dict)
-                        else (case.get("policy_id"))})
+        entries.append({
+            "case_id": case.get("case_id"),
+            "rendered_sha256": rendered_input_hash(
+                rendered, mailbox=case.get("mailbox"), tools=case.get("tools")),
+        })
     return hash_obj(entries)
 
 
@@ -341,6 +340,43 @@ def collect_resource_evidence(probe=None, endpoint_class="in_process"):
 
 # --------------------------------------------------------------------- attempt
 
+def _deployment_record(resource, endpoint_class):
+    """The scorer-facing deployment + hardware receipt (honest by construction).
+
+    A receipt is ``verified`` only when the serving limit is actually enforced
+    (cgroup) and the endpoint is an in-process/own-device CPU.  A shared or warm
+    external endpoint -- including a localhost GPU server -- is recorded as
+    shared/warm and can never qualify.  Configured numbers alone are not a
+    receipt.
+    """
+    external = endpoint_class in ("external", "external_warm", "remote")
+    verified = bool(resource.get("enforced_limits_verified")) and not external
+    receipt = {
+        "verified": verified,
+        "cpu_model": resource.get("cpu_model"),
+        "cpuset": resource.get("cpuset"),
+        "memory": resource.get("memory"),
+        "threads": resource.get("threads"),
+        "device": resource.get("device"),
+        "serving_process": "runner (in-process)" if not external else "external",
+        "shared": external,
+        "warm_endpoint": external,
+        "source": resource.get("measurement"),
+        "notes": list(resource.get("notes") or []),
+    }
+    return {
+        "state": "measured" if verified else "unverified",
+        "endpoint_class": endpoint_class,
+        "metrics": {
+            "process_tree_rss_bytes": resource.get("process_tree_rss_bytes"),
+            "cpu_quota_cores": resource.get("cpu_quota_cores"),
+            "threads": resource.get("threads"),
+            "cold_startup": "unverified",
+        },
+        "hardware_receipt": receipt,
+    }
+
+
 def _unsupported_result(task, adapter):
     from .adapters import make_result, provenance_for, STATUS_SKIPPED
     return make_result(
@@ -417,7 +453,7 @@ def _sandbox_for(dataset, case):
 def build_run_manifest(dataset, adapter, scope, policy=None, *,
                        scorer_revision=None, calibrator_revision=None,
                        generation_config=None, runtime_config=None,
-                       engine_sha=None):
+                       engine_sha=None, allow_unverified_model=False):
     """Build the hashed run manifest for a requested scope (FR7)."""
     from .adapters import AdapterError
     cases = scope["cases"]
@@ -432,8 +468,24 @@ def build_run_manifest(dataset, adapter, scope, policy=None, *,
     policy_revision = revisions[0] if len(revisions) == 1 else "|".join(revisions or ["none"])
     gen = dict(fp.get("generation_config") or {})
     gen.update(generation_config or {})
+    components = fp.get("component_fingerprints") or {}
+    if components:
+        gen["components"] = components
     run_cfg = dict(fp.get("runtime_config") or {})
     run_cfg.update(runtime_config or {})
+
+    identity_source = fp.get("model_identity_source") or "unverified"
+    model_revision = fp.get("model_revision") or ""
+    model_artifact = fp.get("model_artifact_sha256") or ""
+    if identity_source == "unverified":
+        if not allow_unverified_model:
+            raise AdapterError(
+                "adapter %r has no pinned/observed model identity (no revision "
+                "or artifact); pass allow_unverified_model=True only for an "
+                "explicitly declared development probe" % adapter.adapter_id)
+        if not (model_revision or model_artifact):
+            model_revision = "unverified"
+
     fields = {
         "dataset_id": dataset.get("dataset_id") or "dataset",
         "dataset_sha256": dataset_sha256(dataset),
@@ -441,8 +493,8 @@ def build_run_manifest(dataset, adapter, scope, policy=None, *,
         "prompt_revision": fp.get("prompt_revision") or adapter.revision,
         "prompt_sha256": prompt_sha256(cases),
         "model_key": fp.get("model_key") or adapter.adapter_id,
-        "model_revision": fp.get("model_revision") or "",
-        "model_artifact_sha256": fp.get("model_artifact_sha256") or "",
+        "model_revision": model_revision,
+        "model_artifact_sha256": model_artifact,
         "adapter_id": fp["adapter_id"],
         "adapter_revision": fp["adapter_revision"],
         "scorer_revision": scorer,
@@ -456,14 +508,13 @@ def build_run_manifest(dataset, adapter, scope, policy=None, *,
         "requested_splits": scope["requested_splits"],
         "requested_profiles": scope["requested_profiles"],
     }
-    if not (fields["model_revision"] or fields["model_artifact_sha256"]):
-        raise AdapterError(
-            "adapter %r has neither model_revision nor model_artifact_sha256"
-            % adapter.adapter_id)
     manifest = identity.build_manifest(**fields)
     manifest["capabilities"] = fp.get("capabilities")
     manifest["mock"] = fp.get("mock")
-    manifest["qualifies_as_baseline"] = fp.get("qualifies_as_baseline")
+    manifest["qualifies_as_baseline"] = bool(fp.get("qualifies_as_baseline")) \
+        and identity_source != "unverified"
+    manifest["model_identity_source"] = identity_source
+    manifest["components"] = components or None
     manifest["confidence_meaning"] = fp.get("confidence_meaning")
     manifest["adapter_source_sha256"] = fp.get("adapter_source_sha256")
     return manifest
@@ -511,7 +562,7 @@ def run_dataset(dataset, adapter, *, requested_case_ids=None,
                 scorer_revision=None, calibrator_revision=None,
                 generation_config=None, runtime_config=None, max_cases=None,
                 resource_probe=None, endpoint_class="in_process",
-                save=True):
+                allow_unverified_model=False, save=True):
     """Run the requested cases and return the run bundle."""
     if not isinstance(dataset, dict):
         raise RunnerError("dataset must be a mapping")
@@ -538,7 +589,8 @@ def run_dataset(dataset, adapter, *, requested_case_ids=None,
     manifest = build_run_manifest(
         dataset, adapter, scope, policy=explicit_policy,
         scorer_revision=scorer_revision, calibrator_revision=calibrator_revision,
-        generation_config=generation_config, runtime_config=runtime_config)
+        generation_config=generation_config, runtime_config=runtime_config,
+        allow_unverified_model=allow_unverified_model)
 
     existing = _existing_run(resume)
     if existing is not None and not existing.get("manifest"):
@@ -578,6 +630,16 @@ def run_dataset(dataset, adapter, *, requested_case_ids=None,
                     error="%s: %s" % (type(exc).__name__, exc),
                     field_provenance=provenance_for(None),
                     failure_class="infrastructure")
+            if sandbox is not None:
+                # The runner owns the sandbox, so the scored final state cannot
+                # be forged by an adapter's self-report.
+                result.setdefault("output", {})
+                result["output"]["final_state"] = sandbox.final_state()
+                if not result.get("request_sha256"):
+                    rendered = case.get("rendered_input") or {}
+                    result["request_sha256"] = rendered_input_hash(
+                        rendered, mailbox=case.get("mailbox"),
+                        tools=case.get("tools"))
         attempts.append(_attempt(manifest, case, adapter, result, 1))
 
     resource = collect_resource_evidence(probe=resource_probe,
@@ -600,15 +662,20 @@ def run_dataset(dataset, adapter, *, requested_case_ids=None,
         "dataset_review_status": status,
         "adapter_id": adapter.adapter_id,
         "mock": bool(getattr(adapter, "mock", False)),
-        "qualifies_as_baseline": bool(getattr(adapter, "qualifies_as_baseline", True)),
+        "qualifies_as_baseline": bool(manifest.get("qualifies_as_baseline")),
+        "model_identity_source": manifest.get("model_identity_source"),
+        "model_identity_unverified": manifest.get("model_identity_source") == "unverified",
+        "components": manifest.get("components"),
         "resumed_from": resumed_from,
         "executed_case_count": executed,
         "attempt_count": len(attempts),
         "failure_counts": failures,
         "skips": skips,
         "resource": resource,
+        "deployment": _deployment_record(resource, endpoint_class),
         "cpu_qualification": {
-            "cpu_qualified": resource["cpu_qualified"],
+            "cpu_qualified": resource["cpu_qualified"] and not manifest.get(
+                "model_identity_source") == "unverified",
             "enforced_limits_verified": resource["enforced_limits_verified"],
             "endpoint_class": resource["endpoint_class"],
             "notes": resource["notes"],

@@ -11,7 +11,7 @@ a policy revision that disagrees with the manifest) are returned by
 :func:`validate_scope` so the report can mark the run ineligible rather than
 producing a green score.
 """
-from ..common.hashing import hash_obj
+from ..contracts import rendered_input_hash
 from .errors import ScoringError
 
 SCHEMA_VERSION = "v3.0"
@@ -267,15 +267,18 @@ def attempt_field(attempt, field):
 # ------------------------------------------------------------ scope/hash
 
 def request_hash(case):
-    """Canonical hash of a case's rendered request (the runner records this)."""
+    """Canonical hash of a case's declared model-facing input.
+
+    Shares ``contracts.rendered_input_hash`` with the runner and adapters, so the
+    recorded ``request_sha256`` and this recomputation can never diverge: every
+    declared field (profile/system/user/owner/categories/params, the trusted
+    policy card, and the workflow mailbox/tools) is included.
+    """
     rendered = case.get("rendered_input")
     if not isinstance(rendered, dict):
         return None
-    return hash_obj({
-        "profile": rendered.get("profile") or case_profile(case),
-        "system": rendered.get("system", ""),
-        "user": rendered.get("user", ""),
-    })
+    return rendered_input_hash(rendered, mailbox=case.get("mailbox"),
+                               tools=case.get("tools"))
 
 
 def validate_scope(ds, run):

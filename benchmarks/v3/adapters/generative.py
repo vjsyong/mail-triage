@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 from ..common.hashing import canonical, sha256_text
 from ..contracts import (NATIVE_JSON_MODE, NATIVE_MAX_TOKENS,
                          NATIVE_RETRY_MAX_TOKENS, native_output,
-                         parse_native_response)
+                         parse_native_response, rendered_input_hash)
 from ..sandbox import tool_schemas
 from . import base as B
 from .workflow import run_tool_loop
@@ -176,7 +176,11 @@ class OpenAICompatAdapter(B.Adapter):
 
     def run_case(self, view, sandbox=None):
         system, user, policy_sha, policy_sent = self._rendered(view)
-        params = (view.get("rendered_input") or {}).get("params") or {}
+        rendered = view.get("rendered_input") or {}
+        params = rendered.get("params") or {}
+        semantic_hash = rendered_input_hash(rendered,
+                                            mailbox=view.get("mailbox"),
+                                            tools=view.get("tools"))
         task = view.get("task")
 
         if task == "workflow":
@@ -210,15 +214,17 @@ class OpenAICompatAdapter(B.Adapter):
             else:
                 status, failure = B.STATUS_OK, None
             parsed = {"task": "workflow", "steps": loop["steps"],
-                      "completed": status == B.STATUS_OK}
+                      "completed": status == B.STATUS_OK,
+                      "answer": loop["reply"]}
             return B.make_result(
                 status=status, raw=raw, parsed=parsed, error=loop["error"],
                 field_provenance=B.provenance_for(None),
                 tool_events=loop["tool_events"],
                 timings={"measured": "warm", "steps": loop["steps"],
                          "simulated_tools": True, "label": "generative workflow"},
-                request_sha256=loop["request_sha256"],
+                request_sha256=semantic_hash,
                 failure_class=failure,
+                output_extra={"wire_sha256": loop["request_sha256"]},
                 capabilities_used={"tools": True})
 
         try:
@@ -246,10 +252,11 @@ class OpenAICompatAdapter(B.Adapter):
             field_provenance=B.provenance_for(parsed),
             timings={"measured": "warm", "retried": retried,
                      "finish_reason": finish, "label": "generative decision"},
-            request_sha256=response.get("request_sha256", ""),
+            request_sha256=semantic_hash,
             failure_class=None if parsed is not None else B.FAIL_MODEL,
             output_extra={"policy_sha256": policy_sha,
                           "policy_transmitted": policy_sent,
+                          "wire_sha256": response.get("request_sha256", ""),
                           "parsed_full": parsed_full if parsed is not None else None},
             capabilities_used={"decision": True, "prose": uses_prose,
                                "native_parse": True})

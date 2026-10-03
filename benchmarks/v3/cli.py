@@ -1,24 +1,26 @@
-"""Command-line entry point for benchmark v3 (WP4/WP7 plumbing).
+"""Command-line entry point for benchmark v3 (WP2/WP4/WP5/WP7 plumbing).
 
 Subcommands::
 
-    build     build an offline dataset bundle        (WP2 ``build`` API)
-    validate  schema/lint a dataset bundle           (WP2 ``build`` API)
-    run       execute a dataset through an adapter   (this package)
-    score     score a run                            (WP5 ``scoring`` API)
-    compare   compare two runs                       (WP5 ``scoring`` API)
-    review    export/import review worksheets        (WP2 ``build`` API)
-    export    write a dataset (optionally split private material)
-    import    read a dataset/archive back
+    build      build an offline dataset bundle        (WP2 ``build`` API)
+    validate   schema/lint a dataset bundle           (WP2 ``build`` API)
+    run        execute a dataset through an adapter   (WP4 runner)
+    score      score a run, optionally fit a calibrator (WP5 ``scoring`` API)
+    compare    compare two runs                       (WP5 ``scoring`` API)
+    review     export/import a review worksheet, or seal (WP2 ``build`` API)
+    export     write a dataset (optionally split private material)
+    import     read a dataset bundle back (dataset import, not real-mail intake)
 
-The build/scoring/review calls are **lazy** imports of the owning packages so
-this module imports cleanly before those packages are integrated.  JSON output
-is available on every command; Markdown is used for scoring reports.
+Fail-closed policy: dataset load/validate/export/import go through the owning
+``build`` package; a rejected private/real/invalid bundle never creates or
+overwrites a destination.  There is no weaker local fallback.
 
-Safety defaults: no model network unless an endpoint is given, a non-loopback
-endpoint additionally requires ``--allow-remote``, draft datasets require
-``--allow-draft``, and credentials are never read from ``.env`` or written to
-run artifacts.
+Safety defaults: no model network unless an endpoint is given; a non-loopback
+endpoint additionally requires ``--allow-remote``; every externally managed
+endpoint (including a loopback GPU server) is recorded as external/warm, never
+as an in-process CPU.  Draft datasets require ``--allow-draft``; a model with no
+pinned/observed identity requires ``--allow-unverified-model`` (development
+probe only).  Credentials are never read from ``.env`` or written to artifacts.
 """
 from __future__ import annotations
 
@@ -36,17 +38,13 @@ def _load_json(path):
 
 
 def _load_dataset(path):
-    """Load a dataset bundle, preferring the owning build package."""
-    try:
-        from . import build  # type: ignore  # noqa: PLC0415
-        if hasattr(build, "load_dataset"):
-            return build.load_dataset(path)
-    except Exception:  # noqa: BLE001 - not integrated yet; read JSON directly
-        pass
-    data = _load_json(path) if os.path.exists(path) else None
-    if data is None:
-        raise SystemExit("dataset not found: %s" % path)
-    return data
+    """Load a written dataset bundle through the owning build package.
+
+    Raises ``ValidationError``/``BuildError`` on any problem -- never falls back
+    to reading raw JSON, so an invalid bundle cannot masquerade as valid.
+    """
+    from . import build as B  # noqa: PLC0415
+    return B.load_dataset(path)
 
 
 def _dump(payload, as_json, markdown=None):
@@ -57,29 +55,21 @@ def _dump(payload, as_json, markdown=None):
             payload, indent=2, sort_keys=True, default=str))
 
 
-def _local_validate(bundle):
-    """Fallback structural validation used when the build package is absent."""
-    from .schema import validate_artifact
-    errs = []
-    if not isinstance(bundle, dict):
-        return ["dataset must be an object"]
-    if bundle.get("schema_version") != "v3.0":
-        errs.append("dataset schema_version must be 'v3.0'")
-    if not bundle.get("dataset_id"):
-        errs.append("dataset_id is required")
-    cases = bundle.get("cases")
-    if not isinstance(cases, list) or not cases:
-        errs.append("cases must be a non-empty list")
-    else:
-        seen = set()
-        for i, case in enumerate(cases):
-            for e in validate_artifact("case", case):
-                errs.append("cases[%d]: %s" % (i, e))
-            cid = case.get("case_id")
-            if cid in seen:
-                errs.append("duplicate case_id %r" % cid)
-            seen.add(cid)
-    return errs
+def _endpoint_class(args):
+    """Any configured endpoint is external/warm; only offline-fake is in-process.
+
+    A loopback HTTP endpoint may be a GPU server; it is externally managed and
+    is never evidence of in-process CPU resource limits or cold startup.
+    """
+    if getattr(args, "adapter", None) == "offline-fake":
+        return "in_process"
+    if getattr(args, "endpoint", None):
+        from urllib.parse import urlparse
+        host = (urlparse(args.endpoint).hostname or "").lower()
+        if host.startswith("127.") or host in ("localhost", "::1"):
+            return "external_warm"
+        return "external_warm"
+    return "in_process"
 
 
 # -------------------------------------------------------------------- adapters
@@ -97,53 +87,49 @@ def _adapter_from_args(args):
     if name == "generative-openai":
         if not args.endpoint:
             raise AdapterError("--endpoint is required for generative-openai")
-        return OpenAICompatAdapter(base_url=args.endpoint, model=args.model or "model",
-                                   allow_remote=args.allow_remote)
+        return OpenAICompatAdapter(
+            base_url=args.endpoint, model=args.model or "model",
+            model_revision=args.model_revision,
+            model_artifact_sha256=args.model_artifact,
+            allow_remote=args.allow_remote)
     if name == "tinyjev-decision":
         return TinyJevAdapter(model=args.model or "TinyJev-0.6B",
-                              device=args.device or "cpu")
+                              device=args.device or "cpu",
+                              model_revision=args.model_revision,
+                              model_artifact_sha256=args.model_artifact)
     if name == "fusion":
         decision = TinyJevAdapter(model=args.model or "TinyJev-0.6B",
-                                  device=args.device or "cpu")
+                                  device=args.device or "cpu",
+                                  model_revision=args.model_revision,
+                                  model_artifact_sha256=args.model_artifact)
         prose = None
         if args.endpoint:
             prose = OpenAICompatAdapter(base_url=args.endpoint,
                                         model=args.prose_model or "prose",
+                                        model_revision=args.prose_model_revision,
+                                        model_artifact_sha256=args.prose_model_artifact,
                                         allow_remote=args.allow_remote)
         return FusionAdapter(decision_adapter=decision, prose_adapter=prose)
     raise AdapterError("unknown adapter %r" % name)
 
 
-def _endpoint_class(args):
-    if getattr(args, "adapter", None) == "offline-fake":
-        return "in_process"
-    if getattr(args, "endpoint", None):
-        from urllib.parse import urlparse
-        host = (urlparse(args.endpoint).hostname or "").lower()
-        if host.startswith("127.") or host in ("localhost", "::1"):
-            return "in_process"
-        return "external_warm"
-    return "in_process"
-
-
 # --------------------------------------------------------------------- commands
 
 def cmd_build(args):
-    try:
-        from . import build as B  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        raise SystemExit("build package is not available: %s" % exc)
+    from . import build as B  # noqa: PLC0415
     bundle = B.build_dataset(seed=args.seed, triage_roots=args.triage_roots,
                              workflow_roots=args.workflow_roots,
                              include_variants=not args.no_variants,
                              layout=args.layout, private_seed=args.private_seed)
     errs = B.validate_dataset(bundle)
-    result = {"dataset_id": bundle.get("dataset_id"), "cases": len(bundle.get("cases") or []),
-              "errors": errs, "path": args.out}
+    result = {"dataset_id": bundle.get("dataset_id"),
+              "cases": len(bundle.get("cases") or []), "errors": errs,
+              "path": args.out}
     if errs:
         _dump(result, args.json)
         return 1
-    B.write_dataset(bundle, args.out, private_root=args.private_root)
+    paths = B.write_dataset(bundle, args.out, private_root=args.private_root)
+    result["written"] = paths
     _dump(result, args.json,
           markdown="built %s: %d cases -> %s" % (result["dataset_id"],
                                                   result["cases"], args.out))
@@ -151,14 +137,17 @@ def cmd_build(args):
 
 
 def cmd_validate(args):
-    bundle = _load_dataset(args.dataset)
+    from . import build as B  # noqa: PLC0415
+    from .common.validation import ValidationError
     try:
-        from . import build as B  # noqa: PLC0415
-        errs = B.validate_dataset(bundle) if hasattr(B, "validate_dataset") else _local_validate(bundle)
-    except Exception:  # noqa: BLE001
-        errs = _local_validate(bundle)
-    result = {"dataset": args.dataset, "valid": not errs, "errors": errs}
-    _dump(result, args.json,
+        bundle = B.load_dataset(args.dataset)
+    except ValidationError as exc:
+        _dump({"dataset": args.dataset, "valid": False, "errors": [str(exc)]},
+              args.json, markdown="invalid: %s" % exc)
+        return 1
+    errs = B.validate_dataset(bundle)
+    _dump({"dataset": args.dataset, "valid": not errs, "errors": errs},
+          args.json,
           markdown=("valid: %s" % args.dataset) if not errs
           else "invalid:\n  " + "\n  ".join(errs))
     return 0 if not errs else 1
@@ -168,6 +157,7 @@ def cmd_run(args):
     from .runner import RunnerError, run_dataset, run_summary
     bundle = _load_dataset(args.dataset)
     adapter = _adapter_from_args(args)
+    endpoint_class = _endpoint_class(args)
     preflight = {
         "dataset": args.dataset,
         "dataset_id": bundle.get("dataset_id"),
@@ -177,8 +167,11 @@ def cmd_run(args):
         "capabilities": adapter.capabilities,
         "mock": adapter.mock,
         "qualifies_as_baseline": adapter.qualifies_as_baseline,
+        "model_key": adapter.fingerprint().get("model_key"),
+        "model_identity_source": adapter.fingerprint().get("model_identity_source"),
+        "model_unverified_allowed": bool(args.allow_unverified_model),
         "model_network": adapter.adapter_id != "offline-fake" and bool(args.endpoint),
-        "endpoint_class": _endpoint_class(args),
+        "endpoint_class": endpoint_class,
         "cases": len(bundle.get("cases") or []),
         "out": args.out,
     }
@@ -192,7 +185,8 @@ def cmd_run(args):
             resume=args.resume, allow_draft=args.allow_draft,
             scorer_revision=args.scorer_revision,
             calibrator_revision=args.calibrator_revision,
-            max_cases=args.limit, endpoint_class=_endpoint_class(args))
+            max_cases=args.limit, endpoint_class=endpoint_class,
+            allow_unverified_model=args.allow_unverified_model)
     except RunnerError as exc:
         print("run error: %s" % exc, file=sys.stderr)
         return 1
@@ -205,10 +199,7 @@ def cmd_run(args):
 
 
 def _scoring():
-    try:
-        from . import scoring  # type: ignore  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        raise SystemExit("scoring package is not available: %s" % exc)
+    from . import scoring  # type: ignore  # noqa: PLC0415
     return scoring
 
 
@@ -217,7 +208,20 @@ def cmd_score(args):
     bundle = _load_dataset(args.dataset)
     from .runner import load_run
     run = load_run(args.run)
-    report = scoring.score_run(bundle, run, policy=None, calibrator=None)
+
+    calibrator = None
+    if args.calibrator:
+        calibrator = _load_json(args.calibrator)
+    if args.fit_calibrator:
+        if args.calibrator:
+            raise SystemExit("pass either --calibrator or --fit-calibrator, not both")
+        calibrator = scoring.fit_calibrator(bundle, run, policy=None,
+                                            split=args.fit_split)
+        with open(args.fit_calibrator, "w") as f:
+            json.dump(calibrator, f, indent=1, sort_keys=True)
+        args.calibrator_revision = calibrator.get("revision")
+
+    report = scoring.score_run(bundle, run, policy=None, calibrator=calibrator)
     if args.out:
         scoring.write_report(report, args.out)
     text = scoring.render_markdown(report) if hasattr(scoring, "render_markdown") else None
@@ -239,52 +243,77 @@ def cmd_compare(args):
 
 
 def cmd_review(args):
-    """Export or import a review worksheet through the WP2 build package."""
-    try:
-        from . import build as B  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        raise SystemExit("build package is not available: %s" % exc)
-    if args.review_export:
-        fn = getattr(B, "review_export", None)
-        if fn is None:
-            raise SystemExit("build.review_export is not implemented (WP2 owns it)")
-        out = fn(_load_dataset(args.dataset), args.review_export,
-                 reviewer=args.reviewer, authorized=args.authorized)
-        _dump({"exported": args.review_export, "result": out}, args.json)
+    """Bridge to the WP2 review gates: worksheet, import, seal.
+
+    Dataset import and real-mail intake are separate: a de-identified real-mail
+    import requires ``--real-mail`` **and** an ``--authorization`` file; nothing
+    is auto-sealed and no authorization is synthesized.
+    """
+    from . import build as B  # noqa: PLC0415
+    modes = [bool(args.export_worksheet), bool(args.import_judgements),
+             bool(args.seal)]
+    if sum(modes) != 1:
+        raise SystemExit("review requires exactly one of --export-worksheet, "
+                         "--import, --seal")
+    bundle = _load_dataset(args.dataset)
+
+    if args.export_worksheet:
+        worksheet = B.build_review_worksheet(bundle, reviewer=args.reviewer,
+                                             splits=args.splits)
+        B.write_review_worksheet(worksheet, args.export_worksheet)
+        _dump({"worksheet": args.export_worksheet,
+               "items": len(worksheet["items"]),
+               "review_status": worksheet["review_status"]}, args.json)
         return 0
-    if args.review_import:
-        fn = getattr(B, "review_import", None)
-        if fn is None:
-            raise SystemExit("build.review_import is not implemented (WP2 owns it)")
-        out = fn(args.review_import)
-        _dump({"imported": args.review_import, "result": out}, args.json)
+
+    if args.import_judgements:
+        if not args.worksheet:
+            raise SystemExit("--import requires --worksheet PATH")
+        worksheet = B.load_review_worksheet(args.worksheet)
+        judgements = _load_json(args.import_judgements)
+        authorization = _load_json(args.authorization) if args.authorization else None
+        if args.real_mail:
+            records = judgements if isinstance(judgements, list) else \
+                judgements.get("judgements", [])
+            judgements = B.validate_real_import(records,
+                                                authorization=authorization)
+        result = B.import_review(bundle, worksheet, judgements,
+                                 authorization=authorization)
+        if args.out:
+            B.write_dataset(result["bundle"], args.out,
+                            private_root=args.private_root)
+        _dump({k: result[k] for k in ("review_status", "reviewed", "rejected",
+                                      "conflicts", "unreviewed", "agreement")},
+              args.json)
         return 0
-    raise SystemExit("review requires --export PATH or --import PATH")
+
+    # seal
+    if not args.out:
+        raise SystemExit("--seal requires --out DIR")
+    conflicts = _load_json(args.conflicts) if args.conflicts else None
+    sealed = B.seal_bundle(bundle, reviewer=args.reviewer, conflicts=conflicts)
+    B.write_dataset(sealed, args.out, private_root=args.private_root)
+    _dump({"sealed": sealed.get("dataset_id"),
+           "review_status": sealed["metadata"].get("review_status"),
+           "out": args.out}, args.json)
+    return 0
 
 
 def cmd_export(args):
-    try:
-        from . import build as B  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        raise SystemExit("build package is not available: %s" % exc)
-    fn = getattr(B, "write_dataset", None)
-    if fn is None:
-        raise SystemExit("build.write_dataset is not implemented (WP2 owns it)")
-    result = fn(_load_dataset(args.dataset), args.out, private_root=args.private_root)
+    from . import build as B  # noqa: PLC0415
+    result = B.write_dataset(_load_dataset(args.dataset), args.out,
+                             private_root=args.private_root)
     _dump({"path": args.out, "result": result}, args.json)
     return 0
 
 
 def cmd_import(args):
+    """Dataset import: load + validate + write. No fallback, no raw JSON write."""
+    from . import build as B  # noqa: PLC0415
     bundle = _load_dataset(args.archive)
-    try:
-        from . import build as B  # noqa: PLC0415
-        B.write_dataset(bundle, args.out, private_root=args.private_root)
-    except Exception:  # noqa: BLE001 - fall back to plain JSON write
-        os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
-        with open(args.out, "w") as f:
-            json.dump(bundle, f, indent=1, sort_keys=True)
-    _dump({"path": args.out, "cases": len(bundle.get("cases") or [])}, args.json)
+    result = B.write_dataset(bundle, args.out, private_root=args.private_root)
+    _dump({"path": args.out, "cases": len(bundle.get("cases") or []),
+           "result": result}, args.json)
     return 0
 
 
@@ -322,9 +351,14 @@ def build_parser():
     r.add_argument("--resume", default=None)
     r.add_argument("--limit", type=int, default=None)
     r.add_argument("--allow-draft", action="store_true")
+    r.add_argument("--allow-unverified-model", action="store_true")
     r.add_argument("--endpoint", default=None)
     r.add_argument("--model", default=None)
+    r.add_argument("--model-revision", default=None)
+    r.add_argument("--model-artifact", default=None)
     r.add_argument("--prose-model", default=None)
+    r.add_argument("--prose-model-revision", default=None)
+    r.add_argument("--prose-model-artifact", default=None)
     r.add_argument("--device", default=None)
     r.add_argument("--allow-remote", action="store_true")
     r.add_argument("--scorer-revision", default=None)
@@ -337,10 +371,15 @@ def build_parser():
     r.add_argument("--json", action="store_true")
     r.set_defaults(func=cmd_run)
 
-    s = sub.add_parser("score", help="score a run (WP5)")
+    s = sub.add_parser("score", help="score a run, optionally fit a calibrator (WP5)")
     s.add_argument("dataset")
     s.add_argument("run")
     s.add_argument("--out", default=None)
+    s.add_argument("--calibrator", default=None,
+                   help="apply a fitted calibrator artifact (JSON)")
+    s.add_argument("--fit-calibrator", default=None,
+                   help="fit a calibrator from the calibration split and write it")
+    s.add_argument("--fit-split", default="calibration")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_score)
 
@@ -352,12 +391,22 @@ def build_parser():
     c.add_argument("--json", action="store_true")
     c.set_defaults(func=cmd_compare)
 
-    rv = sub.add_parser("review", help="export/import a review worksheet (WP2)")
+    rv = sub.add_parser("review", help="review worksheet / import / seal (WP2)")
     rv.add_argument("dataset")
-    rv.add_argument("--export", dest="review_export", default=None)
-    rv.add_argument("--import", dest="review_import", default=None)
+    rv.add_argument("--export-worksheet", default=None)
+    rv.add_argument("--worksheet", default=None,
+                    help="input worksheet for --import")
+    rv.add_argument("--import", dest="import_judgements", default=None,
+                    help="judgements JSON for --import")
+    rv.add_argument("--seal", action="store_true")
+    rv.add_argument("--out", default=None)
+    rv.add_argument("--private-root", default=None)
     rv.add_argument("--reviewer", default=None)
-    rv.add_argument("--authorized", action="store_true")
+    rv.add_argument("--splits", action="append", default=None)
+    rv.add_argument("--conflicts", default=None)
+    rv.add_argument("--real-mail", action="store_true",
+                    help="de-identified real-mail import (needs --authorization)")
+    rv.add_argument("--authorization", default=None)
     rv.add_argument("--json", action="store_true")
     rv.set_defaults(func=cmd_review)
 
@@ -368,7 +417,7 @@ def build_parser():
     e.add_argument("--json", action="store_true")
     e.set_defaults(func=cmd_export)
 
-    i = sub.add_parser("import", help="read a dataset bundle (WP2)")
+    i = sub.add_parser("import", help="read a dataset bundle back (WP2)")
     i.add_argument("archive")
     i.add_argument("out")
     i.add_argument("--private-root", default=None)

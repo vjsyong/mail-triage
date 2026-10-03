@@ -172,9 +172,11 @@ Full plan (`FULL_LAYOUT`): triage 600/200/1000/300
 
 ## Files
 
-`fixtures/` holds the authored recipes/vocabulary/policies/catalog (small,
-reviewed by hand); `generate.py`, `render.py`, `lineage.py`, `lint.py`,
-`review.py`, `catalog.py`, `recipes.py`, `rng.py`, `errors.py` hold the logic.
+`fixtures/` holds the authored recipes/vocabulary/policies/catalog. They are
+agent-authored **drafts**: no human has reviewed or sealed them, and the
+"reviewed by hand" label must not be applied to this tree. `generate.py`,
+`render.py`, `lineage.py`, `lint.py`, `review.py`, `catalog.py`, `recipes.py`,
+`rng.py`, `errors.py` hold the logic.
 
 (The directory is named `fixtures/`, not `data/`, because the repository
 `.gitignore` ignores any directory named `data`; authoring content must be

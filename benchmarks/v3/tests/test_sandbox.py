@@ -191,5 +191,35 @@ class ToolSchemaTests(unittest.TestCase):
         self.assertIn("send_message", schemas)
 
 
+class FinalStateTests(unittest.TestCase):
+    def test_build_shape_state(self):
+        mb = Mailbox(fixture(), permissions={"move": "auto"}, case_id="c")
+        mb.execute("move_message", {"message_id": "m2", "target_folder": "Receipts"})
+        mb.execute("draft_reply", {"message_id": "m2", "instructions": "ack"})
+        state = mb.final_state()
+        self.assertEqual(state["folders"]["Receipts"], ["m2", "m3"])
+        self.assertNotIn("m2", state["folders"]["INBOX"])
+        self.assertEqual(state["draft_count"], 1)
+        self.assertTrue(any("b@y.com" in r for r in state["draft_recipients"]))
+        self.assertEqual(state["rule_count"], 0)
+
+    def test_id_alias_lookup(self):
+        mb = Mailbox(fixture(), permissions={"move": "auto"}, case_id="c")
+        res = mb.execute("move_message", {"id": "m2", "target_folder": "Receipts"})
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(mb.final_state()["folders"]["Receipts"], ["m2", "m3"])
+
+    def test_approval_is_recorded_on_the_event(self):
+        mb = Mailbox(fixture(), permissions={"move": "ask"}, case_id="c")
+        pending = mb.execute("move_message", {"message_id": "m2",
+                                              "target_folder": "Receipts"})
+        self.assertEqual(pending["status"], "pending")
+        self.assertFalse(mb.events[-1]["permission"]["approved"])
+        ok = mb.execute("move_message", {"message_id": "m2",
+                                         "target_folder": "Receipts"}, approve=True)
+        self.assertEqual(ok["status"], "ok")
+        self.assertTrue(mb.events[-1]["permission"]["approved"])
+
+
 if __name__ == "__main__":
     unittest.main()

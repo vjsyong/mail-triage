@@ -5,17 +5,59 @@ bounded assistance**. v3 supersedes v2 as the basis for generalization and
 deployment decisions; v2 stays frozen as a historical regression track and is
 never imported at runtime.
 
-This directory is the **WP0/WP1 foundation**: the specification
+This directory holds the **v3 benchmark implementation**: the specification
 (`specs/benchmark-v3.spec.md`), the application contracts (native parity,
-profiles, provenance, gold isolation), the v3.0 artifact schemas, and the run
-identity. Later work packages implement against the interfaces frozen below;
-they live in disjoint packages and must not change these shapes without a new
-spec revision.
+profiles, provenance, gold isolation), the v3.0 artifact schemas, the run
+identity, the dataset builder (WP2), the workflow sandbox (WP3), the adapters
+and resumable runner/CLI (WP4) and scoring/statistics/gates (WP5).
 
-> Real-mail intake, CPU qualification and the private test set are **not**
-> produced here. A synthetic-only checkout never marks data human-reviewed,
-> never asserts an authorization it was not given, and never reports a model
-> or latency claim. Those are separate gates (see *Gates*).
+> Real-mail intake, human review/seal, CPU hardware qualification and the
+> private test set are **not** performed by this synthetic-only checkout, and
+> no model or latency claim is produced here. The tooling to run them exists
+> (below) but the human/authorization/qualification gates remain pending until
+> a named reviewer, an explicit authorization and a verified hardware receipt
+> are supplied. A synthetic-only tree never asserts any of them.
+
+## Status
+
+| Work package | State |
+|---|---|
+| WP0–WP1 spec, schemas, contracts, identity | ✅ implemented |
+| WP2 dataset builder / lineage / lint / review gates | ✅ software implemented |
+| WP3 workflow sandbox | ✅ implemented |
+| WP4 adapters, runner, CLI | ✅ implemented (no real inference run yet) |
+| WP5 scoring, statistics, gates | ✅ software implemented |
+| WP6 pilot, annotation, review, freeze | ⚠ tooling available; **human review/seal pending** |
+| WP7 baseline execution and release report | ⚠ tooling available; **actual qualification/report pending** |
+
+No model has been run under v3: the shipped runs are offline fakes and unit
+fixtures. CPU qualification, cold-start and latency numbers are therefore
+explicitly absent (see *CPU deployment protocol*).
+
+## Working commands
+
+```bash
+# build a small development pilot (draft), validate, run the offline mock
+.venv/bin/python -m benchmarks.v3.cli build --triage-roots 6 --workflow-roots 2 \
+    --out /tmp/v3pilot
+.venv/bin/python -m benchmarks.v3.cli validate /tmp/v3pilot
+.venv/bin/python -m benchmarks.v3.cli run /tmp/v3pilot --adapter offline-fake \
+    --out /tmp/v3runs --predictions /tmp/pred.json --allow-draft
+.venv/bin/python -m benchmarks.v3.cli score /tmp/v3pilot /tmp/v3runs
+.venv/bin/python -m benchmarks.v3.cli review /tmp/v3pilot \
+    --export-worksheet /tmp/ws.json
+```
+
+The full plan (`--layout full --private-seed N`) generates the planned
+partitions; calibration/private/real splits are written only to an explicit
+`--private-root` **outside** the checkout. `run` refuses an unverified model
+identity unless `--allow-unverified-model` is passed for a declared development
+probe, and records every externally managed endpoint (including a loopback GPU)
+as external/warm and CPU-unqualified. `score --fit-calibrator` fits from the
+`calibration` split only; `review --import`/`--seal` demand a named human
+reviewer, and a de-identified real-mail import additionally demands
+`--authorization`.
+
 
 ## Layout (frozen)
 
@@ -28,15 +70,18 @@ benchmarks/v3/
   schemas/           JSON Schemas (source of truth), all schema_version "v3.0"
   policy/default.json  a synthetic default policy card
   tests/             stdlib unittest suite (no network, no live DB)
-  build/             (WP2) catalog, rendering, lineage, splitting, lint
+  build/             (WP2) catalog, rendering, lineage, splitting, lint, review
   sandbox/           (WP3) mailbox state machine and tools
   adapters/          (WP4) generative / TinyJev / fusion / offline-fake
-  runner or cli.py   (WP4) immutable manifests, resumable execution
+  runner.py, cli.py  (WP4) immutable manifests, resumable execution, CLI
   scoring/           (WP5) decisions, relations, workflows, calibration, gates
 ```
 
-`build/`, `sandbox/`, `adapters/`, `runner`/`cli.py` and `scoring/` are **not
-implemented here** -- the interfaces below are what their authors target.
+`build/`, `sandbox/`, `adapters/`, `runner.py`/`cli.py` and `scoring/` are all
+implemented against the frozen interfaces below. The semantic request hash
+(`contracts.rendered_input_hash`) is shared by adapters, the runner and the
+scorer so an attempt's recorded `request_sha256` and its recomputation can never
+diverge.
 
 ## Profiles (never silently mixed)
 
@@ -52,7 +97,7 @@ pooled; a `full_context` result is never pooled with native triage.
 `native` reproduces the pinned `engine.LLMClient.classify`; a more tolerant
 parser is a separately named diagnostic and never receives `native` credit.
 `workflow` names the sandbox profile so retrieval gold is only answerable there;
-this foundation ships **no workflow renderer or parser** (WP3/WP4 own it).
+WP3/WP4 own its renderer, tools and execution.
 
 ## Frozen `contracts` API
 
@@ -75,6 +120,11 @@ build_policy_request(msg, policy, categories=None, owner="") -> {..., "profile":
 
 build_full_context_request(msg, full_body, categories=None, owner="") -> {
     ..., "profile": "full_context"}   # body up to FULL_CONTEXT_LIMIT=6000, not 1500
+
+rendered_input_hash(rendered, mailbox=None, tools=None) -> sha256
+# THE semantic request hash shared by adapters, runner and scorer: covers
+# profile/system/user/owner/categories/params + trusted policy + (workflow)
+# mailbox/tools.  An adapter's wire-payload digest is recorded separately.
 
 parse_native_response(content) -> dict        # mirrors classify()
 native_output(result) -> {category, needs_reply, confidence, summary, reason}

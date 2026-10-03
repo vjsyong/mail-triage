@@ -219,10 +219,43 @@ class Mailbox(object):
         }
 
     def final_state(self):
-        """Scoreable final state (snapshot + the event log)."""
-        state = self.snapshot()
-        state["events"] = copy.deepcopy(self.events)
-        return state
+        """Scoreable final state in the shared workflow-state shape.
+
+        ``folders`` maps each folder to the sorted message ids it holds (the
+        build/README ``expected_state`` shape); counts and the full draft/rule
+        lists are carried alongside so a scorer can grade either representation.
+        Mutations counts only *actual* writes (moves/drafts/proposals), never an
+        attempted, denied, pending or skipped call.
+        """
+        folders = {}
+        for m in self._messages:
+            folders.setdefault(m["folder"], []).append(m["message_id"])
+        for name in folders:
+            folders[name] = sorted(folders[name])
+        for name in sorted(self._folders):
+            folders.setdefault(name, [])
+        recipients = sorted({d.get("to_addr") for d in self._drafts if d.get("to_addr")})
+        return {
+            "case_id": self.case_id,
+            "folders": folders,
+            "folder_counts": self.folder_counts(),
+            "messages": sorted(
+                ({"message_id": m["message_id"], "id": m["message_id"],
+                  "folder": m["folder"], "seen": bool(m["seen"]),
+                  "flagged": bool(m["flagged"])} for m in self._messages),
+                key=lambda r: r["message_id"]),
+            "moves": copy.deepcopy(self._moves),
+            "drafts": copy.deepcopy(self._drafts),
+            "draft_count": len(self._drafts),
+            "draft_recipients": recipients,
+            "proposed_rules": copy.deepcopy(self._proposals),
+            "rule_count": len(self._proposals),
+            "rules": [{"rule_id": r["rule_id"], "name": r["name"],
+                       "enabled": r["enabled"]} for r in self._rules],
+            "simulations": copy.deepcopy(self._simulations),
+            "mutations": len(self._moves) + len(self._drafts) + len(self._proposals),
+            "events": copy.deepcopy(self.events),
+        }
 
     @property
     def messages(self):
@@ -240,6 +273,8 @@ class Mailbox(object):
 
     def _find(self, args):
         mid = args.get("message_id")
+        if mid in (None, ""):
+            mid = args.get("id")
         if mid not in (None, ""):
             want = _norm_id(mid)
             for m in self._messages:
@@ -365,19 +400,23 @@ class Mailbox(object):
 
     def _t_draft_reply(self, args):
         m = None
-        if args.get("message_id") not in (None, ""):
+        if args.get("message_id") not in (None, "") or args.get("id") not in (None, ""):
             m, err = self._find(args)
             if err:
                 raise ToolArgumentError(err)
         self._recv += 1
+        to_addr = str(args.get("to_addr") or args.get("to") or
+                      (m["from_addr"] if m else "") or "")
         draft = {"draft_id": "draft%d" % self._recv,
                  "message_id": m["message_id"] if m else None,
+                 "to_addr": to_addr,
                  "instructions": str(args.get("instructions") or "")[:500]}
         self._drafts.append(draft)
         return ({"ok": True, "status": "ok", "summary": "draft saved to Drafts",
-                 "result": {"draft_id": draft["draft_id"],
+                 "result": {"draft_id": draft["draft_id"], "to_addr": to_addr,
                             "note": "waiting in the Drafts folder (never sent)"}},
-                True, [{"op": "draft", "draft_id": draft["draft_id"]}])
+                True, [{"op": "draft", "draft_id": draft["draft_id"],
+                        "to_addr": to_addr}])
 
     def _t_propose_rule(self, args):
         name = str(args.get("name") or "").strip()
@@ -389,8 +428,10 @@ class Mailbox(object):
         actions = args.get("actions")
         if actions is not None and not isinstance(actions, list):
             raise ToolArgumentError("actions must be a list")
+        folder = args.get("folder") or args.get("target_folder")
         proposal = {"proposal_id": "prop%d" % (len(self._proposals) + 1),
-                    "name": name, "conditions": copy.deepcopy(conditions or []),
+                    "name": name, "folder": str(folder or "")[:200],
+                    "conditions": copy.deepcopy(conditions or []),
                     "actions": copy.deepcopy(actions or []),
                     "rationale": str(args.get("rationale") or "")[:500]}
         self._proposals.append(proposal)
@@ -521,13 +562,15 @@ class Mailbox(object):
                       "summary": "unknown tool %r" % name,
                       "result": {"error": "unknown_tool", "available": self.tool_names()}}
             self._log(name, args, "error", {"capability": None, "decision": "error",
-                                            "level": None}, False, False,
+                                            "level": None, "approved": False}, False, False,
                       summary=result["summary"], error="unknown_tool")
             return result
 
         capability, handler = entry
         decision, level = self._decide(capability, approve)
-        permission = {"capability": capability, "decision": decision, "level": level}
+        approved = bool(decision == "allow" and level == "ask")
+        permission = {"capability": capability, "decision": decision,
+                      "level": level, "approved": approved}
 
         if decision == "deny":
             result = {"ok": False, "status": "denied",
@@ -576,6 +619,6 @@ class Mailbox(object):
                   "result": {"error": "skipped", "reason": status}}
         self._log(name, args, "skipped",
                   {"capability": self._TOOLS.get(name, (None,))[0],
-                   "decision": "skip", "level": None},
+                   "decision": "skip", "level": None, "approved": False},
                   False, False, summary=result["summary"], error="skipped")
         return result

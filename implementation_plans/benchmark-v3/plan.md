@@ -1,7 +1,10 @@
 # Benchmark v3 implementation plan (accepted WP0-WP7)
 
-Status: **WP0-WP1 delivered in this package**; WP2-WP7 are planned and owned by
-later disjoint packages. This file records the user's accepted plan, not a new
+Status: **WP0-WP5 delivered** (spec/schemas/contracts, dataset builder, workflow
+sandbox, adapters/runner/CLI, scoring/statistics/gates). WP6 review tooling and
+WP7 baseline tooling exist, but **human review/seal, real-mail authorization and
+CPU hardware qualification are pending** and are never asserted by the
+synthetic-only checkout. This file records the user's accepted plan, not a new
 expansion of scope. Design authority: `specs/benchmark-v3.spec.md`.
 
 Delivery sequence:
@@ -67,7 +70,7 @@ changed-identity resume refusal).
 
 ---
 
-## WP2 — Scenario builder, lineage and split enforcement  (planned)
+## WP2 — Scenario builder, lineage and split enforcement  ✅ delivered
 
 **Owned areas:** `benchmarks/v3/build/`, public development fixtures.
 
@@ -82,7 +85,7 @@ attack or counterfactual pairs fail lint.
 
 ---
 
-## WP3 — Workflow sandbox  (planned)
+## WP3 — Workflow sandbox  ✅ delivered
 
 **Owned areas:** `benchmarks/v3/sandbox/`, workflow fixtures/tests.
 
@@ -97,7 +100,7 @@ ids and unsupported tools return explicit errors.
 
 ---
 
-## WP4 — Adapters, runner and run identity  (planned)
+## WP4 — Adapters, runner and run identity  ✅ delivered
 
 **Owned areas:** `benchmarks/v3/adapters/`, runner/CLI, manifests.
 
@@ -115,7 +118,7 @@ earns capability credit; changed inputs/prompts/models block resume.
 
 ---
 
-## WP5 — Scoring, statistics and executable gates  (planned)
+## WP5 — Scoring, statistics and executable gates  ✅ delivered
 
 **Owned areas:** `benchmarks/v3/scoring/`, `policy/`, report generation.
 
@@ -132,7 +135,7 @@ comparison paths use the configured statistical protocol.
 
 ---
 
-## WP6 — Pilot, annotation and dataset freeze  (planned)
+## WP6 — Pilot, annotation and dataset freeze  ⚠ tooling available; human review/seal pending
 
 **Outputs:** reviewed pilot, annotation agreement report, finalized coverage and
 private manifests.
@@ -149,7 +152,7 @@ and states when external-validity evidence is absent.
 
 ---
 
-## WP7 — Baseline execution and release report  (planned)
+## WP7 — Baseline execution and release report  ⚠ tooling available; actual qualification/report pending
 
 Run Gemma reference, MiniCPM5-2B alone, TinyJev alone, current fusion, and
 applicable deterministic/cheap controls. Produce track eligibility matrix,

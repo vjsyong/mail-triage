@@ -4,6 +4,13 @@ This is the benchmark front page. The implementation, case set, scoring and
 policy live in [`v2/`](v2/README.md) — **v2 is the benchmark**; v1 is frozen
 under [`legacy/`](legacy/README.md) and its scores are not comparable.
 
+> A newer, self-contained benchmark lives in [`v3/`](v3/README.md). Its WP0–WP5
+> software (dataset builder, workflow sandbox, adapters/runner/CLI, scoring and
+> gates) is implemented and offline-tested; human review/seal, real-mail
+> authorization and CPU hardware qualification are **pending** and are never
+> asserted by the synthetic-only tree. v2 remains the frozen historical
+> regression track and its evidence below is unchanged.
+
 Curated results and root-cause notes from the first full v2 evaluation cycle.
 Raw run artifacts live in `v2/results/<run_id>/` (gitignored); the markdown
 reports under `v2/reports/` are committed as the evidence snapshots.
