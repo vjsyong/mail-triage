@@ -15,6 +15,7 @@ shapes for collaborators are documented in ``build/README.md``.
 """
 import json
 import os
+from collections import Counter
 
 from ..common.hashing import hash_obj
 from ..common.validation import ValidationError
@@ -85,6 +86,11 @@ def _subset_bundle(bundle, splits):
     metadata["counts"] = counts
     metadata["components"] = components
     metadata["split_counts"] = {
+        "triage": dict(Counter(l["partition"] for l in keep_lineage
+                               if str(l.get("root_id", "")).startswith("scn_r"))),
+        "workflow": dict(Counter(l["partition"] for l in keep_lineage
+                                 if str(l.get("root_id", "")).startswith("scn_w"))),
+        "cases": dict(Counter(c["split"] for c in keep_cases)),
         "triage_components": components["triage"]["by_split"],
         "workflow_components": components["workflow"]["by_split"],
     }
