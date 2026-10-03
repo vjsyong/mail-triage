@@ -54,6 +54,9 @@ How this folder is organised: by what you need, not by when it was written.
   600-case v2 methodology, acceptance policy, and offline reproduction
 - [rag-lite-report.md](rag-lite-report.md) - consolidated RAG evaluation:
   retrieval ablations, CPU tradeoffs, live validation, and limitations
+- [fusion-lab.md](fusion-lab.md) - TinyJev+MiniCPM local fusion (try-out rig):
+  the A/B Fusion Lab plugin, the fusion sidecar, the assistant
+  primary/fallback switch, and the measured v2 numbers (2026-10-03)
 - [flows-builder-v2.md](flows-builder-v2.md) - flow canvas (trigger -> filters -> steps)
 - [flows-fuzzy-classifier.md](flows-fuzzy-classifier.md) - AI category + about-topic
   conditions for flows

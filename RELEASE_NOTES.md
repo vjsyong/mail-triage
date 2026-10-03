@@ -6,7 +6,8 @@ Prepared October 3, 2026. This release is a draft pending publication.
 
 Mail Triage is a self-hosted assistant for **one mailbox**, used daily by its
 author. This release packages the current application and its engineering
-evidence; it does not include the planned CPU agent fusion.
+evidence, including an optional experimental Fusion Lab. A fully evaluated CPU
+agent deployment remains a future milestone.
 
 ### Included
 
@@ -21,6 +22,9 @@ evidence; it does not include the planned CPU agent fusion.
 - Built-in OAuth proxy integration and a permission-gated plugin SDK/runtime.
 - A 600-case model evaluation harness, committed comparison snapshots, historical
   v1 evidence, and a consolidated retrieval evaluation report.
+- An experimental TinyJev + MiniCPM classification-comparison plugin and optional
+  sidecar, plus a primary/fallback endpoint switch for assistant chat. The lab is
+  opt-in and does not replace the default triage pipeline.
 
 ### Deployment scope
 
@@ -40,6 +44,9 @@ been validated. Model and mailbox-provider compatibility require configuration.
   models. AI auto-filing is opt-in; sending and Trash are disabled by default.
 - **Learning scope:** the lifecycle is a first implemented slice, not a fully
   autonomous self-improving system. Broader routing/model kinds remain roadmap work.
+- **Fusion scope:** reported classification experiments do not establish full
+  acceptance or end-to-end CPU agent performance. The sidecar's 2B endpoint is
+  served separately; raw spike artifacts are not distributed.
 - **Reproduction:** model report snapshots are committed, but raw v2 runs are
   not distributed. The historical retrieval study used a private corpus; its
   aggregate figures cannot be recreated from a clean clone alone.
@@ -75,12 +82,12 @@ claim.
 
 | Check | Result |
 | --- | --- |
-| Full mock app suite | 868 passed, 0 failed on the host and in the Python 3.12 release image |
+| Full mock app suite | 885 passed, 0 failed on the host and in the Python 3.12 release image, including the integrated experimental fusion lab |
 | Offline proxy integration suite | 26 passed, 0 failed in the release image |
 | Benchmark v2 tests | 52 passed, 0 failed in the release image |
 | Benchmark lint | Passed; existing truncation-boundary warnings retained |
 | Snapshot/harness fidelity checks | 9 passed |
-| Reader-facing documentation | 116 local links and anchors checked; no missing targets |
+| Reader-facing documentation | 119 local links and anchors checked; no missing targets |
 | Compose configuration and Docker build | Passed; the build reused cached dependency layers |
 | Fresh-container smoke | HTTP 200 health endpoint, unconfigured doctor output, host alias resolution, and no broken Python requirements |
 | Browser verification | 393px phone and 1440px desktop; wizard skip/exit reach the dashboard, setup help remains visible, no horizontal overflow or browser errors observed |

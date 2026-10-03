@@ -1109,6 +1109,7 @@ def llm_config():
         "model": pick("llm_model", config.LLM_MODEL) or "",
         "thinking": store.get_setting("llm_thinking") or "auto",
         "timeout": int(store.get_setting("llm_timeout") or config.LLM_TIMEOUT),
+        "assistant_use_fallback": bool(store.get_setting("assistant_use_fallback", 0)),
         "fallback": None,
     }
     fb_base = pick("llm_fallback_base_url", config.LLM_FALLBACK_BASE_URL)
@@ -1148,6 +1149,7 @@ class LLMClient:
         self.model = c["model"]
         self.thinking = c["thinking"]
         self.timeout = c["timeout"]
+        self.assistant_use_fallback = c.get("assistant_use_fallback", False)
         self.fallback = None
         if c["fallback"]:
             fb = c["fallback"]
@@ -1230,11 +1232,15 @@ class LLMClient:
     def chat_stream(self, system, messages, tools=None, thinking=True):
         """Stream one chat turn against the primary endpoint, yielding event dicts:
         reasoning_delta / content_delta / tool_calls / turn_done. When the primary
-        fails before producing any output, the fallback endpoint serves instead."""
+        fails before producing any output, the fallback endpoint serves instead.
+        With the assistant_model=fallback setting the order flips so the fallback
+        is tried first (primary stays the safety net)."""
         send_thinking = bool(thinking) and self.thinking != "off"
-        attempts = [(self.base, self.key, self.model, "primary '%s'" % self.model)]
+        primary = (self.base, self.key, self.model, "primary '%s'" % self.model)
+        attempts = [primary]
         if self.fallback:
-            attempts.append((*self.fallback, "fallback '%s'" % self.fallback[2]))
+            fb = (*self.fallback, "fallback '%s'" % self.fallback[2])
+            attempts = [fb, primary] if self.assistant_use_fallback else [primary, fb]
         for i, (base, key, model, label) in enumerate(attempts):
             produced = False
             try:

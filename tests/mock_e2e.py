@@ -5190,6 +5190,150 @@ def main():
     check("template delete announces the removal",
           b'class="msg ok"' in r.data and b"deleted." in r.data)
 
+    section("T59 assistant fallback-model switch", "assistant", "core")
+    _l_front = {k: store.get_setting(k) for k in (
+        "llm_base_url", "llm_model", "llm_fallback_base_url", "llm_fallback_model")}
+    _fb_was = store.get_setting("assistant_use_fallback")
+    _llm_mock = "http://127.0.0.1:%d/v1" % llm_port
+    client.post("/settings", data={"section": "llm", "llm_base_url": _llm_mock,
+                                   "llm_model": "mock-primary",
+                                   "llm_fallback_base_url": _llm_mock,
+                                   "llm_fallback_model": "settings-fb"})
+    _c = engine.LLMClient()
+    check("test rig: primary + fallback configured",
+          _c.base == _llm_mock and _c.fallback == (_llm_mock, "", "settings-fb"))
+    _r = client.post("/settings/assistant-model",
+                     data={"assistant_use_fallback": "1", "next": "/settings#ai"},
+                     follow_redirects=False)
+    check("assistant-model toggle saves and redirects",
+          _r.status_code == 302 and bool(store.get_setting("assistant_use_fallback")))
+    check("LLMClient exposes the assistant preference",
+          engine.LLMClient().assistant_use_fallback is True)
+    _n0 = len(llm_server.calls)
+    list(engine.LLMClient().chat_stream("You are a plain test bot.",
+                                        [{"role": "user", "content": "switch-probe"}],
+                                        tools=None, thinking=False))
+    _hits = llm_server.calls[_n0:]
+    check("assistant streams from the fallback endpoint when selected",
+          bool(_hits) and _hits[0]["payload"].get("model") == "settings-fb")
+    _pg = client.get("/assistant")
+    check("the assistant page shows the fallback model badge",
+          b"fallback:" in _pg.data and b"settings-fb" in _pg.data)
+    client.post("/settings/assistant-model", data={"next": "/settings#ai"})
+    _n0 = len(llm_server.calls)
+    list(engine.LLMClient().chat_stream("You are a plain test bot.",
+                                        [{"role": "user", "content": "switch-probe-2"}],
+                                        tools=None, thinking=False))
+    _hits = llm_server.calls[_n0:]
+    check("turning the switch off returns the assistant to the primary",
+          bool(_hits) and _hits[0]["payload"].get("model") == "mock-primary")
+    for _k, _v in _l_front.items():
+        store.set_setting(_k, _v if _v is not None else "")
+    store.set_setting("assistant_use_fallback", _fb_was or 0)
+
+    section("T60 fusion lab: primary vs fallback vs TinyJev+MiniCPM fusion", "plugins")
+    shutil.copytree(os.path.join(PROJECT, "plugins", "mt-fusion-lab"),
+                    os.path.join(broot, "mt-fusion-lab"), dirs_exist_ok=True)
+    plugins_mod.scan()
+    _row = plugins_mod.get("mt-fusion-lab")
+    check("fusion lab registers as a trusted tool plugin",
+          bool(_row) and _row["root"] == "builtin"
+          and _row["manifest"]["kind"] == ["tool"]
+          and plugins_mod.ui_mode(_row) == "trusted"
+          and plugins_mod.ui_operations(_row) == ["list_messages", "compare_message"])
+    _tools = {t["name"]: t for t in _row["manifest"]["tools"]}
+    check("fusion lab ops are hidden read-only tools",
+          all(_tools[n]["surface"] == "hidden" and _tools[n]["side_effects"] == "none"
+              for n in ("list_messages", "compare_message")))
+    check("fusion lab allowlists its fusion hosts",
+          "127.0.0.1" in (_row["manifest"]["net"]["hosts"] or []))
+    plugins_mod.set_enabled("mt-fusion-lab", True)
+    check("enabling grants the declared capabilities",
+          set(plugins_mod.get("mt-fusion-lab")["grants"])
+          == {"mailbox.read", "llm.complete", "net.http"})
+
+    class _FusionHTTP(BaseHTTPRequestHandler):
+        def do_POST(self):
+            _n = int(self.headers.get("Content-Length") or 0)
+            json.loads(self.rfile.read(_n) or b"{}")
+            _out = {"category": "Action", "category_confidence": 0.91,
+                    "category_probabilities": {"Action": 0.91, "Notification": 0.09},
+                    "needs_reply": True, "needs_reply_confidence": 0.9,
+                    "summary": "fusion summary", "reason": "asks to act",
+                    "components": {"tinyjev_ms": 12.5, "llm_ms": None},
+                    "latency_ms": 50.0, "error": None}
+            _body = json.dumps(_out).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(_body)))
+            self.end_headers()
+            self.wfile.write(_body)
+
+        def log_message(self, *a):
+            pass
+
+    _fsrv = ThreadingHTTPServer(("127.0.0.1", 0), _FusionHTTP)
+    threading.Thread(target=_fsrv.serve_forever, daemon=True).start()
+    _l_front2 = {k: store.get_setting(k) for k in (
+        "llm_base_url", "llm_model", "llm_fallback_base_url", "llm_fallback_model")}
+    client.post("/settings", data={"section": "llm", "llm_base_url": _llm_mock,
+                                   "llm_model": "mock-primary",
+                                   "llm_fallback_base_url": _llm_mock,
+                                   "llm_fallback_model": "settings-fb"})
+    plugins_mod.set_config("mt-fusion-lab", {
+        "fusion_url": "http://127.0.0.1:%d" % _fsrv.server_address[1],
+        "categories": "Action,Notification"})
+    _msg = store.messages(limit=1)[0]
+    _res = rt_mod.runtime.invoke("mt-fusion-lab", "compare_message",
+                                 {"message_id": _msg["id"]})
+    _data = _res.get("result") or {}
+    if not (_data.get("fusion") or {}).get("ok"):
+        print("  [debug] fusion invoke:", json.dumps(_res)[:1200])
+    check("fusion lab tool returns primary + fallback + fusion verdicts",
+          _res.get("ok") and _data.get("primary", {}).get("ok")
+          and _data.get("fallback", {}).get("ok")
+          and (_data.get("fusion") or {}).get("verdict", {}).get("category") == "Action"
+          and _data.get("primary", {}).get("verdict", {}).get("category"))
+    check("fusion verdict keeps its component timings",
+          _data.get("fusion", {}).get("verdict", {}).get("components", {})
+          .get("tinyjev_ms") == 12.5)
+    _lres = rt_mod.runtime.invoke("mt-fusion-lab", "list_messages", {"limit": 5})
+    _msgs = (_lres.get("result") or {}).get("messages") or []
+    check("fusion lab list op returns indexed messages",
+          _lres.get("ok") and 0 < len(_msgs) <= 5
+          and all("id" in m and "subject" in m for m in _msgs))
+    check("fusion lab view stays unapproved until the user approves it",
+          not ui_mod.is_approved(plugins_mod.get("mt-fusion-lab")))
+    client.post("/plugins/mt-fusion-lab/ui-approve",
+                headers={"Origin": "http://localhost"}, follow_redirects=False)
+    _pg = client.get("/extensions/mt-fusion-lab/lab")
+    check("approved fusion lab page renders the sandboxed frame",
+          _pg.status_code == 200 and b'sandbox="allow-scripts"' in _pg.data)
+    _mm = re.search(rb'id="mt-ext-cfg">(\{.*?\})</script>', _pg.data, re.S)
+    _sid = (json.loads(_mm.group(1).decode()) if _mm else {}).get("sid") or ""
+    _rpc = client.post("/extensions/mt-fusion-lab/lab/rpc",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _sid,
+                                "X-MT-Op": "list_messages"},
+                       data=json.dumps({"op": "list_messages", "args": {"limit": 3}}),
+                       content_type="application/json")
+    check("fusion lab page lists messages through its declared op",
+          (_rpc.get_json() or {}).get("ok") is True
+          and len(((_rpc.get_json() or {}).get("data") or {}).get("messages") or []) > 0)
+    _rpc = client.post("/extensions/mt-fusion-lab/lab/rpc",
+                       headers={"Origin": "http://localhost", "X-MT-Session": _sid,
+                                "X-MT-Op": "compare_message"},
+                       data=json.dumps({"op": "compare_message",
+                                        "args": {"message_id": _msg["id"]}}),
+                       content_type="application/json")
+    check("fusion lab page compares one message end to end",
+          (_rpc.get_json() or {}).get("ok") is True)
+    client.post("/plugins/mt-fusion-lab/ui-revoke",
+                headers={"Origin": "http://localhost"}, follow_redirects=True)
+    plugins_mod.set_enabled("mt-fusion-lab", False)
+    _fsrv.shutdown()
+    for _k, _v in _l_front2.items():
+        store.set_setting(_k, _v if _v is not None else "")
+
     # ==== suite tail (always runs, even in a partial run) ====
     if globals().get("_PARTIAL_NOTE"):
         print("\n" + globals()["_PARTIAL_NOTE"])

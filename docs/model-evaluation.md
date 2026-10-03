@@ -106,5 +106,6 @@ and need adaptation to your hardware and model paths.
   they do not prove that every prompt still matches every current app call site.
 - **CPU agent roadmap:** evaluate a MiniCPM 2B + TinyJev fusion against each
   component and the existing baseline, measuring task success, critical failures,
-  sequential latency, and memory on named CPU hardware. That deployment is not
-  included in the current release.
+  sequential latency, and memory on named CPU hardware. An
+  [experimental classification lab](fusion-lab.md) and optional sidecar are now
+  included; a fully evaluated CPU agent deployment remains a separate milestone.
