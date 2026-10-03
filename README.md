@@ -203,6 +203,74 @@ See [Getting started](docs/getting-started.md) for hardware tiers, local model
 options, and account setup. See [Deployment](docs/deployment.md) for remote access,
 TLS, backups, and upgrades.
 
+### Deploy with your coding agent
+
+Give the prompt below to a terminal-capable coding agent on the machine where
+you want to run Mail Triage. It can handle installation and checks; you complete
+mailbox authorization in your browser. The app's model endpoint remains your choice.
+
+<details>
+<summary><strong>Copy-paste deployment prompt</strong></summary>
+
+```text
+Set up Mail Triage on this machine:
+https://github.com/vjsyong/mail-triage
+
+Carry out the deployment, rather than only giving me instructions. Read the
+repository's AGENTS.md, README.md, docs/getting-started.md, and docs/deployment.md
+before making changes. Use the supported Docker Compose deployment path.
+
+1. Inspect the OS, Docker/Compose availability, available RAM/disk, and port
+   conflicts. If Docker is missing, explain the required installation and ask
+   before making privileged host changes. If the repo is inaccessible, ask me
+   to provide access; do not request credentials in chat.
+
+2. Ask only for missing choices: mailbox provider, whether I want a local LLM,
+   an existing OpenAI-compatible endpoint, or no LLM for now, and whether access
+   should be local or remote. If I already have an endpoint, reuse it. Before
+   downloading model weights, explain the model choice, resource requirements,
+   and measured compatibility limits. Do not select a hosted API or cloud
+   fallback without my choice.
+
+3. Clone the repository into a suitable directory, or inspect an existing
+   checkout. Preserve existing changes, .env, data/, and ragmodels/. Back up
+   existing persistent state before an upgrade; do not reset or replace it.
+
+4. Create .env from .env.example only if it does not exist. Configure the chosen
+   endpoint, or leave LLM_BASE_URL and LLM_MODEL blank. Keep secrets out of chat,
+   logs, and Git. For an LLM on the Docker host, use host.docker.internal and
+   verify that the model server is reachable from the container; container
+   127.0.0.1 is not the host. Keep the default CPU retrieval backend. Leave
+   experimental fusion services and plugins off unless I request them.
+
+5. Validate with docker compose config --quiet, then build and start the app
+   with docker compose up -d --build. Wait for /healthz to return HTTP 200 at
+   http://127.0.0.1:8097. Run docker exec mail-triage python app.py --doctor
+   and inspect logs if startup or endpoint checks fail. A healthy web process
+   alone does not prove the mailbox, LLM, or index is ready.
+
+6. Open the setup wizard, or give me the URL if you cannot use a browser. Guide
+   me through the Accounts page and provider authorization; let me complete
+   sign-in, consent, and MFA myself. Do not hand-edit generated proxy config.
+   Explain CPU model downloads and indexing cost before starting the index.
+   For a new install, retain the defaults: AI auto-filing off, sending/Trash off,
+   and learning in shadow mode. Preserve existing preferences during upgrades.
+   Ask before enabling rules or actions that move or send real mail.
+
+7. Verify mailbox connectivity with the app's checks, then read-only search
+   after indexing and assistant responses if an LLM is configured. For remote
+   access, keep the app loopback-bound and configure authenticated proxy or VPN
+   forwarding; the app has no built-in login. Do not expose port 8097 directly.
+
+Finish with a concise handoff: install directory, access URL, model configuration
+without secrets, checks passed, anything still unverified or waiting on me, and
+the commands for status, logs, restart, upgrades, and backups. Distinguish a
+running app from a fully connected and indexed mailbox; do not claim unfinished
+steps succeeded.
+```
+
+</details>
+
 ## How it works
 
 One container runs the web UI, background worker, and embedded OAuth mail proxy.
