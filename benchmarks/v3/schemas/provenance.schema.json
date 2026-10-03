@@ -1,0 +1,29 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v3 source provenance",
+ "type": "object",
+ "required": ["schema_version", "provenance_id", "source", "source_release",
+              "license", "retrieval", "content_sha256", "authorization"],
+ "additionalProperties": true,
+ "properties": {
+  "schema_version": {"const": "v3.0"},
+  "provenance_id": {"type": "string", "minLength": 1},
+  "source": {"enum": ["synthetic", "real_mail", "public_corpus"]},
+  "source_release": {"type": "string", "minLength": 1},
+  "license": {"type": "string", "minLength": 1},
+  "retrieval": {"type": "string", "minLength": 1},
+  "content_sha256": {"type": "string", "minLength": 1},
+  "reference_style": {"type": "string"},
+  "authorization": {
+   "type": "object",
+   "required": ["authorized"],
+   "additionalProperties": true,
+   "properties": {
+    "authorized": {"type": "boolean"},
+    "authorized_by": {"type": ["string", "null"]},
+    "authorization_ref": {"type": ["string", "null"]}
+   }
+  },
+  "notes": {"type": "string"}
+ }
+}
