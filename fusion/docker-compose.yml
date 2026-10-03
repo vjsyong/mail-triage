@@ -7,6 +7,14 @@
 #   benchmarks/serving/serve_llamacpp.sh /path/to/MiniCPM5-2B-Q4_K_M.gguf minicpm5-2b 8042 32768 4 --no-reasoning-preserve
 # For the fusion prompt note that thinking is disabled per request; no extra
 # server flags are needed.
+#
+# The TinyJev model is baked into the image; the port opens immediately while
+# the model loads in the background (~8s), /healthz returns 503 until ready.
+#
+# The service joins the app's compose network (mail-triage_default) with the
+# alias "fusion" so the plugin's default http://fusion:8098 resolves from
+# inside the mail-triage container. Start the app stack first (it creates the
+# network); set MT_NETWORK if your app project uses another name.
 services:
   fusion:
     build: .
@@ -21,9 +29,18 @@ services:
       TINYJEV_DEVICE: "cpu"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-      - fusion-hf:/data/hf
+    networks:
+      - mt
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8098/healthz', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
 
-volumes:
-  fusion-hf:
+networks:
+  mt:
+    name: ${MT_NETWORK:-mail-triage_default}
+    external: true
+

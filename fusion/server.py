@@ -66,6 +66,7 @@ LLM_TIMEOUT = float(os.environ.get("FUSION_LLM_TIMEOUT") or 60)
 
 _lock = threading.Lock()
 _agent = None
+_ready = threading.Event()
 
 
 def _llm_call(state):
@@ -167,14 +168,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.split("?")[0] in ("/healthz", "/health"):
-            self._send(200, {"ok": True, "model": TINYJEV_MODEL, "llm": LLM_BASE or None,
-                             "llm_model": LLM_MODEL})
+            if _ready.is_set():
+                self._send(200, {"ok": True, "model": TINYJEV_MODEL, "llm": LLM_BASE or None,
+                                 "llm_model": LLM_MODEL})
+            else:
+                self._send(503, {"ok": False, "loading": True, "model": TINYJEV_MODEL})
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
         if self.path.split("?")[0] != "/classify":
             self._send(404, {"error": "not found"})
+            return
+        if not _ready.is_set():
+            self._send(503, {"error": "model still loading; retry in a few seconds"})
             return
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -191,7 +198,8 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def main():
+def _load():
+    """Load TinyJev + warm up off the request path; /healthz flips to 200 when done."""
     global _agent
     t0 = time.time()
     import tinyjev
@@ -200,8 +208,15 @@ def main():
         "category": {"type": "choice", "instructions": "category?",
                      "criteria": {CATEGORIES[0]: DESC[CATEGORIES[0]],
                                   CATEGORIES[1]: DESC[CATEGORIES[1]]}}}})
+    _ready.set()
     print("fusion ready in %.1fs (tinyjev=%s device=%s llm=%s model=%s)"
           % (time.time() - t0, TINYJEV_MODEL, TINYJEV_DEVICE, LLM_BASE or "-", LLM_MODEL), flush=True)
+
+
+def main():
+    print("fusion loading (tinyjev=%s device=%s llm=%s model=%s)..."
+          % (TINYJEV_MODEL, TINYJEV_DEVICE, LLM_BASE or "-", LLM_MODEL), flush=True)
+    threading.Thread(target=_load, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

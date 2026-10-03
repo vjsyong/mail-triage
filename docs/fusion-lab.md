@@ -50,6 +50,9 @@ boilerplate mail (TinyJev category drops; a >4k-char fallback fixes it) and the
 2. Start the sidecar:
    `docker compose -f fusion/docker-compose.yml up -d --build`
    (`FUSION_LLM_BASE_URL` points at the 2B; default `host.docker.internal:8042/v1`.)
+   The TinyJev model is baked into the image and loaded offline; the port opens
+   immediately and `/healthz` answers 503 until the model is ready (~8s: torch +
+   transformers imports ~3.4s, weights ~3.7s, first forward ~1.2s).
 3. In the app: enable **Fusion Lab** on the Plugins page (grant `mailbox.read`,
    `llm.complete`, `net.http`), set the Fusion service URL if not
    `http://fusion:8098`, then approve the browser view once.
