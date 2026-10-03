@@ -992,8 +992,9 @@ html{touch-action:manipulation;overscroll-behavior-y:contain}
 .px-dz{display:block;color:var(--dim);font-size:.83rem;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .px-sw{display:inline-flex;align-items:center;cursor:pointer;margin:0;position:relative}
 .px-sw input{position:absolute;opacity:0;width:1px;height:1px}
+form.px-swf{display:flex;align-items:center}
 .px-sw .px-tr{width:36px;height:21px;border:1px solid var(--line2);background:var(--card2);position:relative;transition:background .12s,border-color .12s;display:inline-block}
-.px-sw .px-tr::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;background:#fff;border:1px solid var(--line2);transition:transform .12s,border-color .12s}
+.px-sw .px-tr::after{content:"";box-sizing:border-box;position:absolute;top:2px;left:2px;width:15px;height:15px;background:#fff;border:1px solid var(--line2);transition:transform .12s,border-color .12s}
 .px-sw input:checked+.px-tr{background:var(--acc);border-color:var(--acc)}
 .px-sw input:checked+.px-tr::after{transform:translateX(15px);border-color:transparent}
 .px-sw input:focus-visible+.px-tr{outline:2px solid var(--acc);outline-offset:2px}
@@ -2639,7 +2640,7 @@ RULES_TMPL = """
         <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" title="move up" aria-label="Move rule up">↑</button></form>
         <form class="inline" method="post" action="{{ url_for('rule_move', rule_id=r.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" title="move down" aria-label="Move rule down">↓</button></form>
         </span>
-        <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}">
+        <form class="inline px-swf" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}">
           <label class="px-sw" title="{{ 'Disable' if r.enabled else 'Enable' }} {{ r.name }}"><input type="checkbox" {{ 'checked' if r.enabled }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if r.enabled else 'Enable' }} {{ r.name }}"><span class="px-tr"></span></label>
         </form>
         <a class="btn small ra-inline" href="{{ url_for('rule_edit', rule_id=r.id) }}">Edit</a>
@@ -2696,7 +2697,7 @@ PLUGINS_TMPL = """
       <span class="px-nm">{{ p.name }} <span class="badge">{{ p.version }}</span> <span class="badge">{{ p.kind_label }}</span>{% if p.needs_regrant %} <span class="badge warn">needs re-grant</span>{% endif %}{% if p.problem %} <span class="badge warn">issue</span>{% endif %}</span>
       <span class="px-dz">{{ p.oneliner }}</span>
     </a>
-    <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline">
+    <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline px-swf">
       <input type="hidden" name="action" value="disable">
       <label class="px-sw" title="Disable {{ p.name }}"><input type="checkbox" checked onchange="this.form.requestSubmit()" aria-label="Disable {{ p.name }}"><span class="px-tr"></span></label>
     </form>
@@ -2716,7 +2717,7 @@ PLUGINS_TMPL = """
       <span class="px-nm">{{ p.name }} <span class="badge">{{ p.version }}</span> <span class="badge">{{ p.kind_label }}</span>{% if p.needs_regrant %} <span class="badge warn">needs re-grant</span>{% endif %}{% if p.problem %} <span class="badge warn">issue</span>{% endif %}</span>
       <span class="px-dz">{{ p.oneliner }}</span>
     </a>
-    <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline">
+    <form method="post" action="{{ url_for('plugins_update', pid=p.id) }}" class="inline px-swf">
       <input type="hidden" name="action" value="enable">
       <label class="px-sw" title="Enable {{ p.name }}"><input type="checkbox" onchange="this.form.requestSubmit()" aria-label="Enable {{ p.name }}"><span class="px-tr"></span></label>
     </form>
@@ -3189,7 +3190,7 @@ CLASSIFIERS_TMPL = """
       <td class="sub">{{ h.when }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
         <a class="btn small" href="{{ url_for('classifier_dataset', hid=h.id) }}">Dataset</a>
-        <form class="inline" method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}">
+        <form class="inline px-swf" method="post" action="{{ url_for('classifier_toggle', hid=h.id) }}">
           <label class="px-sw" title="{{ 'Disable' if h.enabled else 'Enable' }} {{ h.name }}"><input type="checkbox" {{ 'checked' if h.enabled }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if h.enabled else 'Enable' }} {{ h.name }}"><span class="px-tr"></span></label>
         </form>
         <details class="menu">
@@ -4808,7 +4809,7 @@ FLOWS_TMPL = """
         <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="up"><button class="btn small" type="submit" aria-label="Move up" {{ 'disabled' if loop.first else '' }}>&#8593;</button></form>
         <form class="inline" method="post" action="{{ url_for('flow_move', flow_id=f.id) }}"><input type="hidden" name="dir" value="down"><button class="btn small" type="submit" aria-label="Move down" {{ 'disabled' if loop.last else '' }}>&#8595;</button></form>
         </span>
-        <form class="inline" method="post" action="{{ url_for('flow_toggle', flow_id=f.id) }}">
+        <form class="inline px-swf" method="post" action="{{ url_for('flow_toggle', flow_id=f.id) }}">
           <label class="px-sw" title="{{ 'Disable' if f.enabled else 'Enable' }} {{ f.name }}"><input type="checkbox" {{ 'checked' if f.enabled }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if f.enabled else 'Enable' }} {{ f.name }}"><span class="px-tr"></span></label>
         </form>
         <details class="menu">
@@ -9521,7 +9522,7 @@ LEARN_TMPL = """<style>
   <div class="dsrow"><span class="dsk">Self-check accuracy</span><span class="dsv">{{ '%.0f' % (c.accuracy * 100) if c.accuracy is not none else '—' }}%</span></div>
   <div class="dsrow"><span class="dsk">Learned from</span><span class="dsv">{{ "{:,}".format(c.samples) if c.samples else '—' }} examples</span></div>
   <div class="row" style="margin-top:12px;align-items:center;gap:8px">
-    <form method="post" action="{{ url_for('classifier_toggle', hid=c.id) }}">
+    <form class="px-swf" method="post" action="{{ url_for('classifier_toggle', hid=c.id) }}">
       <label class="px-sw" title="{{ 'Disable' if c.status == 'live' else 'Enable' }} {{ c.name }}"><input type="checkbox" {{ 'checked' if c.status == 'live' }} onchange="this.form.requestSubmit()" aria-label="{{ 'Disable' if c.status == 'live' else 'Enable' }} {{ c.name }}"><span class="px-tr"></span></label>
     </form>
     <form method="post" action="{{ url_for('classifier_retrain', hid=c.id) }}"><button class="btn small" type="submit">Retrain</button></form>

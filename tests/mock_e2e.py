@@ -981,7 +981,16 @@ class TEIHandler(BaseHTTPRequestHandler):
 
 # ---------------------------------------------------------------- helpers
 
-def add_msg(state, frm, subj, body, msgid, folder="INBOX", date="Wed, 30 Sep 2026 10:00:00 +0800"):
+# Fixture date relative to run time: a hardcoded near-term date rots the moment
+# the wall clock passes it + lookback_hours (default 48), so the first-pass scan
+# silently stops seeing the fixtures.
+_FIXTURE_DATE = time.strftime("%a, %d %b %Y %H:%M:%S +0000",
+                              time.gmtime(time.time() - 3600))
+
+
+def add_msg(state, frm, subj, body, msgid, folder="INBOX", date=None):
+    if date is None:
+        date = _FIXTURE_DATE
     raw = ("From: %s\r\nTo: me@example.com\r\nSubject: %s\r\n"
            "Date: %s\r\nMessage-ID: <%s>\r\n"
            "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s"
@@ -1281,7 +1290,12 @@ def main():
     check("search_mail searches IMAP history",
           r["ok"] and any("budget" in (m.get("subject") or "").lower()
                           for m in r["result"]["messages"]))
-    r = agent.call_tool("search_mail", {"subject_contains": "budget", "since": "2026-10-01"})
+    _since_newer = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 86400))
+    r = agent.call_tool("search_mail", {"subject_contains": "budget", "since": _since_newer})
+    check("search_mail since filter includes newer mail",
+          r["ok"] and r["result"]["returned"] >= 1)
+    _since_future = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 86400))
+    r = agent.call_tool("search_mail", {"subject_contains": "budget", "since": _since_future})
     check("search_mail since filter excludes older mail", r["ok"] and r["result"]["returned"] == 0)
     r = agent.call_tool("search_mail", {"folder": "INBOX", "unseen_only": True})
     check("search_mail unseen filter", r["ok"] and r["result"]["total_matched"] >= 1)
@@ -5102,6 +5116,12 @@ def main():
     check("templates: armed delete + touch overflow menu",
           b"arm-del" in _tp and b"ra-menu" in _tp
           and b"confirm('Delete template" not in _tp)
+    _pp = client.get("/plugins").data
+    check("switch geometry: knob is border-box, flush-free inside its track",
+          b'.px-sw .px-tr::after{content:"";box-sizing:border-box' in _rp)
+    check("switch-only forms center their control (no baseline drift)",
+          b'class="inline px-swf"' in _rp and b'class="inline px-swf"' in _fp
+          and b'class="inline px-swf"' in _cp and b'class="inline px-swf"' in _pp)
     _dp = client.get("/").data
     check("high-stakes actions keep a consequence confirm",
           b"Rebuild the search index from scratch? Mail is untouched." in _dp)
