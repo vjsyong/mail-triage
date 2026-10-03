@@ -82,6 +82,25 @@ This is what "the model is a fusion" looks like from the app's perspective: one
 ordinary OpenAI endpoint whose classification calls happen to be decided by the
 decision head. The Fusion Lab plugin and `/classify` remain available for A/B.
 
+## CPU-only weak-system test (4 cores)
+
+To simulate a machine with no GPU - and a small one - run all three pieces pinned
+to the same four cores:
+
+1. **2B on CPU, 4 threads, no GPU offload** (the exact command is in
+   `fusion/docker-compose.yml`): `-ngl 0 --threads 4 -c 16384 --parallel 1`
+   plus `--cpuset-cpus 4-7`.
+2. **Sidecar**: `FUSION_CPUSET` (default `4-7`) and `FUSION_THREADS` (default 4,
+   applied as `OMP_NUM_THREADS`/`MKL_NUM_THREADS`) pin TinyJev to the same cores.
+3. **App**: `docker update --cpuset-cpus 4-7 mail-triage` to make the whole stack
+   share four cores; revert with the full core list (`nproc` -> `0-43`).
+
+Expected latency from the measured 4-core profile: TinyJev category p50 ~1.0 s
+(p90 2.0 s); 2B direct needs_reply p50 ~4.5 s (p90 ~23.7 s, long emails);
+fused classification p50 ~5.6 s, ~7 emails/min, ~2.7 GB model memory. A
+Raspberry-Pi-class core is 2-4x slower again, so treat this as the optimistic
+bound for weak hardware.
+
 ## Caveats
 
 - This is a classification experiment, not a complete six-suite model acceptance
