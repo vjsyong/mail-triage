@@ -34,6 +34,11 @@ def regions():
     return _load("regions.json")["regions"]
 
 
+def shift_regions():
+    """Regional forms reserved for the source/style shift axis (never dev/cal)."""
+    return _load("regions.json").get("shift_regions", [])
+
+
 def policies():
     return _load("policies.json")["policies"]
 
@@ -44,6 +49,10 @@ def policy_variants():
 
 def vocab():
     return _load("vocab.json")
+
+
+def situations():
+    return _load("situations.json")["groups"]
 
 
 def category_roles():

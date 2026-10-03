@@ -364,25 +364,42 @@ class PublicExportTest(unittest.TestCase):
             build.public_export(b)
 
 
+# A mid-size multi-split plan that is large enough to exercise real
+# near-duplicate grouping (the original full-layout collision trigger) while
+# staying cheap enough for the routine suite. The actual planned 2100/220 build
+# is exercised once by the recorded CLI validation.
+MECH_LAYOUT = {
+    "triage": {"development": 132, "calibration": 33,
+               "private_test": 66, "private_shift": 9},
+    "workflow": {"development": 12, "private_test": 12, "private_shift": 4},
+}
+
+
+def mechanism_bundle(seed=7, private_seed=1):
+    return build.build_dataset(layout=MECH_LAYOUT, seed=seed,
+                               private_seed=private_seed)
+
+
+def _axis_of(case):
+    for tag in case["tags"]:
+        if tag.startswith("shift:") and tag != "shift:none":
+            return tag.split(":", 1)[1]
+    return None
+
+
 class LayoutShiftTest(unittest.TestCase):
     def test_shift_axes_one_at_a_time(self):
-        layout = {"triage": {"development": 10, "calibration": 4,
-                             "private_test": 6, "private_shift": 6},
-                  "workflow": {"development": 3, "private_test": 3,
-                               "private_shift": 2}}
-        b = build.build_dataset(layout=layout, seed=11, private_seed=22)
-        shift_cases = [c for c in b["cases"]
-                       if c["split"] == "private_shift"]
+        b = mechanism_bundle()
+        shift_cases = [c for c in b["cases"] if c["split"] == "private_shift"]
         self.assertTrue(shift_cases)
         for case in shift_cases:
             axes = [t.split(":", 1)[1] for t in case["tags"]
                     if t.startswith("shift:") and t != "shift:none"]
             self.assertEqual(len(axes), 1, "%s has axes %s" % (case["case_id"], axes))
         axes_seen = set(b["metadata"]["coverage"]["shift_axes"])
-        self.assertTrue(axes_seen)
-        self.assertTrue(axes_seen.issubset(
-            {"unseen_policy_combo", "unseen_template_family",
-             "source_style_shift"}))
+        self.assertEqual(axes_seen,
+                         {"unseen_policy_combo", "unseen_template_family",
+                          "source_style_shift"})
 
     def test_full_layout_selectable_by_mapping(self):
         layout = {"triage": {"development": 4, "calibration": 2,
@@ -392,6 +409,148 @@ class LayoutShiftTest(unittest.TestCase):
         b = build.build_dataset(layout=layout, seed=1, private_seed=2)
         self.assertEqual(b["metadata"]["layout"], "custom")
         self.assertEqual(b["metadata"]["split_plan"]["triage"]["private_test"], 2)
+
+
+class ShiftReservationTest(unittest.TestCase):
+    """The shift axes must reserve resources that never appear in dev/cal."""
+
+    def test_shift_families_are_held_out_of_dev(self):
+        from benchmarks.v3.build import generate as G
+        b = mechanism_bundle()
+        dev_families, shift_families = set(), set()
+        for case in b["cases"]:
+            if case["task"] == "workflow":
+                continue
+            if case["split"] in ("development", "calibration"):
+                dev_families.add(case["family"])
+            elif case["split"] == "private_shift":
+                shift_families.add(case["family"])
+        self.assertTrue(shift_families)
+        self.assertFalse(dev_families & set(G.SHIFT_FAMILIES))
+        self.assertTrue(shift_families <= set(G.SHIFT_FAMILIES))
+
+    def test_each_axis_reserves_its_own_resource(self):
+        from benchmarks.v3.build import generate as G
+        b = mechanism_bundle()
+        dev_pairs, dev_regions = set(), set()
+        for case in b["cases"]:
+            if case["task"] != "workflow" and case["split"] in (
+                    "development", "calibration"):
+                dev_pairs.add((case["persona"], case["policy_id"]))
+                dev_regions.add(case["region"])
+        for axis, families in G.SHIFT_FAMILIES_BY_AXIS.items():
+            cases = [c for c in b["cases"] if c["task"] != "workflow"
+                     and _axis_of(c) == axis]
+            self.assertTrue(cases, "no cases for axis %s" % axis)
+            self.assertTrue({c["family"] for c in cases} <= set(families))
+            if axis == "unseen_policy_combo":
+                pairs = {(c["persona"], c["policy_id"]) for c in cases}
+                self.assertFalse(pairs & dev_pairs)
+            if axis == "source_style_shift":
+                self.assertFalse({c["region"] for c in cases} & dev_regions)
+
+    def test_workflow_shift_recipes_are_held_out(self):
+        b = mechanism_bundle()
+        shift = {c["tags"][-1] for c in b["cases"]
+                 if c["task"] == "workflow" and c["split"] == "private_shift"}
+        dev = {c["tags"][-1] for c in b["cases"] if c["task"] == "workflow"
+               and c["split"] in ("development", "private_test")}
+        self.assertTrue(shift)
+        self.assertFalse(shift & dev)
+
+
+class ComponentSplitTest(unittest.TestCase):
+    """Whole components are assigned to one partition; no cross-split graph."""
+
+    def _components(self, bundle):
+        edges, _near = L.case_edges(bundle["cases"])
+        groups = L.connected_components(
+            [c["case_id"] for c in bundle["cases"]], edges)
+        by_id = {c["case_id"]: c for c in bundle["cases"]}
+        return groups, by_id
+
+    def test_planned_counts_exact_with_zero_crosssplit_components(self):
+        b = mechanism_bundle()
+        meta = b["metadata"]
+        self.assertEqual(meta["counts"]["triage_roots"], 240)
+        self.assertEqual(meta["counts"]["workflow_roots"], 28)
+        self.assertEqual(meta["split_counts"]["triage"],
+                         {"development": 132, "calibration": 33,
+                          "private_test": 66, "private_shift": 9})
+        self.assertEqual(meta["split_counts"]["workflow"],
+                         {"development": 12, "private_test": 12,
+                          "private_shift": 4})
+        self.assertEqual(build.validate_dataset(b), [])
+        groups, by_id = self._components(b)
+        for members in groups.values():
+            splits = {by_id[m]["split"] for m in members}
+            self.assertEqual(len(splits), 1, members)
+
+    def test_grouping_is_exercised_and_disclosed(self):
+        b = mechanism_bundle()
+        counts = b["metadata"]["counts"]
+        # the scale must include at least one genuine near-duplicate group so the
+        # test would catch a naive per-root split assignment
+        self.assertGreaterEqual(counts["duplicate_groups"], 1)
+        self.assertLess(counts["triage_components"], counts["triage_roots"])
+        self.assertIn("components", b["metadata"]["coverage"])
+        comp = b["metadata"]["coverage"]["components"]["triage"]
+        self.assertEqual(comp["grouped_roots"],
+                         sum(comp["group_sizes"]))
+
+    def test_deterministic_and_second_private_seed_isolated(self):
+        from benchmarks.v3.common.hashing import hash_obj
+        a = mechanism_bundle(private_seed=1)
+        b = mechanism_bundle(private_seed=1)
+        c = mechanism_bundle(private_seed=2)
+        self.assertEqual(hash_obj(a), hash_obj(b))
+        self.assertEqual(a["dataset_id"], b["dataset_id"])
+        self.assertNotEqual(a["dataset_id"], c["dataset_id"])
+        a_priv = {x["case_id"] for x in a["cases"]
+                  if x["split"] in ("calibration", "private_test", "private_shift")}
+        c_priv = {x["case_id"] for x in c["cases"]
+                  if x["split"] in ("calibration", "private_test", "private_shift")}
+        self.assertNotEqual(a_priv, c_priv)
+        self.assertEqual({x["split"] for x in build.public_export(a)["cases"]},
+                         {"development"})
+
+
+class ComponentPackerTest(unittest.TestCase):
+    def test_group_is_kept_whole_and_counts_are_exact(self):
+        from benchmarks.v3.build import generate as G
+        comps = [
+            {"kind": "triage", "roots": [0, 1], "axis": None,
+             "key": ("triage", (0, 1))},
+            {"kind": "triage", "roots": [2], "axis": None,
+             "key": ("triage", (2,))},
+            {"kind": "triage", "roots": [3], "axis": None,
+             "key": ("triage", (3,))},
+            {"kind": "triage", "roots": [4], "axis": None,
+             "key": ("triage", (4,))},
+        ]
+        assignment = G._pack_components(comps, {"development": 2, "calibration": 3},
+                                        "salt")
+        totals = {"development": 0, "calibration": 0}
+        for comp in comps:
+            totals[assignment[comp["key"]]] += len(comp["roots"])
+        self.assertEqual(totals, {"development": 2, "calibration": 3})
+        # a component key maps to exactly one split (never fanned out)
+        self.assertEqual(assignment[("triage", (0, 1))],
+                         assignment[("triage", (0, 1))])
+
+    def test_unplaceable_group_reports_deviation(self):
+        from benchmarks.v3.build import generate as G
+        comps = [{"kind": "triage", "roots": [0, 1, 2], "axis": None,
+                  "key": ("triage", (0, 1, 2))}]
+        with self.assertRaises(G.BuildError):
+            G._pack_components(comps, {"development": 1, "calibration": 2}, "salt")
+
+    def test_shift_target_mismatch_reports(self):
+        from benchmarks.v3.build import generate as G
+        comps = [{"kind": "triage", "roots": [0], "axis": "unseen_template_family",
+                  "key": ("triage", (0,))}]
+        with self.assertRaises(G.BuildError):
+            G._pack_components(comps, {"development": 1}, "salt")
 
 
 if __name__ == "__main__":

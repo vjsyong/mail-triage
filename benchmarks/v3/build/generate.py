@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 from .. import contracts, schema
 from ..common.hashing import hash_obj, short
-from . import catalog, recipes, render
+from . import catalog, lineage as lineage_mod, recipes, render
 from .errors import BuildError
 from .rng import stream
 
@@ -33,10 +33,42 @@ FULL_LAYOUT = {
     "workflow": {"development": 60, "private_test": 120, "private_shift": 40},
 }
 
-# Shift axes are applied one at a time (never all at once). These families are
-# held out of development when a build contains a private_shift partition.
+# Shift axes are applied one at a time (never all at once). Each axis reserves
+# resources that must NOT appear in development or calibration, so the shift
+# test isolates one unseen cause rather than recycling a tagged dev example:
+#   * unseen_template_family -- a disjoint held-out family set;
+#   * unseen_policy_combo     -- a (persona, taxonomy) pairing never used in dev;
+#   * source_style_shift      -- a held-out family set AND a held-out regional
+#                                style pack.
 SHIFT_AXES = ("unseen_policy_combo", "unseen_template_family", "source_style_shift")
-SHIFT_FAMILIES = ("school_community", "shipping_travel_update", "operational_alert")
+SHIFT_FAMILIES_BY_AXIS = {
+    "unseen_template_family": ("school_community", "shipping_travel_update"),
+    "unseen_policy_combo": ("operational_alert", "event_registration"),
+    "source_style_shift": ("support_exchange", "project_status"),
+}
+SHIFT_FAMILIES = tuple(sorted(
+    {f for fams in SHIFT_FAMILIES_BY_AXIS.values() for f in fams}))
+# Workflow task families reserved for the shift partition (never in dev/cal).
+WF_SHIFT_RECIPES = ("wf_triage_summary",)
+
+# Coarse context group per family for the authored situation clauses; clauses
+# add real semantic variety to repeated templates without changing the scored
+# decision.
+SITUATION_GROUP = {
+    "request_approval": "action", "support_exchange": "action",
+    "project_request": "action", "meeting_request": "action",
+    "order_request": "action", "document_request": "action",
+    "event_registration": "action",
+    "receipt_confirmation": "receipt", "invoice_receipt": "receipt",
+    "refund_status": "receipt", "payment_reminder": "receipt",
+    "newsletter_digest": "newsletter",
+    "ambiguous_marketing": "promo", "legitimate_promo": "promo",
+    "suspicious_phishing": "promo",
+    "security_notification": "notification",
+    "shipping_travel_update": "notification",
+    "project_status": "notification", "operational_alert": "notification",
+    "personal_invitation": "personal", "school_community": "personal",
+}
 
 CLIP_PREAMBLE = (
     "From: thread-archive@lists.example\nTo: owner@example.org\n"
@@ -235,6 +267,17 @@ def _present_evidence(slots, templates, text):
     return out
 
 
+def _pick_situation(family_id, seed, index):
+    """A deterministic authored context clause for this root, or None."""
+    group = SITUATION_GROUP.get(family_id)
+    if not group:
+        return None
+    pool = recipes.situations().get(group) or []
+    if not pool:
+        return None
+    return stream(seed, "situation:%d" % index).pick(pool)
+
+
 # --------------------------------------------------------------------------- splits
 
 def _split_plan(layout, triage_roots, workflow_roots):
@@ -264,16 +307,70 @@ def _has_private(plan):
     return any(split in PRIVATE_SPLITS for kind in plan.values() for split in kind)
 
 
-def _assign_splits(kind, split_counts, seed):
-    labels = []
-    for split in ALL_SPLITS:
-        labels.extend([split] * int(split_counts.get(split, 0)))
-    return stream(seed, "splits:%s" % kind).shuffled(labels)
+def _pack_components(comps, targets, salt):
+    """Assign whole connected components to splits, hitting exact root targets.
+
+    A component is the split/bootstap unit: every root in a near-duplicate group
+    (and every variant of a root) lands in one partition, so the global
+    near-duplicate/source graph can never cross a partition boundary. Shift-
+    reserved components must land in ``private_shift``; the remaining components
+    fill the other bins. Returns ``{component_key: split}``.
+    """
+    result = {}
+    shift = [c for c in comps if c["axis"]]
+    normal = [c for c in comps if not c["axis"]]
+    shift_target = int(targets.get("private_shift", 0))
+    shift_roots = sum(len(c["roots"]) for c in shift)
+    if shift_roots != shift_target:
+        raise BuildError(
+            "shift reservation mismatch: %d reserved roots but private_shift "
+            "target is %d" % (shift_roots, shift_target))
+    for c in shift:
+        result[c["key"]] = "private_shift"
+
+    bin_splits = [s for s in ALL_SPLITS
+                  if s != "private_shift" and int(targets.get(s, 0)) > 0]
+    remaining = {s: int(targets[s]) for s in bin_splits}
+    normal_roots = sum(len(c["roots"]) for c in normal)
+    if sum(remaining.values()) != normal_roots:
+        raise BuildError(
+            "layout targets %r do not match %d unreserved roots"
+            % ({s: remaining[s] for s in bin_splits}, normal_roots))
+
+    order = stream(salt, "pack").shuffled(normal)
+    rank = {s: i for i, s in enumerate(bin_splits)}
+    placement = {s: [] for s in bin_splits}
+    large = sorted((c for c in order if len(c["roots"]) > 1),
+                   key=lambda c: (-len(c["roots"]), c["key"]))
+    singles = [c for c in order if len(c["roots"]) == 1]
+    for comp in large:
+        size = len(comp["roots"])
+        fits = [s for s in bin_splits if remaining[s] >= size]
+        if not fits:
+            raise BuildError(
+                "a %d-root near-duplicate group cannot fit any remaining split "
+                "bin %r; planned counts are unreachable without splitting the "
+                "group" % (size, {s: remaining[s] for s in bin_splits}))
+        split = min(fits, key=lambda s: (remaining[s] - size, rank[s]))
+        placement[split].append(comp)
+        remaining[split] -= size
+    single_index = 0
+    for split in bin_splits:
+        while remaining[split] > 0:
+            if single_index >= len(singles):
+                raise BuildError("ran out of singleton components filling %r" % split)
+            placement[split].append(singles[single_index])
+            single_index += 1
+            remaining[split] -= 1
+    for split, group in placement.items():
+        for comp in group:
+            result[comp["key"]] = split
+    return result
 
 
 def _dataset_id(layout_name, seed, plan, include_variants, private_seed):
     material = {"layout": plan, "include_variants": bool(include_variants),
-                "private": private_seed is not None}
+                "private_seed": private_seed}
     return "v3_%s_s%s_%s" % (_slug(str(layout_name)), seed, short(hash_obj(material)))
 
 
@@ -356,6 +453,8 @@ def _base_message(ctx):
     tmpl = variants[ctx.index % len(variants)]
     subject = _fill(tmpl["subject"], ctx.slots)
     body = _fill(tmpl["body"], ctx.slots)
+    if getattr(ctx, "situation", None):
+        body = body + "\n\n" + _fill(ctx.situation, ctx.slots)
     ctx.slots["sender_subject"] = subject
     return {
         "message_id": "msg_%s" % ctx.root,
@@ -368,11 +467,16 @@ def _base_message(ctx):
     }
 
 
-def _variant_message(ctx, base, variant):
+def _variant_message(ctx, base, variant, with_situation=True):
     out = dict(base)
     if variant:
         out["subject"] = _fill(variant["subject"], ctx.slots)
-        out["body"] = _fill(variant["body"], ctx.slots)
+        body = _fill(variant["body"], ctx.slots)
+        if with_situation and getattr(ctx, "situation", None):
+            body = body + "\n\n" + _fill(ctx.situation, ctx.slots)
+        out["body"] = body
+    elif with_situation and getattr(ctx, "situation", None):
+        out["body"] = out["body"] + "\n\n" + _fill(ctx.situation, ctx.slots)
     out["snippet"] = out["body"]
     return out
 
@@ -411,7 +515,7 @@ def _build_triage_root(ctx, include_variants):
           ["injection", "untrusted_instruction", "clean_pair:%s" % base_id,
            "changed:injected_instruction"])
     if fam.get("resolved"):
-        res = _variant_message(ctx, msg, fam["resolved"])
+        res = _variant_message(ctx, msg, fam["resolved"], with_situation=False)
         res["subject"] = _fill(fam["resolved"]["subject"], ctx.slots)
         _emit(ctx, "resolved", contracts.NATIVE_PROFILE, ctx.policy, res,
               "counterfactual", base_id, ["category"], ["needs_reply"],
@@ -605,6 +709,7 @@ def _mk_ctx(kind, index, seed, persona, region, split, shift_axis, family_id,
                         "needs_reply:%s" % family.get("needs_reply", None)],
     )
     ctx.slots = _fill_slots(kind, index, persona, region, root_seed)
+    ctx.situation = _pick_situation(family_id, root_seed, index)
     ctx.case_id = lambda tag: "case_%s_%s" % (root, tag)
     ctx.gold_id = lambda tag: "gold_%s_%s" % (root, tag)
     return ctx
@@ -631,70 +736,155 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
 
     personas = recipes.personas()
     regions = recipes.regions()
+    shift_regions = recipes.shift_regions()
     fams = sorted(recipes.families().keys())
     policy_index = recipes.policy_index(include_variants=True)
     split_seed = seed if not private else "%s|%s" % (seed, private_seed)
 
-    triage_splits = _assign_splits("triage", plan["triage"], split_seed)
-    workflow_splits = _assign_splits("workflow", plan["workflow"], split_seed)
+    total_triage = sum(int(v) for v in plan["triage"].values())
+    total_workflow = sum(int(v) for v in plan["workflow"].values())
+    shift_triage_target = int(plan["triage"].get("private_shift", 0))
+    shift_workflow_target = int(plan["workflow"].get("private_shift", 0))
+    has_shift = shift_triage_target > 0 or shift_workflow_target > 0
+    # Held-out families are removed from development/calibration only when a
+    # shift partition actually exists, so a calibration-only build keeps breadth.
+    dev_families = [f for f in fams if f not in SHIFT_FAMILIES] if has_shift else fams
 
-    scenarios, cases, golds, lineages = [], [], [], []
+    # Shift roots are chosen deterministically from the private seed, and the
+    # axis cycles so all three reserved resources are exercised. Content is
+    # generated independently of the split, so components can be computed first
+    # and packed whole.
+    if shift_triage_target > total_triage:
+        raise BuildError("private_shift target %d exceeds %d triage roots"
+                         % (shift_triage_target, total_triage))
+    if shift_workflow_target > total_workflow:
+        raise BuildError("private_shift target %d exceeds %d workflow roots"
+                         % (shift_workflow_target, total_workflow))
+    triage_shift_indices = sorted(
+        stream(split_seed, "shiftselect:triage")
+        .shuffled(range(total_triage))[:shift_triage_target])
+    workflow_shift_indices = set(
+        stream(split_seed, "shiftselect:workflow")
+        .shuffled(range(total_workflow))[:shift_workflow_target])
+    triage_axis = {}
+    for k, idx in enumerate(triage_shift_indices):
+        triage_axis[idx] = SHIFT_AXES[k % len(SHIFT_AXES)]
 
-    def root_seed_for(split):
-        return private_seed if split in PRIVATE_SPLITS else seed
-
-    def dev_families():
-        if private:
-            return [f for f in fams if f not in SHIFT_FAMILIES]
-        return fams
-
-    # -- triage ------------------------------------------------------------
-    for i, split in enumerate(triage_splits):
+    # -- generate triage content (split assigned later) --------------------
+    triage_ctxs = []
+    for i in range(total_triage):
         persona = personas[i % len(personas)]
-        shift_axis = None
-        if split == "private_shift":
-            shift_axis = SHIFT_AXES[i % len(SHIFT_AXES)]
-        chosen = dev_families()
-        if shift_axis == "unseen_template_family":
-            chosen = list(SHIFT_FAMILIES)
-        family_id = chosen[(i // len(personas)) % len(chosen)]
+        axis = triage_axis.get(i)
+        if axis is None:
+            family_id = dev_families[(i // len(personas)) % len(dev_families)]
+            policy_id = persona["policy_id"]
+            region = regions[i % len(regions)]
+            variant_policy = recipes.variant_policy_for(policy_id)
+        else:
+            fam_list = SHIFT_FAMILIES_BY_AXIS[axis]
+            family_id = fam_list[(i // len(personas)) % len(fam_list)]
+            if axis == "unseen_policy_combo":
+                # a (persona, taxonomy) pairing that never appears in dev/cal
+                policy_id = personas[(i + 3) % len(personas)]["policy_id"]
+            else:
+                policy_id = persona["policy_id"]
+            if axis == "source_style_shift" and shift_regions:
+                region = shift_regions[(i // len(personas)) % len(shift_regions)]
+            else:
+                region = regions[i % len(regions)]
+            variant_policy = None
         family = recipes.families()[family_id]
-        region = regions[i % len(regions)]
-        if shift_axis == "source_style_shift":
-            region = regions[(i + 1) % len(regions)]
-        policy_id = persona["policy_id"]
-        if shift_axis == "unseen_policy_combo":
-            variant = recipes.variant_policy_for(policy_id)
-            if variant:
-                policy_id = variant["policy_id"]
         policy = policy_index[policy_id]
-        variant_policy = recipes.variant_policy_for(policy_id)
-        ctx = _mk_ctx("triage", i, seed, persona, region, split, shift_axis,
+        ctx = _mk_ctx("triage", i, seed, persona, region, None, axis,
                       family_id, family, policy, variant_policy, policy_index,
-                      root_seed_for(split))
+                      seed)
         ctx.policy_id = policy_id
         _build_triage_root(ctx, include_variants)
-        scenarios.append(_scenario(ctx, _triage_scenario_messages(ctx, ctx.base_msg)))
-        cases.extend(ctx.cases)
-        golds.extend(ctx.golds)
-        lineages.append(_lineage(ctx))
+        triage_ctxs.append(ctx)
 
-    # -- workflow ----------------------------------------------------------
+    # -- generate workflow content -----------------------------------------
     wf_recipes = recipes.workflow_recipes()
-    for j, split in enumerate(workflow_splits):
+    dev_recipes = [r for r in wf_recipes if r["id"] not in WF_SHIFT_RECIPES] \
+        or list(wf_recipes)
+    shift_recipes = [r for r in wf_recipes if r["id"] in WF_SHIFT_RECIPES] \
+        or list(wf_recipes)
+    workflow_ctxs = []
+    for j in range(total_workflow):
         persona = personas[j % len(personas)]
-        recipe = wf_recipes[j % len(wf_recipes)]
-        shift_axis = None
-        if split == "private_shift":
-            shift_axis = SHIFT_AXES[(j + 2) % len(SHIFT_AXES)]
+        is_shift = j in workflow_shift_indices
+        axis = "source_style_shift" if is_shift else None
+        pool = shift_recipes if is_shift else dev_recipes
+        recipe = pool[j % len(pool)]
         policy = policy_index[persona["policy_id"]]
         ctx = _mk_ctx("workflow", j, seed, persona, regions[j % len(regions)],
-                      split, shift_axis, "workflow", {"needs_reply": None,
-                      "templates": [{}], "resolved": None}, policy, None,
-                      policy_index, root_seed_for(split))
+                      None, axis, "workflow",
+                      {"needs_reply": None, "templates": [{}], "resolved": None},
+                      policy, None, policy_index, seed)
         _build_workflow_root(ctx, recipe)
-        mailbox = ctx.cases[0]["mailbox"]
-        scenarios.append(_scenario(ctx, _workflow_scenario_messages(ctx, mailbox)))
+        workflow_ctxs.append(ctx)
+
+    # -- connected components, then split by whole component ---------------
+    all_ctxs = triage_ctxs + workflow_ctxs
+    all_cases = []
+    ctx_key_by_case = {}
+    ctx_by_key = {}
+    source_ids = {}
+    for ctx in all_ctxs:
+        key = (ctx.kind, ctx.index)
+        ctx_by_key[key] = ctx
+        for case in ctx.cases:
+            ctx_key_by_case[case["case_id"]] = key
+            source_ids[case["case_id"]] = list(ctx.message_ids)
+            all_cases.append(case)
+    edges, _near = lineage_mod.case_edges(all_cases, source_ids=source_ids)
+    groups = lineage_mod.connected_components(
+        [c["case_id"] for c in all_cases], edges)
+    comps = []
+    for members in groups.values():
+        keys = {ctx_key_by_case[m] for m in members}
+        members_ctxs = [ctx_by_key[k] for k in sorted(keys)]
+        kinds = {c.kind for c in members_ctxs}
+        if len(kinds) != 1:
+            raise BuildError("connected component mixes dataset kinds %s"
+                             % sorted(kinds))
+        kind = kinds.pop()
+        axes = {c.shift_axis for c in members_ctxs}
+        reserved = {a for a in axes if a}
+        if len(reserved) > 1:
+            raise BuildError("connected component mixes shift axes %s"
+                             % sorted(reserved))
+        if reserved and None in axes:
+            raise BuildError(
+                "shift reservation leaked: a component mixes reserved "
+                "(family/policy/style) and development roots")
+        roots = sorted(c.index for c in members_ctxs)
+        comps.append({"kind": kind, "roots": roots,
+                      "axis": (reserved.pop() if reserved else None),
+                      "ctxs": members_ctxs, "key": (kind, tuple(roots))})
+
+    assignment = {}
+    for kind, targets in (("triage", plan["triage"]),
+                          ("workflow", plan["workflow"])):
+        kind_comps = [c for c in comps if c["kind"] == kind]
+        assignment.update(_pack_components(kind_comps, targets, split_seed))
+
+    for comp in comps:
+        split = assignment[comp["key"]]
+        for ctx in comp["ctxs"]:
+            ctx.split = split
+            for case in ctx.cases:
+                case["split"] = split
+
+    # -- assemble records in index order -----------------------------------
+    scenarios, cases, golds, lineages = [], [], [], []
+    for ctx in all_ctxs:
+        if ctx.kind == "triage":
+            scenarios.append(_scenario(ctx,
+                                       _triage_scenario_messages(ctx, ctx.base_msg)))
+        else:
+            mailbox = ctx.cases[0]["mailbox"]
+            scenarios.append(_scenario(ctx,
+                                       _workflow_scenario_messages(ctx, mailbox)))
         cases.extend(ctx.cases)
         golds.extend(ctx.golds)
         lineages.append(_lineage(ctx))
@@ -710,7 +900,7 @@ def build_dataset(*, seed=0, triage_roots=200, workflow_roots=30,
 
     metadata = _metadata(dataset_id, seed, layout_name, plan, include_variants,
                          private_seed, private, scenarios, cases, golds, lineages,
-                         policies, provenance)
+                         policies, provenance, comps, assignment)
     bundle = {
         "schema_version": SCHEMA_VERSION,
         "dataset_id": dataset_id,
@@ -745,13 +935,30 @@ def _lineage(ctx):
 
 
 def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_seed,
-              private, scenarios, cases, golds, lineages, policies, provenance):
+              private, scenarios, cases, golds, lineages, policies, provenance,
+              comps=None, assignment=None):
+    comps = comps or []
+    assignment = assignment or {}
     relations = Counter(c["relation"]["relation_type"] for c in cases)
     shifts = Counter()
     for c in cases:
         for t in c["tags"]:
             if t.startswith("shift:"):
                 shifts[t.split(":", 1)[1]] += 1
+    component_meta = {}
+    component_split_counts = {}
+    for kind in ("triage", "workflow"):
+        kind_comps = [c for c in comps if c["kind"] == kind]
+        by_split = Counter(assignment.get(c["key"]) for c in kind_comps)
+        dup = [c for c in kind_comps if len(c["roots"]) > 1]
+        component_meta[kind] = {
+            "total": len(kind_comps),
+            "by_split": dict(by_split),
+            "duplicate_groups": len(dup),
+            "grouped_roots": sum(len(c["roots"]) for c in dup),
+            "group_sizes": sorted(len(c["roots"]) for c in dup),
+        }
+        component_split_counts[kind] = dict(by_split)
     coverage = {
         "personas": dict(Counter(c.get("persona") for c in cases)),
         "families": dict(Counter(c.get("family") for c in cases)),
@@ -761,6 +968,7 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
                                   for c in cases)),
         "relations": dict(relations),
         "shift_axes": {k: v for k, v in shifts.items() if k != "none"},
+        "components": component_meta,
     }
     split_counts = {
         "triage": dict(Counter(l["partition"] for l in lineages
@@ -768,6 +976,8 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
         "workflow": dict(Counter(l["partition"] for l in lineages
                                  if l["root_id"].startswith("scn_w"))),
         "cases": dict(Counter(c["split"] for c in cases)),
+        "triage_components": component_split_counts.get("triage", {}),
+        "workflow_components": component_split_counts.get("workflow", {}),
     }
     return {
         "seed": seed,
@@ -782,6 +992,12 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
         "counts": {
             "triage_roots": sum(1 for l in lineages if l["root_id"].startswith("scn_r")),
             "workflow_roots": sum(1 for l in lineages if l["root_id"].startswith("scn_w")),
+            "triage_components": component_meta["triage"]["total"],
+            "workflow_components": component_meta["workflow"]["total"],
+            "duplicate_groups": (component_meta["triage"]["duplicate_groups"]
+                                 + component_meta["workflow"]["duplicate_groups"]),
+            "grouped_roots": (component_meta["triage"]["grouped_roots"]
+                              + component_meta["workflow"]["grouped_roots"]),
             "scenarios": len(scenarios),
             "cases": len(cases),
             "gold": len(golds),
@@ -789,12 +1005,58 @@ def _metadata(dataset_id, seed, layout_name, plan, include_variants, private_see
             "policies": len(policies),
             "provenance": len(provenance),
         },
+        "components": component_meta,
         "split_counts": split_counts,
         "split_plan": plan,
         "coverage": coverage,
         "dataset_id": dataset_id,
         "notes": ("Synthetic pilot/development authoring. Defaults to draft: no "
                   "human review was performed and no real-mail authorization is "
-                  "claimed. Private/calibration records are only produced with an "
-                  "explicit private_seed and are never part of a public export."),
+                  "claimed. Splits are assigned to whole connected components, so "
+                  "near-duplicate/source lineages never cross a partition; root "
+                  "and component counts are both reported and duplicate groups "
+                  "disclosed. Private/calibration records are only produced with "
+                  "an explicit private_seed and are never part of a public export."),
     }
+
+
+def summarize_components(cases, scenarios):
+    """Component summary for an arbitrary case/scenario subset (export honesty).
+
+    Recomputes the same content/source near-duplicate graph the builder uses, so
+    a public or private export reports its own root and component counts rather
+    than the source bundle totals.
+    """
+    by_scn = {s["scenario_id"]: s for s in scenarios}
+    source_ids = {}
+    for case in cases:
+        scn = by_scn.get(case["scenario_id"]) or {}
+        source_ids[case["case_id"]] = [m.get("message_id")
+                                       for m in scn.get("messages") or []]
+    edges, _near = lineage_mod.case_edges(cases, source_ids=source_ids)
+    groups = lineage_mod.connected_components([c["case_id"] for c in cases], edges)
+    by_id = {c["case_id"]: c for c in cases}
+    meta = {k: {"total": 0, "by_split": {}, "duplicate_groups": 0,
+                "grouped_roots": 0, "group_sizes": []}
+            for k in ("triage", "workflow")}
+    roots = {"triage": set(), "workflow": set()}
+    for case in cases:
+        kind = "workflow" if case.get("task") == "workflow" else "triage"
+        roots[kind].add(case["scenario_id"])
+    for members in groups.values():
+        kind = ("workflow"
+                if all(by_id[m].get("task") == "workflow" for m in members)
+                else "triage")
+        split = by_id[members[0]].get("split")
+        bucket = meta[kind]
+        bucket["total"] += 1
+        bucket["by_split"][split] = bucket["by_split"].get(split, 0) + 1
+        root_count = len({by_id[m]["scenario_id"] for m in members})
+        if root_count > 1:
+            bucket["duplicate_groups"] += 1
+            bucket["grouped_roots"] += root_count
+            bucket["group_sizes"].append(root_count)
+    for kind in ("triage", "workflow"):
+        meta[kind]["group_sizes"].sort()
+        meta[kind]["roots"] = len(roots[kind])
+    return meta

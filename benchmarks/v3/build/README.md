@@ -134,14 +134,42 @@ Assertion kinds the runner/scorer should implement:
 `claimed-outcome` are scored separately by WP5; a skipped/failed call cannot
 satisfy a required outcome.
 
-## Layouts and the private boundary
+## Layouts, component-level splits and the private boundary
 
 Pilot defaults: 200 triage roots / 30 workflow roots, all `development`.
 Full plan (`FULL_LAYOUT`): triage 600/200/1000/300
 (dev/calibration/private_test/private_shift), workflow 60/120/40
 (dev/test/shift). Counts are configurable by passing a mapping as `layout`.
 
-- Private/calibration splits require an explicit `private_seed`.
+Splits are assigned to whole **connected components**, not to rows. The builder
+generates the full pool first, recomputes the content/source near-duplicate
+graph (`shared lineage/scenario/source messages`, parent relations, and real
+MinHash near-duplicates), then packs each component whole into exactly one
+partition while hitting the planned root counts. Consequences:
+
+- the global near-duplicate/source graph can never cross a partition boundary;
+- every variant of a root, and every grouped near-duplicate root, shares a
+  partition;
+- root counts hit the planned target exactly; component counts are reported too.
+- `metadata.counts` reports `triage_roots`/`workflow_roots` **and**
+  `triage_components`/`workflow_components`, `duplicate_groups` and
+  `grouped_roots`; `metadata.coverage.components` carries the per-split
+  component counts, duplicate-group count and group sizes, and
+  `metadata.split_counts` carries `triage_components`/`workflow_components`.
+  Exported public/private subsets recompute their own counts.
+
+**Shift axes reserve real resources** (they cannot be recycled dev examples with
+a different tag): `unseen_template_family` uses a held-out family set,
+`unseen_policy_combo` uses a `(persona, taxonomy)` pairing never used in
+dev/calibration, and `source_style_shift` uses a held-out family set **and** a
+held-out regional style pack. Workflow shift roots use reserved task recipes.
+Held-out families/regions are removed from development/calibration whenever the
+plan contains a shift partition, and the builder fails if a component mixes
+reserved and unreserved roots.
+
+- Private/calibration splits require an explicit `private_seed`; the same inputs
+  rebuild byte-identically, a different `private_seed` re-partitions the private
+  data (isolated) and changes `dataset_id`.
 - `write_dataset` refuses an unintended overwrite (only a target whose
   `manifest.json` carries the same `dataset_id` may be rewritten) and refuses to
   publish any private/calibration/real-mail record through the public path.
@@ -149,8 +177,12 @@ Full plan (`FULL_LAYOUT`): triage 600/200/1000/300
   public path; private records are written only there.
 - `metadata.contains_private` is consistent with the records present; a public
   bundle can never contain a private split.
-- Shift roots are tagged with exactly one `shift:<axis>` (unseen policy combo,
-  unseen template family, source/style shift) — never all axes at once.
+
+Semantic variety: authored `fixtures/situations.json` context clauses are
+appended to repeated templates so roots that share a persona/family/region
+template still describe genuinely different situations; the clause is neutral to
+the scored decision, so gold stays accurate. Residual near-duplicate groups are
+grouped (never split) and disclosed rather than hidden.
 
 ## Review, import and reuse gates
 
@@ -172,11 +204,11 @@ Full plan (`FULL_LAYOUT`): triage 600/200/1000/300
 
 ## Files
 
-`fixtures/` holds the authored recipes/vocabulary/policies/catalog. They are
-agent-authored **drafts**: no human has reviewed or sealed them, and the
-"reviewed by hand" label must not be applied to this tree. `generate.py`,
-`render.py`, `lineage.py`, `lint.py`, `review.py`, `catalog.py`, `recipes.py`,
-`rng.py`, `errors.py` hold the logic.
+`fixtures/` holds the authored recipes/vocabulary/policies/catalog plus the
+`situations.json` context clauses. They are agent-authored **drafts**: no human
+has reviewed or sealed them, and the "reviewed by hand" label must not be
+applied to this tree. `generate.py`, `render.py`, `lineage.py`, `lint.py`,
+`review.py`, `catalog.py`, `recipes.py`, `rng.py`, `errors.py` hold the logic.
 
 (The directory is named `fixtures/`, not `data/`, because the repository
 `.gitignore` ignores any directory named `data`; authoring content must be

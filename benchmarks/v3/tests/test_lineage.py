@@ -88,7 +88,30 @@ class CleanBundleTest(unittest.TestCase):
         edges, _near = L.case_edges(b["cases"])
         groups = L.connected_components([c["case_id"] for c in b["cases"]], edges)
         self.assertGreater(len(groups), 1)
-        self.assertEqual(len(groups), len(b["lineage"]))
+        # Components may group genuine near-duplicate roots; they never exceed
+        # the lineage count and the split graph stays intra-partition.
+        self.assertLessEqual(len(groups), len(b["lineage"]))
+        by_id = {c["case_id"]: c for c in b["cases"]}
+        for members in groups.values():
+            self.assertEqual(len({by_id[m]["split"] for m in members}), 1)
+
+    def test_grouped_near_dupes_share_a_split(self):
+        # A scale that actually contains near-duplicate groups: whole components
+        # must land in one partition (regression for the full-layout collision).
+        layout = {"triage": {"development": 132, "calibration": 33,
+                             "private_test": 66, "private_shift": 9},
+                  "workflow": {"development": 12, "private_test": 12,
+                               "private_shift": 4}}
+        b = build.build_dataset(layout=layout, seed=7, private_seed=1)
+        self.assertGreaterEqual(b["metadata"]["counts"]["duplicate_groups"], 1)
+        by_id = {c["case_id"]: c for c in b["cases"]}
+        edges, _near = L.case_edges(b["cases"])
+        groups = L.connected_components([c["case_id"] for c in b["cases"]], edges)
+        grouped = [g for g in groups.values()
+                   if len({by_id[m]["lineage_id"] for m in g}) > 1]
+        self.assertTrue(grouped, "expected at least one grouped component")
+        for members in grouped:
+            self.assertEqual(len({by_id[m]["split"] for m in members}), 1)
 
 
 class SplitLeakTest(unittest.TestCase):

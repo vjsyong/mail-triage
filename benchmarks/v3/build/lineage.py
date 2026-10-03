@@ -16,6 +16,23 @@ ROWS = 4
 DEFAULT_NEAR_DUPE = 0.90
 _TOKEN = re.compile(r"[a-z0-9]+")
 
+_MASK = (1 << 64) - 1
+
+
+def _splitmix(seed):
+    z = (seed + 0x9E3779B97F4A7C15) & _MASK
+    z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & _MASK
+    z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & _MASK
+    return (z ^ (z >> 31)) & _MASK
+
+
+# Deterministic universal-hash permutations: one stable shingle hash is
+# computed per shingle and cheaply re-mixed per permutation. This keeps the
+# detection exact and run-stable (no ``hash()``) while making a full 12k-case
+# lint practical.
+_PERMS = tuple((_splitmix(2 * k + 1) | 1, _splitmix(2 * k + 2))
+               for k in range(NUM_HASHES))
+
 
 def normalize_text(text):
     return " ".join(_TOKEN.findall((text or "").lower()))
@@ -37,9 +54,9 @@ def _shingles(tokens, k=4):
     return {tuple(tokens[i:i + k]) for i in range(len(tokens) - k + 1)}
 
 
-def _hash(seed, shingle):
-    material = ("%d|" % seed).encode("ascii") + repr(shingle).encode("utf-8")
-    return int.from_bytes(hashlib.blake2b(material, digest_size=8).digest(), "big")
+def _shingle_hash(shingle):
+    return int.from_bytes(
+        hashlib.blake2b(repr(shingle).encode("utf-8"), digest_size=8).digest(), "big")
 
 
 def minhash(text, num_hashes=NUM_HASHES):
@@ -47,7 +64,9 @@ def minhash(text, num_hashes=NUM_HASHES):
     shingles = _shingles(tokens)
     if not shingles:
         return None
-    return tuple(min(_hash(h, s) for s in shingles) for h in range(num_hashes))
+    base = [_shingle_hash(s) for s in shingles]
+    perms = _PERMS[:num_hashes]
+    return tuple(min(((h * a + b) & _MASK) for h in base) for a, b in perms)
 
 
 def _estimated_similarity(sig_a, sig_b):

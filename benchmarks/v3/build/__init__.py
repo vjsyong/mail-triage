@@ -20,7 +20,7 @@ from ..common.hashing import hash_obj
 from ..common.validation import ValidationError
 from .errors import BuildError, PrivateExportError, ReviewError, WriteRefused
 from .generate import (FULL_LAYOUT, PRIVATE_SPLITS, PUBLIC_SPLITS, SCHEMA_VERSION,
-                       build_dataset)
+                       build_dataset, summarize_components)
 from .lint import validate_dataset
 from .review import (agreement_report, build_review_worksheet, import_review,
                      load_review_worksheet, seal_bundle, validate_real_import,
@@ -64,12 +64,29 @@ def _subset_bundle(bundle, splits):
     private_present = any(c.get("split") in PRIVATE_SPLITS for c in keep_cases)
     metadata["contains_private"] = private_present
     metadata["visibility"] = "private" if private_present else "public"
+    components = summarize_components(keep_cases, keep_scenarios)
     counts = dict(metadata.get("counts") or {})
     counts.update({
         "cases": len(keep_cases), "gold": len(keep_golds),
         "scenarios": len(keep_scenarios), "lineages": len(keep_lineage),
+        "triage_roots": components["triage"]["roots"],
+        "workflow_roots": components["workflow"]["roots"],
+        "triage_components": components["triage"]["total"],
+        "workflow_components": components["workflow"]["total"],
+        "duplicate_groups": (components["triage"]["duplicate_groups"]
+                             + components["workflow"]["duplicate_groups"]),
+        "grouped_roots": (components["triage"]["grouped_roots"]
+                          + components["workflow"]["grouped_roots"]),
     })
     metadata["counts"] = counts
+    metadata["components"] = components
+    metadata["split_counts"] = {
+        "triage_components": components["triage"]["by_split"],
+        "workflow_components": components["workflow"]["by_split"],
+    }
+    coverage = dict(metadata.get("coverage") or {})
+    coverage["components"] = components
+    metadata["coverage"] = coverage
     subset = dict(bundle)
     subset.update({
         "cases": keep_cases, "gold": keep_golds, "scenarios": keep_scenarios,
