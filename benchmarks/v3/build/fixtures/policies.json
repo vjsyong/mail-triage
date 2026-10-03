@@ -1,0 +1,186 @@
+{
+  "policies": [
+    {
+      "schema_version": "v3.0",
+      "policy_id": "employee_coordinator",
+      "revision": "3.0",
+      "owner": "Priya Raman",
+      "persona": "employee_project_coordinator",
+      "categories": [
+        {"name": "Action", "description": "Needs a decision or action from the owner", "folder": "Action"},
+        {"name": "Notification", "description": "Automated account, security or operational notice", "folder": "Notifications"},
+        {"name": "Newsletter", "description": "Subscribed newsletter or digest", "folder": "Reading"},
+        {"name": "Receipt", "description": "Receipt, invoice or payment confirmation", "folder": "Receipts"},
+        {"name": "Personal", "description": "Personal correspondence to the owner", "folder": "Personal"},
+        {"name": "Promo", "description": "Legitimate promotion or marketing", "folder": "Reading"}
+      ],
+      "filing": {"default_folder": "Action", "mode": "suggest", "confidence_gate": 0.55},
+      "permissions": {"allow_move": false, "allow_send": false, "allow_rule_create": false, "require_approval": true},
+      "notes": "Synthetic policy for the employee/project-coordinator context."
+    },
+    {
+      "schema_version": "v3.0",
+      "policy_id": "freelancer",
+      "revision": "3.0",
+      "owner": "Daniel Ferreira",
+      "persona": "freelancer",
+      "categories": [
+        {"name": "Client", "description": "Client request, brief or approval needed", "folder": "Clients"},
+        {"name": "Invoice", "description": "Invoice, payment or billing message", "folder": "Invoices"},
+        {"name": "Admin", "description": "Tax, banking, contracts or admin notice", "folder": "Admin"},
+        {"name": "Personal", "description": "Personal correspondence", "folder": "Personal"},
+        {"name": "Newsletter", "description": "Subscribed newsletter or digest", "folder": "Reading"},
+        {"name": "Promo", "description": "Legitimate promotion or marketing", "folder": "Reading"}
+      ],
+      "filing": {"default_folder": "Client", "mode": "ask", "confidence_gate": 0.6},
+      "permissions": {"allow_move": true, "allow_send": false, "allow_rule_create": true, "require_approval": true},
+      "notes": "Synthetic policy for the freelancer context."
+    },
+    {
+      "schema_version": "v3.0",
+      "policy_id": "developer_oncall",
+      "revision": "3.0",
+      "owner": "Kenji Sato",
+      "persona": "developer_oncall",
+      "categories": [
+        {"name": "Incident", "description": "Production alert or on-call incident", "folder": "Incidents"},
+        {"name": "Review", "description": "Code review, dependency or build notice", "folder": "Dev"},
+        {"name": "Account", "description": "Account, security or access notice", "folder": "Accounts"},
+        {"name": "Newsletter", "description": "Technical newsletter or digest", "folder": "Reading"},
+        {"name": "Receipt", "description": "Receipt or subscription confirmation", "folder": "Receipts"},
+        {"name": "Personal", "description": "Personal correspondence", "folder": "Personal"}
+      ],
+      "filing": {"default_folder": "Incidents", "mode": "auto", "confidence_gate": 0.7},
+      "permissions": {"allow_move": true, "allow_send": false, "allow_rule_create": true, "require_approval": false},
+      "notes": "Synthetic policy for the developer/on-call context."
+    },
+    {
+      "schema_version": "v3.0",
+      "policy_id": "student",
+      "revision": "3.0",
+      "owner": "Marta Kowalska",
+      "persona": "student",
+      "categories": [
+        {"name": "Coursework", "description": "Assignment, deadline or supervisor message", "folder": "Uni"},
+        {"name": "Admin", "description": "Enrolment, fees or university admin", "folder": "Uni/Admin"},
+        {"name": "Social", "description": "Society, event or invitation", "folder": "Social"},
+        {"name": "Newsletter", "description": "Subscribed mailing or digest", "folder": "Reading"},
+        {"name": "Receipt", "description": "Receipt or purchase confirmation", "folder": "Receipts"},
+        {"name": "Promo", "description": "Legitimate promotion or marketing", "folder": "Reading"}
+      ],
+      "filing": {"default_folder": "Uni", "mode": "suggest", "confidence_gate": 0.5},
+      "permissions": {"allow_move": false, "allow_send": false, "allow_rule_create": false, "require_approval": true},
+      "notes": "Synthetic policy for the student context."
+    },
+    {
+      "schema_version": "v3.0",
+      "policy_id": "household",
+      "revision": "3.0",
+      "owner": "Aisha Bello",
+      "persona": "household_organizer",
+      "categories": [
+        {"name": "Family", "description": "Family or household correspondence", "folder": "Family"},
+        {"name": "Bill", "description": "Utility, rent or household bill", "folder": "Bills"},
+        {"name": "Appointment", "description": "Appointment, booking or school notice", "folder": "Appointments"},
+        {"name": "Notification", "description": "Automated household or delivery notice", "folder": "Notifications"},
+        {"name": "Newsletter", "description": "Subscribed newsletter", "folder": "Reading"},
+        {"name": "Promo", "description": "Legitimate promotion or marketing", "folder": "Reading"}
+      ],
+      "filing": {"default_folder": "Family", "mode": "suggest", "confidence_gate": 0.55},
+      "permissions": {"allow_move": false, "allow_send": false, "allow_rule_create": false, "require_approval": true},
+      "notes": "Synthetic policy for the household-organizer context."
+    },
+    {
+      "schema_version": "v3.0",
+      "policy_id": "business_owner",
+      "revision": "3.0",
+      "owner": "Rosa Alvarez",
+      "persona": "small_business_owner",
+      "categories": [
+        {"name": "Order", "description": "Customer order or booking request", "folder": "Orders"},
+        {"name": "Invoice", "description": "Supplier or customer invoice", "folder": "Invoices"},
+        {"name": "Supplier", "description": "Supplier, stock or delivery message", "folder": "Suppliers"},
+        {"name": "Marketing", "description": "Marketing or promotion for the business", "folder": "Marketing"},
+        {"name": "Personal", "description": "Personal correspondence", "folder": "Personal"},
+        {"name": "Alert", "description": "Automated operational or payment alert", "folder": "Alerts"}
+      ],
+      "filing": {"default_folder": "Orders", "mode": "ask", "confidence_gate": 0.6},
+      "permissions": {"allow_move": true, "allow_send": false, "allow_rule_create": true, "require_approval": true},
+      "notes": "Synthetic policy for the small-business-owner context."
+    },
+    {
+      "schema_version": "v3.0",
+      "policy_id": "community_organizer",
+      "revision": "3.0",
+      "owner": "Liam O'Connor",
+      "persona": "community_organizer",
+      "categories": [
+        {"name": "Event", "description": "Event, meeting or venue message", "folder": "Events"},
+        {"name": "Volunteer", "description": "Volunteer roster or coordination", "folder": "Volunteers"},
+        {"name": "Admin", "description": "Charity, grant or admin notice", "folder": "Admin"},
+        {"name": "Newsletter", "description": "Community newsletter or bulletin", "folder": "Reading"},
+        {"name": "Donation", "description": "Donation or fundraising receipt", "folder": "Donations"},
+        {"name": "Promo", "description": "Legitimate promotion or marketing", "folder": "Reading"}
+      ],
+      "filing": {"default_folder": "Event", "mode": "suggest", "confidence_gate": 0.55},
+      "permissions": {"allow_move": false, "allow_send": false, "allow_rule_create": false, "require_approval": true},
+      "notes": "Synthetic policy for the community-organizer context."
+    },
+    {
+      "schema_version": "v3.0",
+      "policy_id": "job_seeker",
+      "revision": "3.0",
+      "owner": "Noah Fischer",
+      "persona": "job_seeker",
+      "categories": [
+        {"name": "Application", "description": "Application status or interview scheduling", "folder": "Applications"},
+        {"name": "Recruiter", "description": "Recruiter outreach or referral", "folder": "Recruiters"},
+        {"name": "Admin", "description": "Benefits, contract or admin notice", "folder": "Admin"},
+        {"name": "Newsletter", "description": "Job alert or subscribed digest", "folder": "Reading"},
+        {"name": "Receipt", "description": "Receipt or subscription confirmation", "folder": "Receipts"},
+        {"name": "Promo", "description": "Legitimate promotion or marketing", "folder": "Reading"}
+      ],
+      "filing": {"default_folder": "Application", "mode": "ask", "confidence_gate": 0.6},
+      "permissions": {"allow_move": true, "allow_send": false, "allow_rule_create": false, "require_approval": true},
+      "notes": "Synthetic policy for the job-seeker context."
+    }
+  ],
+  "variants": [
+    {
+      "schema_version": "v3.0",
+      "policy_id": "employee_coordinator_mkt",
+      "revision": "3.0",
+      "owner": "Priya Raman",
+      "persona": "employee_project_coordinator",
+      "categories": [
+        {"name": "Action", "description": "Needs a decision or action from the owner", "folder": "Action"},
+        {"name": "Notification", "description": "Automated account, security or operational notice", "folder": "Notifications"},
+        {"name": "Newsletter", "description": "Subscribed newsletter, digest or marketing", "folder": "Reading", "roles": ["newsletter", "promo"]},
+        {"name": "Receipt", "description": "Receipt, invoice or payment confirmation", "folder": "Receipts"},
+        {"name": "Personal", "description": "Personal correspondence to the owner", "folder": "Personal"},
+        {"name": "Promo", "description": "Only discounts from approved vendors", "folder": "Offers"}
+      ],
+      "filing": {"default_folder": "Action", "mode": "suggest", "confidence_gate": 0.55},
+      "permissions": {"allow_move": false, "allow_send": false, "allow_rule_create": false, "require_approval": true},
+      "notes": "Counterfactual taxonomy: general marketing is filed as Newsletter."
+    },
+    {
+      "schema_version": "v3.0",
+      "policy_id": "freelancer_strict",
+      "revision": "3.0",
+      "owner": "Daniel Ferreira",
+      "persona": "freelancer",
+      "categories": [
+        {"name": "Client", "description": "Client request, brief or approval needed", "folder": "Clients"},
+        {"name": "Invoice", "description": "Invoice, payment or billing message", "folder": "Invoices"},
+        {"name": "Admin", "description": "Tax, banking, contracts or admin notice", "folder": "Admin"},
+        {"name": "Personal", "description": "Personal correspondence", "folder": "Personal"},
+        {"name": "Newsletter", "description": "Subscribed newsletter or digest", "folder": "Reading"},
+        {"name": "Promo", "description": "Legitimate promotion or marketing", "folder": "Reading"}
+      ],
+      "filing": {"default_folder": "Client", "mode": "suggest", "confidence_gate": 0.8},
+      "permissions": {"allow_move": false, "allow_send": false, "allow_rule_create": false, "require_approval": true},
+      "notes": "Counterfactual taxonomy: higher confidence gate changes filing mode."
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "regions": [
+    {"region": "uk", "date_style": "day_month", "currency": "£", "spelling": "british",
+     "hour": "09:00", "deadline": ["Friday 12 September", "Wednesday 24 September", "the 30th"]},
+    {"region": "us", "date_style": "month_day", "currency": "$", "spelling": "american",
+     "hour": "08:30", "deadline": ["Friday, September 12", "September 30", "next Tuesday"]},
+    {"region": "eu", "date_style": "day_month", "currency": "€", "spelling": "british",
+     "hour": "10:00", "deadline": ["12 September", "30.09.2025", "the end of the month"]},
+    {"region": "au", "date_style": "day_month", "currency": "A$", "spelling": "british",
+     "hour": "07:45", "deadline": ["Friday 12 September", "30 September", "mid-month"]}
+  ]
+}
