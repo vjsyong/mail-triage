@@ -23,6 +23,7 @@ services:
     ports:
       - "127.0.0.1:8098:8098"
     environment:
+      FUSION_NAME: "${FUSION_NAME:-MiniCPM5-2B-TinyJev-Fusion}"
       FUSION_LLM_BASE_URL: "${FUSION_LLM_BASE_URL:-http://host.docker.internal:8042/v1}"
       FUSION_LLM_MODEL: "${FUSION_LLM_MODEL:-minicpm5-2b}"
       FUSION_USER_NAME: "${FUSION_USER_NAME:-Sean}"

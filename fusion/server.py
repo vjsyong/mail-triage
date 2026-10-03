@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """TinyJev + MiniCPM fusion sidecar for Mail Triage.
 
-The "fusion system" measured on the v2 classification suite:
+The system is named MiniCPM5-2B-TinyJev-Fusion (FUSION_NAME). It was measured
+on the v2 classification suite as:
   category   : TinyJev-0.6B (Qwen3-0.6B + pointer head, Choice over the app's
                categories with one-line descriptions) - CPU friendly.
   needs_reply: MiniCPM5-2B, *direct* needs_reply prompt, thinking OFF (the
@@ -66,6 +67,7 @@ RECALL_SYSTEM = (
 
 CLASSIFY_MARK = "triage incoming email for"
 
+FUSION_NAME = os.environ.get("FUSION_NAME") or "MiniCPM5-2B-TinyJev-Fusion"
 LLM_BASE = (os.environ.get("FUSION_LLM_BASE_URL") or "").rstrip("/")
 LLM_MODEL = os.environ.get("FUSION_LLM_MODEL") or "minicpm5-2b"
 LLM_KEY = os.environ.get("FUSION_LLM_API_KEY") or ""
@@ -103,6 +105,14 @@ def extract_categories(messages):
             return [c.strip().strip('"').strip("'") for c in mt.group(1).split(",")
                     if c.strip().strip('"').strip("'")]
     return []
+
+
+def upstream_model(requested):
+    """Clients may target the fusion alias for every call; proxying maps it back."""
+    req = str(requested or "").strip()
+    if not req or req == FUSION_NAME:
+        return LLM_MODEL
+    return req
 
 
 def last_user(messages):
@@ -213,6 +223,7 @@ def classify(state, categories):
         tiny_ms = out["execution"]["model_ms"]
         ans = out["states"][0]["answers"]["category"]
         result = {
+            "model": FUSION_NAME,
             "category": ans["choice"],
             "category_confidence": float(ans["confidence"]),
             "category_probabilities": ans["probabilities"],
@@ -268,8 +279,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path in ("/healthz", "/health"):
             if _ready.is_set():
-                self._send(200, {"ok": True, "model": TINYJEV_MODEL, "llm": LLM_BASE or None,
-                                 "llm_model": LLM_MODEL})
+                self._send(200, {"ok": True, "model": TINYJEV_MODEL, "fusion": FUSION_NAME,
+                                 "llm": LLM_BASE or None, "llm_model": LLM_MODEL})
             else:
                 self._send(503, {"ok": False, "loading": True, "model": TINYJEV_MODEL})
         elif path == "/v1/models":
@@ -293,6 +304,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         if not ids:
             ids = [LLM_MODEL]
+        ids = [FUSION_NAME] + [i for i in ids if i and i != FUSION_NAME]
         self._send(200, {"object": "list",
                          "data": [{"id": i, "object": "model", "owned_by": "fusion"}
                                   for i in ids]})
@@ -352,7 +364,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "type": "upstream_error"}})
             return
         text = json.dumps(content, ensure_ascii=False)
-        model = raw.get("model") or LLM_MODEL
+        model = FUSION_NAME
         usage = {"prompt_tokens": _est_tokens(state), "completion_tokens": _est_tokens(text),
                  "total_tokens": _est_tokens(state) + _est_tokens(text)}
         if raw.get("stream"):
@@ -386,6 +398,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _proxy_chat(self, raw, stream):
+        raw = dict(raw)
+        raw["model"] = upstream_model(raw.get("model"))
         if not LLM_BASE:
             self._send(502, {"error": {"message": "FUSION_LLM_BASE_URL is not configured",
                                        "type": "upstream_error"}})
