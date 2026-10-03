@@ -1,0 +1,27 @@
+{
+ "schema_version": "v3.0",
+ "policy_id": "default",
+ "revision": "3.0",
+ "owner": "the account owner",
+ "persona": "employee_project_coordinator",
+ "categories": [
+  {"name": "Action", "description": "Needs a decision or action from the owner", "folder": "Action"},
+  {"name": "Notification", "description": "Automated account, security or operational notice", "folder": "Notifications"},
+  {"name": "Newsletter", "description": "Subscribed newsletter or digest", "folder": "Reading"},
+  {"name": "Receipt", "description": "Receipt, invoice or payment confirmation", "folder": "Receipts"},
+  {"name": "Personal", "description": "Personal correspondence to the owner", "folder": "Personal"},
+  {"name": "Promo", "description": "Legitimate promotion or marketing", "folder": "Reading"}
+ ],
+ "filing": {
+  "default_folder": "Action",
+  "mode": "suggest",
+  "confidence_gate": 0.0
+ },
+ "permissions": {
+  "allow_move": false,
+  "allow_send": false,
+  "allow_rule_create": false,
+  "require_approval": true
+ },
+ "notes": "Synthetic default policy for benchmark v3. This is not a real mailbox policy and makes no claim about any deployed configuration."
+}

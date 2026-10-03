@@ -1,0 +1,34 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "benchmark v3 gold record",
+ "type": "object",
+ "required": ["schema_version", "gold_id", "case_id", "review_status",
+              "human_seal", "observable", "answer"],
+ "additionalProperties": true,
+ "properties": {
+  "schema_version": {"const": "v3.0"},
+  "gold_id": {"type": "string", "minLength": 1},
+  "case_id": {"type": "string", "minLength": 1},
+  "review_status": {"enum": ["draft", "reviewed", "sealed"]},
+  "human_seal": {"type": "boolean"},
+  "reviewer": {"type": ["string", "null"]},
+  "authorized": {"type": "boolean"},
+  "source": {"enum": ["synthetic", "real_mail", "public_corpus"]},
+  "provenance_id": {"type": "string"},
+  "observable": {"type": "object"},
+  "hidden_evidence": {"type": "array", "items": {"type": "string"}},
+  "answer": {
+   "type": "object",
+   "additionalProperties": true,
+   "properties": {
+    "category": {"type": ["string", "null"]},
+    "acceptable_categories": {"type": "array", "items": {"type": "string"}},
+    "needs_reply": {"type": ["boolean", "null"]},
+    "required_outcomes": {"type": "array", "items": {"type": "string"}},
+    "forbidden_outcomes": {"type": "array", "items": {"type": "string"}},
+    "supporting_evidence": {"type": "array", "items": {"type": "string"}}
+   }
+  },
+  "adjudication": {"type": ["string", "null"]}
+ }
+}

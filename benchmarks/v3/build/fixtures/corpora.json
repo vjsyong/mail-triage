@@ -1,0 +1,41 @@
+{
+  "note": "Metadata-only catalog of existing public corpora. No extraction, download, normalization or reuse is performed by v3. Entries record known release duplication and access caveats so later authors do not treat downloadability as a redistribution right.",
+  "corpora": [
+    {
+      "corpus_id": "enron",
+      "name": "Enron Email Dataset",
+      "source": "public_corpus",
+      "releases": ["enron_2015_cmu", "enron_kaggle_mirror", "enron_2015_cmu_dup"],
+      "license": "research-use (per release terms)",
+      "retrieval": "metadata_only",
+      "notes": "Multiple mirror releases duplicate the same messages; use one canonical release and deduplicate by Message-ID. No download in v3."
+    },
+    {
+      "corpus_id": "ietf",
+      "name": "IETF Public Mail Archive",
+      "source": "public_corpus",
+      "releases": ["ietf_mail_archive", "ietf_mail_archive_mirror"],
+      "license": "public archive (per list terms)",
+      "retrieval": "metadata_only",
+      "notes": "Archive access has moved behind OAuth-gated tooling; legacy token flows are stale and must not be automated. No download in v3."
+    },
+    {
+      "corpus_id": "spamassassin",
+      "name": "SpamAssassin Public Corpus",
+      "source": "public_corpus",
+      "releases": ["20021010", "20030228", "20021010_easy_ham_dup"],
+      "license": "public corpus",
+      "retrieval": "metadata_only",
+      "notes": "Older releases overlap and ship near-duplicate ham/spam messages; treat the union as one source with duplicate releases. No download in v3."
+    },
+    {
+      "corpus_id": "nazario",
+      "name": "Nazario Phishing Corpus",
+      "source": "public_corpus",
+      "releases": ["nazario_2005", "nazario_2007"],
+      "license": "research-use",
+      "retrieval": "metadata_only",
+      "notes": "Phishing samples are dated and stylistically stale; no modern real-mail validity claim may be drawn from them. No download in v3."
+    }
+  ]
+}
