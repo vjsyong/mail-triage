@@ -7,16 +7,29 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TAG="${1:-$(date +%Y%m%d-%H%M)}"
 OUT="$ROOT/qa/shots/$TAG"
 BASE="http://127.0.0.1:8097"
+SHOT_TIMEOUT=90   # per-shot hard cap: a wedged page or binary must never stall the loop
 
-BIN="$HOME/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome"
-[ -x "$BIN" ] || BIN="$(find "$HOME/.cache/ms-playwright" -maxdepth 3 -name chrome -type f 2>/dev/null | sort -r | head -1)"
-if [ ! -x "$BIN" ]; then echo "no chromium binary found"; exit 1; fi
+mkdir -p "$OUT/mobile" "$OUT/desktop"
+
+# Pick the newest chromium that can actually take a screenshot. Some Chrome-for-Testing
+# builds hang forever on --screenshot (browser starts, PNG never lands), so probe each
+# candidate with a data: URL first and use the first one that produces a PNG.
+BIN=""
+CANDIDATES="$HOME/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome
+$(find "$HOME/.cache/ms-playwright" -maxdepth 3 \( -name chrome -o -name chrome-headless-shell \) -type f 2>/dev/null | sort -r)"
+while IFS= read -r cand; do
+  [ -n "$cand" ] && [ -x "$cand" ] || continue
+  rm -f "$OUT/.probe.png"
+  timeout 30 "$cand" --headless --no-sandbox --disable-gpu --screenshot="$OUT/.probe.png" "data:text/html,ok" >/dev/null 2>&1
+  if [ -s "$OUT/.probe.png" ]; then BIN="$cand"; break; fi
+done <<< "$CANDIDATES"
+rm -f "$OUT/.probe.png"
+if [ -z "$BIN" ]; then echo "no working chromium binary found"; exit 1; fi
+echo "using: $BIN"
 
 # newest message id for the viewer page
 MID="$(curl -s --max-time 5 "$BASE/messages" | grep -oE '/messages/[0-9]+' | head -1 | grep -oE '[0-9]+')"
 [ -n "${MID:-}" ] || MID=1
-
-mkdir -p "$OUT/mobile" "$OUT/desktop"
 
 PAGES="dashboard:/
 messages:/messages
@@ -33,7 +46,8 @@ templates:/templates
 flows:/flows"
 
 shot(){ # name url w h scale subdir
-  "$BIN" --headless --no-sandbox --disable-gpu --hide-scrollbars \
+  rm -f "$OUT/$6/$1.png"
+  timeout "$SHOT_TIMEOUT" "$BIN" --headless --no-sandbox --disable-gpu --hide-scrollbars \
     --force-device-scale-factor="$5" --window-size="$3,$4" \
     --virtual-time-budget=4000 --screenshot="$OUT/$6/$1.png" "$BASE$2" >/dev/null 2>&1
   if [ -s "$OUT/$6/$1.png" ]; then echo "ok $6/$1"; else echo "FAIL $6/$1"; fi

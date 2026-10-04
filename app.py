@@ -729,7 +729,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .dw-head{padding-top:max(10px, env(safe-area-inset-top))}
   .content{padding-left:max(14px, env(safe-area-inset-left));padding-right:max(14px, env(safe-area-inset-right))}
   .toolbar{display:block;padding:10px 0 10px 12px}
-  .tchips{display:flex;gap:6px;overflow-x:auto;padding-right:12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .tchips{display:flex;gap:6px;overflow-x:auto;padding-right:12px;scrollbar-width:none;-webkit-overflow-scrolling:touch;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}
   .tchips::-webkit-scrollbar{display:none}
   .tchips .chip{flex:none;height:34px}
   .tactions{display:flex;gap:8px;margin:10px 12px 0 0}
@@ -2351,12 +2351,12 @@ DASH_TMPL = """
     <div class="metric">
       <b>{{ st.moved }}</b>
       <span class="lbl">sorted by rules</span>
-      <span class="ctx">{{ '%.0f' % (st.moved * 100.0 / st.total) if st.total else 0 }}% of {{ st.total }} seen</span>
+      <span class="ctx">{{ (st.moved * 100 // st.total) if st.total else 0 }}% of {{ st.total }} seen</span>
     </div>
     <div class="metric">
       <b>{{ st.classified }}</b>
       <span class="lbl">LLM classified</span>
-      <span class="ctx">{{ '%.0f' % (st.classified * 100.0 / st.total) if st.total else 0 }}% of {{ st.total }} seen</span>
+      <span class="ctx">{{ (st.classified * 100 // st.total) if st.total else 0 }}% of {{ st.total }} seen</span>
     </div>
     <div class="metric">
       <b><a href="{{ url_for('rules') }}">{{ st.rules }}</a></b>
@@ -2376,7 +2376,7 @@ DASH_TMPL = """
   </div>
   <div class="dstat">
     <div class="dsrow"><span class="dsk">Sorted by rules</span><span class="dsv">{{ "{:,}".format(st.moved) }}</span></div>
-    <div class="dsrow"><span class="dsk">LLM classified</span><span class="dsv">{{ "{:,}".format(st.classified) }}<span class="dsp">{{ '%.0f' % (st.classified * 100.0 / st.total) if st.total else 0 }}% of {{ "{:,}".format(st.total) }}</span></span></div>
+    <div class="dsrow"><span class="dsk">LLM classified</span><span class="dsv">{{ "{:,}".format(st.classified) }}<span class="dsp">{{ (st.classified * 100 // st.total) if st.total else 0 }}% of {{ "{:,}".format(st.total) }}</span></span></div>
     <div class="dsrow"><span class="dsk">Rules active</span><span class="dsv"><a href="{{ url_for('rules') }}">{{ st.rules }}</a></span></div>
     <div class="dsrow"><span class="dsk">Flows active</span><span class="dsv"><a href="{{ url_for('flows') }}">{{ st.flows }}</a></span></div>
     <div class="dsrow"><span class="dsk">Classifiers active</span><span class="dsv"><a href="{{ url_for('classifiers') }}">{{ st.classifiers }}</a></span></div>
@@ -5926,7 +5926,7 @@ MESSAGES_TMPL = """
       </span>
       <span class="tactions">
       <button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify all<span class="mhide"> unclassified</span> ({{ unclassified }})</button>
-      <button class="btn small" type="submit" formaction="{{ url_for('learn_rules') }}" {{ 'disabled' if not tagged_count else '' }}>Learn rules<span class="mhide"> from tags</span> ({{ tagged_count }})</button>
+      <button class="btn small" type="submit" formaction="{{ url_for('learn_rules') }}" {{ 'disabled' if not tagged_count else '' }} title="{{ 'Nothing to learn from yet — tag some messages first' if not tagged_count else '' }}">Learn rules<span class="mhide"> from tags</span> ({{ tagged_count }})</button>
       </span>
     </div>
     <div class="bulkbar" id="bulkbar" role="region" aria-label="Bulk actions">
@@ -7968,7 +7968,7 @@ SETTINGS_TMPL = """
 .model-picker .model-status{font-size:.74rem;color:var(--dim)}
 .setrow .st-c input:disabled,.setrow .st-c select:disabled{background:var(--hover);color:var(--dim);opacity:.7;cursor:not-allowed}
 @media(max-width:900px){.settings-grid{grid-template-columns:1fr}.setnav{flex-direction:row;flex-wrap:wrap;position:static;gap:4px;margin-bottom:6px}.setnav .sn-h{display:none}.setrow{grid-template-columns:1fr}}
-@media(max-width:767px){.setnav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}.setnav::-webkit-scrollbar{display:none}.setnav a{flex:none;border:1px solid var(--line);white-space:nowrap;padding:5px 10px}}
+@media(max-width:767px){.setnav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}.setnav::-webkit-scrollbar{display:none}.setnav a{flex:none;border:1px solid var(--line);white-space:nowrap;padding:5px 10px}}
 </style>
 <div class="page-head">
   <div>
