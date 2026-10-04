@@ -11,10 +11,12 @@ Usage:  .venv/bin/python tests/mock_e2e.py
 """
 import email.utils
 import hashlib
+import imaplib
 import json
 import math
 import os
 import re
+import requests
 import shutil
 import socket
 import socketserver
@@ -60,6 +62,7 @@ class MockState:
         self.folders = {}
         self.appended = []
         self._next_uid = 1
+        self.fail_conns = 0  # accept this many connections by dropping them early
 
     def ensure(self, name, flags=""):
         with self.lock:
@@ -125,6 +128,11 @@ class IMAPHandler(socketserver.StreamRequestHandler):
         self.wfile.flush()
 
     def handle(self):
+        with self.server.state.lock:
+            if self.server.state.fail_conns > 0:
+                self.server.state.fail_conns -= 1
+                self.connection.close()
+                return
         self.cur = "INBOX"
         self.send("* OK [CAPABILITY IMAP4rev1 UIDPLUS MOVE] Mock IMAP ready")
         while True:
@@ -1691,6 +1699,56 @@ def main():
     row = store.get_message(row["id"])
     check("retry requeues and clears failures",
           n == 1 and row["status"] == "queued" and store.llm_fail_count(row["id"]) == 0)
+
+    section("T11b dropped IMAP connection: cycle reconnects instead of failing", "base")
+    check("requests/LLM errors are not IMAP disconnects",
+          engine._imap_disconnect(imaplib.IMAP4.error("User is authenticated but not connected."))
+          and engine._imap_disconnect(ConnectionResetError("proxy EOF"))
+          and not engine._imap_disconnect(requests.exceptions.ConnectionError("llm down"))
+          and not engine._imap_disconnect(RuntimeError("LLM returned no JSON")))
+    saved_delay = engine.IMAP_RETRY_DELAY
+    saved_suggest = store.all_settings().get("llm_suggest")
+    engine.IMAP_RETRY_DELAY = 0.05
+    store.set_setting("llm_suggest", False)  # scan only; leave the queue untouched
+    state.fail_conns = 1
+    add_msg(state, "flaky@x.com", "Reconnect after EOF", "body survives", "rf1@x")
+    try:
+        summary = engine.process_mailbox()
+    finally:
+        engine.IMAP_RETRY_DELAY = saved_delay
+        store.set_setting("llm_suggest", saved_suggest)
+        state.fail_conns = 0
+    rr = [r for r in store.messages(limit=4000) if r["msgid"] == "rf1@x"]
+    check("cycle survived one dropped connection", bool(rr) and "new" in summary)
+    check("reconnect attempt logged", any("reconnecting" in (e.get("message") or "")
+                                          for e in store.recent_events(50)))
+
+    section("T11c classifier connection failures neither strike nor park", "base")
+    saved_suggest = store.all_settings().get("llm_suggest")
+    store.set_setting("llm_suggest", False)  # create the row, do not classify it
+    add_msg(state, "flaky2@x.com", "Classifier connection flake", "body", "cf1@x")
+    try:
+        engine.process_mailbox()
+    finally:
+        store.set_setting("llm_suggest", saved_suggest)
+    cfrow = [r for r in store.messages(limit=4000) if r["msgid"] == "cf1@x"][0]
+    saved_cc = store.all_settings().get("classify_concurrency")
+    store.set_setting("classify_concurrency", 1)
+    state.fail_conns = 4
+    try:
+        job = engine.ClassifyJob()
+        job.trigger([cfrow["id"]])
+        job._run_job()
+    finally:
+        store.set_setting("classify_concurrency", saved_cc)
+        state.fail_conns = 0
+    check("connection failure leaves no LLM strike",
+          store.llm_fail_count(cfrow["id"]) == 0)
+    check("message not parked on a connection failure",
+          store.get_message(cfrow["id"])["status"] != "error")
+    check("connection failure logged, not blamed on the endpoint",
+          any("IMAP connection error" in (e.get("message") or "")
+              for e in store.recent_events(50)))
 
     section("T12 RAG: indexer, chunking, folder exclusions", "rag")
     uid_probe = add_msg(state, "probe@x.com", "Half index probe", "probe body text", "hx@x")

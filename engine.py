@@ -2509,25 +2509,61 @@ def _process_llm_queue(mc, settings, batch):
     return done
 
 
+IMAP_RETRIES = 2        # extra attempts when a cycle dies on a connection error
+IMAP_RETRY_DELAY = 2.0  # seconds between those attempts
+
+
+def _imap_disconnect(exc):
+    """True for IMAP/socket-level failures (proxy EOF, dropped sessions,
+    'User is authenticated but not connected.'), False for LLM/HTTP errors.
+    requests' exceptions subclass OSError, so they are excluded first."""
+    if isinstance(exc, requests.exceptions.RequestException):
+        return False
+    return isinstance(exc, (imaplib.IMAP4.error, OSError))
+
+
+def _mail_pass(mc, settings, rules, flows):
+    scanned = moved = 0
+    for folder in settings.get("watch_folders") or ["INBOX"]:
+        s, m = _process_folder(mc, folder, settings, rules, flows)
+        scanned += s
+        moved += m
+    classified = 0
+    if settings.get("llm_suggest"):
+        budget = int(settings.get("max_llm_per_hour", 40)) - store.llm_count_last_hour()
+        batch = max(0, min(int(settings.get("llm_batch_per_cycle", 5)), budget))
+        if batch:
+            classified = _process_llm_queue(mc, settings, batch)
+    return scanned, moved, classified
+
+
 def process_mailbox():
-    """One full pass: scan watched folders, apply rules, run the LLM queue."""
+    """One full pass: scan watched folders, apply rules, run the LLM queue.
+
+    A dropped proxy session (EOF, 'User is authenticated but not connected.')
+    is transient on the far side: reconnect and retry the pass before letting
+    the cycle fail, so one blip does not paint the dashboard red."""
     settings = store.all_settings()
     rules = [r for r in store.list_rules() if r.get("enabled")]
     flows = [f for f in store.list_flows() if f.get("enabled")]
-    mc = MailClient().connect()
-    scanned = moved = classified = 0
-    try:
-        for folder in settings.get("watch_folders") or ["INBOX"]:
-            s, m = _process_folder(mc, folder, settings, rules, flows)
-            scanned += s
-            moved += m
-        if settings.get("llm_suggest"):
-            budget = int(settings.get("max_llm_per_hour", 40)) - store.llm_count_last_hour()
-            batch = max(0, min(int(settings.get("llm_batch_per_cycle", 5)), budget))
-            if batch:
-                classified = _process_llm_queue(mc, settings, batch)
-    finally:
-        mc.close()
+    attempt = 0
+    while True:
+        attempt += 1
+        mc = None
+        try:
+            mc = MailClient().connect()
+            scanned, moved, classified = _mail_pass(mc, settings, rules, flows)
+            break
+        except Exception as exc:
+            if attempt <= IMAP_RETRIES and _imap_disconnect(exc):
+                store.log_event("warn", "check hit a connection error (%r) — reconnecting "
+                                "(retry %d/%d)" % (exc, attempt, IMAP_RETRIES))
+                time.sleep(IMAP_RETRY_DELAY)
+                continue
+            raise
+        finally:
+            if mc is not None:
+                mc.close()
     parts = []
     if scanned:
         parts.append("%d new" % scanned)
@@ -2717,8 +2753,26 @@ class ClassifyJob(threading.Thread):
                 self._conns.append(mc)
         return mc
 
+    def _forget(self, mc):
+        """Drop a connection that died mid-job so the next task reconnects."""
+        with self.lock:
+            if mc in self._conns:
+                self._conns.remove(mc)
+        if getattr(self._tls, "mc", None) is mc:
+            self._tls.mc = None
+        try:
+            mc.close()
+        except Exception:
+            pass
+
     def _classify_one(self, msg, settings):
-        res = classify_and_store(msg, settings, mc=self._mail())
+        mc = self._mail()
+        try:
+            res = classify_and_store(msg, settings, mc=mc)
+        except Exception as exc:
+            if _imap_disconnect(exc):
+                self._forget(mc)
+            raise
         if not res.get("_heuristic_id"):
             store.add_llm_log(msg["id"], True)
         return res
@@ -2773,15 +2827,22 @@ class ClassifyJob(threading.Thread):
                                             % ((msg.get("subject") or "")[:50], res.get("category"),
                                                (" (moved to %s)" % res["_moved_to"]) if res.get("_moved_to") else ""))
                         except Exception as exc:
-                            failed += 1
-                            store.add_llm_log(msg["id"], False, repr(exc))
-                            if store.llm_fail_count(msg["id"]) >= 3:
-                                store.update_message(msg["id"], status="error")
-                                store.log_event("error", "classify: '%s' parked after repeated failures"
-                                                % (msg.get("subject") or "")[:50])
-                            else:
-                                store.log_event("error", "classify: '%s' failed (retry later): %r"
+                            if _imap_disconnect(exc):
+                                # connection died, not a bad verdict: leave it
+                                # queued and let a later pass retry, no strike
+                                store.log_event("warn", "classify: '%s' hit an IMAP connection "
+                                                "error (%r) — left queued for retry"
                                                 % ((msg.get("subject") or "")[:50], exc))
+                            else:
+                                failed += 1
+                                store.add_llm_log(msg["id"], False, repr(exc))
+                                if store.llm_fail_count(msg["id"]) >= 3:
+                                    store.update_message(msg["id"], status="error")
+                                    store.log_event("error", "classify: '%s' parked after repeated failures"
+                                                    % (msg.get("subject") or "")[:50])
+                                else:
+                                    store.log_event("error", "classify: '%s' failed (retry later): %r"
+                                                    % ((msg.get("subject") or "")[:50], exc))
                     self.state["done"] = done
                     self.state["failed"] = failed
             if self.stop_flag.is_set():
