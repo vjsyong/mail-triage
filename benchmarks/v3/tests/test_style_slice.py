@@ -309,5 +309,88 @@ class TestSpamSampling(unittest.TestCase):
             shutil.rmtree(ietf, ignore_errors=True)
 
 
+class TestNewsletter(unittest.TestCase):
+    def setUp(self):
+        self.spam = tempfile.mkdtemp(prefix="nl-spam-")
+        self.enron = tempfile.mkdtemp(prefix="nl-enron-")
+        hard = os.path.join(self.spam, "hard_ham")
+        easy = os.path.join(self.spam, "easy_ham")
+        os.makedirs(hard, exist_ok=True)
+        os.makedirs(easy, exist_ok=True)
+        # hard_ham: one signal, one non-signal (must be excluded)
+        _write_msg(os.path.join(hard, "00001.a"), "news@x.com", "b@y.com",
+                   "Monthly Newsletter - March", _body("unsubscribe from this issue"))
+        _write_msg(os.path.join(hard, "00002.b"), "a@x.com", "b@y.com",
+                   "lunch today", _body("are we still on for lunch"))
+        # easy_ham: digest marker via list tag
+        _write_msg(os.path.join(easy, "00001.c"), "list@x.com", "b@y.com",
+                   "[dev] digest volume 3", _body("weekly digest of the list"))
+        # enron: inbox bulletin (kept) and sent duplicate (excluded: inbox-only)
+        _write_msg(os.path.join(self.enron, "u1", "inbox", "1."), "n@x.com",
+                   "b@y.com", "Weekly Update", _body("weekly update bulletin"))
+        _write_msg(os.path.join(self.enron, "u1", "sent", "1."), "n@x.com",
+                   "b@y.com", "Weekly Update", _body("weekly update bulletin"))
+
+    def tearDown(self):
+        shutil.rmtree(self.spam, ignore_errors=True)
+        shutil.rmtree(self.enron, ignore_errors=True)
+
+    def test_signals_per_source(self):
+        news = {"subject": "Monthly Newsletter", "body": "... unsubscribe ...",
+                "from_name": "", "from_email": "", "to_name": "", "to_email": "", "cc": []}
+        plain = {"subject": "lunch", "body": "are we still on", "from_name": "",
+                 "from_email": "", "to_name": "", "to_email": "", "cc": []}
+        self.assertTrue(es._newsletter_signal(news, "hard_ham"))
+        self.assertFalse(es._newsletter_signal(plain, "hard_ham"))
+        self.assertTrue(es._newsletter_signal({"subject": "[dev] digest", "body": "x",
+                                               "from_name": "", "from_email": "",
+                                               "to_name": "", "to_email": "", "cc": []},
+                                              "easy_ham"))
+        self.assertTrue(es._newsletter_signal(news, "enron"))
+        self.assertFalse(es._newsletter_signal(plain, "enron"))
+
+    def test_newsletter_sampling_filters_and_scope(self):
+        refs = es.sample_references(source="mix", family="newsletter", seed=9, n=3,
+                                    min_groups=3, enron_root=self.enron,
+                                    spam_root=self.spam)
+        groups = {r["group"] for r in refs}
+        self.assertEqual(groups, {"hard_ham", "easy_ham", "enron"})
+        self.assertTrue(all(r["register"] == "newsletter" for r in refs))
+        # the non-signal hard_ham and the sent-folder enron message are excluded
+        self.assertFalse(any("00002" in r["message_id"] for r in refs))
+        self.assertTrue(all("/inbox/" in r["message_id"] or r["source"] != "enron"
+                            for r in refs))
+
+    def test_register_aware_prompt(self):
+        w, p, q = _world_ref_emails()
+        ref = _ref()
+        nl = es.build_prompt(ref, p, q, "monthly_digest", "3 March 2025",
+                             "8 March 2025", register="newsletter")
+        self.assertIn("NEWSLETTER", nl[0]["content"])
+        self.assertIn("monthly digest", nl[1]["content"].lower())
+        gen = es.build_prompt(ref, p, q, "meeting", "3 March 2025", "8 March 2025")
+        self.assertNotIn("NEWSLETTER", gen[0]["content"])
+
+    def test_newsletter_word_band(self):
+        w, p, q = _world_ref_emails()
+        ref = _ref()
+        words = ("alpha bravo charlie delta echo foxtrot golf hotel india juliet "
+                 "kilo lima mike november oscar papa quebec romeo sierra tango")
+        body = " ".join((words.split() * 12)[:220])
+        gen = {"subject": "Issue", "body": body, "from_email": p["email"],
+               "to_email": q["email"]}
+        nl, _ = es.guard(ref, gen, w, ["3 March 2025"], register="newsletter")
+        gen_probs, _ = es.guard(ref, gen, w, ["3 March 2025"], register="general")
+        self.assertFalse(any("band" in x for x in nl))
+        self.assertTrue(any("band" in x for x in gen_probs))
+
+    def test_newsletter_sender_is_role_mailbox(self):
+        w = World.build()
+        from benchmarks.v3.build.rng import stream
+        s = es.pick_newsletter_sender(w, stream(1, "nl"))
+        self.assertIn(s["email"].split("@")[0], es.NEWS_ROLES)
+        self.assertIn(s["domain"], w.domains)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
