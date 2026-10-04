@@ -231,7 +231,8 @@ def build_brief(*, family_id, slots, facts, region, persona, allocator,
         login_dt = send - timedelta(minutes=7)
         login = {"time": login_dt.strftime("%H:%M"),
                  "date": _fmt_date(login_dt, region),
-                 "place": facts.get("venue") or "an unrecognised device"}
+                 "place": facts.get("venue") or slots.get("place")
+                 or "an unrecognised device"}
         required.append(("login_time", login["time"]))
 
     forbidden = []
