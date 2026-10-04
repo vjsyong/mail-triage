@@ -241,7 +241,7 @@
         {
           "id": "news_a",
           "subject": "{org} monthly digest - {month}",
-          "body": "Hi {owner_first},\n\nHere is your {month} digest from {org}. This month we cover {detail}. You are receiving this because you subscribed; unsubscribe any time.\n\nRead online: {link}\n\n{org} editorial team",
+          "body": "Hi {owner_first},\n\nHere is your {month} digest from {org}. This month's highlights follow.\n\n{detail}\n\nYou are receiving this because you subscribed; unsubscribe any time.\n\nRead online: {link}\n\n{org} editorial team",
           "evidence": [
             "subscribed",
             "{link}"
@@ -250,7 +250,7 @@
       ],
       "paraphrase": {
         "subject": "What's new at {org} this {month}",
-        "body": "Hello {owner_first},\n\nOur {month} roundup is ready: {detail}. Thanks for following {org}. Manage your subscription or unsubscribe at {link}.\n\n{org}",
+        "body": "Hello {owner_first},\n\nOur {month} roundup is ready.\n\n{detail}\n\nThanks for following {org}. Manage your subscription or unsubscribe at {link}.\n\n{org}",
         "evidence": [
           "subscription",
           "{link}"

@@ -466,7 +466,6 @@ class World(object):
             "catalog_bucket": bucket, "catalog_item": term,
             "signature_expected": signature_expected,
             "item_expected": item_expected, "service_expected": service_expected,
-            "claims": {"cc": False, "workstream": False, "history": False},
             "sender": {"kind": sender["kind"], "org": sender["org"],
                        "org_id": sender.get("org_id"), "domain": sender["domain"],
                        "email": sender["email"], "person_name": sender["person_name"],

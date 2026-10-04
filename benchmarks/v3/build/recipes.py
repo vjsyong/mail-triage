@@ -81,6 +81,11 @@ def category_covers():
     return _load("semantics.json")["category_covers"]
 
 
+def description_intents():
+    """Intents each category's own name+description supports (independent map)."""
+    return _load("semantics.json")["description_intents"]
+
+
 def family_intent():
     """The semantic intent(s) of each family (multiple => genuinely ambiguous)."""
     return _load("semantics.json")["family_intent"]
@@ -222,6 +227,13 @@ def validate_recipes():
     return True
 
 
+def _clauses(entry):
+    """Flatten an eliciting/neutral clause entry to a list."""
+    if isinstance(entry, dict):
+        return list(entry.get("eliciting") or []) + list(entry.get("neutral") or [])
+    return list(entry or [])
+
+
 def _situation_disjointness_problems():
     """The public and each private clause pool must be pairwise disjoint.
 
@@ -234,15 +246,15 @@ def _situation_disjointness_problems():
     groups = raw.get("groups") or {}
     private = raw.get("private_groups") or {}
     for domain, pools in private.items():
-        for group, clauses in pools.items():
+        for group, entry in pools.items():
             if group not in groups:
                 problems.append("private situations %r has unknown group %r"
                                 % (domain, group))
                 continue
-            public_set = set(groups[group])
+            clauses = _clauses(entry)
             if not clauses:
                 problems.append("private situations %r/%r is empty" % (domain, group))
-            if public_set & set(clauses):
+            if set(_clauses(groups[group])) & set(clauses):
                 problems.append("private situations %r/%r overlap the public pool"
                                 % (domain, group))
     domains = list(private)
@@ -250,7 +262,7 @@ def _situation_disjointness_problems():
         for j in range(i + 1, len(domains)):
             a, b = domains[i], domains[j]
             for group in set(private[a]) & set(private[b]):
-                if set(private[a][group]) & set(private[b][group]):
+                if set(_clauses(private[a][group])) & set(_clauses(private[b][group])):
                     problems.append("private situations %r and %r overlap on %r"
                                     % (a, b, group))
     return problems

@@ -44,15 +44,34 @@ _SAME_DOMAIN_OK = {"meeting_request", "personal_invitation"}
 
 # Phrases that assert an out-of-band fact (a CC/team copy, a parallel
 # workstream, or a prior exchange). They are only allowed when the scenario
-# declares the corresponding fact, so a clause cannot invent one.
+# declares the corresponding fact; no current scenario declares one, so these
+# phrases are rejected by default rather than blanket-banned by a dead flag.
 _CLAIM_PHRASES = (
-    ("copied the wider team", "cc"),
-    ("wider team", "cc"),
+    ("copied the wider team", "cc_recipients"),
+    ("wider team", "cc_recipients"),
     ("other workstream", "workstream"),
     ("earlier exchange", "history"),
     ("followed this thread", "history"),
     ("as we discussed earlier", "history"),
 )
+_CLAUSE_OPENERS = ("We", "This", "There", "Please", "Let", "Hope", "Thank",
+                   "Kindly", "Our", "Your", "If", "See")
+_DOUBLED_PUNCT = re.compile(r"[.!?]{2,}")
+_LOWER_AFTER_TERM = re.compile(r"[.!?][ \t]+([a-z])")
+# Common abbreviations that legitimately precede a lowercase word.
+_ABBREV = {"co", "ltd", "inc", "corp", "plc", "gmbh", "etc", "vs", "no", "st",
+           "dr", "mr", "mrs", "ms", "e.g", "i.e", "p.o"}
+_MID_SENTENCE_OPENER = re.compile(r"[a-z,][ \t]+(%s)\b" % "|".join(_CLAUSE_OPENERS))
+
+
+def _lowercase_after_terminator(text):
+    for match in _LOWER_AFTER_TERM.finditer(text):
+        head = text[:match.start() + 1]
+        tokens = head.split()
+        prev = tokens[-1].strip(".,!?;:").lower() if tokens else ""
+        if prev not in _ABBREV:
+            return True
+    return False
 
 
 def _parse(value):
@@ -266,12 +285,20 @@ def _check_text(text, facts, world, label, quoted, expect=None):
                         % (label, name))
             break
     lowered = text.lower()
-    claims = facts.get("claims") or {}
     for phrase, key in _CLAIM_PHRASES:
-        if phrase in lowered and not claims.get(key):
-            errs.append("%s: unbacked %s claim %r (no declared fact)"
-                        % (label, key, phrase))
+        if phrase in lowered and not facts.get(key):
+            errs.append("%s: unbacked claim %r (no declared %r fact)"
+                        % (label, phrase, key))
             break
+    if not quoted:
+        if _DOUBLED_PUNCT.search(text):
+            errs.append("%s: doubled terminal punctuation" % label)
+        if _lowercase_after_terminator(text):
+            errs.append("%s: lowercase after a sentence terminator" % label)
+        opener = _MID_SENTENCE_OPENER.search(text)
+        if opener:
+            errs.append("%s: clause opener %r injected mid-sentence"
+                        % (label, opener.group(1)))
     if not quoted and expect.get("signer") and (facts.get("signer") or {}).get("name") \
             and facts["signer"]["name"].lower() not in lowered:
         errs.append("%s: signature %r does not appear" % (label, facts["signer"]["name"]))

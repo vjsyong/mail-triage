@@ -37,8 +37,8 @@ DOMAINS = (PUBLIC_DOMAIN,) + PRIVATE_DOMAINS
 # Draft-data revisions. Bumped because this refresh changes the content
 # generator: previously generated draft datasets are INCOMPATIBLE and must be
 # regenerated (no scientific claim is made by any earlier draft).
-BUILDER_REVISION = "3.5-draft-semantic"
-DATA_REVISION = "3.5-draft-semantic"
+BUILDER_REVISION = "3.6-draft-final"
+DATA_REVISION = "3.6-draft-final"
 PROMPT_REVISION = "native-v3.0"
 
 SYNTHETIC_PROVENANCE_ID = "prov_synthetic_v3"
@@ -98,7 +98,7 @@ SITUATION_GROUP = {
     "workflow": "workflow",
 }
 
-CLIP_PREAMBLE = (
+_CLIP_PREAMBLE_TMPL = (
     "From: thread-archive@lists.example\nTo: owner@example.org\n"
     "Subject: Re: Re: Thursday sync notes\nDate: Mon, 1 Sep 2025 08:00:00 +0000\n\n"
     "On Thursday we went through the standing agenda. Notes follow in full so the "
@@ -129,6 +129,13 @@ CLIP_PREAMBLE = (
     "with the other archived threads from the same working group over the past "
     "several years of the project.\n\n"
 )
+
+
+def _clip_preamble(tld):
+    """The authored quoted thread, on the configured world TLD."""
+    return (_CLIP_PREAMBLE_TMPL
+            .replace("thread-archive@lists.example", "thread-archive@lists." + tld)
+            .replace("owner@example.org", "owner@" + tld))
 
 
 # --------------------------------------------------------------------------- helpers
@@ -197,22 +204,50 @@ def _present_evidence(slots, templates, text):
     return out
 
 
-def _pick_situation(family_id, seed, index, domain=PUBLIC_DOMAIN):
+def _pick_situation(family_id, seed, index, domain=PUBLIC_DOMAIN, calm=False):
     """A deterministic authored context clause for this root, or None.
 
-    Public and private domains draw from disjoint clause pools, so every private
-    record contains a clause absent from every public record.
+    ``calm`` selects a non-eliciting clause (for needs_reply=false, resolved or
+    automated messages). Public and private domains draw from disjoint clause
+    pools, so every private record contains a clause absent from every public
+    record.
     """
     group = SITUATION_GROUP.get(family_id)
     if not group:
         return None
     if domain == PUBLIC_DOMAIN:
-        pool = recipes.situations().get(group) or []
+        entry = recipes.situations().get(group) or {}
     else:
-        pool = recipes.private_situations(domain).get(group) or []
+        entry = recipes.private_situations(domain).get(group) or {}
+    if isinstance(entry, dict):
+        pool = list(entry.get("neutral" if calm else "eliciting") or [])
+        if not pool:
+            pool = list(entry.get("eliciting") or entry.get("neutral") or [])
+    else:
+        pool = list(entry or [])
     if not pool:
         return None
-    return stream(seed, "domain:%s:situation:%d" % (domain, index)).pick(pool)
+    return stream(seed, "domain:%s:situation:%s:%d"
+                  % (domain, "calm" if calm else "base", index)).pick(pool)
+
+
+def _normalize_punctuation(text):
+    """Collapse doubled terminal punctuation (e.g. an abbreviation before a period)."""
+    return re.sub(r"([.!?])\1+", r"\1", text)
+
+
+def _format_clause(clause):
+    text = clause.strip()
+    if text and text[0].islower():
+        text = text[0].upper() + text[1:]
+    return re.sub(r"[.!?]+$", "", text) + "."
+
+
+def _append_clause(body, clause):
+    """Append a context clause as its own safe sentence."""
+    if not clause:
+        return body
+    return body.rstrip() + "\n\n" + _format_clause(clause)
 
 
 # --------------------------------------------------------------------------- splits
@@ -362,7 +397,9 @@ def _base_message(ctx):
         body, stream(ctx.seed, "style:%s" % ctx.root),
         getattr(ctx, "style_profile", "standard"))
     if getattr(ctx, "situation", None):
-        body = body + "\n\n" + _fill(ctx.situation, ctx.slots)
+        ctx.base_clause_rendered = _format_clause(_fill(ctx.situation, ctx.slots))
+        body = _append_clause(body, ctx.base_clause_rendered)
+    body = _normalize_punctuation(body)
     ctx.slots["sender_subject"] = subject
     # Authoritative reply intent: a template may override the family default
     # (e.g. an automated pay-only reminder is needs_reply=False while a variant
@@ -381,19 +418,21 @@ def _base_message(ctx):
     }
 
 
-def _variant_message(ctx, base, variant, with_situation=True):
+def _variant_message(ctx, base, variant, with_situation=True, calm=False):
     out = dict(base)
+    clause = ctx.situation_calm if calm else getattr(ctx, "situation", None)
     if variant:
         out["subject"] = _fill(variant["subject"], ctx.slots)
         body = _fill(variant["body"], ctx.slots)
         body = style.restyle_greeting(
             body, stream(ctx.seed, "style:%s:%s" % (ctx.root, variant.get("subject", ""))),
             getattr(ctx, "style_profile", "standard"))
-        if with_situation and getattr(ctx, "situation", None):
-            body = body + "\n\n" + _fill(ctx.situation, ctx.slots)
+        if with_situation and clause:
+            body = _append_clause(body, _fill(clause, ctx.slots))
         out["body"] = body
-    elif with_situation and getattr(ctx, "situation", None):
-        out["body"] = out["body"] + "\n\n" + _fill(ctx.situation, ctx.slots)
+    elif with_situation and clause:
+        out["body"] = _append_clause(out["body"], _fill(clause, ctx.slots))
+    out["body"] = _normalize_punctuation(out["body"])
     out["snippet"] = out["body"]
     return out
 
@@ -409,7 +448,7 @@ def _build_triage_root(ctx, include_variants):
     # Plausibility is enforced before the message enters any rendered case.
     problems = plausibility.check_scenario(ctx.facts, [msg], ctx.world)
     if problems:
-        raise BuildError("implausible scenario:\n  " + "\n  ".join(problems))
+        raise BuildError("implausible scenario %s:\n  %s\nBODY=%r" % (ctx.family_id, "\n  ".join(problems), msg.get("body","")))
     ctx.base_msg = msg
     ctx.message_ids = [msg["message_id"]]
     fam = ctx.family
@@ -429,11 +468,11 @@ def _build_triage_root(ctx, include_variants):
               ["profile:policy", "policy_card"],
               force_needs_reply=ctx.template_needs_reply, extra=base_audit)
     para = fam.get("paraphrase")
+    para_needs = (para or {}).get("needs_reply", ctx.template_needs_reply)
     _emit(ctx, "para", contracts.NATIVE_PROFILE, ctx.policy,
-          _variant_message(ctx, msg, para),
+          _variant_message(ctx, msg, para, calm=not para_needs),
           "invariance", base_id, ["category", "needs_reply"], ["text:paraphrase"],
-          ["paraphrase"],
-          force_needs_reply=(para or {}).get("needs_reply", ctx.template_needs_reply),
+          ["paraphrase"], force_needs_reply=para_needs,
           extra=_audit((para or {}).get("body", base_body)))
     sig_body = msg["body"] + "\n\n--\n" + \
         "\n".join(ctx.facts["signer"].get("signature_lines") or
@@ -456,7 +495,7 @@ def _build_triage_root(ctx, include_variants):
           force_needs_reply=ctx.template_needs_reply, extra=base_audit)
     if fam.get("resolved"):
         resolved = fam["resolved"]
-        res = _variant_message(ctx, msg, resolved)
+        res = _variant_message(ctx, msg, resolved, calm=True)
         res["subject"] = _fill(resolved["subject"], ctx.slots)
         _emit(ctx, "resolved", contracts.NATIVE_PROFILE, ctx.policy, res,
               "counterfactual", base_id, ["category"], ["needs_reply"],
@@ -468,7 +507,13 @@ def _build_triage_root(ctx, include_variants):
         alias = ctx.facts["recipient"].get("team_alias") or \
             ("team@%s" % ctx.facts["recipient"]["domain"])
         other["to_addr"] = alias
-        other["body"] = msg["body"] + \
+        body = msg["body"]
+        base_clause = getattr(ctx, "base_clause_rendered", None)
+        if base_clause and ctx.situation_calm:
+            calm_text = _format_clause(_fill(ctx.situation_calm, ctx.slots))
+            body = body.replace("\n\n" + base_clause,
+                                "\n\n" + calm_text, 1)
+        other["body"] = body + \
             "\n\n(Note: this copy was delivered to the declared team alias %s.)" % alias
         other["snippet"] = other["body"]
         _emit(ctx, "recipient", contracts.NATIVE_PROFILE, ctx.policy, other,
@@ -490,16 +535,16 @@ def _clip_variants(ctx, msg, base_id, base_audit):
     # The visible clipped region is dominated by boilerplate; prefix the
     # domain's context clause so a clipped private input still differs from a
     # clipped public one rather than sharing identical visible text.
-    preamble = CLIP_PREAMBLE
+    preamble = _clip_preamble(ctx.world.tld)
     if getattr(ctx, "situation", None):
-        preamble = _fill(ctx.situation, ctx.slots) + "\n\n" + CLIP_PREAMBLE
+        preamble = _fill(ctx.situation, ctx.slots) + "\n\n" + preamble
     # The clip preamble is authored quoted boilerplate; tell the lint which of
     # its weekdays belong to the quoted context so they are not mistaken for
     # this message's own dates.
     ctx.facts["clip_quoted_weekdays"] = [
         form for name in temporal.WEEKDAY_NAMES
         for form in (name, name[:3])
-        if re.search(r"\b%s\b" % form, CLIP_PREAMBLE)]
+        if re.search(r"\b%s\b" % form, preamble)]
     if len(preamble) < contracts.SNIPPET_LIMIT + 100:
         raise BuildError("clip preamble is not long enough to push evidence out")
     long_body = preamble + "\n" + msg["body"]
@@ -546,7 +591,7 @@ def _fill_mailbox(ctx, fixture):
         "permissions": dict(ctx.permissions),
     }
     for m in fixture.get("messages", []):
-        body = _fill(m.get("body", ""), ctx.slots)
+        body = _normalize_punctuation(_fill(m.get("body", ""), ctx.slots))
         out["messages"].append({
             "id": m["id"],
             "from_addr": _fill(m.get("from_addr", ""), ctx.slots),
@@ -649,7 +694,7 @@ def _build_workflow_root(ctx, recipe):
     task = _fill(recipe["task"], ctx.slots)
     if getattr(ctx, "situation", None):
         # Domain-scoped task context keeps workflow model inputs domain-distinct.
-        task = task + "\n\n" + _fill(ctx.situation, ctx.slots)
+        task = _append_clause(task, _fill(ctx.situation, ctx.slots))
     trusted = _fill(recipe["trusted_system"], ctx.slots)
     rendered = render.render_workflow(task, trusted)
     gold_spec = recipe["gold"]
@@ -769,7 +814,14 @@ def _mk_ctx(kind, index, seed, persona, domain, shift_axis, family_id,
         relevant_facts=["family:%s" % family_id,
                         "needs_reply:%s" % family.get("needs_reply", None)],
     )
-    ctx.situation = _pick_situation(family_id, root_seed, index, domain)
+    templates = family.get("templates") or [{}]
+    base_tmpl = templates[index % len(templates)]
+    base_needs_reply = base_tmpl.get("needs_reply", family.get("needs_reply"))
+    ctx.situation = _pick_situation(family_id, root_seed, index, domain,
+                                    calm=not base_needs_reply)
+    ctx.situation_calm = _pick_situation(family_id, root_seed, index, domain,
+                                         calm=True)
+    ctx.base_needs_reply = base_needs_reply
     ctx.case_id = lambda tag: "case_%s_%s" % (root, tag)
     ctx.gold_id = lambda tag: "gold_%s_%s" % (root, tag)
     return ctx

@@ -350,23 +350,31 @@ grounded in its own description. Resolution:
 
 A category's explicit `roles` (e.g. the marketing-merge twin) takes precedence
 over the name map, so policy twins honor only their declared mapping change.
-Coverage and the number of taxonomy gaps are recorded in
+`covers` is a **strict subset of `description_intents`**, an independent map
+authored from each category's own name and description (checked by a
+non-circular test), so no category claims coverage its definition does not
+support. Coverage and the number of taxonomy gaps are recorded in
 `metadata.coverage.taxonomy` by profile and persona (a diagnostic, not a quality
 claim). No production category contract is modified.
 
 **Context claims + reply intent (AR-2)** (`fixtures/situations.json`,
-`world.build_scenario`). Context clauses are purpose-scoped (request/billing/
-news/notice/social) and never assert an unbacked copy/CC/team/workstream/prior-
-exchange fact; the lint rejects such a phrase unless the scenario declares the
-corresponding fact. A template may declare its own `needs_reply` (e.g. the
+`world.build_scenario`). Context clauses are purpose-scoped
+(request/billing/news/notice/social) and split into `eliciting` (invite a reply)
+and `neutral` pools; a `needs_reply=false`, resolved or automated message draws
+only a neutral clause. Clauses are inserted as their own capitalized sentence
+with a single terminal punctuation and never assert an unbacked
+copy/CC/team/workstream/prior-exchange fact; the lint rejects such a phrase
+unless the scenario declares the corresponding fact, and also rejects doubled
+punctuation, a lowercase word after a sentence terminator, and a clause opener
+injected mid-sentence. A template may declare its own `needs_reply` (e.g. the
 payment family ships both an automated pay-only reminder, needs_reply false, and
 a variant that explicitly asks for a reply, needs_reply true); gold derives the
 reply intent from the rendered template, so a payment/action message is never
 scored as a reply request unless it actually asks for one.
 
-**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.5-draft-semantic`; the
+**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.6-draft-final`; the
 content generator changed, so earlier draft datasets and previews (including
-`83ed0ac`) are incompatible and the dataset ids differ.
+`26fb4ec`) are incompatible and the dataset ids differ.
 
 ## Files
 

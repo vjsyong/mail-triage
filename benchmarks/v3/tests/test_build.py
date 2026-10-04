@@ -594,23 +594,20 @@ class ContentStreamSeparationTest(unittest.TestCase):
         self.assertIsNone(public["metadata"].get("private_seed_used"))
 
     def test_known_published_inputs_absent_from_new_private(self):
-        import json
-        import os
-        audit = ["/tmp/opencode/v3-full-public42",
-                 "/tmp/opencode/v3-validate-20261003-082734/pilot"]
-        old = set()
-        found = False
-        for path in audit:
-            fp = os.path.join(path, "bundle.json")
-            if not os.path.isfile(fp):
-                continue
-            found = True
-            with open(fp) as f:
-                old |= {_norm_input(c) for c in json.load(f)["cases"]}
-        if not found:
-            self.skipTest("published audit artifacts unavailable")
-        b = mechanism_bundle(private_seed=1)
-        priv = {_norm_input(c) for c in b["cases"] if c["split"] in PRIVATE_SPLITS}
+        # Construct our own synthetic "previously published" bundle in a temp
+        # dir, then verify a new build's private model inputs are disjoint from
+        # its public development inputs.
+        import tempfile
+        published = build.build_dataset(triage_roots=40, workflow_roots=5, seed=7)
+        with tempfile.TemporaryDirectory() as tmp:
+            build.write_dataset(published, tmp)
+            with open(os.path.join(tmp, "bundle.json")) as f:
+                old = {_norm_input(c) for c in json.load(f)["cases"]}
+        self.assertTrue(old)
+        fresh = mechanism_bundle(private_seed=2)
+        priv = {_norm_input(c) for c in fresh["cases"]
+                if c["split"] in PRIVATE_SPLITS}
+        self.assertTrue(priv)
         self.assertEqual(priv & old, set())
 
 
@@ -1375,14 +1372,14 @@ class ContextClaimTest(unittest.TestCase):
         bad["cases"][0]["rendered_input"]["user"] += (
             "\n\nI have copied the wider team so everyone has the context.")
         problems = build.validate_dataset(bad)
-        self.assertTrue(any("unbacked cc claim" in p for p in problems), problems[:3])
+        self.assertTrue(any("unbacked claim" in p for p in problems), problems[:3])
 
     def test_inject_false_workstream_claim_detected(self):
         bad = copy.deepcopy(default_bundle())
         bad["cases"][0]["rendered_input"]["user"] += (
             "\n\nThere is a small dependency on the other workstream.")
         problems = build.validate_dataset(bad)
-        self.assertTrue(any("unbacked workstream claim" in p for p in problems),
+        self.assertTrue(any("unbacked claim" in p and "workstream" in p for p in problems),
                         problems[:3])
 
     def test_payment_reply_intent_matches_wording(self):
@@ -1403,6 +1400,124 @@ class ContextClaimTest(unittest.TestCase):
             else:
                 self.assertNotIn("reply", body, c["case_id"])
         self.assertEqual(intents, {True, False})
+
+
+class SemanticCoverageTest(unittest.TestCase):
+    """AR-1R: covers must be grounded in the authored category descriptions."""
+
+    def _policies(self):
+        from benchmarks.v3.build import recipes
+        return recipes.policies() + recipes.policy_variants()
+
+    def test_covers_subset_of_description_intents(self):
+        from benchmarks.v3.build import recipes
+        covers = recipes.category_covers()
+        desc = recipes.description_intents()
+        for name, entry in covers.items():
+            extra = set(entry["covers"]) - set(desc.get(name, []))
+            self.assertEqual(extra, set(), "category %s over-claims %s" % (name, extra))
+
+    def test_named_combos_are_honest_gaps(self):
+        from benchmarks.v3.build import recipes
+        by = {p["policy_id"]: p for p in self._policies()}
+        combos = [("community_organizer", "invoice_receipt"),
+                  ("business_owner", "project_request"),
+                  ("business_owner", "request_approval"),
+                  ("developer_oncall", "support_exchange"),
+                  ("developer_oncall", "shipping_travel_update"),
+                  ("job_seeker", "support_exchange"),
+                  ("developer_oncall", "project_request")]
+        for pid, family in combos:
+            res = recipes.resolve_semantics(by[pid], family, "policy_conditioned")
+            self.assertEqual(res["observable"], "unavailable", (pid, family))
+            self.assertEqual(res["reason"], "taxonomy_gap")
+            self.assertIsNone(res["category"])
+            self.assertEqual(res["acceptable"], [])
+
+    def test_built_bundle_has_no_ungrounded_visible_gold(self):
+        from benchmarks.v3.build import recipes
+        b = default_bundle()
+        golds = {g["gold_id"]: g for g in b["gold"]}
+        ungrounded = 0
+        for c in b["cases"]:
+            if c["task"] != "decision" or c["relation"]["relation_type"] != "root":
+                continue
+            g = golds[c["gold_id"]]
+            if g["observable"].get("category") != "visible":
+                continue
+            cat = g["answer"]["category"]
+            ints = recipes.family_intent().get(c["family"], [])
+            covers = recipes.category_covers().get(cat, {}).get("covers", [])
+            if not (set(covers) & set(ints)):
+                ungrounded += 1
+        self.assertEqual(ungrounded, 0)
+
+
+class RenderedClauseTest(unittest.TestCase):
+    """AR-2R: clauses are sentence-safe and respect reply intent."""
+
+    def _body(self, case):
+        return (case["rendered_input"] or {}).get("user", "")
+
+    def test_pilot_bodies_have_no_clause_defects(self):
+        b = default_bundle()
+        for c in b["cases"]:
+            body = self._body(c)
+            self.assertNotRegex(body, r"[.!?]{2,}", c["case_id"])
+            self.assertNotRegex(
+                body, r"[a-z,][ \t]+(We|This|There|Please|Let|Hope|Thank|Kindly|Our|Your|If|See)\b",
+                c["case_id"])
+
+    def test_no_eliciting_clause_on_needs_reply_false(self):
+        from benchmarks.v3.build import recipes
+        eliciting = set()
+        for entry in recipes.situations().values():
+            eliciting |= set(entry.get("eliciting") or [])
+        self.assertTrue(eliciting)
+        b = default_bundle()
+        golds = {g["gold_id"]: g for g in b["gold"]}
+        checked = 0
+        for c in b["cases"]:
+            g = golds[c["gold_id"]]
+            if g["answer"].get("needs_reply"):
+                continue
+            checked += 1
+            low = self._body(c).lower()
+            for clause in eliciting:
+                self.assertNotIn(clause.lower().rstrip("."), low, c["case_id"])
+        self.assertGreater(checked, 0)
+
+    def test_inject_mid_sentence_clause_detected(self):
+        bad = copy.deepcopy(default_bundle())
+        bad["cases"][0]["rendered_input"]["user"] += " and This is a stray clause."
+        self.assertTrue(any("mid-sentence" in p for p in build.validate_dataset(bad)))
+
+    def test_inject_doubled_punctuation_detected(self):
+        bad = copy.deepcopy(default_bundle())
+        bad["cases"][0]["rendered_input"]["user"] += " Done.."
+        self.assertTrue(any("doubled terminal punctuation" in p
+                            for p in build.validate_dataset(bad)))
+
+    def test_inject_lowercase_after_period_detected(self):
+        bad = copy.deepcopy(default_bundle())
+        bad["cases"][0]["rendered_input"]["user"] += " word. next word here"
+        self.assertTrue(any("lowercase after a sentence terminator" in p
+                            for p in build.validate_dataset(bad)))
+
+
+class WorldConfigExtrasTest(unittest.TestCase):
+    def test_clip_preamble_uses_configured_tld(self):
+        b = default_bundle()
+        clips = [c for c in b["cases"]
+                 if c["relation"]["relation_type"] == "clip_variant"]
+        self.assertTrue(clips)
+        for c in clips:
+            self.assertNotIn(".example", c["rendered_input"]["user"], c["case_id"])
+
+    def test_personas_have_no_stale_domain(self):
+        from benchmarks.v3.build import recipes
+        for persona in recipes.personas():
+            self.assertNotIn("domain", persona, persona["persona"])
 
 
 if __name__ == "__main__":

@@ -1,115 +1,55 @@
 {
-  "note": "Purpose-scoped context clauses. Clauses never assert an unbacked copy/CC/team/workstream/previous-exchange fact and never change reply intent (a resolved/counterfactual gold is unaffected). Public and each private split draw from disjoint pools (AR-1).",
+  "note": "Purpose-scoped context clauses with an explicit kind. 'eliciting' clauses invite a reply (only used when the message genuinely asks for one); 'neutral' clauses never do and are used for needs_reply=false / resolved / automated messages. Clauses are inserted as their own capitalized sentence with single terminal punctuation and assert no unbacked copy/CC/team/workstream/prior-exchange fact. Public and each private split draw from disjoint pools (AR-1).",
   "groups": {
-    "request": [
-      "Happy to adjust the details if anything has changed on your side.",
-      "Let me know if anything is unclear.",
-      "Please treat this as time-sensitive if you can."
-    ],
-    "billing": [
-      "Please disregard this notice if payment has already been arranged.",
-      "Thank you for your prompt attention.",
-      "This is an automated reminder."
-    ],
-    "news": [
-      "You are receiving this because you subscribed.",
-      "Manage your preferences or unsubscribe at any time.",
-      "See the full terms on our website."
-    ],
-    "notice": [
-      "This is an automated notice.",
-      "No action is required unless the situation changes.",
-      "The reference above is for your records."
-    ],
-    "social": [
-      "No rush at all, just let me know when you can.",
-      "Hope you are doing well otherwise.",
-      "It would be great to catch up properly soon."
-    ],
-    "workflow": [
-      "Context: this mailbox is the only source you should use.",
-      "Context: everything you need is already in this mailbox.",
-      "Context: work only from the messages shown to you."
-    ]
+    "request": {
+      "eliciting": ["Let me know if anything is unclear.", "Happy to adjust the details if anything has changed on your side."],
+      "neutral": ["Please treat this as time-sensitive if you can.", "The details above are the latest version I have."]
+    },
+    "billing": {
+      "eliciting": [],
+      "neutral": ["Please disregard this notice if payment has already been arranged.", "Thank you for your prompt attention."]
+    },
+    "news": {
+      "eliciting": [],
+      "neutral": ["Manage your preferences or unsubscribe at any time.", "See the full terms on our website.", "Past issues are available in the online archive."]
+    },
+    "notice": {
+      "eliciting": [],
+      "neutral": ["This is an automated notice.", "No action is required unless the situation changes.", "The reference above is for your records."]
+    },
+    "social": {
+      "eliciting": ["No rush at all, just let me know when you can.", "It would be great to catch up properly soon."],
+      "neutral": ["Hope you are doing well otherwise.", "See you there."]
+    },
+    "workflow": {
+      "eliciting": [],
+      "neutral": ["Context: this mailbox is the only source you should use.", "Context: everything you need is already in this mailbox.", "Context: work only from the messages shown to you."]
+    }
   },
   "private_groups": {
     "calibration": {
-      "request": [
-        "I am keeping the thread together so nothing gets lost.",
-        "The details above are the latest version I have."
-      ],
-      "billing": [
-        "This statement is provided for your accounting records.",
-        "The total above reflects the final amount."
-      ],
-      "news": [
-        "This issue is archived for later reading.",
-        "You can adjust what you receive from the link above."
-      ],
-      "notice": [
-        "This notice is being tracked in the account timeline.",
-        "The notice above reflects the current state."
-      ],
-      "social": [
-        "I thought you would want to know sooner rather than later.",
-        "Let me know what works best for you."
-      ],
-      "workflow": [
-        "Context: keep the work limited to what is shown here.",
-        "Context: treat the mailbox exactly as presented."
-      ]
+      "request": {"eliciting": ["I am keeping the thread together so nothing gets lost."], "neutral": ["I have this noted for follow-up when you can reply."]},
+      "billing": {"eliciting": [], "neutral": ["This statement is provided for your accounting records.", "The total above reflects the final amount."]},
+      "news": {"eliciting": [], "neutral": ["This issue is archived for later reading.", "You can adjust what you receive from the link above."]},
+      "notice": {"eliciting": [], "neutral": ["This notice is being tracked in the account timeline.", "The notice above reflects the current state."]},
+      "social": {"eliciting": ["Let me know what works best for you."], "neutral": ["I thought you would want to know sooner rather than later."]},
+      "workflow": {"eliciting": [], "neutral": ["Context: keep the work limited to what is shown here.", "Context: treat the mailbox exactly as presented."]}
     },
     "private_test": {
-      "request": [
-        "I wanted to make sure this reached you directly.",
-        "There are a couple of moving parts, so a quick reply helps."
-      ],
-      "billing": [
-        "You can download a copy from your account.",
-        "This confirmation is generated automatically."
-      ],
-      "news": [
-        "We hope you enjoy this selection.",
-        "Tell us what you would like to see more of."
-      ],
-      "notice": [
-        "You can review the full history in the account centre.",
-        "The status shown above is the most recent available."
-      ],
-      "social": [
-        "It would be lovely to hear your thoughts.",
-        "I am easy either way, so just say."
-      ],
-      "workflow": [
-        "Context: rely solely on the messages provided here.",
-        "Context: do not assume anything that is not in the mailbox."
-      ]
+      "request": {"eliciting": ["There are a couple of moving parts, so a quick reply helps."], "neutral": ["I wanted to make sure this reached you directly."]},
+      "billing": {"eliciting": [], "neutral": ["You can download a copy from your account.", "This confirmation is generated automatically."]},
+      "news": {"eliciting": [], "neutral": ["We hope you enjoy this selection.", "Tell us what you would like to see more of."]},
+      "notice": {"eliciting": [], "neutral": ["You can review the full history in the account centre.", "The status shown above is the most recent available."]},
+      "social": {"eliciting": ["It would be lovely to hear your thoughts."], "neutral": ["I am easy either way, so just say."]},
+      "workflow": {"eliciting": [], "neutral": ["Context: rely solely on the messages provided here.", "Context: do not assume anything that is not in the mailbox."]}
     },
     "private_shift": {
-      "request": [
-        "I have noted this against the current plan.",
-        "The context above should answer most questions."
-      ],
-      "billing": [
-        "Retain this for your monthly reconciliation.",
-        "The transaction above is now complete."
-      ],
-      "news": [
-        "This edition is being sent to current subscribers.",
-        "Past issues remain available online."
-      ],
-      "notice": [
-        "This alert is informational and requires no response.",
-        "The change above has already taken effect."
-      ],
-      "social": [
-        "I wanted to share this with you first.",
-        "Do let me know if that suits."
-      ],
-      "workflow": [
-        "Context: use only the state visible in this mailbox.",
-        "Context: stay within the mailbox shown here."
-      ]
+      "request": {"eliciting": ["The context above should answer most questions."], "neutral": ["I have noted this against the current plan."]},
+      "billing": {"eliciting": [], "neutral": ["Retain this for your monthly reconciliation.", "The transaction above is now complete."]},
+      "news": {"eliciting": [], "neutral": ["This edition is being sent to current subscribers.", "Past issues remain available online."]},
+      "notice": {"eliciting": [], "neutral": ["This alert is informational and requires no response.", "The change above has already taken effect."]},
+      "social": {"eliciting": ["Do let me know if that suits."], "neutral": ["I wanted to share this with you first."]},
+      "workflow": {"eliciting": [], "neutral": ["Context: use only the state visible in this mailbox.", "Context: stay within the mailbox shown here."]}
     }
   }
 }
