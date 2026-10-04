@@ -5746,7 +5746,8 @@ def main():
           and b'id="llm-save"' in _pg and b'id="rag-save"' in _pg
           and b'id="llm-gate"' in _pg and b'id="rag-gate"' in _pg
           and b'data-side="llm:primary"' in _pg and b'data-side="embed"' in _pg
-          and b"X-Requested-With" in _pg and b"EPGATE" in _pg)
+          and b"X-Requested-With" in _pg and b"EPGATE" in _pg
+          and b"button[data-side=" in _pg)
     # restore the pre-T63 endpoint settings
     for _k, _v in _g_front.items():
         store.set_setting(_k, _v if _v is not None else "")

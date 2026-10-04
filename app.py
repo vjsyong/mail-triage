@@ -8719,7 +8719,12 @@ SETTINGS_TMPL = """
         refresh();
         if (saveBtn && saveBtn.disabled) { ev.preventDefault(); }
       });
-      Array.prototype.forEach.call(form.querySelectorAll("button[data-side]"), function(btn){
+      var testBtns = [];
+      card.sides.forEach(function(s){
+        var b = document.querySelector('button[data-side="' + s.key + '"]');
+        if (b) { testBtns.push(b); }
+      });
+      Array.prototype.forEach.call(testBtns, function(btn){
         btn.addEventListener("click", function(ev){
           ev.preventDefault();
           var key = btn.getAttribute("data-side"), s = null;
