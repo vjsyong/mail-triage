@@ -37,8 +37,8 @@ DOMAINS = (PUBLIC_DOMAIN,) + PRIVATE_DOMAINS
 # Draft-data revisions. Bumped because this refresh changes the content
 # generator: previously generated draft datasets are INCOMPATIBLE and must be
 # regenerated (no scientific claim is made by any earlier draft).
-BUILDER_REVISION = "3.6-draft-final"
-DATA_REVISION = "3.6-draft-final"
+BUILDER_REVISION = "3.7-draft-final2"
+DATA_REVISION = "3.7-draft-final2"
 PROMPT_REVISION = "native-v3.0"
 
 SYNTHETIC_PROVENANCE_ID = "prov_synthetic_v3"
@@ -503,17 +503,20 @@ def _build_triage_root(ctx, include_variants):
               evidence_templates=resolved.get("evidence", []),
               extra=_audit(resolved.get("body", base_body)))
     if fam.get("needs_reply"):
-        other = dict(msg)
         alias = ctx.facts["recipient"].get("team_alias") or \
             ("team@%s" % ctx.facts["recipient"]["domain"])
+        # A copy delivered to the team alias is not addressed to the owner, so
+        # it is worded neutrally (neutral detail + calm clause) rather than
+        # carrying the original eliciting request text.
+        saved_detail, saved_situation = ctx.slots["detail"], ctx.situation
+        ctx.slots["detail"] = stream(
+            ctx.seed, "neutraldetail:%s" % ctx.root).pick(
+                recipes.vocab()["detail_neutral"])
+        ctx.situation = ctx.situation_calm
+        other = _base_message(ctx)
+        ctx.slots["detail"], ctx.situation = saved_detail, saved_situation
         other["to_addr"] = alias
-        body = msg["body"]
-        base_clause = getattr(ctx, "base_clause_rendered", None)
-        if base_clause and ctx.situation_calm:
-            calm_text = _format_clause(_fill(ctx.situation_calm, ctx.slots))
-            body = body.replace("\n\n" + base_clause,
-                                "\n\n" + calm_text, 1)
-        other["body"] = body + \
+        other["body"] = other["body"] + \
             "\n\n(Note: this copy was delivered to the declared team alias %s.)" % alias
         other["snippet"] = other["body"]
         _emit(ctx, "recipient", contracts.NATIVE_PROFILE, ctx.policy, other,

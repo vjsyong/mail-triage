@@ -1426,13 +1426,32 @@ class SemanticCoverageTest(unittest.TestCase):
                   ("developer_oncall", "support_exchange"),
                   ("developer_oncall", "shipping_travel_update"),
                   ("job_seeker", "support_exchange"),
-                  ("developer_oncall", "project_request")]
+                  ("developer_oncall", "project_request"),
+                  # R1 trims
+                  ("community_organizer", "receipt_confirmation"),
+                  ("business_owner", "project_status"),
+                  ("developer_oncall", "project_status"),
+                  ("freelancer", "support_exchange"),
+                  ("household", "personal_invitation")]
         for pid, family in combos:
             res = recipes.resolve_semantics(by[pid], family, "policy_conditioned")
             self.assertEqual(res["observable"], "unavailable", (pid, family))
             self.assertEqual(res["reason"], "taxonomy_gap")
             self.assertIsNone(res["category"])
             self.assertEqual(res["acceptable"], [])
+
+    def test_receipt_intent_is_never_donation(self):
+        from benchmarks.v3.build import recipes
+        self.assertNotIn("receipt", recipes.description_intents()["Donation"])
+        self.assertNotIn("receipt", recipes.category_covers()["Donation"]["covers"])
+        # A policy whose only receipt-like category is Donation must not turn a
+        # plain receipt into a donation.
+        fake = {"policy_id": "donation_only", "categories": [
+            {"name": "Donation", "description": "Donation or fundraising receipt",
+             "folder": "Donations"}]}
+        res = recipes.resolve_semantics(fake, "receipt_confirmation", "policy_conditioned")
+        self.assertEqual(res["observable"], "unavailable")
+        self.assertEqual(res["reason"], "taxonomy_gap")
 
     def test_built_bundle_has_no_ungrounded_visible_gold(self):
         from benchmarks.v3.build import recipes
@@ -1503,6 +1522,29 @@ class RenderedClauseTest(unittest.TestCase):
         bad["cases"][0]["rendered_input"]["user"] += " word. next word here"
         self.assertTrue(any("lowercase after a sentence terminator" in p
                             for p in build.validate_dataset(bad)))
+
+
+    def test_neutral_mail_has_no_tight_deadline_phrase(self):
+        from benchmarks.v3.build import recipes
+        tight = ("The schedule is tight", "an early answer helps",
+                 "We can hold the current price", "We have one slot left",
+                 "Accounts have flagged this as priority")
+        for phrase in tight:
+            self.assertTrue(any(phrase in d for d in recipes.vocab()["detail"]))
+        b = default_bundle()
+        golds = {g["gold_id"]: g for g in b["gold"]}
+        for c in b["cases"]:
+            if c["family"] not in ("newsletter_digest", "receipt_confirmation",
+                                   "invoice_receipt", "payment_reminder",
+                                   "refund_status", "operational_alert",
+                                   "security_notification", "shipping_travel_update"):
+                continue
+            g = golds[c["gold_id"]]
+            if g["answer"].get("needs_reply"):
+                continue
+            body = self._body(c)
+            for phrase in tight:
+                self.assertNotIn(phrase, body, c["case_id"])
 
 
 class WorldConfigExtrasTest(unittest.TestCase):

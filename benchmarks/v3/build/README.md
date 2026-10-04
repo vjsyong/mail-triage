@@ -372,9 +372,9 @@ a variant that explicitly asks for a reply, needs_reply true); gold derives the
 reply intent from the rendered template, so a payment/action message is never
 scored as a reply request unless it actually asks for one.
 
-**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.6-draft-final`; the
+**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.7-draft-final2`; the
 content generator changed, so earlier draft datasets and previews (including
-`26fb4ec`) are incompatible and the dataset ids differ.
+`8a54f7a`) are incompatible and the dataset ids differ.
 
 ## Files
 

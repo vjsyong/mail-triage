@@ -423,7 +423,9 @@ class World(object):
             "vendor3_slug": vendor3["domain"].split(".")[0],
             "org": sender["org"], "org_slug": identity.slugify(sender["org"]),
             "news_vendor": sender["org"], "news_slug": identity.slugify(sender["org"]),
-            "item": item, "service": service, "detail": rng.pick(v["detail"]),
+            "item": item, "service": service,
+            "detail": rng.pick(v["detail_neutral"] if spec.get("detail_style") == "neutral"
+                               else v["detail"]),
             "place": place, "person": sender["person"]["given"], "course": course,
             "event_name": event["name"] if event else rng.pick(v["event_name"]),
             "month": temporal.MONTH_NAMES[send.month - 1],

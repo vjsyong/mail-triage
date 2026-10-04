@@ -156,5 +156,11 @@
     "PO",
     "CASE"
   ],
-  "ticket_prefix": "TKT"
+  "ticket_prefix": "TKT",
+  "detail_neutral": [
+    "This message is for your information only.",
+    "No action is required.",
+    "The details above are provided for reference.",
+    "You can review this at any time."
+  ]
 }

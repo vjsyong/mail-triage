@@ -21,7 +21,8 @@
         "services",
         "goods"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "invoice_receipt": {
       "kind": "org",
@@ -40,7 +41,8 @@
         "goods",
         "services"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "payment_reminder": {
       "kind": "org",
@@ -57,7 +59,8 @@
       "object": [
         "services"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "refund_status": {
       "kind": "org",
@@ -73,7 +76,8 @@
         "goods",
         "services"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "newsletter_digest": {
       "kind": "org",
@@ -87,7 +91,8 @@
       "object": [
         "services"
       ],
-      "relationship": "subscriber"
+      "relationship": "subscriber",
+      "detail_style": "neutral"
     },
     "legitimate_promo": {
       "kind": "org",
@@ -103,7 +108,8 @@
         "services",
         "goods"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "ambiguous_marketing": {
       "kind": "org",
@@ -118,7 +124,8 @@
       "object": [
         "services"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "suspicious_phishing": {
       "kind": "org",
@@ -136,7 +143,8 @@
         "documents"
       ],
       "relationship": "customer",
-      "sketchy": true
+      "sketchy": true,
+      "detail_style": "neutral"
     },
     "security_notification": {
       "kind": "org",
@@ -152,7 +160,8 @@
       "object": [
         "documents"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "shipping_travel_update": {
       "kind": "org",
@@ -169,7 +178,8 @@
         "services",
         "goods"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "support_exchange": {
       "kind": "org",
@@ -186,7 +196,8 @@
         "services",
         "goods"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "standard"
     },
     "document_request": {
       "kind": "org",
@@ -204,7 +215,8 @@
       "object": [
         "documents"
       ],
-      "relationship": "tenant"
+      "relationship": "tenant",
+      "detail_style": "standard"
     },
     "order_request": {
       "kind": "org",
@@ -218,7 +230,8 @@
       "object": [
         "goods"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "standard"
     },
     "request_approval": {
       "kind": "org",
@@ -237,7 +250,8 @@
       "object": [
         "services"
       ],
-      "relationship": "client"
+      "relationship": "client",
+      "detail_style": "standard"
     },
     "project_request": {
       "kind": "org",
@@ -254,7 +268,8 @@
       "object": [
         "projects"
       ],
-      "relationship": "client"
+      "relationship": "client",
+      "detail_style": "standard"
     },
     "project_status": {
       "kind": "org",
@@ -269,7 +284,8 @@
       "object": [
         "projects"
       ],
-      "relationship": "client"
+      "relationship": "client",
+      "detail_style": "neutral"
     },
     "operational_alert": {
       "kind": "org",
@@ -284,7 +300,8 @@
       "object": [
         "services"
       ],
-      "relationship": "customer"
+      "relationship": "customer",
+      "detail_style": "neutral"
     },
     "meeting_request": {
       "kind": "person",
@@ -292,7 +309,8 @@
       "object": [
         "projects"
       ],
-      "relationship": "colleague"
+      "relationship": "colleague",
+      "detail_style": "standard"
     },
     "personal_invitation": {
       "kind": "person",
@@ -300,7 +318,8 @@
       "object": [
         "social"
       ],
-      "relationship": "friend"
+      "relationship": "friend",
+      "detail_style": "standard"
     },
     "school_community": {
       "kind": "org",
@@ -317,7 +336,8 @@
       "object": [
         "projects"
       ],
-      "relationship": "parent"
+      "relationship": "parent",
+      "detail_style": "standard"
     },
     "event_registration": {
       "kind": "org",
@@ -334,7 +354,8 @@
       "object": [
         "projects"
       ],
-      "relationship": "member"
+      "relationship": "member",
+      "detail_style": "standard"
     }
   }
 }
