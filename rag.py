@@ -22,17 +22,26 @@ import config
 import engine
 import store
 
-def embed_config():
-    """Effective embedding endpoint: UI settings win, blank fields fall back to env."""
+def embed_config(overlay=None):
+    """Effective embedding endpoint: UI settings win, blank fields fall back to env.
+
+    `overlay` (optional) carries raw form values for an UNSAVED edit: a key present
+    in the overlay replaces the stored setting (blank clears it, exactly like a
+    save), while missing keys keep the stored value. The Settings test buttons use
+    this to probe the values currently in the form (T63 endpoint test gate)."""
+    def ov(name):
+        return overlay.get(name) if (overlay is not None and name in overlay) \
+            else store.get_setting(name)
+
     def pick(name, env):
-        v = store.get_setting(name)
+        v = ov(name)
         return v if v not in (None, "") else env
 
-    protocol = (store.get_setting("embed_protocol") or "tei").lower()
+    protocol = (ov("embed_protocol") or "tei").lower()
     if protocol == "local":
         # local models are named from the Settings value only; the env default (4B)
         # does not exist as a FastEmbed/ONNX build
-        model = store.get_setting("embed_model") or ""
+        model = ov("embed_model") or ""
     else:
         model = pick("embed_model", config.EMBED_MODEL) or ""
     return {
@@ -40,20 +49,25 @@ def embed_config():
         "model": model,
         "key": pick("embed_api_key", "") or "",
         "protocol": protocol,
-        "timeout": int(store.get_setting("embed_timeout") or config.EMBED_TIMEOUT),
-        "query_prefix": store.get_setting("embed_query_prefix") or "",
+        "timeout": int(ov("embed_timeout") or config.EMBED_TIMEOUT),
+        "query_prefix": ov("embed_query_prefix") or "",
     }
 
 
-def rerank_config():
-    """Effective reranker endpoint: UI settings win, blank fields fall back to env."""
+def rerank_config(overlay=None):
+    """Effective reranker endpoint: UI settings win, blank fields fall back to env.
+    See embed_config() for the `overlay` contract."""
+    def ov(name):
+        return overlay.get(name) if (overlay is not None and name in overlay) \
+            else store.get_setting(name)
+
     def pick(name, env):
-        v = store.get_setting(name)
+        v = ov(name)
         return v if v not in (None, "") else env
 
-    protocol = (store.get_setting("rerank_protocol") or "tei").lower()
+    protocol = (ov("rerank_protocol") or "tei").lower()
     if protocol == "local":
-        model = store.get_setting("rerank_model") or ""
+        model = ov("rerank_model") or ""
     else:
         model = pick("rerank_model", config.RERANK_MODEL) or ""
     return {
@@ -61,7 +75,7 @@ def rerank_config():
         "model": model,
         "key": pick("rerank_api_key", "") or "",
         "protocol": protocol,
-        "timeout": int(store.get_setting("rerank_timeout") or config.RERANK_TIMEOUT),
+        "timeout": int(ov("rerank_timeout") or config.RERANK_TIMEOUT),
     }
 
 
@@ -201,11 +215,13 @@ def _local_rerank(query, texts, model):
     return [float(s) for s in inst.rerank(query, list(texts))]
 
 
-def embed(texts, kind="document"):
+def embed(texts, kind="document", cfg=None):
     """Embed texts via the configured backend. kind='query' prepends the configured
     query instruction prefix (documents stay raw). Protocols: 'tei' (POST /embed),
-    'openai' (POST /embeddings) or 'local' (FastEmbed/ONNX on CPU, in-process)."""
-    cfg = embed_config()
+    'openai' (POST /embeddings) or 'local' (FastEmbed/ONNX on CPU, in-process).
+    `cfg` (optional) is a resolved config dict overriding embed_config() - the
+    Settings test buttons pass one built from unsaved form values."""
+    cfg = cfg or embed_config()
     payload_texts = list(texts)
     if kind == "query" and cfg["query_prefix"]:
         payload_texts = [cfg["query_prefix"] + t for t in payload_texts]
@@ -240,12 +256,13 @@ def embed_one(text, kind="query"):
     return embed([text], kind=kind)[0]
 
 
-def rerank(query, texts, top_n=None):
+def rerank(query, texts, top_n=None, cfg=None):
     """Cross-encoder rerank via the configured endpoint. Returns [{index, score}]
     sorted desc or None. Protocols: 'tei' ({"query","texts"} -> [{index,score}]) or
     'cohere' ({"query","documents","top_n"} -> {"results":[{index,relevance_score}]},
-    which covers Cohere/Jina/Infinity-style rerank servers)."""
-    cfg = rerank_config()
+    which covers Cohere/Jina/Infinity-style rerank servers). `cfg` (optional) is a
+    resolved config dict overriding rerank_config()."""
+    cfg = cfg or rerank_config()
     if not texts:
         return None
     if cfg["protocol"] == "local":

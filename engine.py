@@ -1095,20 +1095,29 @@ def _process_flow(mc, flow, row, meta, settings, why=""):
 
 # ---------------------------------------------------------------- LLM
 
-def llm_config():
+def llm_config(overlay=None):
     """Effective LLM endpoint settings: values set in the UI (SQLite) win, blank
     fields fall back to the container env (LLM_BASE_URL etc.). Returns
-    {base, key, model, thinking, timeout, fallback: {base, key, model} | None}."""
+    {base, key, model, thinking, timeout, fallback: {base, key, model} | None}.
+
+    `overlay` (optional) carries raw form values for an UNSAVED edit: a key present
+    in the overlay replaces the stored setting (blank clears it, exactly like a
+    save), missing keys keep the stored value. The Settings test buttons use this
+    to probe the values currently in the form (T63 endpoint test gate)."""
+    def ov(name):
+        return overlay.get(name) if (overlay is not None and name in overlay) \
+            else store.get_setting(name)
+
     def pick(name, env):
-        v = store.get_setting(name)
+        v = ov(name)
         return v if v not in (None, "") else env
 
     cfg = {
         "base": (pick("llm_base_url", config.LLM_BASE_URL) or "").rstrip("/"),
         "key": pick("llm_api_key", config.LLM_API_KEY) or "",
         "model": pick("llm_model", config.LLM_MODEL) or "",
-        "thinking": store.get_setting("llm_thinking") or "auto",
-        "timeout": int(store.get_setting("llm_timeout") or config.LLM_TIMEOUT),
+        "thinking": ov("llm_thinking") or "auto",
+        "timeout": int(ov("llm_timeout") or config.LLM_TIMEOUT),
         "assistant_use_fallback": bool(store.get_setting("assistant_use_fallback", 0)),
         "fallback": None,
     }
@@ -1177,8 +1186,8 @@ def fetch_model_ids(base, key="", timeout=15):
 
 
 class LLMClient:
-    def __init__(self):
-        c = llm_config()
+    def __init__(self, cfg=None):
+        c = cfg or llm_config()
         self.base = c["base"]
         self.key = c["key"]
         self.model = c["model"]

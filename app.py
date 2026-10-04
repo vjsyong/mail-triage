@@ -7949,6 +7949,178 @@ def _save_connection_settings():
     _save_secret("imap_password")
 
 
+# ---------------------------------------------------------------- endpoint test gate
+# Saving CHANGED LLM / RAG endpoint values requires a passing test of those exact
+# values first (suite section T63). Every Test button probes the values currently
+# in the form (unsaved edits included) and records a per-side fingerprint; a save
+# whose endpoint values differ from the stored ones is refused unless it matches
+# the last successful test. The marker is per-process: after a restart unchanged
+# values still save, changed values need a fresh test. The client mirrors this as
+# a disabled Save button + inline test results; the server check stays authoritative.
+
+_ENDPOINT_TESTED = {}  # side -> fingerprint of the last successful test
+
+_EP_SIDES = {
+    "llm:primary": {"label": "LLM endpoint", "base": "llm_base_url",
+                    "key": "llm_api_key",
+                    "fields": ("llm_base_url", "llm_model", "llm_api_key",
+                               "llm_api_key_clear")},
+    "llm:fallback": {"label": "fallback endpoint", "base": "llm_fallback_base_url",
+                     "key": "llm_fallback_api_key",
+                     "fields": ("llm_fallback_base_url", "llm_fallback_model",
+                                "llm_fallback_api_key", "llm_fallback_api_key_clear")},
+    "embed": {"label": "embedding endpoint", "base": "embed_base_url",
+              "key": "embed_api_key", "protocol": "embed_protocol",
+              "fields": ("embed_protocol", "embed_base_url", "embed_model",
+                         "embed_api_key", "embed_api_key_clear")},
+    "rerank": {"label": "reranker endpoint", "base": "rerank_base_url",
+               "key": "rerank_api_key", "protocol": "rerank_protocol",
+               "fields": ("rerank_protocol", "rerank_base_url", "rerank_model",
+                          "rerank_api_key", "rerank_api_key_clear")},
+}
+
+
+def _ep_keytoken(v):
+    return hashlib.sha1(("k:" + (v or "")).encode("utf-8")).hexdigest()[:12]
+
+
+def _ep_fp(*parts):
+    return hashlib.sha1(json.dumps([str(p) for p in parts])
+                        .encode("utf-8")).hexdigest()[:16]
+
+
+def _note_endpoint_test(side, fp):
+    if fp:
+        _ENDPOINT_TESTED[side] = fp
+
+
+def _llm_overlay(f):
+    """Form values for an unsaved LLM edit: present keys replace the stored setting
+    (blank clears, same as a save; an armed clear checkbox wins like _save_secret)."""
+    ov = {}
+    for k in ("llm_base_url", "llm_model", "llm_timeout", "llm_thinking",
+              "llm_fallback_base_url", "llm_fallback_model"):
+        if k in f:
+            ov[k] = (f.get(k) or "").strip()
+    for k, clr in (("llm_api_key", "llm_api_key_clear"),
+                   ("llm_fallback_api_key", "llm_fallback_api_key_clear")):
+        if (f.get(clr) or "") not in ("", "0"):
+            ov[k] = ""
+        elif k in f:
+            ov[k] = (f.get(k) or "").strip()
+    return ov
+
+
+def _rag_overlay(f):
+    ov = {}
+    for k in ("embed_protocol", "embed_base_url", "embed_model", "embed_timeout",
+              "rerank_protocol", "rerank_base_url", "rerank_model", "rerank_timeout"):
+        if k in f:
+            ov[k] = (f.get(k) or "").strip()
+    if "embed_query_prefix" in f:
+        ov["embed_query_prefix"] = f.get("embed_query_prefix") or ""  # raw: never stripped
+    for k, clr in (("embed_api_key", "embed_api_key_clear"),
+                   ("rerank_api_key", "rerank_api_key_clear")):
+        if (f.get(clr) or "") not in ("", "0"):
+            ov[k] = ""
+        elif k in f:
+            ov[k] = (f.get(k) or "").strip()
+    return ov
+
+
+def _ep_changed(f, spec):
+    """True when the posted endpoint-defining values differ from the stored ones.
+    A blank secret field means keep-the-stored-key and never counts as a change."""
+    for k in spec["fields"]:
+        if k not in f:
+            continue
+        v = (f.get(k) or "").strip()
+        if k == spec["key"]:
+            if v:
+                return True
+            continue
+        stored = store.get_setting(k)
+        stored = "" if stored is None else str(stored).strip()
+        if v != stored:
+            return True
+    return False
+
+
+def _fp_llm_cfg(cfg, which):
+    if which == "fallback":
+        fb = cfg.get("fallback")
+        if not fb:
+            return None
+        return _ep_fp("llm:fallback", fb.get("base"), fb.get("model"),
+                      _ep_keytoken(fb.get("key")))
+    return _ep_fp("llm:primary", cfg.get("base"), cfg.get("model"),
+                  _ep_keytoken(cfg.get("key")))
+
+
+def _fp_embed_cfg(cfg):
+    return _ep_fp("embed", cfg.get("protocol"), cfg.get("base"), cfg.get("model"),
+                  _ep_keytoken(cfg.get("key")))
+
+
+def _fp_rerank_cfg(cfg):
+    return _ep_fp("rerank", cfg.get("protocol"), cfg.get("base"), cfg.get("model"),
+                  _ep_keytoken(cfg.get("key")))
+
+
+def _endpoint_gate_blocked(section, f):
+    """Labels of sides whose changed endpoint values were never tested ([] = ok)."""
+    blocked = []
+    if section == "llm":
+        cfg = engine.llm_config(overlay=_llm_overlay(f))
+        for side, which in (("llm:primary", "primary"), ("llm:fallback", "fallback")):
+            spec = _EP_SIDES[side]
+            if not _ep_changed(f, spec):
+                continue
+            if spec["base"] in f:
+                required = bool((f.get(spec["base"]) or "").strip())
+            else:
+                resolved = (cfg.get("base") if which == "primary"
+                            else (cfg.get("fallback") or {}).get("base"))
+                required = bool((resolved or "").strip())
+            if not required:
+                continue  # clearing to "no endpoint" needs no test
+            fp = _fp_llm_cfg(cfg, which)
+            if not fp or _ENDPOINT_TESTED.get(side) != fp:
+                blocked.append(spec["label"])
+    elif section == "rag":
+        ov = _rag_overlay(f)
+        for side, cfg, fpfn in (("embed", rag.embed_config(overlay=ov), _fp_embed_cfg),
+                                ("rerank", rag.rerank_config(overlay=ov), _fp_rerank_cfg)):
+            spec = _EP_SIDES[side]
+            if not _ep_changed(f, spec):
+                continue
+            if (cfg.get("protocol") or "") == "local":
+                continue  # nothing remote to reach
+            fp = fpfn(cfg)
+            if not fp or _ENDPOINT_TESTED.get(side) != fp:
+                blocked.append(spec["label"])
+    return blocked
+
+
+def _endpoint_gate_spec():
+    """JS mirror of the save gate for the Settings page (keep in sync with _EP_SIDES)."""
+    def mk(key, status, extra=None):
+        sp = _EP_SIDES[key]
+        d = {"key": key, "label": sp["label"], "base": sp["base"],
+             "fields": list(sp["fields"]), "status": status}
+        if extra:
+            d.update(extra)
+        return d
+    return [
+        {"form": "llm-form", "save": "llm-save", "gate": "llm-gate",
+         "sides": [mk("llm:primary", "llm-status-primary"),
+                   mk("llm:fallback", "llm-status-fallback")]},
+        {"form": "rag-form", "save": "rag-save", "gate": "rag-gate",
+         "sides": [mk("embed", "embed-status", {"protocol": "embed_protocol"}),
+                   mk("rerank", "rerank-status", {"protocol": "rerank_protocol"})]},
+    ]
+
+
 SETTINGS_TMPL = """
 <style>
 .settings-grid{display:grid;grid-template-columns:216px minmax(0,1fr);gap:26px;align-items:start;margin-top:14px}
@@ -8028,7 +8200,7 @@ SETTINGS_TMPL = """
 
   <div class="card" id="ai-model">
     <div class="card-h"><h3>LLM endpoint</h3><span class="sub">any OpenAI-compatible /chat/completions server</span></div>
-    <form method="post">
+    <form method="post" id="llm-form">
       <input type="hidden" name="section" value="llm">
       <input type="hidden" name="scope" value="LLM endpoint">
       <div class="setrow"><div class="st-l"><b>Base URL</b><span class="sub">e.g. http://host:8000/v1</span></div>
@@ -8078,12 +8250,14 @@ SETTINGS_TMPL = """
         <div class="st-c"><label class="check"><input type="checkbox" name="llm_fallback_api_key_clear" value="1"> <span>Clear fallback key</span></label></div></div>
         </div>
       </details>
-      <div class="savebar"><button class="btn primary" type="submit">Save LLM endpoint</button><span class="sub">Blank fields fall back to the env file.</span></div>
+      <div class="savebar"><button class="btn primary" type="submit" id="llm-save">Save LLM endpoint</button><span class="sub" id="llm-gate" style="color:var(--warn)" hidden></span><span class="sub">Blank fields fall back to the env file.</span></div>
     </form>
     <div class="row" style="margin-top:10px">
-      <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit">Test primary</button></form>
-      <form class="inline" method="post" action="{{ url_for('settings_test_llm', which='fallback') }}"><button class="btn" type="submit">Test fallback</button></form>
-      <span class="sub">tests the saved settings — save first if you just edited them</span>
+      <form class="inline" method="post" action="{{ url_for('settings_test_llm') }}"><button class="btn" type="submit" data-side="llm:primary">Test primary</button></form>
+      <span class="sub" id="llm-status-primary" aria-live="polite"></span>
+      <form class="inline" method="post" action="{{ url_for('settings_test_llm', which='fallback') }}"><button class="btn" type="submit" data-side="llm:fallback">Test fallback</button></form>
+      <span class="sub" id="llm-status-fallback" aria-live="polite"></span>
+      <span class="sub">tests the values in the form; saving changed endpoint values needs a passing test</span>
     </div>
   </div>
 
@@ -8136,7 +8310,7 @@ SETTINGS_TMPL = """
 
   <div class="card" id="ai-search">
     <div class="card-h"><h3>Embeddings &amp; reranker</h3><span class="sub">the semantic search stack</span></div>
-    <form method="post">
+    <form method="post" id="rag-form">
       <input type="hidden" name="section" value="rag">
       <input type="hidden" name="scope" value="Embeddings &amp; reranker">
       <h4>Search architecture</h4>
@@ -8203,12 +8377,14 @@ SETTINGS_TMPL = """
         <div class="st-c"><input type="number" name="rerank_timeout" min="0" value="{{ s.rerank_timeout or '' }}" placeholder="90" aria-label="Rerank timeout"></div></div>
       <div class="setrow"><div class="st-l"><b>Clear the stored key</b></div>
         <div class="st-c"><label class="check"><input type="checkbox" name="rerank_api_key_clear" value="1"> <span>Clear key</span></label></div></div>
-      <div class="savebar"><button class="btn primary" type="submit">Save endpoints</button><span class="sub">Changing the embedding model or dimension needs an index rebuild (Dashboard).</span></div>
+      <div class="savebar"><button class="btn primary" type="submit" id="rag-save">Save endpoints</button><span class="sub" id="rag-gate" style="color:var(--warn)" hidden></span><span class="sub">Changing the embedding model or dimension needs an index rebuild (Dashboard).</span></div>
     </form>
     <div class="row" style="margin-top:10px">
-      <form class="inline" method="post" action="{{ url_for('settings_test_embed') }}"><button class="btn" type="submit">Test embeddings</button></form>
-      <form class="inline" method="post" action="{{ url_for('settings_test_rerank') }}"><button class="btn" type="submit">Test reranker</button></form>
-      <span class="sub">tests the saved settings</span>
+      <form class="inline" method="post" action="{{ url_for('settings_test_embed') }}"><button class="btn" type="submit" data-side="embed">Test embeddings</button></form>
+      <span class="sub" id="embed-status" aria-live="polite"></span>
+      <form class="inline" method="post" action="{{ url_for('settings_test_rerank') }}"><button class="btn" type="submit" data-side="rerank">Test reranker</button></form>
+      <span class="sub" id="rerank-status" aria-live="polite"></span>
+      <span class="sub">tests the values in the form; saving changed endpoint values needs a passing test</span>
     </div>
   </div>
 
@@ -8486,6 +8662,93 @@ SETTINGS_TMPL = """
     sel.addEventListener('change', function(){ upd(true); });
     upd(false);
   });
+
+  // ---- endpoint test gate (T63): changed endpoint values need a passing test ----
+  var EPGATE = {{ epgate|tojson }};
+  if (EPGATE) {
+    EPGATE.forEach(function(card){
+      var form = document.getElementById(card.form);
+      if (!form) { return; }
+      var saveBtn = document.getElementById(card.save);
+      var gateEl = document.getElementById(card.gate);
+      function sideVals(s){
+        var vals = [];
+        s.fields.forEach(function(n){
+          var el = form.querySelector('[name="' + n + '"]');
+          if (!el) { vals.push(""); }
+          else if (el.type === "checkbox") { vals.push(el.checked ? "1" : "0"); }
+          else { vals.push(el.value); }
+        });
+        return JSON.stringify(vals);
+      }
+      var initial = {}, tested = {};
+      card.sides.forEach(function(s){ initial[s.key] = sideVals(s); });
+      function required(s){
+        if (s.protocol) {
+          var p = form.querySelector('[name="' + s.protocol + '"]');
+          return !!(p && p.value !== "local");
+        }
+        var b = form.querySelector('[name="' + s.base + '"]');
+        return !!(b && b.value.trim());
+      }
+      function refresh(){
+        var blocked = [];
+        card.sides.forEach(function(s){
+          var v = sideVals(s);
+          if (!required(s)) { return; }
+          if (v === initial[s.key]) { return; }
+          if (tested[s.key] !== undefined && v === tested[s.key]) { return; }
+          blocked.push(s.label);
+        });
+        if (saveBtn) {
+          saveBtn.disabled = blocked.length > 0;
+          saveBtn.title = blocked.length ? "Test " + blocked.join(" / ") + " first" : "";
+        }
+        if (gateEl) {
+          gateEl.hidden = blocked.length === 0;
+          if (blocked.length) {
+            gateEl.textContent = "Test " + blocked.join(" / ") + " first - the new values are not verified yet.";
+          }
+        }
+      }
+      Array.prototype.forEach.call(form.querySelectorAll("input,select,textarea"), function(el){
+        el.addEventListener("input", refresh);
+        el.addEventListener("change", refresh);
+      });
+      form.addEventListener("submit", function(ev){
+        refresh();
+        if (saveBtn && saveBtn.disabled) { ev.preventDefault(); }
+      });
+      Array.prototype.forEach.call(form.querySelectorAll("button[data-side]"), function(btn){
+        btn.addEventListener("click", function(ev){
+          ev.preventDefault();
+          var key = btn.getAttribute("data-side"), s = null;
+          card.sides.forEach(function(x){ if (x.key === key) { s = x; } });
+          if (!s || !btn.form) { return; }
+          var st = document.getElementById(s.status);
+          var snap = sideVals(s);
+          if (st) { st.textContent = "testing..."; st.style.color = "var(--dim)"; }
+          fetch(btn.form.getAttribute("action"), {
+            method: "POST",
+            body: new FormData(form),
+            headers: {"X-Requested-With": "fetch", "Accept": "application/json"}
+          }).then(function(r){ return r.json(); }).then(function(d){
+            if (d && d.ok) {
+              tested[key] = snap;
+              if (st) { st.textContent = "verified - " + (d.msg || "OK"); st.style.color = "var(--ok)"; }
+            } else if (st) {
+              st.textContent = (d && d.msg) || "test failed";
+              st.style.color = "var(--err)";
+            }
+            refresh();
+          }).catch(function(){
+            if (st) { st.textContent = "test request failed"; st.style.color = "var(--err)"; }
+          });
+        });
+      });
+      refresh();
+    });
+  }
 })();
 </script>"""
 
@@ -8512,6 +8775,13 @@ def settings():
         section = request.form.get("section") or "behavior"
         scope = (request.form.get("scope") or "").strip()
         nxt = (request.values.get("next") or "").strip()
+        if section in ("llm", "rag"):
+            blocked = _endpoint_gate_blocked(section, request.form)
+            if blocked:
+                flash("Not saved - test the %s first: the values changed since the "
+                      "last successful test." % " and ".join(blocked), "err")
+                anchor = _settings_anchor(section, scope)
+                return redirect(url_for("settings") + ("#" + anchor if anchor else ""))
         if section == "llm":
             _save_llm_settings()
             flash(("%s saved." % scope) if scope else "LLM endpoint settings saved.", "ok")
@@ -8543,7 +8813,7 @@ def settings():
         tz=tz_label(), agcaps=engine.AGENT_CAPS,
         llm=engine.llm_config(), ecfg=rag.embed_config(), rcfg=rag.rerank_config(),
         icfg=engine.imap_config(), lembed=rag.LOCAL_EMBED_DEFAULT,
-        lrerank=rag.LOCAL_RERANK_DEFAULT))
+        lrerank=rag.LOCAL_RERANK_DEFAULT, epgate=_endpoint_gate_spec()))
 
 
 @app.route("/settings/llm-models")
@@ -8607,64 +8877,108 @@ def settings_assistant_model():
     return redirect(dest)
 
 
+def _wants_json():
+    return (request.headers.get("X-Requested-With") == "fetch"
+            or "application/json" in (request.headers.get("Accept") or ""))
+
+
 @app.route("/settings/test-llm", methods=["POST"])
 def settings_test_llm():
     which = request.args.get("which") or "primary"
+    wants_json = _wants_json()
     nxt = (request.values.get("next") or "").strip()
     dest = nxt if (nxt.startswith("/") and not nxt.startswith("//")) else url_for("settings")
     started = time.time()
-    client = engine.LLMClient()
+    # probe the VALUES IN THE FORM (unsaved edits included); an empty form probes
+    # the saved config, exactly like before
+    cfg = engine.llm_config(overlay=_llm_overlay(request.form))
+    client = engine.LLMClient(cfg)
     if which == "fallback":
         if not client.fallback:
-            flash("No fallback endpoint configured (see the LLM endpoint card).", "err")
+            msg = "No fallback endpoint configured (see the LLM endpoint card)."
+            if wants_json:
+                return jsonify({"ok": False, "msg": msg})
+            flash(msg, "err")
             return redirect(dest)
         base, key, model = client.fallback
     else:
         base, key, model = client.base, client.key, client.model
     if not base:
-        flash("No LLM endpoint configured - set one in Settings.", "err")
+        msg = "No LLM endpoint configured - set one in Settings."
+        if wants_json:
+            return jsonify({"ok": False, "msg": msg})
+        flash(msg, "err")
         return redirect(dest)
+    side = "llm:fallback" if which == "fallback" else "llm:primary"
     try:
         out = client._chat_once(base, key, model,
                                 "You are a connectivity test. Reply with the single word ok.",
                                 [{"role": "user", "content": "Reply with the single word ok."}],
                                 json_mode=False)
-        flash("LLM %s OK in %.1fs - %s @ %s - replied: %s"
-              % (which, time.time() - started, model, base, (out or "").strip()[:60]), "ok")
+        msg = ("LLM %s OK in %.1fs - %s @ %s - replied: %s"
+               % (which, time.time() - started, model, base, (out or "").strip()[:60]))
+        _note_endpoint_test(side, _fp_llm_cfg(cfg, which))
+        if wants_json:
+            return jsonify({"ok": True, "msg": msg})
+        flash(msg, "ok")
     except Exception as exc:
-        flash("LLM %s FAILED after %.1fs: %r - check the endpoint on this page "
-              "(local model server: cd gemma && docker compose ps)"
-              % (which, time.time() - started, exc), "err")
+        msg = ("LLM %s FAILED after %.1fs: %r - check the endpoint on this page "
+               "(local model server: cd gemma && docker compose ps)"
+               % (which, time.time() - started, exc))
+        if wants_json:
+            return jsonify({"ok": False, "msg": msg})
+        flash(msg, "err")
     return redirect(dest)
 
 
 @app.route("/settings/test-embed", methods=["POST"])
 def settings_test_embed():
     started = time.time()
-    cfg = rag.embed_config()
+    wants_json = _wants_json()
+    cfg = rag.embed_config(overlay=_rag_overlay(request.form))
     try:
-        vec = rag.embed_one("connectivity test")
-        flash("Embeddings OK in %.1fs - %s @ %s - %d dimensions - protocol %s"
-              % (time.time() - started, cfg["model"], cfg["base"], len(vec), cfg["protocol"]), "ok")
+        vec = rag.embed(["connectivity test"], kind="query", cfg=cfg)[0]
+        msg = ("Embeddings OK in %.1fs - %s @ %s - %d dimensions - protocol %s"
+               % (time.time() - started, cfg["model"], cfg["base"], len(vec),
+                  cfg["protocol"]))
+        _note_endpoint_test("embed", _fp_embed_cfg(cfg))
+        if wants_json:
+            return jsonify({"ok": True, "msg": msg})
+        flash(msg, "ok")
     except Exception as exc:
-        flash("Embeddings FAILED after %.1fs: %r" % (time.time() - started, exc), "err")
+        msg = "Embeddings FAILED after %.1fs: %r" % (time.time() - started, exc)
+        if wants_json:
+            return jsonify({"ok": False, "msg": msg})
+        flash(msg, "err")
     return redirect(url_for("settings"))
 
 
 @app.route("/settings/test-rerank", methods=["POST"])
 def settings_test_rerank():
     started = time.time()
+    wants_json = _wants_json()
+    cfg = rag.rerank_config(overlay=_rag_overlay(request.form))
     try:
         rr = rag.rerank("budget review", ["the Q4 budget was reviewed and approved",
-                                          "lunch tomorrow near campus"])
+                                          "lunch tomorrow near campus"], cfg=cfg)
         if not rr:
-            flash("Reranker not configured (Settings -> RAG) or returned no results.", "err")
+            msg = "Reranker not configured (Settings -> RAG) or returned no results."
+            if wants_json:
+                return jsonify({"ok": False, "msg": msg})
+            flash(msg, "err")
         else:
             top = max(rr, key=lambda d: d.get("score") or 0)
-            flash("Reranker OK in %.1fs - %d result(s), top score %.3f"
-                  % (time.time() - started, len(rr), top.get("score") or 0), "ok")
+            msg = ("Reranker OK in %.1fs - %d result(s), top score %.3f"
+                   % (time.time() - started, len(rr), top.get("score") or 0))
+            _note_endpoint_test("rerank", _fp_rerank_cfg(cfg))
+            if wants_json:
+                return jsonify({"ok": True, "msg": msg})
+            flash(msg, "ok")
     except Exception as exc:
-        flash("Reranker FAILED after %.1fs: %r" % (time.time() - started, exc), "err")
+        msg = "Reranker FAILED after %.1fs: %r" % (time.time() - started, exc)
+        if wants_json:
+            return jsonify({"ok": False, "msg": msg})
+        flash(msg, "err")
     return redirect(url_for("settings"))
 
 

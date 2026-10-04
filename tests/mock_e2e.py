@@ -54,6 +54,13 @@ def section(name, *groups):
         print("\n== %s ==" % name)
 
 
+def verify_endpoint(client, url, data):
+    """T63: endpoint test-before-save flow - probe the posted values the way the
+    Settings UI does (fetch header -> JSON path, no flash) so the server records
+    the verification marker for those exact values."""
+    return client.post(url, data=data, headers={"X-Requested-With": "fetch"})
+
+
 # ---------------------------------------------------------------- mock state
 
 class MockState:
@@ -2526,6 +2533,10 @@ def main():
     llm_base_mock = "http://127.0.0.1:%d/v1" % llm_port
     tei_base = "http://127.0.0.1:%d" % tei_port
     # -- the LLM endpoint (base/model/key/timeout) is now a setting
+    # T63: endpoint changes need a passing test first - probe the values, then save
+    verify_endpoint(client, "/settings/test-llm",
+                    {"llm_base_url": llm_base_mock, "llm_model": "settings-model-x",
+                     "llm_api_key": "settings-key-1", "llm_timeout": "33"})
     r = client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
                                        "llm_model": "settings-model-x", "llm_api_key": "settings-key-1",
                                        "llm_timeout": "33"})
@@ -2547,6 +2558,9 @@ def main():
                                    "llm_model": "settings-model-x", "llm_api_key": "",
                                    "llm_timeout": "33"})
     check("blank key field keeps the stored key", engine.LLMClient().key == "settings-key-1")
+    verify_endpoint(client, "/settings/test-llm",
+                    {"llm_base_url": llm_base_mock, "llm_model": "settings-model-x",
+                     "llm_api_key_clear": "1", "llm_timeout": "33"})
     client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
                                    "llm_model": "settings-model-x", "llm_api_key_clear": "1",
                                    "llm_timeout": "33"})
@@ -2574,6 +2588,9 @@ def main():
           and attempts[0]["payload"].get("chat_template_kwargs")
           and "chat_template_kwargs" not in attempts[1]["payload"])
     # -- fallback endpoint is a setting too
+    verify_endpoint(client, "/settings/test-llm?which=fallback",
+                    {"llm_fallback_base_url": llm_base_mock,
+                     "llm_fallback_model": "settings-fb"})
     client.post("/settings", data={"section": "llm", "llm_fallback_base_url": llm_base_mock,
                                    "llm_fallback_model": "settings-fb"})
     check("fallback endpoint comes from settings",
@@ -2586,6 +2603,11 @@ def main():
           engine.LLMClient().base == config.LLM_BASE_URL
           and engine.LLMClient().model == config.LLM_MODEL)
     # -- RAG endpoints as settings, incl. OpenAI-style embeddings + Cohere-style rerank
+    verify_endpoint(client, "/settings/test-embed",
+                    {"embed_base_url": tei_base, "embed_model": "mock-embed-1",
+                     "embed_protocol": "openai"})
+    verify_endpoint(client, "/settings/test-rerank",
+                    {"rerank_base_url": tei_base, "rerank_protocol": "cohere"})
     client.post("/settings", data={"section": "rag", "embed_base_url": tei_base,
                                    "embed_model": "mock-embed-1", "embed_protocol": "openai",
                                    "rerank_base_url": tei_base, "rerank_protocol": "cohere"})
@@ -2614,12 +2636,15 @@ def main():
     r = client.post("/settings/test-llm", query_string={"which": "fallback"})
     check("Test fallback button redirects (no fallback configured)",
           r.status_code == 302)
+    verify_endpoint(client, "/settings/test-embed", {"embed_protocol": "tei"})
+    verify_endpoint(client, "/settings/test-rerank", {"rerank_protocol": "tei"})
     client.post("/settings", data={"section": "rag", "embed_protocol": "tei",
                                    "rerank_protocol": "tei"})
     check("protocols flip back to tei",
           rag.embed_config()["protocol"] == "tei" and rag.rerank_config()["protocol"] == "tei")
     # -- the embed-model change guard reads the settings value (active lite backend)
     dim = store.meta_get("lite_embed_dim") or 8
+    verify_endpoint(client, "/settings/test-embed", {"embed_model": "other-embed-9"})
     client.post("/settings", data={"section": "rag", "embed_model": "other-embed-9"})
     guard_error = ""
     try:
@@ -2628,6 +2653,7 @@ def main():
         guard_error = str(exc)
     check("embedding model change guard fires from the settings value",
           "other-embed-9" in guard_error and "rebuild" in guard_error)
+    verify_endpoint(client, "/settings/test-embed", {"embed_model": ""})
     client.post("/settings", data={"section": "rag", "embed_model": ""})
     # -- excluded folders, refresh cadence, display timezone are settings now
     client.post("/settings", data={"section": "rag", "rag_exclude_folders": "junk, custom-skip"})
@@ -2645,6 +2671,8 @@ def main():
     check("settings page carries the new endpoint cards",
           b"LLM endpoint" in r.data and b"Embeddings" in r.data and b"Reranker" in r.data)
     # -- the Settings model dropdown is fed by the endpoint's /models list
+    verify_endpoint(client, "/settings/test-llm",
+                    {"llm_base_url": llm_base_mock, "llm_model": "settings-model-x"})
     client.post("/settings", data={"section": "llm", "llm_base_url": llm_base_mock,
                                    "llm_model": "settings-model-x"})
     r = client.get("/settings/llm-models?which=primary")
@@ -3099,6 +3127,7 @@ def main():
     node = _sh.which("node")
     if node:
         page = client.get("/messages").data.decode("utf-8", "replace")
+        page += client.get("/settings").data.decode("utf-8", "replace")
         blocks = _re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", page, _re.S)
         bad = []
         for bi, blk in enumerate(blocks):
@@ -4612,6 +4641,7 @@ def main():
     _cfg = eng_mod.llm_config()
     _base = (_cfg.get("base") or "").strip()
     _model = (_cfg.get("model") or "").strip()
+    verify_endpoint(client, "/settings/test-llm", {"llm_base_url": _base, "llm_model": _model})
     r = client.post("/settings?next=%2Fwelcome%3Fs%3D3",
                     data={"section": "llm", "scope": "LLM endpoint",
                           "llm_base_url": _base, "llm_model": _model})
@@ -5376,6 +5406,10 @@ def main():
         "llm_base_url", "llm_model", "llm_fallback_base_url", "llm_fallback_model")}
     _fb_was = store.get_setting("assistant_use_fallback")
     _llm_mock = "http://127.0.0.1:%d/v1" % llm_port
+    verify_endpoint(client, "/settings/test-llm",
+                    {"llm_base_url": _llm_mock, "llm_model": "mock-primary"})
+    verify_endpoint(client, "/settings/test-llm?which=fallback",
+                    {"llm_fallback_base_url": _llm_mock, "llm_fallback_model": "settings-fb"})
     client.post("/settings", data={"section": "llm", "llm_base_url": _llm_mock,
                                    "llm_model": "mock-primary",
                                    "llm_fallback_base_url": _llm_mock,
@@ -5457,6 +5491,10 @@ def main():
     threading.Thread(target=_fsrv.serve_forever, daemon=True).start()
     _l_front2 = {k: store.get_setting(k) for k in (
         "llm_base_url", "llm_model", "llm_fallback_base_url", "llm_fallback_model")}
+    verify_endpoint(client, "/settings/test-llm",
+                    {"llm_base_url": _llm_mock, "llm_model": "mock-primary"})
+    verify_endpoint(client, "/settings/test-llm?which=fallback",
+                    {"llm_fallback_base_url": _llm_mock, "llm_fallback_model": "settings-fb"})
     client.post("/settings", data={"section": "llm", "llm_base_url": _llm_mock,
                                    "llm_model": "mock-primary",
                                    "llm_fallback_base_url": _llm_mock,
@@ -5607,6 +5645,111 @@ def main():
           and b'id="llm-txt"' in r.data and b'id="llm-checked"' in r.data)
     check("dashboard polls the LLM health endpoint",
           b"/llm/health.json" in r.data)
+
+    section("T63 endpoint test-before-save gate (LLM + RAG)", "core", "ui")
+    _g_front = {k: store.get_setting(k) for k in (
+        "llm_base_url", "llm_model", "llm_api_key", "llm_fallback_base_url",
+        "llm_fallback_model", "embed_protocol", "embed_base_url", "embed_model",
+        "rerank_protocol", "rerank_base_url", "rerank_model")}
+    _g_llm = "http://127.0.0.1:%d/v1" % llm_port
+    _g_tei = "http://127.0.0.1:%d" % tei_port
+    # clearing an endpoint needs no test (nothing remote to reach)
+    r = client.post("/settings", data={"section": "llm", "llm_base_url": "", "llm_model": ""})
+    check("clearing the LLM endpoint needs no test", r.status_code == 302
+          and (store.get_setting("llm_base_url") or "") == "")
+    # the fetch test path probes the UNSAVED values and answers JSON
+    r = client.post("/settings/test-llm",
+                    data={"llm_base_url": _g_llm, "llm_model": "gate-model"},
+                    headers={"X-Requested-With": "fetch"})
+    _j = r.get_json() or {}
+    check("fetch test-llm answers JSON with an ok message",
+          r.status_code == 200 and r.is_json and _j.get("ok") is True
+          and "OK in" in (_j.get("msg") or ""))
+    # saving the verified values passes
+    r = client.post("/settings", data={"section": "llm", "llm_base_url": _g_llm,
+                                       "llm_model": "gate-model"})
+    check("verified LLM endpoint saves", r.status_code == 302
+          and (store.get_setting("llm_base_url") or "") == _g_llm)
+    # changing the base without a test is refused; the stored value stays put
+    r = client.post("/settings", data={"section": "llm", "llm_base_url": _g_llm + "/alt"},
+                    follow_redirects=True)
+    check("unverified LLM endpoint change is refused",
+          b"changed since the last successful test" in r.data)
+    check("refused save left the stored LLM endpoint untouched",
+          (store.get_setting("llm_base_url") or "") == _g_llm)
+    # an unchanged re-save needs no test
+    r = client.post("/settings", data={"section": "llm", "llm_base_url": _g_llm,
+                                       "llm_model": "gate-model"})
+    check("unchanged LLM values save without a test", r.status_code == 302)
+    # -- RAG: embed side. local protocol = no test; flipping to a server needs one
+    r = client.post("/settings", data={"section": "rag", "embed_protocol": "local"})
+    check("switch to the local protocol needs no test", r.status_code == 302
+          and (store.get_setting("embed_protocol") or "") == "local")
+    r = client.post("/settings/test-embed",
+                    data={"embed_protocol": "tei", "embed_base_url": _g_tei,
+                          "embed_model": "mock-embed-1"},
+                    headers={"X-Requested-With": "fetch"})
+    _j = r.get_json() or {}
+    check("fetch test-embed answers JSON with an ok message",
+          r.status_code == 200 and _j.get("ok") is True and "OK in" in (_j.get("msg") or ""))
+    r = client.post("/settings", data={"section": "rag", "embed_protocol": "tei",
+                                       "embed_base_url": _g_tei, "embed_model": "mock-embed-1"})
+    check("verified embed endpoint saves", r.status_code == 302
+          and (store.get_setting("embed_protocol") or "") == "tei")
+    r = client.post("/settings", data={"section": "rag", "embed_base_url": _g_tei + "/other"},
+                    follow_redirects=True)
+    check("unverified embed change is refused",
+          b"changed since the last successful test" in r.data)
+    check("refused embed save left the stored base untouched",
+          (store.get_setting("embed_base_url") or "") == _g_tei)
+    # previously verified values still pass after a local round-trip (marker memory)
+    client.post("/settings", data={"section": "rag", "embed_protocol": "local"})
+    r = client.post("/settings", data={"section": "rag", "embed_protocol": "tei"})
+    check("flip back to previously verified values passes", r.status_code == 302
+          and (store.get_setting("embed_protocol") or "") == "tei")
+    # -- RAG: rerank side
+    r = client.post("/settings/test-rerank",
+                    data={"rerank_protocol": "tei", "rerank_base_url": _g_tei,
+                          "rerank_model": "mock-rerank-1"},
+                    headers={"X-Requested-With": "fetch"})
+    _j = r.get_json() or {}
+    check("fetch test-rerank answers JSON with an ok message",
+          r.status_code == 200 and _j.get("ok") is True and "OK in" in (_j.get("msg") or ""))
+    r = client.post("/settings", data={"section": "rag", "rerank_protocol": "tei",
+                                       "rerank_base_url": _g_tei, "rerank_model": "mock-rerank-1"})
+    check("verified reranker endpoint saves", r.status_code == 302
+          and (store.get_setting("rerank_model") or "") == "mock-rerank-1")
+    r = client.post("/settings", data={"section": "rag", "rerank_base_url": _g_tei + "/r2"},
+                    follow_redirects=True)
+    check("unverified reranker change is refused",
+          b"changed since the last successful test" in r.data)
+    # -- LLM: fallback side
+    r = client.post("/settings/test-llm?which=fallback",
+                    data={"llm_fallback_base_url": _g_llm, "llm_fallback_model": "gate-fb"},
+                    headers={"X-Requested-With": "fetch"})
+    _j = r.get_json() or {}
+    check("fetch test-llm fallback answers JSON with an ok message",
+          r.status_code == 200 and _j.get("ok") is True)
+    r = client.post("/settings", data={"section": "llm", "llm_fallback_base_url": _g_llm,
+                                       "llm_fallback_model": "gate-fb"})
+    check("verified fallback endpoint saves", r.status_code == 302
+          and (store.get_setting("llm_fallback_base_url") or "") == _g_llm)
+    r = client.post("/settings", data={"section": "llm", "llm_fallback_base_url": _g_llm + "/fb2"},
+                    follow_redirects=True)
+    check("unverified fallback change is refused",
+          b"changed since the last successful test" in r.data)
+    # -- presentation: the page ships the wiring the JS binds to
+    r = client.get("/settings")
+    _pg = r.data
+    check("settings page ships the endpoint-gate wiring",
+          b'id="llm-form"' in _pg and b'id="rag-form"' in _pg
+          and b'id="llm-save"' in _pg and b'id="rag-save"' in _pg
+          and b'id="llm-gate"' in _pg and b'id="rag-gate"' in _pg
+          and b'data-side="llm:primary"' in _pg and b'data-side="embed"' in _pg
+          and b"X-Requested-With" in _pg and b"EPGATE" in _pg)
+    # restore the pre-T63 endpoint settings
+    for _k, _v in _g_front.items():
+        store.set_setting(_k, _v if _v is not None else "")
 
     # ==== suite tail (always runs, even in a partial run) ====
     if globals().get("_PARTIAL_NOTE"):
