@@ -1,26 +1,340 @@
 {
   "note": "Maps each synthetic email family to the world entity kind that sends it and the object it can plausibly reference. An org sender must match one of the listed industries AND hold one of the listed role mailboxes (selection fails closed otherwise); 'object' names the catalog bucket the scenario draws from so goods/services/documents/projects are bound to the sender's actual business.",
   "family_world": {
-    "receipt_confirmation": {"kind": "org", "industries": ["retail", "utility", "travel", "software", "health", "food", "telecom"], "roles": ["billing", "bookings", "accounts"], "object": ["services", "goods"], "relationship": "customer"},
-    "invoice_receipt": {"kind": "org", "industries": ["retail", "software", "logistics", "insurance", "property"], "roles": ["billing", "accounts"], "object": ["goods", "services"], "relationship": "customer"},
-    "payment_reminder": {"kind": "org", "industries": ["utility", "telecom", "property", "insurance"], "roles": ["billing", "accounts"], "object": ["services"], "relationship": "customer"},
-    "refund_status": {"kind": "org", "industries": ["retail", "travel", "software"], "roles": ["support"], "object": ["goods", "services"], "relationship": "customer"},
-    "newsletter_digest": {"kind": "org", "industries": ["media"], "roles": ["subscribe", "no-reply"], "object": ["news"], "relationship": "subscriber"},
-    "legitimate_promo": {"kind": "org", "industries": ["retail", "marketing"], "roles": ["offers", "no-reply"], "object": ["services", "goods"], "relationship": "customer"},
-    "ambiguous_marketing": {"kind": "org", "industries": ["retail", "marketing"], "roles": ["offers", "no-reply"], "object": ["services"], "relationship": "customer"},
-    "suspicious_phishing": {"kind": "org", "industries": ["finance", "utility", "retail"], "roles": ["security", "billing", "no-reply"], "object": ["documents"], "relationship": "customer", "sketchy": true},
-    "security_notification": {"kind": "org", "industries": ["finance", "software", "telecom"], "roles": ["security", "no-reply"], "object": ["documents"], "relationship": "customer"},
-    "shipping_travel_update": {"kind": "org", "industries": ["logistics", "travel"], "roles": ["tracking", "support", "no-reply"], "object": ["services", "goods"], "relationship": "customer"},
-    "support_exchange": {"kind": "org", "industries": ["software", "retail", "telecom", "health"], "roles": ["support"], "object": ["services", "goods"], "relationship": "customer"},
-    "document_request": {"kind": "org", "industries": ["property", "insurance", "government"], "roles": ["accounts", "support", "services", "lettings"], "object": ["documents"], "relationship": "tenant"},
-    "order_request": {"kind": "org", "industries": ["retail", "food"], "roles": ["orders"], "object": ["goods"], "relationship": "customer"},
-    "request_approval": {"kind": "org", "industries": ["software", "marketing", "retail", "property"], "roles": ["accounts", "billing", "support", "lettings"], "object": ["services", "projects"], "relationship": "client"},
-    "project_request": {"kind": "org", "industries": ["software", "marketing", "retail"], "roles": ["accounts", "billing", "support"], "object": ["projects", "services"], "relationship": "client"},
-    "project_status": {"kind": "org", "industries": ["software", "marketing"], "roles": ["no-reply", "support"], "object": ["projects"], "relationship": "client"},
-    "operational_alert": {"kind": "org", "industries": ["software", "utility", "telecom"], "roles": ["no-reply"], "object": ["services"], "relationship": "customer"},
-    "meeting_request": {"kind": "person", "context": "colleague", "object": ["projects"], "relationship": "colleague"},
-    "personal_invitation": {"kind": "person", "context": "friend", "object": ["social"], "relationship": "friend"},
-    "school_community": {"kind": "org", "industries": ["education", "community"], "roles": ["office", "events", "volunteers", "registry"], "object": ["projects"], "relationship": "parent"},
-    "event_registration": {"kind": "org", "industries": ["events", "community", "education"], "roles": ["events", "boxoffice", "office"], "object": ["event"], "relationship": "member"}
+    "receipt_confirmation": {
+      "kind": "org",
+      "industries": [
+        "retail",
+        "utility",
+        "travel",
+        "software",
+        "health",
+        "food",
+        "telecom"
+      ],
+      "roles": [
+        "billing",
+        "bookings",
+        "accounts"
+      ],
+      "object": [
+        "services",
+        "goods"
+      ],
+      "relationship": "customer"
+    },
+    "invoice_receipt": {
+      "kind": "org",
+      "industries": [
+        "retail",
+        "software",
+        "logistics",
+        "insurance",
+        "property"
+      ],
+      "roles": [
+        "billing",
+        "accounts"
+      ],
+      "object": [
+        "goods",
+        "services"
+      ],
+      "relationship": "customer"
+    },
+    "payment_reminder": {
+      "kind": "org",
+      "industries": [
+        "utility",
+        "telecom",
+        "property",
+        "insurance"
+      ],
+      "roles": [
+        "billing",
+        "accounts"
+      ],
+      "object": [
+        "services"
+      ],
+      "relationship": "customer"
+    },
+    "refund_status": {
+      "kind": "org",
+      "industries": [
+        "retail",
+        "travel",
+        "software"
+      ],
+      "roles": [
+        "support"
+      ],
+      "object": [
+        "goods",
+        "services"
+      ],
+      "relationship": "customer"
+    },
+    "newsletter_digest": {
+      "kind": "org",
+      "industries": [
+        "media"
+      ],
+      "roles": [
+        "subscribe",
+        "no-reply"
+      ],
+      "object": [
+        "services"
+      ],
+      "relationship": "subscriber"
+    },
+    "legitimate_promo": {
+      "kind": "org",
+      "industries": [
+        "retail",
+        "marketing"
+      ],
+      "roles": [
+        "offers",
+        "no-reply"
+      ],
+      "object": [
+        "services",
+        "goods"
+      ],
+      "relationship": "customer"
+    },
+    "ambiguous_marketing": {
+      "kind": "org",
+      "industries": [
+        "retail",
+        "marketing"
+      ],
+      "roles": [
+        "offers",
+        "no-reply"
+      ],
+      "object": [
+        "services"
+      ],
+      "relationship": "customer"
+    },
+    "suspicious_phishing": {
+      "kind": "org",
+      "industries": [
+        "finance",
+        "utility",
+        "retail"
+      ],
+      "roles": [
+        "security",
+        "billing",
+        "no-reply"
+      ],
+      "object": [
+        "documents"
+      ],
+      "relationship": "customer",
+      "sketchy": true
+    },
+    "security_notification": {
+      "kind": "org",
+      "industries": [
+        "finance",
+        "software",
+        "telecom"
+      ],
+      "roles": [
+        "security",
+        "no-reply"
+      ],
+      "object": [
+        "documents"
+      ],
+      "relationship": "customer"
+    },
+    "shipping_travel_update": {
+      "kind": "org",
+      "industries": [
+        "logistics",
+        "travel"
+      ],
+      "roles": [
+        "tracking",
+        "support",
+        "no-reply"
+      ],
+      "object": [
+        "services",
+        "goods"
+      ],
+      "relationship": "customer"
+    },
+    "support_exchange": {
+      "kind": "org",
+      "industries": [
+        "software",
+        "retail",
+        "telecom",
+        "health"
+      ],
+      "roles": [
+        "support"
+      ],
+      "object": [
+        "services",
+        "goods"
+      ],
+      "relationship": "customer"
+    },
+    "document_request": {
+      "kind": "org",
+      "industries": [
+        "property",
+        "insurance",
+        "government"
+      ],
+      "roles": [
+        "accounts",
+        "support",
+        "services",
+        "lettings"
+      ],
+      "object": [
+        "documents"
+      ],
+      "relationship": "tenant"
+    },
+    "order_request": {
+      "kind": "org",
+      "industries": [
+        "retail",
+        "food"
+      ],
+      "roles": [
+        "orders"
+      ],
+      "object": [
+        "goods"
+      ],
+      "relationship": "customer"
+    },
+    "request_approval": {
+      "kind": "org",
+      "industries": [
+        "software",
+        "marketing",
+        "retail",
+        "property"
+      ],
+      "roles": [
+        "accounts",
+        "billing",
+        "support",
+        "lettings"
+      ],
+      "object": [
+        "services"
+      ],
+      "relationship": "client"
+    },
+    "project_request": {
+      "kind": "org",
+      "industries": [
+        "software",
+        "marketing",
+        "retail"
+      ],
+      "roles": [
+        "accounts",
+        "billing",
+        "support"
+      ],
+      "object": [
+        "projects"
+      ],
+      "relationship": "client"
+    },
+    "project_status": {
+      "kind": "org",
+      "industries": [
+        "software",
+        "marketing"
+      ],
+      "roles": [
+        "no-reply",
+        "support"
+      ],
+      "object": [
+        "projects"
+      ],
+      "relationship": "client"
+    },
+    "operational_alert": {
+      "kind": "org",
+      "industries": [
+        "software",
+        "utility",
+        "telecom"
+      ],
+      "roles": [
+        "no-reply"
+      ],
+      "object": [
+        "services"
+      ],
+      "relationship": "customer"
+    },
+    "meeting_request": {
+      "kind": "person",
+      "context": "colleague",
+      "object": [
+        "projects"
+      ],
+      "relationship": "colleague"
+    },
+    "personal_invitation": {
+      "kind": "person",
+      "context": "friend",
+      "object": [
+        "social"
+      ],
+      "relationship": "friend"
+    },
+    "school_community": {
+      "kind": "org",
+      "industries": [
+        "education",
+        "community"
+      ],
+      "roles": [
+        "office",
+        "events",
+        "volunteers",
+        "registry"
+      ],
+      "object": [
+        "projects"
+      ],
+      "relationship": "parent"
+    },
+    "event_registration": {
+      "kind": "org",
+      "industries": [
+        "events",
+        "community",
+        "education"
+      ],
+      "roles": [
+        "events",
+        "boxoffice",
+        "office"
+      ],
+      "object": [
+        "projects"
+      ],
+      "relationship": "member"
+    }
   }
 }

@@ -109,8 +109,12 @@ class NativeClippingTest(unittest.TestCase):
             for hidden in gold["hidden_evidence"]:
                 self.assertIn(hidden.lower(),
                               twin["rendered_input"]["user"].lower())
-            self.assertEqual(gold_of(b, twin)["observable"]["category"],
-                             contracts.OBSERVABILITY_VISIBLE)
+            # The twin makes the evidence visible; the category observable is
+            # the resolver's taxonomy state (visible, or an honest gap/ambiguity).
+            self.assertIn(gold_of(b, twin)["observable"]["category"],
+                          (contracts.OBSERVABILITY_VISIBLE,
+                           contracts.OBSERVABILITY_AMBIGUOUS,
+                           contracts.OBSERVABILITY_UNAVAILABLE))
 
     def test_native_has_no_clipping_marker(self):
         b = default_bundle()
@@ -1026,7 +1030,16 @@ class WorldFixtureTest(unittest.TestCase):
         owner_domains = {o["domain"] for o in world.owners.values()}
         self.assertFalse(owner_domains & domain_set,
                          "owner domain collides with an org domain")
-        self.assertTrue(world.tld and world.tld != "com")
+        self.assertEqual(world.tld, "com")
+
+    def test_domains_use_configured_suffix(self):
+        b = default_bundle()
+        for scn in b["scenarios"]:
+            facts = scn.get("facts") or {}
+            for entity in ("sender", "recipient", "signer"):
+                email = (facts.get(entity) or {}).get("email")
+                if email:
+                    self.assertTrue(email.endswith(".com"), email)
 
     def test_style_fixture_is_aggregate_and_has_provenance(self):
         from benchmarks.v3.build import recipes
@@ -1256,6 +1269,140 @@ class WorldCoherenceW2Test(unittest.TestCase):
                     return
         problems = self._mutated(b, mutate)
         self.assertTrue(any("role" in p for p in problems), problems[:3])
+
+
+class SemanticGoldTest(unittest.TestCase):
+    """AR-1: gold categories are grounded in policy definitions, not role order."""
+
+    def _policies(self):
+        from benchmarks.v3.build import recipes
+        return recipes.policies() + recipes.policy_variants()
+
+    def test_matrix_invariants(self):
+        from benchmarks.v3.build import recipes
+        names = set()
+        for policy in self._policies():
+            names |= {c["name"] for c in policy["categories"]}
+        for policy in self._policies():
+            pnames = {c["name"] for c in policy["categories"]}
+            for family in recipes.families():
+                for profile in ("native", "policy_conditioned"):
+                    res = recipes.resolve_semantics(policy, family, profile)
+                    self.assertIn(res["observable"],
+                                  ("visible", "ambiguous", "unavailable"))
+                    if res["observable"] == "visible":
+                        self.assertIn(res["category"], pnames)
+                        self.assertEqual(res["acceptable"], [res["category"]])
+                    elif res["observable"] == "unavailable":
+                        self.assertEqual(res["category"], None)
+                        self.assertEqual(res["acceptable"], [])
+                        self.assertEqual(res["reason"], "taxonomy_gap")
+                    else:
+                        self.assertIsNone(res["category"])
+                        self.assertTrue(res["acceptable"])
+                        self.assertTrue(set(res["acceptable"]) <= pnames)
+
+    def test_specific_grounded_examples(self):
+        from benchmarks.v3.build import recipes
+        by_id = {p["policy_id"]: p for p in self._policies()}
+        dev = recipes.resolve_semantics(by_id["developer_oncall"],
+                                        "event_registration", "native")
+        self.assertEqual(dev["category"], "Personal")
+        self.assertNotEqual(dev["category"], "Incident")
+        stu = recipes.resolve_semantics(by_id["student"], "support_exchange", "native")
+        self.assertEqual(stu["observable"], "unavailable")
+        self.assertEqual(stu["reason"], "taxonomy_gap")
+        house = recipes.resolve_semantics(by_id["household"],
+                                          "document_request", "native")
+        self.assertEqual(house["category"], "Family")
+        self.assertNotEqual(house["category"], "Appointment")
+        amb = recipes.resolve_semantics(by_id["employee_coordinator"],
+                                        "ambiguous_marketing", "native")
+        self.assertEqual(amb["observable"], "ambiguous")
+        self.assertTrue({"Promo", "Newsletter"} <= set(amb["acceptable"]))
+
+    def test_policy_twin_honors_declared_mapping(self):
+        from benchmarks.v3.build import recipes
+        by_id = {p["policy_id"]: p for p in self._policies()}
+        base = recipes.resolve_semantics(by_id["employee_coordinator"],
+                                         "legitimate_promo", "policy_conditioned")
+        twin = recipes.resolve_semantics(by_id["employee_coordinator_mkt"],
+                                         "legitimate_promo", "policy_conditioned")
+        self.assertEqual(base["category"], "Promo")
+        self.assertEqual(twin["category"], "Newsletter")
+
+    def test_no_contradictory_category_for_invites_or_support(self):
+        from benchmarks.v3.build import recipes
+        b = default_bundle()
+        golds = {g["gold_id"]: g for g in b["gold"]}
+        for c in b["cases"]:
+            if c["task"] != "decision" or c["relation"]["relation_type"] != "root":
+                continue
+            g = golds[c["gold_id"]]
+            if g["observable"].get("category") != "visible":
+                continue
+            cat = g["answer"]["category"]
+            ints = recipes.family_intent().get(c["family"], [])
+            covers = recipes.category_covers().get(cat, {}).get("covers", [])
+            self.assertTrue(set(covers) & set(ints),
+                            "%s -> %s has no semantic cover" % (c["family"], cat))
+
+    def test_taxonomy_gaps_recorded_by_profile_persona(self):
+        b = default_bundle()
+        tax = b["metadata"]["coverage"]["taxonomy"]
+        self.assertTrue(tax["gaps_by_profile"])
+        self.assertTrue(tax["gaps_by_persona"])
+        self.assertIn("taxonomy_gap", tax["gap_reasons"] or {"taxonomy_gap": 0})
+
+
+class ContextClaimTest(unittest.TestCase):
+    """AR-2: no unbacked CC/workstream/history claims; reply intent is honest."""
+
+    def _body(self, case):
+        return (case["rendered_input"] or {}).get("user", "")
+
+    def test_no_false_context_claims_in_pilot(self):
+        b = default_bundle()
+        banned = ("copied the wider team", "wider team", "other workstream",
+                  "earlier exchange", "followed this thread")
+        for c in b["cases"]:
+            body = self._body(c).lower()
+            for phrase in banned:
+                self.assertNotIn(phrase, body, c["case_id"])
+
+    def test_inject_false_cc_claim_detected(self):
+        bad = copy.deepcopy(default_bundle())
+        bad["cases"][0]["rendered_input"]["user"] += (
+            "\n\nI have copied the wider team so everyone has the context.")
+        problems = build.validate_dataset(bad)
+        self.assertTrue(any("unbacked cc claim" in p for p in problems), problems[:3])
+
+    def test_inject_false_workstream_claim_detected(self):
+        bad = copy.deepcopy(default_bundle())
+        bad["cases"][0]["rendered_input"]["user"] += (
+            "\n\nThere is a small dependency on the other workstream.")
+        problems = build.validate_dataset(bad)
+        self.assertTrue(any("unbacked workstream claim" in p for p in problems),
+                        problems[:3])
+
+    def test_payment_reply_intent_matches_wording(self):
+        b = default_bundle()
+        golds = {g["gold_id"]: g for g in b["gold"]}
+        intents = set()
+        for c in b["cases"]:
+            if c["family"] != "payment_reminder" or c["task"] != "decision":
+                continue
+            if c["relation"]["relation_type"] != "root":
+                continue
+            g = golds[c["gold_id"]]
+            nr = g["answer"]["needs_reply"]
+            intents.add(nr)
+            body = self._body(c).lower()
+            if nr:
+                self.assertIn("reply", body, c["case_id"])
+            else:
+                self.assertNotIn("reply", body, c["case_id"])
+        self.assertEqual(intents, {True, False})
 
 
 if __name__ == "__main__":

@@ -1,315 +1,878 @@
 {
   "families": {
     "request_approval": {
-      "roles": ["action"], "category_roles": ["action"], "needs_reply": true,
-      "tags": ["request", "approval"],
-      "templates": [
-        {"id": "req_approval_a",
-         "subject": "Approval needed: {item} ({ref})",
-         "body": "Hi {owner_first},\n\nWe need your approval for {item} with {vendor} before {deadline}. {detail} The total comes to {amount}, and the reference is {ref}.\n\nPlease reply to confirm or tell us what to change.\n\nThanks,\n{signer}",
-         "evidence": ["{amount}", "{ref}", "before {deadline}"]},
-        {"id": "req_approval_b",
-         "subject": "{vendor}: sign-off for {item}",
-         "body": "Hello {owner_first},\n\n{vendor} is holding {item} until you sign off. We would like to proceed by {deadline}; the quoted cost is {amount} ({ref}). {detail}\n\nA short reply is enough to move this forward.\n\nBest,\n{signer}",
-         "evidence": ["{amount}", "{ref}", "{deadline}"]}
+      "roles": [
+        "action"
       ],
-      "paraphrase": {"subject": "Could you approve {item}?",
+      "category_roles": [
+        "action"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "request",
+        "approval"
+      ],
+      "templates": [
+        {
+          "id": "req_approval_a",
+          "subject": "Approval needed: {item} ({ref})",
+          "body": "Hi {owner_first},\n\nWe need your approval for {item} with {vendor} before {deadline}. {detail} The total comes to {amount}, and the reference is {ref}.\n\nPlease reply to confirm or tell us what to change.\n\nThanks,\n{signer}",
+          "evidence": [
+            "{amount}",
+            "{ref}",
+            "before {deadline}"
+          ]
+        },
+        {
+          "id": "req_approval_b",
+          "subject": "{vendor}: sign-off for {item}",
+          "body": "Hello {owner_first},\n\n{vendor} is holding {item} until you sign off. We would like to proceed by {deadline}; the quoted cost is {amount} ({ref}). {detail}\n\nA short reply is enough to move this forward.\n\nBest,\n{signer}",
+          "evidence": [
+            "{amount}",
+            "{ref}",
+            "{deadline}"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Could you approve {item}?",
         "body": "Hi {owner_first},\n\nQuick check-in on {item} with {vendor}: can you give us the go-ahead before {deadline}? It is priced at {amount}, booking reference {ref}. {detail}\n\nLet us know either way.\n\nRegards,\n{signer}",
-        "evidence": ["{amount}", "{ref}", "{deadline}"]},
-      "resolved": {"subject": "Re: Approval needed: {item} ({ref})",
+        "evidence": [
+          "{amount}",
+          "{ref}",
+          "{deadline}"
+        ]
+      },
+      "resolved": {
+        "subject": "Re: Approval needed: {item} ({ref})",
         "body": "Hi {owner_first},\n\nThanks for approving {item} with {vendor}. This is now fully processed and no further action is needed from you. Reference {ref}, total {amount}.\n\nRegards,\n{signer}",
-        "evidence": ["no further action", "{ref}"]}
+        "evidence": [
+          "no further action",
+          "{ref}"
+        ]
+      }
     },
     "receipt_confirmation": {
-      "roles": ["receipt"], "category_roles": ["receipt"], "needs_reply": false,
-      "tags": ["receipt", "automated"],
-      "templates": [
-        {"id": "receipt_a",
-         "subject": "Your receipt from {vendor} - {ref}",
-         "body": "Hello {owner_first},\n\nThank you for your payment of {amount} to {vendor} on {date}. Reference {ref}. This message is your receipt and no reply is needed.\n\n{vendor}",
-         "evidence": ["{amount}", "{ref}", "no reply"]},
-        {"id": "receipt_b",
-         "subject": "Payment confirmation {ref}",
-         "body": "Hi {owner_first},\n\nWe have received {amount} for {service} ({ref}) on {date}. Keep this email for your records; there is nothing you need to do.\n\nAutomated confirmation from {vendor}.",
-         "evidence": ["{amount}", "{ref}", "nothing you need to do"]}
+      "roles": [
+        "receipt"
       ],
-      "paraphrase": {"subject": "Receipt #{ref}",
+      "category_roles": [
+        "receipt"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "receipt",
+        "automated"
+      ],
+      "templates": [
+        {
+          "id": "receipt_a",
+          "subject": "Your receipt from {vendor} - {ref}",
+          "body": "Hello {owner_first},\n\nThank you for your payment of {amount} to {vendor} on {date}. Reference {ref}. This message is your receipt and no reply is needed.\n\n{vendor}",
+          "evidence": [
+            "{amount}",
+            "{ref}",
+            "no reply"
+          ]
+        },
+        {
+          "id": "receipt_b",
+          "subject": "Payment confirmation {ref}",
+          "body": "Hi {owner_first},\n\nWe have received {amount} for {service} ({ref}) on {date}. Keep this email for your records; there is nothing you need to do.\n\nAutomated confirmation from {vendor}.",
+          "evidence": [
+            "{amount}",
+            "{ref}",
+            "nothing you need to do"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Receipt #{ref}",
         "body": "Hi {owner_first},\n\nThis confirms your {amount} payment to {vendor} on {date}, reference {ref}. It is an automated receipt only - no action required.\n\n{vendor} accounts team",
-        "evidence": ["{amount}", "{ref}", "no action required"]}
+        "evidence": [
+          "{amount}",
+          "{ref}",
+          "no action required"
+        ]
+      }
     },
     "payment_reminder": {
-      "roles": ["bill", "receipt"], "category_roles": ["bill", "receipt", "action"], "needs_reply": true,
-      "tags": ["billing", "reminder"],
-      "templates": [
-        {"id": "pay_reminder_a",
-         "subject": "Payment due {deadline}: {ref}",
-         "body": "Dear {owner_first},\n\nOur records show that {amount} for {service} is still outstanding. Please arrange payment by {deadline} to avoid a late fee. Your reference is {ref}.\n\nIf you have already paid, reply to this message and we will check.\n\n{vendor} billing team",
-         "evidence": ["{amount}", "{deadline}", "{ref}"]}
+      "roles": [
+        "bill",
+        "receipt"
       ],
-      "paraphrase": {"subject": "Reminder: {amount} outstanding ({ref})",
-        "body": "Hi {owner_first},\n\nA quick reminder that {amount} for {service} remains unpaid. Could you settle it before {deadline}? Reference {ref}. Reply if the payment has already gone through.\n\nThanks,\n{vendor} billing team",
-        "evidence": ["{amount}", "{deadline}", "{ref}"]},
-      "resolved": {"subject": "Re: Payment due {deadline}: {ref}",
+      "category_roles": [
+        "bill",
+        "receipt",
+        "action"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "billing",
+        "reminder"
+      ],
+      "templates": [
+        {
+          "id": "pay_reminder_a",
+          "subject": "Payment due {deadline}: {ref}",
+          "body": "Dear {owner_first},\n\nOur records show that {amount} for {service} is still outstanding. Please arrange payment by {deadline} to avoid a late fee. Your reference is {ref}.\n\nIf you have already paid, no further action is needed.\n\n{vendor} billing team",
+          "evidence": [
+            "{amount}",
+            "{deadline}",
+            "{ref}"
+          ],
+          "needs_reply": false
+        },
+        {
+          "id": "pay_reminder_b",
+          "subject": "Please confirm the payment date for {ref}",
+          "body": "Dear {owner_first},\n\nOur records show that {amount} for {service} is due by {deadline}. Could you reply to confirm the payment date? Your reference is {ref}.\n\n{vendor} billing team",
+          "evidence": [
+            "{amount}",
+            "{deadline}",
+            "{ref}"
+          ],
+          "needs_reply": true
+        }
+      ],
+      "paraphrase": {
+        "subject": "Reminder: {amount} outstanding ({ref})",
+        "body": "Hi {owner_first},\n\nA quick reminder that {amount} for {service} remains unpaid. Please settle it before {deadline}; no reply is required. Reference {ref}.\n\nThanks,\n{vendor} billing team",
+        "evidence": [
+          "{amount}",
+          "{deadline}",
+          "{ref}"
+        ],
+        "needs_reply": false
+      },
+      "resolved": {
+        "subject": "Re: Payment due {deadline}: {ref}",
         "body": "Dear {owner_first},\n\nWe have now received {amount} against {ref}. Your account is up to date and no action is required. Ignore any earlier reminder.\n\n{vendor} billing team",
-        "evidence": ["up to date", "no action required"]}
+        "evidence": [
+          "up to date",
+          "no action required"
+        ]
+      }
     },
     "invoice_receipt": {
-      "roles": ["invoice", "receipt"], "category_roles": ["invoice", "receipt"], "needs_reply": false,
-      "tags": ["invoice", "automated"],
-      "templates": [
-        {"id": "invoice_a",
-         "subject": "Invoice {ref} from {vendor}",
-         "body": "Hi {owner_first},\n\nPlease find invoice {ref} for {item} totalling {amount}, dated {date}. This is for your records; payment terms are net 30.\n\n{vendor}",
-         "evidence": ["{amount}", "{ref}"]}
+      "roles": [
+        "invoice",
+        "receipt"
       ],
-      "paraphrase": {"subject": "Your invoice {ref}",
+      "category_roles": [
+        "invoice",
+        "receipt"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "invoice",
+        "automated"
+      ],
+      "templates": [
+        {
+          "id": "invoice_a",
+          "subject": "Invoice {ref} from {vendor}",
+          "body": "Hi {owner_first},\n\nPlease find invoice {ref} for {item} totalling {amount}, dated {date}. This is for your records; payment terms are net 30.\n\n{vendor}",
+          "evidence": [
+            "{amount}",
+            "{ref}"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Your invoice {ref}",
         "body": "Hello {owner_first},\n\nInvoice {ref} from {vendor} covering {item} is attached/available. Amount due {amount}, issued {date}, terms net 30. No reply needed; this is a copy for your accounts.\n\n{vendor}",
-        "evidence": ["{amount}", "{ref}"]}
+        "evidence": [
+          "{amount}",
+          "{ref}"
+        ]
+      }
     },
     "refund_status": {
-      "roles": ["receipt", "notification"], "category_roles": ["receipt", "notification", "alert"], "needs_reply": false,
-      "tags": ["refund", "automated"],
-      "templates": [
-        {"id": "refund_a",
-         "subject": "Refund processed for {ref}",
-         "body": "Hi {owner_first},\n\nWe have processed your refund of {amount} for {item}. Reference {ref}. The funds should reach your original payment method within 5 working days. No action is needed.\n\n{vendor} support team",
-         "evidence": ["{amount}", "{ref}", "No action"]}
+      "roles": [
+        "receipt",
+        "notification"
       ],
-      "paraphrase": {"subject": "Your refund is on its way ({ref})",
+      "category_roles": [
+        "receipt",
+        "notification",
+        "alert"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "refund",
+        "automated"
+      ],
+      "templates": [
+        {
+          "id": "refund_a",
+          "subject": "Refund processed for {ref}",
+          "body": "Hi {owner_first},\n\nWe have processed your refund of {amount} for {item}. Reference {ref}. The funds should reach your original payment method within 5 working days. No action is needed.\n\n{vendor} support team",
+          "evidence": [
+            "{amount}",
+            "{ref}",
+            "No action"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Your refund is on its way ({ref})",
         "body": "Hello {owner_first},\n\nGood news - the {amount} refund for {item} has been approved and issued under {ref}. Expect it within five business days; nothing further is required from you.\n\n{vendor}",
-        "evidence": ["{amount}", "{ref}", "nothing further"]}
+        "evidence": [
+          "{amount}",
+          "{ref}",
+          "nothing further"
+        ]
+      }
     },
     "newsletter_digest": {
-      "roles": ["newsletter"], "category_roles": ["newsletter"], "needs_reply": false,
-      "tags": ["newsletter", "subscription"],
-      "templates": [
-        {"id": "news_a",
-         "subject": "{org} monthly digest - {month}",
-         "body": "Hi {owner_first},\n\nHere is your {month} digest from {org}. This month we cover {detail}. You are receiving this because you subscribed; unsubscribe any time.\n\nRead online: {link}\n\n{org} editorial team",
-         "evidence": ["subscribed", "{link}"]}
+      "roles": [
+        "newsletter"
       ],
-      "paraphrase": {"subject": "What's new at {org} this {month}",
+      "category_roles": [
+        "newsletter"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "newsletter",
+        "subscription"
+      ],
+      "templates": [
+        {
+          "id": "news_a",
+          "subject": "{org} monthly digest - {month}",
+          "body": "Hi {owner_first},\n\nHere is your {month} digest from {org}. This month we cover {detail}. You are receiving this because you subscribed; unsubscribe any time.\n\nRead online: {link}\n\n{org} editorial team",
+          "evidence": [
+            "subscribed",
+            "{link}"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "What's new at {org} this {month}",
         "body": "Hello {owner_first},\n\nOur {month} roundup is ready: {detail}. Thanks for following {org}. Manage your subscription or unsubscribe at {link}.\n\n{org}",
-        "evidence": ["subscription", "{link}"]}
+        "evidence": [
+          "subscription",
+          "{link}"
+        ]
+      }
     },
     "ambiguous_marketing": {
-      "roles": ["promo", "newsletter"], "category_roles": ["promo", "marketing", "newsletter"],
-      "needs_reply": false, "ambiguous": true,
-      "acceptable_role_sets": [["promo"], ["newsletter"]],
-      "tags": ["marketing", "ambiguous"],
-      "templates": [
-        {"id": "amb_mkt_a",
-         "subject": "{vendor} partner offers for {month}",
-         "body": "Hi {owner_first},\n\nHere are this {month}'s partner offers from {vendor}, including {percent} off {service} with code {code}. Offers end {deadline}. Manage preferences at {link}.\n\n{vendor}",
-         "evidence": ["{percent}", "{code}", "{deadline}"]}
+      "roles": [
+        "promo",
+        "newsletter"
       ],
-      "paraphrase": {"subject": "Offers from {vendor} - {month}",
-         "body": "Hello {owner_first},\n\nA round-up of {month} offers from {vendor}: {percent} off {service}, code {code}, valid to {deadline}. Update your preferences at {link}.\n\n{vendor}",
-         "evidence": ["{percent}", "{code}", "{deadline}"]}
+      "category_roles": [
+        "promo",
+        "marketing",
+        "newsletter"
+      ],
+      "needs_reply": false,
+      "ambiguous": true,
+      "acceptable_role_sets": [
+        [
+          "promo"
+        ],
+        [
+          "newsletter"
+        ]
+      ],
+      "tags": [
+        "marketing",
+        "ambiguous"
+      ],
+      "templates": [
+        {
+          "id": "amb_mkt_a",
+          "subject": "{vendor} partner offers for {month}",
+          "body": "Hi {owner_first},\n\nHere are this {month}'s partner offers from {vendor}, including {percent} off {service} with code {code}. Offers end {deadline}. Manage preferences at {link}.\n\n{vendor}",
+          "evidence": [
+            "{percent}",
+            "{code}",
+            "{deadline}"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Offers from {vendor} - {month}",
+        "body": "Hello {owner_first},\n\nA round-up of {month} offers from {vendor}: {percent} off {service}, code {code}, valid to {deadline}. Update your preferences at {link}.\n\n{vendor}",
+        "evidence": [
+          "{percent}",
+          "{code}",
+          "{deadline}"
+        ]
+      }
     },
     "legitimate_promo": {
-      "roles": ["promo", "marketing"], "category_roles": ["promo", "marketing", "newsletter"], "needs_reply": false,
-      "tags": ["promo", "marketing"],
-      "templates": [
-        {"id": "promo_a",
-         "subject": "{vendor}: {percent} off {service} until {deadline}",
-         "body": "Hi {owner_first},\n\nAs a valued customer, enjoy {percent} off {service} at {vendor} until {deadline}. Use code {code} at checkout. Prices include the current offer only.\n\nShop: {link}\n\n{vendor} team",
-         "evidence": ["{percent}", "{code}", "{deadline}"]}
+      "roles": [
+        "promo",
+        "marketing"
       ],
-      "paraphrase": {"subject": "A little something from {vendor}",
+      "category_roles": [
+        "promo",
+        "marketing",
+        "newsletter"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "promo",
+        "marketing"
+      ],
+      "templates": [
+        {
+          "id": "promo_a",
+          "subject": "{vendor}: {percent} off {service} until {deadline}",
+          "body": "Hi {owner_first},\n\nAs a valued customer, enjoy {percent} off {service} at {vendor} until {deadline}. Use code {code} at checkout. Prices include the current offer only.\n\nShop: {link}\n\n{vendor} team",
+          "evidence": [
+            "{percent}",
+            "{code}",
+            "{deadline}"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "A little something from {vendor}",
         "body": "Hello {owner_first},\n\nWe would love to see you again - take {percent} off {service} through {deadline} with code {code}. Browse the offer at {link}.\n\n{vendor}",
-        "evidence": ["{percent}", "{code}", "{deadline}"]}
+        "evidence": [
+          "{percent}",
+          "{code}",
+          "{deadline}"
+        ]
+      }
     },
     "security_notification": {
-      "roles": ["security", "account"], "category_roles": ["security", "account", "notification"], "needs_reply": false,
-      "tags": ["security", "automated"],
-      "templates": [
-        {"id": "security_a",
-         "subject": "New sign-in to your {vendor} account",
-         "body": "Hi {owner_first},\n\nWe noticed a new sign-in to your {vendor} account from {place} on {date}. If this was you, no action is needed. If not, secure your account and reset your password.\n\n{vendor} security team",
-         "evidence": ["new sign-in", "no action"]}
+      "roles": [
+        "security",
+        "account"
       ],
-      "paraphrase": {"subject": "Security alert: unrecognised device",
+      "category_roles": [
+        "security",
+        "account",
+        "notification"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "security",
+        "automated"
+      ],
+      "templates": [
+        {
+          "id": "security_a",
+          "subject": "New sign-in to your {vendor} account",
+          "body": "Hi {owner_first},\n\nWe noticed a new sign-in to your {vendor} account from {place} on {date}. If this was you, no action is needed. If not, secure your account and reset your password.\n\n{vendor} security team",
+          "evidence": [
+            "new sign-in",
+            "no action"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Security alert: unrecognised device",
         "body": "Hello {owner_first},\n\nA sign-in to your {vendor} account was recorded from {place}. If that was you, you can ignore this message. Otherwise, reset your password from the account settings page.\n\n{vendor} Account Security",
-        "evidence": ["sign-in", "ignore"]}
+        "evidence": [
+          "sign-in",
+          "ignore"
+        ]
+      }
     },
     "shipping_travel_update": {
-      "roles": ["notification", "alert", "supplier"], "category_roles": ["notification", "alert", "supplier"], "needs_reply": false,
-      "tags": ["shipping", "automated"],
-      "templates": [
-        {"id": "shipping_a",
-         "subject": "Your order {ref} is on its way",
-         "body": "Hi {owner_first},\n\nOrder {ref} from {vendor} has shipped and is expected on {deadline}. Track it here: {link}. No reply is needed.\n\n{vendor} team",
-         "evidence": ["{ref}", "{deadline}", "No reply"]}
+      "roles": [
+        "notification",
+        "alert",
+        "supplier"
       ],
-      "paraphrase": {"subject": "Tracking update for {ref}",
+      "category_roles": [
+        "notification",
+        "alert",
+        "supplier"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "shipping",
+        "automated"
+      ],
+      "templates": [
+        {
+          "id": "shipping_a",
+          "subject": "Your order {ref} is on its way",
+          "body": "Hi {owner_first},\n\nOrder {ref} from {vendor} has shipped and is expected on {deadline}. Track it here: {link}. No reply is needed.\n\n{vendor} team",
+          "evidence": [
+            "{ref}",
+            "{deadline}",
+            "No reply"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Tracking update for {ref}",
         "body": "Hello {owner_first},\n\nGood news: {ref} left the {vendor} depot and should arrive by {deadline}. Follow it at {link}. There is nothing you need to do.\n\n{vendor}",
-         "evidence": ["{ref}", "{deadline}", "nothing you need to do"]}
+        "evidence": [
+          "{ref}",
+          "{deadline}",
+          "nothing you need to do"
+        ]
+      }
     },
     "support_exchange": {
-      "roles": ["action", "client"], "category_roles": ["action", "client", "notification"], "needs_reply": true,
-      "tags": ["support", "request"],
-      "templates": [
-        {"id": "support_a",
-         "subject": "Ticket {ticket}: we need one detail from you",
-         "body": "Hi {owner_first},\n\nThanks for contacting {vendor} support about {item}. To resolve ticket {ticket}, could you reply with the missing detail? Once we have that we can finish within 24 hours.\n\n{detail}\n\n{vendor} support team",
-         "evidence": ["{ticket}", "confirm"]}
+      "roles": [
+        "action",
+        "client"
       ],
-      "paraphrase": {"subject": "Re: your support request {ticket}",
+      "category_roles": [
+        "action",
+        "client",
+        "notification"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "support",
+        "request"
+      ],
+      "templates": [
+        {
+          "id": "support_a",
+          "subject": "Ticket {ticket}: we need one detail from you",
+          "body": "Hi {owner_first},\n\nThanks for contacting {vendor} support about {item}. To resolve ticket {ticket}, could you reply with the missing detail? Once we have that we can finish within 24 hours.\n\n{detail}\n\n{vendor} support team",
+          "evidence": [
+            "{ticket}",
+            "confirm"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Re: your support request {ticket}",
         "body": "Hello {owner_first},\n\nWe are on ticket {ticket} regarding {item}. Before we can close it, please reply with the missing detail. After that, resolution is usually same-day.\n\n{detail}\n\n{vendor} support team",
-         "evidence": ["{ticket}", "reply"]},
-      "resolved": {"subject": "Ticket {ticket} resolved",
+        "evidence": [
+          "{ticket}",
+          "reply"
+        ]
+      },
+      "resolved": {
+        "subject": "Ticket {ticket} resolved",
         "body": "Hi {owner_first},\n\nYour support ticket {ticket} about {item} has been resolved and closed. Nothing further is needed.\n\n{vendor} support team",
-        "evidence": ["resolved", "Nothing further"]}
+        "evidence": [
+          "resolved",
+          "Nothing further"
+        ]
+      }
     },
     "project_request": {
-      "roles": ["action"], "category_roles": ["action"], "needs_reply": true,
-      "tags": ["project", "request"],
-      "templates": [
-        {"id": "project_req_a",
-         "subject": "Next step on {item}?",
-         "body": "Hi {owner_first},\n\nFollowing our discussion, could you confirm whether we should start {item} this week? We need a decision by {deadline} to keep the {deadline2} milestone. {detail}\n\nThanks,\n{signer}",
-         "evidence": ["decision by {deadline}", "{deadline2}"]}
+      "roles": [
+        "action"
       ],
-      "paraphrase": {"subject": "{item}: can we proceed?",
+      "category_roles": [
+        "action"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "project",
+        "request"
+      ],
+      "templates": [
+        {
+          "id": "project_req_a",
+          "subject": "Next step on {item}?",
+          "body": "Hi {owner_first},\n\nFollowing our discussion, could you confirm whether we should start {item} this week? We need a decision by {deadline} to keep the {deadline2} milestone. {detail}\n\nThanks,\n{signer}",
+          "evidence": [
+            "decision by {deadline}",
+            "{deadline2}"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "{item}: can we proceed?",
         "body": "Hello {owner_first},\n\nWe are ready to begin {item}, but we need your go/no-go before {deadline}; otherwise the {deadline2} milestone slips. Any blockers on your side?\n\n{signer}",
-         "evidence": ["go/no-go", "{deadline}", "{deadline2}"]}
+        "evidence": [
+          "go/no-go",
+          "{deadline}",
+          "{deadline2}"
+        ]
+      }
     },
     "project_status": {
-      "roles": ["notification", "review"], "category_roles": ["notification", "review"], "needs_reply": false,
-      "tags": ["project", "automated"],
-      "templates": [
-        {"id": "project_status_a",
-         "subject": "Weekly status: {item} is on track",
-         "body": "Hi {owner_first},\n\nStatus for {item}: on track, with the next checkpoint on {deadline}. {detail} No action is required from you this week.\n\n{signer}",
-         "evidence": ["on track", "No action"]}
+      "roles": [
+        "notification",
+        "review"
       ],
-      "paraphrase": {"subject": "{item} update - all green",
-         "body": "Hello {owner_first},\n\n{item} remains on schedule; the next checkpoint is {deadline}. {detail} Nothing is needed from you at this stage.\n\n{signer}",
-         "evidence": ["on schedule", "Nothing"]}
+      "category_roles": [
+        "notification",
+        "review"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "project",
+        "automated"
+      ],
+      "templates": [
+        {
+          "id": "project_status_a",
+          "subject": "Weekly status: {item} is on track",
+          "body": "Hi {owner_first},\n\nStatus for {item}: on track, with the next checkpoint on {deadline}. {detail} No action is required from you this week.\n\n{signer}",
+          "evidence": [
+            "on track",
+            "No action"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "{item} update - all green",
+        "body": "Hello {owner_first},\n\n{item} remains on schedule; the next checkpoint is {deadline}. {detail} Nothing is needed from you at this stage.\n\n{signer}",
+        "evidence": [
+          "on schedule",
+          "Nothing"
+        ]
+      }
     },
     "personal_invitation": {
-      "roles": ["personal", "social"], "category_roles": ["personal", "social"], "needs_reply": true,
-      "tags": ["personal", "invitation"],
-      "templates": [
-        {"id": "invite_a",
-         "subject": "{person} is having people over on {deadline}",
-         "body": "Hi {owner_first},\n\n{person} and I are getting a few people together at {place} on {deadline}. Would you like to come? Let me know by {deadline2} so we can plan food.\n\nHope to see you,\n{signer}",
-         "evidence": ["{place}", "{deadline}", "Let me know"]}
+      "roles": [
+        "personal",
+        "social"
       ],
-      "paraphrase": {"subject": "Come over on {deadline}?",
-         "body": "Hey {owner_first},\n\nA few of us are meeting at {place} on {deadline}. Are you in? It would help to know by {deadline2}.\n\n{signer}",
-         "evidence": ["{place}", "{deadline}", "Are you in"]},
-      "resolved": {"subject": "Re: {person} is having people over on {deadline}",
-         "body": "Hi {owner_first},\n\nJust to close the loop on {place}: the plan is set and we are all sorted. See you there on {deadline} - no reply needed.\n\n{signer}",
-         "evidence": ["plan is set", "no reply needed"]}
+      "category_roles": [
+        "personal",
+        "social"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "personal",
+        "invitation"
+      ],
+      "templates": [
+        {
+          "id": "invite_a",
+          "subject": "{person} is having people over on {deadline}",
+          "body": "Hi {owner_first},\n\n{person} and I are getting a few people together at {place} on {deadline}. Would you like to come? Let me know by {deadline2} so we can plan food.\n\nHope to see you,\n{signer}",
+          "evidence": [
+            "{place}",
+            "{deadline}",
+            "Let me know"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Come over on {deadline}?",
+        "body": "Hey {owner_first},\n\nA few of us are meeting at {place} on {deadline}. Are you in? It would help to know by {deadline2}.\n\n{signer}",
+        "evidence": [
+          "{place}",
+          "{deadline}",
+          "Are you in"
+        ]
+      },
+      "resolved": {
+        "subject": "Re: {person} is having people over on {deadline}",
+        "body": "Hi {owner_first},\n\nJust to close the loop on {place}: the plan is set and we are all sorted. See you there on {deadline} - no reply needed.\n\n{signer}",
+        "evidence": [
+          "plan is set",
+          "no reply needed"
+        ]
+      }
     },
     "school_community": {
-      "roles": ["appointment", "event", "action"], "category_roles": ["appointment", "event", "action", "personal"], "needs_reply": true,
-      "tags": ["school", "community"],
-      "templates": [
-        {"id": "school_a",
-         "subject": "{org}: {item} on {deadline}",
-         "body": "Dear {owner_first},\n\nThis is a reminder that {item} takes place on {deadline} at {place}. Please confirm your attendance by {deadline2}, or let us know if you cannot make it.\n\n{org} office",
-         "evidence": ["{deadline}", "{place}", "confirm"]}
+      "roles": [
+        "appointment",
+        "event",
+        "action"
       ],
-      "paraphrase": {"subject": "RSVP for {item}",
-         "body": "Hello {owner_first},\n\nA quick note from {org}: {item} is scheduled for {deadline} at {place}. Kindly reply by {deadline2} to confirm.\n\n{org}",
-         "evidence": ["{deadline}", "{place}", "reply"]},
-      "resolved": {"subject": "Re: {org}: {item} on {deadline}",
-         "body": "Dear {owner_first},\n\nThank you - your place at {item} is confirmed and no further response is required. We look forward to seeing you on {deadline} at {place}.\n\n{org} office",
-         "evidence": ["confirmed", "no further response"]}
+      "category_roles": [
+        "appointment",
+        "event",
+        "action",
+        "personal"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "school",
+        "community"
+      ],
+      "templates": [
+        {
+          "id": "school_a",
+          "subject": "{org}: {item} on {deadline}",
+          "body": "Dear {owner_first},\n\nThis is a reminder that {item} takes place on {deadline} at {place}. Please confirm your attendance by {deadline2}, or let us know if you cannot make it.\n\n{org} office",
+          "evidence": [
+            "{deadline}",
+            "{place}",
+            "confirm"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "RSVP for {item}",
+        "body": "Hello {owner_first},\n\nA quick note from {org}: {item} is scheduled for {deadline} at {place}. Kindly reply by {deadline2} to confirm.\n\n{org}",
+        "evidence": [
+          "{deadline}",
+          "{place}",
+          "reply"
+        ]
+      },
+      "resolved": {
+        "subject": "Re: {org}: {item} on {deadline}",
+        "body": "Dear {owner_first},\n\nThank you - your place at {item} is confirmed and no further response is required. We look forward to seeing you on {deadline} at {place}.\n\n{org} office",
+        "evidence": [
+          "confirmed",
+          "no further response"
+        ]
+      }
     },
     "operational_alert": {
-      "roles": ["alert", "incident", "notification"], "category_roles": ["alert", "incident", "notification"], "needs_reply": false,
-      "tags": ["alert", "automated"],
-      "templates": [
-        {"id": "alert_a",
-         "subject": "[{vendor}] {item} threshold exceeded",
-         "body": "Automated alert for {owner_first}:\n\n{item} crossed its configured threshold at {date}. Current value {amount} against a limit of {amount2}. {detail} No action is required unless this persists.\n\n{vendor} monitoring team",
-         "evidence": ["threshold", "{amount}", "No action"]}
+      "roles": [
+        "alert",
+        "incident",
+        "notification"
       ],
-      "paraphrase": {"subject": "{item} alert - {date}",
-         "body": "Hi {owner_first},\n\nYour monitoring reported {item} above its threshold ({amount} vs {amount2}) at {date}. This is informational; nothing needs doing right now.\n\n{vendor} monitoring team",
-         "evidence": ["threshold", "{amount}", "nothing needs doing"]}
+      "category_roles": [
+        "alert",
+        "incident",
+        "notification"
+      ],
+      "needs_reply": false,
+      "tags": [
+        "alert",
+        "automated"
+      ],
+      "templates": [
+        {
+          "id": "alert_a",
+          "subject": "[{vendor}] {item} threshold exceeded",
+          "body": "Automated alert for {owner_first}:\n\n{item} crossed its configured threshold at {date}. Current value {amount} against a limit of {amount2}. {detail} No action is required unless this persists.\n\n{vendor} monitoring team",
+          "evidence": [
+            "threshold",
+            "{amount}",
+            "No action"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "{item} alert - {date}",
+        "body": "Hi {owner_first},\n\nYour monitoring reported {item} above its threshold ({amount} vs {amount2}) at {date}. This is informational; nothing needs doing right now.\n\n{vendor} monitoring team",
+        "evidence": [
+          "threshold",
+          "{amount}",
+          "nothing needs doing"
+        ]
+      }
     },
     "suspicious_phishing": {
-      "roles": ["promo", "notification", "action"], "category_roles": ["promo", "notification", "action"], "needs_reply": false,
-      "ambiguous": true, "acceptable_role_sets": [["promo"], ["notification"], ["action"]],
-      "tags": ["suspicious", "untrusted"],
-      "templates": [
-        {"id": "phish_a",
-         "subject": "Urgent: verify your {vendor} account or lose access",
-         "body": "Dear customer,\n\nYour {vendor} account will be suspended within 24 hours. Click {link} and confirm your details and password immediately to avoid closure. Failure to act may result in permanent loss.\n\n{vendor} security team",
-         "evidence": ["Urgent", "suspend", "confirm your details"]}
+      "roles": [
+        "promo",
+        "notification",
+        "action"
       ],
-      "paraphrase": {"subject": "Action required: unusual activity on {vendor}",
-         "body": "Customer,\n\nWe detected unusual activity. Verify your identity at {link} within 24 hours or your {vendor} account will be closed. Provide your password to continue.\n\nAccount Team",
-         "evidence": ["unusual activity", "password", "{link}"]}
+      "category_roles": [
+        "promo",
+        "notification",
+        "action"
+      ],
+      "needs_reply": false,
+      "ambiguous": true,
+      "acceptable_role_sets": [
+        [
+          "promo"
+        ],
+        [
+          "notification"
+        ],
+        [
+          "action"
+        ]
+      ],
+      "tags": [
+        "suspicious",
+        "untrusted"
+      ],
+      "templates": [
+        {
+          "id": "phish_a",
+          "subject": "Urgent: verify your {vendor} account or lose access",
+          "body": "Dear customer,\n\nYour {vendor} account will be suspended within 24 hours. Click {link} and confirm your details and password immediately to avoid closure. Failure to act may result in permanent loss.\n\n{vendor} security team",
+          "evidence": [
+            "Urgent",
+            "suspend",
+            "confirm your details"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Action required: unusual activity on {vendor}",
+        "body": "Customer,\n\nWe detected unusual activity. Verify your identity at {link} within 24 hours or your {vendor} account will be closed. Provide your password to continue.\n\nAccount Team",
+        "evidence": [
+          "unusual activity",
+          "password",
+          "{link}"
+        ]
+      }
     },
     "meeting_request": {
-      "roles": ["action"], "category_roles": ["action"], "needs_reply": true,
-      "tags": ["meeting", "request"],
-      "templates": [
-        {"id": "meeting_a",
-         "subject": "Can we meet about {item} on {deadline}?",
-         "body": "Hi {owner_first},\n\nWould you have 30 minutes on {deadline} to discuss {item}? I can do {hour} or later, wherever suits you. {detail}\n\nLet me know what works and I will send an invite.\n\n{signer}",
-         "evidence": ["{deadline}", "{hour}", "Let me know"]}
+      "roles": [
+        "action"
       ],
-      "paraphrase": {"subject": "Time for {item}?",
-         "body": "Hello {owner_first},\n\nCould we find a slot on {deadline} for {item}? I am free from {hour}. Tell me a time that works and I will set it up.\n\n{signer}",
-         "evidence": ["{deadline}", "{hour}", "Tell me"]},
-      "resolved": {"subject": "Re: Can we meet about {item}?",
-         "body": "Hi {owner_first},\n\nThe {item} meeting is already booked for {deadline} and an invite has gone out. Nothing further is needed from you.\n\n{signer}",
-         "evidence": ["already booked", "Nothing further"]}
+      "category_roles": [
+        "action"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "meeting",
+        "request"
+      ],
+      "templates": [
+        {
+          "id": "meeting_a",
+          "subject": "Can we meet about {item} on {deadline}?",
+          "body": "Hi {owner_first},\n\nWould you have 30 minutes on {deadline} to discuss {item}? I can do {hour} or later, wherever suits you. {detail}\n\nLet me know what works and I will send an invite.\n\n{signer}",
+          "evidence": [
+            "{deadline}",
+            "{hour}",
+            "Let me know"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Time for {item}?",
+        "body": "Hello {owner_first},\n\nCould we find a slot on {deadline} for {item}? I am free from {hour}. Tell me a time that works and I will set it up.\n\n{signer}",
+        "evidence": [
+          "{deadline}",
+          "{hour}",
+          "Tell me"
+        ]
+      },
+      "resolved": {
+        "subject": "Re: Can we meet about {item}?",
+        "body": "Hi {owner_first},\n\nThe {item} meeting is already booked for {deadline} and an invite has gone out. Nothing further is needed from you.\n\n{signer}",
+        "evidence": [
+          "already booked",
+          "Nothing further"
+        ]
+      }
     },
     "order_request": {
-      "roles": ["action", "order"], "category_roles": ["action", "order"], "needs_reply": true,
-      "tags": ["order", "request"],
-      "templates": [
-        {"id": "order_a",
-         "subject": "Order request: {item} ({ref})",
-         "body": "Hi {owner_first},\n\nA customer would like to order {item} for {amount}, reference {ref}. Could you confirm stock and lead time by {deadline}? {detail}\n\nThanks,\n{signer}",
-         "evidence": ["{amount}", "{ref}", "{deadline}"]}
+      "roles": [
+        "action",
+        "order"
       ],
-      "paraphrase": {"subject": "New order to confirm ({ref})",
-         "body": "Hello {owner_first},\n\nWe have a request for {item} at {amount} ({ref}). Please confirm availability before {deadline}. {detail}\n\n{signer}",
-         "evidence": ["{amount}", "{ref}", "{deadline}"]},
-      "resolved": {"subject": "Re: Order request: {item} ({ref})",
-         "body": "Hi {owner_first},\n\nOrder {ref} for {item} is confirmed and already in the queue. No reply is needed.\n\n{signer}",
-         "evidence": ["confirmed", "No reply"]}
+      "category_roles": [
+        "action",
+        "order"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "order",
+        "request"
+      ],
+      "templates": [
+        {
+          "id": "order_a",
+          "subject": "Order request: {item} ({ref})",
+          "body": "Hi {owner_first},\n\nA customer would like to order {item} for {amount}, reference {ref}. Could you confirm stock and lead time by {deadline}? {detail}\n\nThanks,\n{signer}",
+          "evidence": [
+            "{amount}",
+            "{ref}",
+            "{deadline}"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "New order to confirm ({ref})",
+        "body": "Hello {owner_first},\n\nWe have a request for {item} at {amount} ({ref}). Please confirm availability before {deadline}. {detail}\n\n{signer}",
+        "evidence": [
+          "{amount}",
+          "{ref}",
+          "{deadline}"
+        ]
+      },
+      "resolved": {
+        "subject": "Re: Order request: {item} ({ref})",
+        "body": "Hi {owner_first},\n\nOrder {ref} for {item} is confirmed and already in the queue. No reply is needed.\n\n{signer}",
+        "evidence": [
+          "confirmed",
+          "No reply"
+        ]
+      }
     },
     "document_request": {
-      "roles": ["action"], "category_roles": ["action"], "needs_reply": true,
-      "tags": ["document", "request"],
-      "templates": [
-        {"id": "doc_a",
-         "subject": "Could you send the {item}?",
-         "body": "Dear {owner_first},\n\nFor our records we need the {item}. Could you send it by {deadline}? If it is already on file, just confirm the reference {ref}.\n\n{signer}",
-         "evidence": ["{deadline}", "{ref}", "confirm"]}
+      "roles": [
+        "action"
       ],
-      "paraphrase": {"subject": "Missing document for {item}",
-         "body": "Hi {owner_first},\n\nWe are still missing the {item}. Please share it before {deadline}, or reply with the reference {ref} if you have already sent it.\n\n{signer}",
-         "evidence": ["{deadline}", "{ref}", "reply"]},
-      "resolved": {"subject": "Re: Could you send the {item}?",
-         "body": "Dear {owner_first},\n\nThank you - the {item} has been received under reference {ref}. No further action is required.\n\n{signer}",
-         "evidence": ["received", "No further action"]}
+      "category_roles": [
+        "action"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "document",
+        "request"
+      ],
+      "templates": [
+        {
+          "id": "doc_a",
+          "subject": "Could you send the {item}?",
+          "body": "Dear {owner_first},\n\nFor our records we need the {item}. Could you send it by {deadline}? If it is already on file, just confirm the reference {ref}.\n\n{signer}",
+          "evidence": [
+            "{deadline}",
+            "{ref}",
+            "confirm"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Missing document for {item}",
+        "body": "Hi {owner_first},\n\nWe are still missing the {item}. Please share it before {deadline}, or reply with the reference {ref} if you have already sent it.\n\n{signer}",
+        "evidence": [
+          "{deadline}",
+          "{ref}",
+          "reply"
+        ]
+      },
+      "resolved": {
+        "subject": "Re: Could you send the {item}?",
+        "body": "Dear {owner_first},\n\nThank you - the {item} has been received under reference {ref}. No further action is required.\n\n{signer}",
+        "evidence": [
+          "received",
+          "No further action"
+        ]
+      }
     },
     "event_registration": {
-      "roles": ["action", "event"], "category_roles": ["action", "event"], "needs_reply": true,
-      "tags": ["event", "registration"],
-      "templates": [
-        {"id": "event_reg_a",
-         "subject": "Register for {event_name} at {org}",
-         "body": "Hi {owner_first},\n\nRegistration for {event_name} at {org} on {deadline} at {place} is now open. Places are limited, so please confirm your attendance by {deadline2}.\n\n{org} events team",
-         "evidence": ["{deadline}", "{place}", "confirm"]}
+      "roles": [
+        "action",
+        "event"
       ],
-      "paraphrase": {"subject": "Your place at {event_name}?",
-         "body": "Hello {owner_first},\n\n{org} is running {event_name} on {deadline} at {place}. Would you like a place? Kindly reply by {deadline2}.\n\n{org} events team",
-         "evidence": ["{deadline}", "{place}", "reply"]},
-      "resolved": {"subject": "Re: Register for {event_name} at {org}",
-         "body": "Hi {owner_first},\n\nYour registration for {event_name} on {deadline} at {place} is confirmed. No further reply is needed.\n\n{org} events team",
-         "evidence": ["confirmed", "No further reply"]}
+      "category_roles": [
+        "action",
+        "event"
+      ],
+      "needs_reply": true,
+      "tags": [
+        "event",
+        "registration"
+      ],
+      "templates": [
+        {
+          "id": "event_reg_a",
+          "subject": "Register for {event_name} at {org}",
+          "body": "Hi {owner_first},\n\nRegistration for {event_name} at {org} on {deadline} at {place} is now open. Places are limited, so please confirm your attendance by {deadline2}.\n\n{org} events team",
+          "evidence": [
+            "{deadline}",
+            "{place}",
+            "confirm"
+          ]
+        }
+      ],
+      "paraphrase": {
+        "subject": "Your place at {event_name}?",
+        "body": "Hello {owner_first},\n\n{org} is running {event_name} on {deadline} at {place}. Would you like a place? Kindly reply by {deadline2}.\n\n{org} events team",
+        "evidence": [
+          "{deadline}",
+          "{place}",
+          "reply"
+        ]
+      },
+      "resolved": {
+        "subject": "Re: Register for {event_name} at {org}",
+        "body": "Hi {owner_first},\n\nYour registration for {event_name} on {deadline} at {place} is confirmed. No further reply is needed.\n\n{org} events team",
+        "evidence": [
+          "confirmed",
+          "No further reply"
+        ]
+      }
     }
   }
 }

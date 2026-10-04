@@ -1,53 +1,30 @@
 {
-  "note": "Authored situation/context clauses appended to a scenario body. Clauses are deliberately neutral to the scored decision (they add context, not a category or reply cue) so gold stays accurate, and they provide genuine wording variety. The public development pool ('groups') and each private split pool ('private_groups') are disjoint by construction: every private record therefore always contains a clause absent from any public record, which prevents a public example reappearing as private.",
+  "note": "Purpose-scoped context clauses. Clauses never assert an unbacked copy/CC/team/workstream/previous-exchange fact and never change reply intent (a resolved/counterfactual gold is unaffected). Public and each private split draw from disjoint pools (AR-1).",
   "groups": {
-    "action": [
-      "This follows our earlier exchange and I would like to close it out this week.",
-      "I have copied the wider team so everyone has the context.",
-      "Please treat this as time-sensitive if you can.",
-      "I raised this at our last catch-up as well, so it is still open.",
+    "request": [
       "Happy to adjust the details if anything has changed on your side.",
-      "There is a small dependency on the other workstream, so a quick answer helps."
+      "Let me know if anything is unclear.",
+      "Please treat this as time-sensitive if you can."
     ],
-    "notification": [
-      "This is an automated notice; no reply is needed.",
-      "You are receiving this because you enabled these alerts.",
-      "The related reference is shown above for your records.",
-      "This supersedes the previous notice for the same event.",
-      "No action is required unless the situation persists.",
-      "This message was generated automatically and is not monitored."
+    "billing": [
+      "Please disregard this notice if payment has already been arranged.",
+      "Thank you for your prompt attention.",
+      "This is an automated reminder."
     ],
-    "newsletter": [
+    "news": [
       "You are receiving this because you subscribed.",
       "Manage your preferences or unsubscribe at any time.",
-      "This edition follows the one we sent last month.",
-      "Catch up on anything you missed in the online archive.",
-      "Thanks for reading and for your continued support.",
-      "Reply to this address if you would like to change what you receive."
+      "See the full terms on our website."
     ],
-    "receipt": [
-      "Keep this message for your records.",
-      "This confirms the transaction shown above.",
-      "No action is required on your part.",
-      "If anything looks wrong, reply and we will check it.",
-      "This replaces any earlier confirmation for the same order.",
-      "A copy has also been added to your account history."
+    "notice": [
+      "This is an automated notice.",
+      "No action is required unless the situation changes.",
+      "The reference above is for your records."
     ],
-    "promo": [
-      "You can opt out of these offers at any time.",
-      "This offer is available while stocks last.",
-      "We thought this might be useful based on your past orders.",
-      "Prices shown include the current promotion only.",
-      "See the full terms on our website.",
-      "This is a one-off message and will not repeat automatically."
-    ],
-    "personal": [
+    "social": [
       "No rush at all, just let me know when you can.",
       "Hope you are doing well otherwise.",
-      "It would be great to catch up properly soon.",
-      "Feel free to bring someone along if you like.",
-      "I will follow up if I do not hear back this week.",
-      "No pressure either way; I just did not want you to miss it."
+      "It would be great to catch up properly soon."
     ],
     "workflow": [
       "Context: this mailbox is the only source you should use.",
@@ -57,27 +34,23 @@
   },
   "private_groups": {
     "calibration": {
-      "action": [
+      "request": [
         "I am keeping the thread together so nothing gets lost.",
         "The details above are the latest version I have."
       ],
-      "notification": [
-        "This is being tracked in the account timeline.",
-        "The notice above reflects the current state."
-      ],
-      "newsletter": [
-        "This issue is archived for later reading.",
-        "You can adjust what you receive from the link above."
-      ],
-      "receipt": [
+      "billing": [
         "This statement is provided for your accounting records.",
         "The total above reflects the final amount."
       ],
-      "promo": [
-        "This message is sent occasionally to existing customers.",
-        "You can manage what you receive from your account."
+      "news": [
+        "This issue is archived for later reading.",
+        "You can adjust what you receive from the link above."
       ],
-      "personal": [
+      "notice": [
+        "This notice is being tracked in the account timeline.",
+        "The notice above reflects the current state."
+      ],
+      "social": [
         "I thought you would want to know sooner rather than later.",
         "Let me know what works best for you."
       ],
@@ -87,27 +60,23 @@
       ]
     },
     "private_test": {
-      "action": [
+      "request": [
         "I wanted to make sure this reached you directly.",
         "There are a couple of moving parts, so a quick reply helps."
       ],
-      "notification": [
-        "You can review the full history in the account centre.",
-        "The status shown above is the most recent available."
-      ],
-      "newsletter": [
-        "We hope you enjoy this month's selection.",
-        "Tell us what you would like to see more of."
-      ],
-      "receipt": [
+      "billing": [
         "You can download a copy from your account.",
         "This confirmation is generated automatically."
       ],
-      "promo": [
-        "We hope this is relevant to you.",
-        "Availability may vary by region."
+      "news": [
+        "We hope you enjoy this selection.",
+        "Tell us what you would like to see more of."
       ],
-      "personal": [
+      "notice": [
+        "You can review the full history in the account centre.",
+        "The status shown above is the most recent available."
+      ],
+      "social": [
         "It would be lovely to hear your thoughts.",
         "I am easy either way, so just say."
       ],
@@ -117,27 +86,23 @@
       ]
     },
     "private_shift": {
-      "action": [
+      "request": [
         "I have noted this against the current plan.",
         "The context above should answer most questions."
       ],
-      "notification": [
-        "This alert is informational and requires no response.",
-        "The change above has already taken effect."
-      ],
-      "newsletter": [
-        "This edition is being sent to current subscribers.",
-        "Past issues remain available online."
-      ],
-      "receipt": [
+      "billing": [
         "Retain this for your monthly reconciliation.",
         "The transaction above is now complete."
       ],
-      "promo": [
-        "This is a limited offer for current subscribers.",
-        "You can turn these messages off at any time."
+      "news": [
+        "This edition is being sent to current subscribers.",
+        "Past issues remain available online."
       ],
-      "personal": [
+      "notice": [
+        "This alert is informational and requires no response.",
+        "The change above has already taken effect."
+      ],
+      "social": [
         "I wanted to share this with you first.",
         "Do let me know if that suits."
       ],

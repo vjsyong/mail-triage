@@ -1,9 +1,9 @@
 {
-  "note": "World configuration. tld_profile 'reserved' keeps every generated domain under a reserved TLD so it can never collide with a real registered domain; the switch is centralized here.",
-  "tld_profile": "reserved",
+  "note": "World configuration. The owner approved realistic commercial-looking domains for the preview; 'commercial' maps to .com. Every organization, person and address in this world is FICTIONAL and generated only; no mail is ever sent and no real domain is contacted. The 'reserved' profile (.example) remains available as a switch. This is the single place that controls the suffix, and the lint derives its domain checks from it.",
+  "tld_profile": "commercial",
   "tld_profiles": {
-    "reserved": "example",
-    "reserved_alt": "test"
+    "commercial": "com",
+    "reserved": "example"
   },
   "business": {
     "weekdays": [0, 1, 2, 3, 4],

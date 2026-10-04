@@ -76,6 +76,58 @@ def category_roles():
     return _load("roles.json")["category_roles"]
 
 
+def category_covers():
+    """Authored semantic covers/by_name per policy category name."""
+    return _load("semantics.json")["category_covers"]
+
+
+def family_intent():
+    """The semantic intent(s) of each family (multiple => genuinely ambiguous)."""
+    return _load("semantics.json")["family_intent"]
+
+
+def resolve_semantics(policy, family_id, profile):
+    """Resolve a family to a policy category grounded in the policy's definitions.
+
+    Uses the category's explicit ``roles`` (a declared mapping override, e.g.
+    the marketing merge) when present, else the authored semantic covers. Returns
+    a dict ``{category, acceptable, observable, reason}``:
+
+    * ``visible`` with a concrete category when exactly one category covers it
+      and (the policy card is visible OR the category name is self-evident);
+    * ``ambiguous`` with an acceptable set when several categories fit or the
+      family is inherently ambiguous, or when a native run cannot see the
+      description that would disambiguate it;
+    * ``unavailable`` with reason ``taxonomy_gap`` when no category covers it.
+    """
+    intents = list(family_intent().get(family_id) or [])
+    if not intents:
+        return {"category": None, "acceptable": [],
+                "observable": "unavailable", "reason": "unknown_family"}
+    cats = policy.get("categories") or []
+    explicit = [c for c in cats if set(c.get("roles") or []) & set(intents)]
+    if explicit:
+        matches = explicit
+    else:
+        matches = [c for c in cats
+                   if set(category_covers().get(c.get("name"), {}).get("covers", []))
+                   & set(intents)]
+    if not matches:
+        return {"category": None, "acceptable": [],
+                "observable": "unavailable", "reason": "taxonomy_gap"}
+    names = [c["name"] for c in matches]
+    if len(matches) > 1 or len(intents) > 1:
+        return {"category": None, "acceptable": names,
+                "observable": "ambiguous", "reason": "multiple_fitting_categories"}
+    cat = matches[0]
+    by_name = category_covers().get(cat.get("name"), {}).get("by_name", False)
+    if profile == "policy_conditioned" or by_name:
+        return {"category": cat["name"], "acceptable": [cat["name"]],
+                "observable": "visible", "reason": "mapped"}
+    return {"category": None, "acceptable": [cat["name"]],
+            "observable": "ambiguous", "reason": "requires_policy_description"}
+
+
 def corpora():
     return _load("corpora.json")["corpora"]
 

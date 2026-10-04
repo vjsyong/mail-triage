@@ -260,10 +260,13 @@ their **real colleagues**, venues, events and a calendar. `identity.org_slug`
 strips legal suffixes and connectors (``"Cedar & Co."`` -> ``cedar``);
 `identity.org_domain` builds ``<slug>.<tld>``; role mailboxes (`billing@`,
 `support@`, `orders@`, `no-reply@`, `accounts@`, ...) live on that org's domain.
-**TLD policy** is centralized in `fixtures/world/config.json`:
-`tld_profile: "reserved"` maps to `.example` so a generated address can never
-collide with a real registered domain (a `tld_profile` switch exists for other
-reserved profiles). Sender, recipient, signature person, host and reply-to all
+**TLD policy** is centralized in `fixtures/world/config.json`: the owner
+approved realistic commercial-looking domains, so `tld_profile: "commercial"`
+maps to `.com`. Every organization, person and address is **fictional** and
+generated only; no mail is sent and no real domain is contacted. The `reserved`
+profile (`.example`) remains as a switch, and the domain/person lint derives its
+checks from the configured suffix. Sender, recipient, signature person, host and
+reply-to all
 resolve to world entities.
 
 **Selection fails closed** (`World.eligible_orgs`): a sender must match one of
@@ -330,9 +333,40 @@ name the offending scenario/case and field. `test_build.py` reproduces each
 defect first and then asserts the lint rejects it, including rendered-only
 mutations while the metadata stays correct.
 
-**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.4-draft-coherent`; the
+**Semantic gold (AR-1)** (`fixtures/semantics.json`, `recipes.resolve_semantics`).
+Gold is no longer resolved by "first category whose role intersects a generic
+action role" (which produced Incident for a developer's social invite, Coursework
+for an ISP support email, Appointment for a tenancy document). Each family has an
+authored semantic intent; each policy category has authored `covers`/`by_name`
+grounded in its own description. Resolution:
+
+- exactly one covering category, and (the policy card is visible **or** the
+  category name is self-evident) -> `visible` with that category;
+- several categories fit, or the family is inherently ambiguous, or a native run
+  cannot see the description that would disambiguate -> `ambiguous` with an
+  acceptable set and `answer.category = null`;
+- no category covers the intent -> `unavailable` with `reason = taxonomy_gap`
+  and `answer.resolution_reason = taxonomy_gap` (never an invented first label).
+
+A category's explicit `roles` (e.g. the marketing-merge twin) takes precedence
+over the name map, so policy twins honor only their declared mapping change.
+Coverage and the number of taxonomy gaps are recorded in
+`metadata.coverage.taxonomy` by profile and persona (a diagnostic, not a quality
+claim). No production category contract is modified.
+
+**Context claims + reply intent (AR-2)** (`fixtures/situations.json`,
+`world.build_scenario`). Context clauses are purpose-scoped (request/billing/
+news/notice/social) and never assert an unbacked copy/CC/team/workstream/prior-
+exchange fact; the lint rejects such a phrase unless the scenario declares the
+corresponding fact. A template may declare its own `needs_reply` (e.g. the
+payment family ships both an automated pay-only reminder, needs_reply false, and
+a variant that explicitly asks for a reply, needs_reply true); gold derives the
+reply intent from the rendered template, so a payment/action message is never
+scored as a reply request unless it actually asks for one.
+
+**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.5-draft-semantic`; the
 content generator changed, so earlier draft datasets and previews (including
-`c8c8a36`) are incompatible and the dataset ids differ.
+`83ed0ac`) are incompatible and the dataset ids differ.
 
 ## Files
 

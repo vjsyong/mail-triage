@@ -29,7 +29,7 @@ _TIME_FIELDS = ("send", "txn", "due", "event", "arrival", "until", "register_by"
 _ORDERED_FIELDS = ("txn", "due", "event", "arrival", "until", "register_by",
                    "meeting", "milestone", "checkpoint", "rsvp")
 _DUPLICATE_WORD = re.compile(r"\b([a-z]{3,})\s+\1\b", re.I)
-_DOMAIN = re.compile(r"@([a-z0-9.-]+)")
+_DOMAIN = re.compile(r"@([a-z0-9-]+(?:\.[a-z0-9-]+)*)")
 # Rendered calendar dates: full-month forms only (abbreviated header dates are
 # checked separately), with an optional weekday.
 _DATE_DAY_MONTH = re.compile(r"\b(?:(%s)\s+)?\d{1,2}\s+(%s)\s+\d{4}\b"
@@ -41,6 +41,18 @@ _HEADER_FROM = re.compile(r"^From:\s*(.+?)\s*$", re.M)
 _HEADER_TO = re.compile(r"^To:\s*(.+?)\s*$", re.M)
 
 _SAME_DOMAIN_OK = {"meeting_request", "personal_invitation"}
+
+# Phrases that assert an out-of-band fact (a CC/team copy, a parallel
+# workstream, or a prior exchange). They are only allowed when the scenario
+# declares the corresponding fact, so a clause cannot invent one.
+_CLAIM_PHRASES = (
+    ("copied the wider team", "cc"),
+    ("wider team", "cc"),
+    ("other workstream", "workstream"),
+    ("earlier exchange", "history"),
+    ("followed this thread", "history"),
+    ("as we discussed earlier", "history"),
+)
 
 
 def _parse(value):
@@ -254,6 +266,12 @@ def _check_text(text, facts, world, label, quoted, expect=None):
                         % (label, name))
             break
     lowered = text.lower()
+    claims = facts.get("claims") or {}
+    for phrase, key in _CLAIM_PHRASES:
+        if phrase in lowered and not claims.get(key):
+            errs.append("%s: unbacked %s claim %r (no declared fact)"
+                        % (label, key, phrase))
+            break
     if not quoted and expect.get("signer") and (facts.get("signer") or {}).get("name") \
             and facts["signer"]["name"].lower() not in lowered:
         errs.append("%s: signature %r does not appear" % (label, facts["signer"]["name"]))

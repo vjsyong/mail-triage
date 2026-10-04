@@ -92,6 +92,7 @@ class World(object):
             owner["name"] = identity.display_name(owner["given"], owner["family"])
             owner["email"] = identity.person_email(owner["given"], owner["family"],
                                                    owner["domain"])
+            owner["team_alias"] = "team@%s" % owner["domain"]
             owners.append(owner)
         # Real colleagues of each owner: same org/domain as the owner, so a
         # colleague sender is a genuine member of the owner's organisation.
@@ -141,28 +142,40 @@ class World(object):
             raise BuildError("no world owner for persona %r" % persona["persona"])
         return raw
 
-    def eligible_orgs(self, industries, roles, allowed=None, exclude=None):
-        """Orgs that both match an industry and hold a required role.
+    def eligible_orgs(self, industries, roles, buckets=None, allowed=None,
+                      exclude=None):
+        """Orgs that match an industry, hold a required role and carry a
+        compatible catalog bucket.
 
         Fails closed: there is no 'matching or anything' fallback, so an
-        ineligible industry/role combination raises instead of silently
-        borrowing an unrelated org.
+        ineligible industry/role/object combination raises instead of silently
+        borrowing an unrelated org or an unrelated object.
         """
         wanted_industry = set(industries or [])
         wanted_roles = set(roles or [])
+        wanted_buckets = set(buckets or [])
         cands = list(self.orgs)
         if allowed is not None:
             cands = [o for o in cands if o["id"] in allowed]
         elif exclude:
             cands = [o for o in cands if o["id"] not in exclude]
-        cands = [o for o in cands
-                 if o.get("industry") in wanted_industry
-                 and (wanted_roles & set((o.get("role_mailboxes") or {}).keys()))]
+
+        def ok(org):
+            if org.get("industry") not in wanted_industry:
+                return False
+            if not (wanted_roles & set((org.get("role_mailboxes") or {}).keys())):
+                return False
+            if wanted_buckets and not (wanted_buckets & set((org.get("catalog") or {}).keys())):
+                return False
+            return True
+
+        cands = [o for o in cands if ok(o)]
         if not cands:
             raise BuildError(
-                "no eligible org for industries %s / roles %s (allowed=%s)"
-                % (sorted(wanted_industry), sorted(wanted_roles),
-                   sorted(allowed) if allowed else None))
+                "no eligible org for industries %s / roles %s / objects %s "
+                "(allowed=%s)" % (sorted(wanted_industry), sorted(wanted_roles),
+                                  sorted(wanted_buckets),
+                                  sorted(allowed) if allowed else None))
         return cands
 
     def people_for_org(self, org_id):
@@ -171,8 +184,9 @@ class World(object):
     # -- selection ---------------------------------------------------------
     def _org_sender(self, family_id, spec, stream, allowed=None, exclude=None):
         org = stream.pick(self.eligible_orgs(spec.get("industries"),
-                                             spec.get("roles"), allowed=allowed,
-                                             exclude=exclude))
+                                             spec.get("roles"),
+                                             buckets=spec.get("object"),
+                                             allowed=allowed, exclude=exclude))
         mailboxes = org.get("role_mailboxes") or {}
         role = next(r for r in spec.get("roles") or [] if r in mailboxes)
         localpart = mailboxes[role]
@@ -383,9 +397,20 @@ class World(object):
         # Bind the family's object to the sender's catalog where the family
         # references an item/service/document/project; fall back to a neutral
         # generic only for person senders or families with no catalog bucket.
+        catalog = (sender.get("org_ref") or {}).get("catalog") or {}
         item = term or rng.pick(v["item"])
-        service = term if bucket == "services" else rng.pick(v["service"])
-        course = term if bucket == "courses" else rng.pick(v["course"])
+        if bucket == "services":
+            service = term
+        elif catalog.get("services"):
+            service = rng.pick(catalog["services"])
+        else:
+            service = rng.pick(v["service"])
+        if bucket == "courses":
+            course = term
+        elif catalog.get("courses"):
+            course = rng.pick(catalog["courses"])
+        else:
+            course = rng.pick(v["course"])
 
         slots = {
             "owner_first": owner["given"], "owner_addr": owner["email"],
@@ -441,6 +466,7 @@ class World(object):
             "catalog_bucket": bucket, "catalog_item": term,
             "signature_expected": signature_expected,
             "item_expected": item_expected, "service_expected": service_expected,
+            "claims": {"cc": False, "workstream": False, "history": False},
             "sender": {"kind": sender["kind"], "org": sender["org"],
                        "org_id": sender.get("org_id"), "domain": sender["domain"],
                        "email": sender["email"], "person_name": sender["person_name"],
@@ -450,7 +476,8 @@ class World(object):
                        "signature_lines": list(sender.get("signature_lines") or
                                               [sender["person_name"]])},
             "recipient": {"name": owner["name"], "email": owner["email"],
-                          "domain": owner["domain"], "org": owner["org"]},
+                          "domain": owner["domain"], "org": owner["org"],
+                          "team_alias": owner.get("team_alias")},
         }
         for key, dt in dates.items():
             facts[key] = dt.isoformat()
