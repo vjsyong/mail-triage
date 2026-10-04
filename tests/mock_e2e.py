@@ -1749,6 +1749,24 @@ def main():
     check("connection failure logged, not blamed on the endpoint",
           any("IMAP connection error" in (e.get("message") or "")
               for e in store.recent_events(50)))
+    # Retry parked is a manual action: it must run the classifier on exactly the
+    # parked ids so the scheduled worker's hourly budget cannot starve it.
+    store.update_message(cfrow["id"], status="error")
+    store.add_llm_log(cfrow["id"], False, "endpoint was down")
+    check("parked ids helper finds the parked message",
+          cfrow["id"] in store.parked_error_ids())
+    calls = []
+    saved_trigger = app_mod.classifier.trigger
+    app_mod.classifier.trigger = lambda ids=None: calls.append(ids)
+    try:
+        r = client.post("/retry-errors")
+    finally:
+        app_mod.classifier.trigger = saved_trigger
+    check("retry route runs the manual classifier on the parked ids",
+          r.status_code == 302 and calls and cfrow["id"] in calls[0])
+    check("retry route requeued and cleared the failures",
+          store.get_message(cfrow["id"])["status"] == "queued"
+          and store.llm_fail_count(cfrow["id"]) == 0)
 
     section("T12 RAG: indexer, chunking, folder exclusions", "rag")
     uid_probe = add_msg(state, "probe@x.com", "Half index probe", "probe body text", "hx@x")

@@ -1308,13 +1308,20 @@ def llm_fail_count(msg_id):
     return row["n"]
 
 
+def parked_error_ids():
+    """Ids of messages parked after repeated LLM failures (error status with
+    failure rows). Used by the Retry parked action to run a manual retry pass."""
+    with db() as conn:
+        return [r["id"] for r in conn.execute(
+            "SELECT DISTINCT m.id FROM messages m JOIN llm_log l ON l.msg_id = m.id "
+            "WHERE m.status='error' AND l.ok=0 ORDER BY m.id")]
+
+
 def retry_parked_errors():
     """Requeue messages parked after repeated LLM failures and clear their failure rows.
     Only touches messages whose errors came from the LLM path (they have llm_log rows)."""
+    ids = parked_error_ids()
     with db() as conn:
-        ids = [r["id"] for r in conn.execute(
-            "SELECT DISTINCT m.id FROM messages m JOIN llm_log l ON l.msg_id = m.id "
-            "WHERE m.status='error' AND l.ok=0")]
         for mid in ids:
             conn.execute("UPDATE messages SET status='queued' WHERE id=?", (mid,))
             conn.execute("DELETE FROM llm_log WHERE msg_id=? AND ok=0", (mid,))

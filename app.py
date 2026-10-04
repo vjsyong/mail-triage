@@ -2618,7 +2618,12 @@ def undo_move(lid):
 
 @app.route("/retry-errors", methods=["POST"])
 def retry_errors():
+    ids = store.parked_error_ids()
     n = store.retry_parked_errors()
+    if ids:
+        # explicit user action: run the manual classifier on exactly these ids so
+        # the scheduled worker's hourly budget cannot starve the retry
+        classifier.trigger(ids)
     worker.trigger()
     flash("Re-queued %d message(s) for classification." % n, "ok")
     return redirect(url_for("dashboard"))
