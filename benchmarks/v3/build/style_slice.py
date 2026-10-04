@@ -499,11 +499,11 @@ def style_features(text):
 # ------------------------------------------------------------------ identities
 
 def pick_identities(world, rng):
-    """A world sender/recipient pair from different organisations."""
+    """A world sender/recipient pair from different orgs and distinct names."""
     for _ in range(50):
         a = rng.pick(world.people)
         b = rng.pick(world.people)
-        if a["org_id"] != b["org_id"]:
+        if a["org_id"] != b["org_id"] and a["full"] != b["full"]:
             return a, b
     return world.people[0], world.people[1]
 
