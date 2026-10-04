@@ -254,33 +254,46 @@ now bottom-up from a coherent synthetic world rather than flat slot filling.
 
 **A. World** (`world.py`, `identity.py`, `fixtures/world/*.json`). Authored
 organizations (name, slug, derived domain, industry, region, address,
-departments, role mailboxes), people per org, the eight account owners, venues,
-events and a calendar. `identity.org_slug` strips legal suffixes and connectors
-(``"Cedar & Co."`` -> ``cedar``); `identity.org_domain` builds
-``<slug>.<tld>``; role mailboxes (`billing@`, `support@`, `orders@`,
-`no-reply@`, `accounts@`, ...) live on that org's domain. **TLD policy** is
-centralized in `fixtures/world/config.json`: `tld_profile: "reserved"` maps to
-`.example` so a generated address can never collide with a real registered
-domain (a `tld_profile` switch exists for other reserved profiles). Sender,
-recipient, cc/thread participants, signature person, host and reply-to all
-resolve to world entities; a sender never borrows the recipient's domain except
-for the explicitly personal/colleague families.
+departments, role mailboxes, and a **catalog** of the goods/services/documents/
+projects/courses it can reference), people per org, the eight account owners and
+their **real colleagues**, venues, events and a calendar. `identity.org_slug`
+strips legal suffixes and connectors (``"Cedar & Co."`` -> ``cedar``);
+`identity.org_domain` builds ``<slug>.<tld>``; role mailboxes (`billing@`,
+`support@`, `orders@`, `no-reply@`, `accounts@`, ...) live on that org's domain.
+**TLD policy** is centralized in `fixtures/world/config.json`:
+`tld_profile: "reserved"` maps to `.example` so a generated address can never
+collide with a real registered domain (a `tld_profile` switch exists for other
+reserved profiles). Sender, recipient, signature person, host and reply-to all
+resolve to world entities.
+
+**Selection fails closed** (`World.eligible_orgs`): a sender must match one of
+the family's declared industries **and** hold one of its declared roles, or the
+build raises. There is no "matching or any org" fallback and no silent role
+substitution, so marketing uses offers/newsletter roles, invoices and reminders
+use billing/accounts, security uses security/no-reply. A `meeting_request`
+colleague is a genuine member of the owner's org/domain (constructed, not a
+vendor person with a rewritten domain), and every scenario records an explicit
+relationship (customer/tenant/client/student/parent/colleague/friend).
 
 **B. Bottom-up scenarios** (`world.World.build_scenario`, `generate.py`). Each
-family maps to a sender kind (org + relevant industry + role mailbox, or a
-person) and to a temporal window (`temporal.WINDOWS`). A world event
+family maps to a sender kind and to a temporal window (`temporal.WINDOWS`). The
+scenario's object (item/service/document/project/course) is drawn from the
+**sender org's declared catalog** and bound to the family's purpose and the
+recipient relationship, so a lettings document request asks for a tenancy/lease
+document and a software vendor references its licence/plan -- never a telecom
+data plan from a retailer or a software licence from a landlord. A world event
 (purchase->receipt, invoice->reminder, order->confirmation, shipping->update,
-event->invitation/registration, meeting->request, ...) drives the message; the
-envelope, greeting, body, signature, amounts, references, links and dates all
-derive from the same world selection, and every variant keeps its declared
-stable/changing fields.
+event->invitation/registration, meeting->request, ...) drives the message.
 
 **Temporal engine** (`temporal.py`). No date string lives in any fixture. Every
 message has an absolute ISO datetime; named weekdays and deadlines are derived
 from it; deadlines are `send +` a bounded business-day window (1-14 for routine
 requests, bounded family exceptions up to 60); receipts carry a transaction date
-before send; events follow registrations; a payment reminder may carry a past
-due date. Locale date/currency formats come from the world region.
+before send; a payment reminder may carry a past due date. **Event seasons come
+from the actual held date**, not the send date (a fair announced in autumn is
+held in autumn), and social events (fairs, parties) may fall on a weekend while
+business deadlines stay on business days; RSVP/registration dates precede the
+event they answer for. Locale date/currency formats come from the world region.
 
 **C. Corpus-guided style** (`style.py`, `fixtures/style.json`,
 `tools/mine_corpora.py`). The offline miner samples a bounded number of messages
@@ -290,26 +303,36 @@ shapes, subject prefixes, body-length bands, quoting rate -- with checksums and
 license provenance in the fixture. No body, name, address or domain is copied.
 Runtime and tests never read the corpora; `style.restyle_greeting` uses the
 derived greeting pool, and the `source_style_shift` axis reserves a disjoint
-style profile and org ids.
+style profile and a disjoint authored org cohort (`pinnacle`, `beacon`).
 
 **D. Plausibility lint** (`plausibility.py`, enforced by `lint.validate_dataset`
-and before render in `generate._build_triage_root`). Checks and U-mapping:
+and before render in `generate._build_triage_root`). Two layers:
+
+*Structured facts + source message* (`check_scenario`):
 
 | check | rejects |
 |---|---|
-| day-of-month spread (no day > 25%) | U1 clustered dates |
-| `due/event/...` after send, 1..60 business days, txn before send | U2 temporal contradiction |
-| sender mailbox domain is its own org's domain; no cross-org sender/recipient domain for non-personal families | U3/U4 identity + domain |
-| role mailbox format / person address; domains must be world entities | U4 unbelievable domains |
-| host person == signer identity; signature appears where the template signs a person | U5 host/signer mismatch |
-| named weekday matches a fact; no duplicated words; no unknown domain in headers or body | artifact/template defects |
+| day-of-month spread (no day > 25%) | clustered dates |
+| `due/event/...` after send, 1..60 business days, txn before send, rsvp/registration before the event | temporal contradictions |
+| event season equals the season of the **held** date | wrong-season event names |
+| sender mailbox domain is its own org's domain; membership; no cross-org sender/recipient domain for non-personal families | identity + domain defects |
+| sender role is a role the org actually holds; catalog object is in the org's catalog | role/industry/object defects |
+| host person == signer identity | host/signer mismatch |
 
-Lint failures name the offending scenario and field. `test_build.py` reproduces
-each defect by injecting it into a real bundle and asserting the lint rejects it.
+*Rendered model input per case* (`check_case`): the header date must equal the
+send datetime; `From` must equal the declared sender and `To` the declared
+recipient (or its team alias); every printed calendar date must match a declared
+fact and a printed weekday must match that date; the signer and the bound
+catalog object must appear. Clip/quote variants declare a per-message
+**projection** (`case.audit` plus `clip_quoted_weekdays`) so authored quoted
+boilerplate is not falsely rejected -- the lint is never disabled. Lint failures
+name the offending scenario/case and field. `test_build.py` reproduces each
+defect first and then asserts the lint rejects it, including rendered-only
+mutations while the metadata stays correct.
 
-**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.3-draft-world`; the
-content generator changed, so earlier draft datasets are incompatible and the
-dataset ids differ.
+**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.4-draft-coherent`; the
+content generator changed, so earlier draft datasets and previews (including
+`c8c8a36`) are incompatible and the dataset ids differ.
 
 ## Files
 

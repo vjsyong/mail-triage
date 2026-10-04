@@ -13,6 +13,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from datetime import timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -1037,6 +1038,224 @@ class WorldFixtureTest(unittest.TestCase):
         self.assertTrue(style.get("greetings"))
         blob = json.dumps(style)
         self.assertNotIn("@", blob)  # no addresses/domains retained
+
+
+class WorldCoherenceW2Test(unittest.TestCase):
+    """W2-1..W2-4: real rendered-world coherence, not metadata alone."""
+
+    def _all_families(self):
+        # Pilot has no shift partition, so every family (incl. social events)
+        # is present.
+        return default_bundle()
+
+    def _scn_facts(self, bundle):
+        return [s.get("facts") or {} for s in bundle["scenarios"]]
+
+    def _mutated(self, bundle, mutate):
+        bad = copy.deepcopy(bundle)
+        mutate(bad)
+        return build.validate_dataset(bad)
+
+    # W2-1 -----------------------------------------------------------------
+    def test_w2_1_event_season_matches_held_date(self):
+        from benchmarks.v3.build import temporal
+        b = self._all_families()
+        seen = 0
+        weekend = 0
+        for facts in self._scn_facts(b):
+            if not facts.get("event"):
+                continue
+            seen += 1
+            held = temporal.parse(facts["event"])
+            self.assertEqual(
+                temporal.season_of(held, {"region": facts.get("region")}),
+                facts.get("event_season"), facts.get("family"))
+            if facts.get("family") in ("personal_invitation", "event_registration") \
+                    and held.weekday() >= 5:
+                weekend += 1
+        self.assertGreater(seen, 5)
+        self.assertGreater(weekend, 0, "social events should be able to fall on a weekend")
+
+    def test_w2_1_wrong_season_is_rejected(self):
+        from benchmarks.v3.build import temporal
+        b = self._all_families()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if facts.get("event"):
+                    held = temporal.parse(facts["event"])
+                    # move the held date to a different season, keep the name
+                    other = held + timedelta(days=100)
+                    facts["event"] = other.isoformat()
+                    return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("held date" in p for p in problems), problems[:3])
+
+    # W2-2 -----------------------------------------------------------------
+    def test_w2_2_objects_bound_to_sender_catalog(self):
+        from benchmarks.v3.build.world import World
+        world = World.build()
+        b = self._all_families()
+        seen = 0
+        for facts in self._scn_facts(b):
+            sender = facts.get("sender") or {}
+            item = facts.get("catalog_item")
+            if not item or sender.get("kind") != "org":
+                continue
+            org = world.org_by_id[sender["org_id"]]
+            terms = {t for bucket in (org.get("catalog") or {}).values() for t in bucket}
+            self.assertIn(item, terms, facts.get("family"))
+            seen += 1
+        self.assertGreater(seen, 20)
+        # A lettings document request must not ask for a software licence.
+        docreq = [f for f in self._scn_facts(b)
+                  if f.get("family") == "document_request" and f.get("catalog_item")]
+        self.assertTrue(docreq)
+        for facts in docreq:
+            self.assertNotIn("licence", facts["catalog_item"].lower())
+
+    def test_w2_2_foreign_catalog_object_is_rejected(self):
+        b = self._all_families()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if (facts.get("family") == "document_request"
+                        and (facts.get("sender") or {}).get("kind") == "org"):
+                    facts["catalog_item"] = "the software licence"
+                    return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("catalog" in p for p in problems), problems[:3])
+
+    # W2-3 -----------------------------------------------------------------
+    def test_w2_3_selection_fails_closed(self):
+        from benchmarks.v3.build.world import World
+        from benchmarks.v3.build.errors import BuildError
+        world = World.build()
+        with self.assertRaises(BuildError):
+            world.eligible_orgs(["finance"], ["orders"])
+
+    def test_w2_3_colleague_is_owner_org_member(self):
+        b = self._all_families()
+        cols = [f for f in self._scn_facts(b)
+                if f.get("family") == "meeting_request" and f.get("sender")]
+        self.assertTrue(cols)
+        for facts in cols:
+            sender, recipient = facts["sender"], facts["recipient"]
+            self.assertEqual(sender["domain"], recipient["domain"])
+            self.assertEqual(sender["org"], recipient["org"])
+
+    def test_w2_3_false_membership_is_rejected(self):
+        b = self._all_families()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                if facts.get("family") == "meeting_request" and facts.get("sender"):
+                    # claim a vendor identity while keeping the owner domain
+                    facts["sender"]["org"] = "Orbit Software"
+                    return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("member" in p or "org" in p for p in problems),
+                        problems[:3])
+
+    # W2-4: rendered-output defects while metadata stays correct -------------
+    def _first_case(self, bundle, pred=lambda c: True):
+        return next(c for c in bundle["cases"] if pred(c))
+
+    def test_w2_4_wrong_month_is_rejected(self):
+        from benchmarks.v3.build import temporal
+        b = self._all_families()
+        pattern = re.compile(r"\b(\d{1,2}) (January|February|March|April|May|"
+                             r"June|July|August|September|October|November|"
+                             r"December) (\d{4})\b")
+        case = next(c for c in b["cases"]
+                    if pattern.search(c["rendered_input"]["user"]))
+        cid = case["case_id"]
+        sid = case["scenario_id"]
+
+        def mutate(bad):
+            target = next(c for c in bad["cases"] if c["case_id"] == cid)
+            facts = next(s["facts"] for s in bad["scenarios"]
+                         if s["scenario_id"] == sid)
+            fact_months = {temporal.MONTH_NAMES[temporal.parse(facts[f]).month - 1]
+                           for f in ("send", "due", "event", "deadline2")
+                           if facts.get(f)}
+            match = pattern.search(target["rendered_input"]["user"])
+            replacement = next(mo for mo in temporal.MONTH_NAMES
+                               if mo not in fact_months and mo != match.group(2))
+            text = target["rendered_input"]["user"]
+            target["rendered_input"]["user"] = (
+                text[:match.start()] + "%s %s %s" % (match.group(1), replacement,
+                                                     match.group(3))
+                + text[match.end():])
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("rendered date" in p for p in problems), problems[:3])
+
+    def test_w2_4_swapped_weekday_is_rejected(self):
+        from benchmarks.v3.build import temporal
+        b = self._all_families()
+        case = None
+        for cand in b["cases"]:
+            facts = next((s["facts"] for s in b["scenarios"]
+                          if s["scenario_id"] == cand["scenario_id"]), {})
+            weekdays = {temporal.WEEKDAY_NAMES[temporal.parse(facts[f]).weekday()]
+                        for f in ("send", "due", "event", "deadline2")
+                        if facts.get(f)}
+            if len(weekdays) >= 2 and re.search(
+                    r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)",
+                    cand["rendered_input"]["user"]):
+                case = cand
+                break
+        self.assertIsNotNone(case, "need a case with >=2 fact weekdays and a rendered weekday")
+        cid = case["case_id"]
+
+        def mutate(bad):
+            facts = next(s["facts"] for s in bad["scenarios"]
+                         if s["scenario_id"] == case["scenario_id"])
+            names = {temporal.WEEKDAY_NAMES[temporal.parse(facts[f]).weekday()]:
+                     f for f in ("send", "due", "event", "deadline2")
+                     if facts.get(f)}
+            rendered = next(c for c in bad["cases"] if c["case_id"] == cid)["rendered_input"]
+            current = re.search(r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)",
+                                rendered["user"]).group(1)
+            other = next(n for n in names if n != current)
+            rendered["user"] = rendered["user"].replace(current, other, 1)
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("weekday" in p or "rendered date" in p
+                            for p in problems), problems[:3])
+
+    def test_w2_4_wrong_to_is_rejected(self):
+        b = self._all_families()
+        case = self._first_case(b)
+        cid = case["case_id"]
+
+        def mutate(bad):
+            target = next(c for c in bad["cases"] if c["case_id"] == cid)
+            target["rendered_input"]["user"] = re.sub(
+                r"^To: .*$", "To: stranger@elsewhere.example",
+                target["rendered_input"]["user"], count=1, flags=re.M)
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("rendered To" in p for p in problems), problems[:3])
+
+    def test_w2_4_wrong_sender_role_is_rejected(self):
+        from benchmarks.v3.build.world import World
+        world = World.build()
+        b = self._all_families()
+
+        def mutate(bad):
+            for scn in bad["scenarios"]:
+                facts = scn.get("facts") or {}
+                sender = facts.get("sender") or {}
+                if sender.get("kind") != "org":
+                    continue
+                org = world.org_by_id.get(sender.get("org_id"))
+                if org and "offers" not in (org.get("role_mailboxes") or {}):
+                    sender["role"] = "offers"
+                    return
+        problems = self._mutated(b, mutate)
+        self.assertTrue(any("role" in p for p in problems), problems[:3])
 
 
 if __name__ == "__main__":

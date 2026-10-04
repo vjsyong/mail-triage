@@ -152,11 +152,11 @@
       "templates": [
         {"id": "support_a",
          "subject": "Ticket {ticket}: we need one detail from you",
-         "body": "Hi {owner_first},\n\nThanks for contacting {vendor} support about {item}. To resolve ticket {ticket}, could you confirm {detail}? Once we have that we can finish within 24 hours.\n\n{vendor} support team",
+         "body": "Hi {owner_first},\n\nThanks for contacting {vendor} support about {item}. To resolve ticket {ticket}, could you reply with the missing detail? Once we have that we can finish within 24 hours.\n\n{detail}\n\n{vendor} support team",
          "evidence": ["{ticket}", "confirm"]}
       ],
       "paraphrase": {"subject": "Re: your support request {ticket}",
-        "body": "Hello {owner_first},\n\nWe are on ticket {ticket} regarding {item}. Before we can close it, please reply with {detail}. After that, resolution is usually same-day.\n\n{vendor} support team",
+        "body": "Hello {owner_first},\n\nWe are on ticket {ticket} regarding {item}. Before we can close it, please reply with the missing detail. After that, resolution is usually same-day.\n\n{detail}\n\n{vendor} support team",
          "evidence": ["{ticket}", "reply"]},
       "resolved": {"subject": "Ticket {ticket} resolved",
         "body": "Hi {owner_first},\n\nYour support ticket {ticket} about {item} has been resolved and closed. Nothing further is needed.\n\n{vendor} support team",
@@ -284,15 +284,15 @@
       "tags": ["document", "request"],
       "templates": [
         {"id": "doc_a",
-         "subject": "Could you send the {item} document?",
-         "body": "Dear {owner_first},\n\nFor our records we need the {item} document. Could you send it by {deadline}? If it is already on file, just confirm the reference {ref}.\n\n{signer}",
+         "subject": "Could you send the {item}?",
+         "body": "Dear {owner_first},\n\nFor our records we need the {item}. Could you send it by {deadline}? If it is already on file, just confirm the reference {ref}.\n\n{signer}",
          "evidence": ["{deadline}", "{ref}", "confirm"]}
       ],
       "paraphrase": {"subject": "Missing document for {item}",
-         "body": "Hi {owner_first},\n\nWe are still missing the {item} paperwork. Please share it before {deadline}, or reply with the reference {ref} if you have already sent it.\n\n{signer}",
+         "body": "Hi {owner_first},\n\nWe are still missing the {item}. Please share it before {deadline}, or reply with the reference {ref} if you have already sent it.\n\n{signer}",
          "evidence": ["{deadline}", "{ref}", "reply"]},
-      "resolved": {"subject": "Re: Could you send the {item} document?",
-         "body": "Dear {owner_first},\n\nThank you - the {item} document has been received under reference {ref}. No further action is required.\n\n{signer}",
+      "resolved": {"subject": "Re: Could you send the {item}?",
+         "body": "Dear {owner_first},\n\nThank you - the {item} has been received under reference {ref}. No further action is required.\n\n{signer}",
          "evidence": ["received", "No further action"]}
     },
     "event_registration": {
@@ -300,14 +300,14 @@
       "tags": ["event", "registration"],
       "templates": [
         {"id": "event_reg_a",
-         "subject": "Register for {org} {event_name}",
-         "body": "Hi {owner_first},\n\nRegistration for {org} {event_name} on {deadline} at {place} is now open. Places are limited, so please confirm your attendance by {deadline2}.\n\n{org} events team",
+         "subject": "Register for {event_name} at {org}",
+         "body": "Hi {owner_first},\n\nRegistration for {event_name} at {org} on {deadline} at {place} is now open. Places are limited, so please confirm your attendance by {deadline2}.\n\n{org} events team",
          "evidence": ["{deadline}", "{place}", "confirm"]}
       ],
       "paraphrase": {"subject": "Your place at {event_name}?",
          "body": "Hello {owner_first},\n\n{org} is running {event_name} on {deadline} at {place}. Would you like a place? Kindly reply by {deadline2}.\n\n{org} events team",
          "evidence": ["{deadline}", "{place}", "reply"]},
-      "resolved": {"subject": "Re: Register for {org} {event_name}",
+      "resolved": {"subject": "Re: Register for {event_name} at {org}",
          "body": "Hi {owner_first},\n\nYour registration for {event_name} on {deadline} at {place} is confirmed. No further reply is needed.\n\n{org} events team",
          "evidence": ["confirmed", "No further reply"]}
     }
