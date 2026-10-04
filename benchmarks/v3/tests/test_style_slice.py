@@ -16,7 +16,7 @@ for _p in (ROOT, V3):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from benchmarks.v3.build import enron_slice as es  # noqa: E402
+from benchmarks.v3.build import style_slice as es  # noqa: E402
 from benchmarks.v3.build.world import World  # noqa: E402
 
 
@@ -62,7 +62,7 @@ class TestSampling(unittest.TestCase):
         shutil.rmtree(self.root, ignore_errors=True)
 
     def test_filters_and_min_users(self):
-        refs = es.sample_references(self.root, seed=1, n=5, min_users=5)
+        refs = es.sample_references(source="enron", seed=1, n=5, min_groups=5, enron_root=self.root)
         users = {r["user"] for r in refs}
         self.assertEqual(len(refs), 5)
         self.assertGreaterEqual(len(users), 5)
@@ -70,14 +70,14 @@ class TestSampling(unittest.TestCase):
         self.assertNotIn("bad2", users)
 
     def test_determinism(self):
-        a = es.sample_references(self.root, seed=7, n=4, min_users=4)
-        b = es.sample_references(self.root, seed=7, n=4, min_users=4)
+        a = es.sample_references(source="enron", seed=7, n=4, min_groups=4, enron_root=self.root)
+        b = es.sample_references(source="enron", seed=7, n=4, min_groups=4, enron_root=self.root)
         self.assertEqual([r["message_id"] for r in a], [r["message_id"] for r in b])
         self.assertEqual([r["sha256"] for r in a], [r["sha256"] for r in b])
 
     def test_insufficient_users_raises(self):
         with self.assertRaises(es.BuildError):
-            es.sample_references(self.root, seed=1, n=8, min_users=8)
+            es.sample_references(source="enron", seed=1, n=8, min_groups=8, enron_root=self.root)
 
 
 class TestProvenance(unittest.TestCase):
@@ -86,7 +86,7 @@ class TestProvenance(unittest.TestCase):
         try:
             path = os.path.join(root, "u1", "sent", "1.")
             _write_msg(path, "a@x.com", "b@y.com", "subject here", _body("hello"))
-            ref = es.sample_references(root, seed=2, n=1, min_users=1)[0]
+            ref = es.sample_references(source="enron", seed=2, n=1, min_groups=1, enron_root=root)[0]
             import hashlib
             with open(path, "rb") as fh:
                 self.assertEqual(ref["sha256"], hashlib.sha256(fh.read()).hexdigest())
@@ -128,7 +128,7 @@ class TestGuards(unittest.TestCase):
         for bad in ("Kenneth Lay", "kenneth.lay@enron.com", "555-867-5309"):
             gen = {"subject": "New note", "body": "Hello, this mentions %s here." % bad,
                    "from_email": p["email"], "to_email": q["email"]}
-            problems, stats = es.guard(ref, gen, w, allowed)
+            problems, stats = es.guard(ref, gen, w, allowed, pii_guard=True)
             self.assertTrue(any("PII leak" in x for x in problems), bad)
             self.assertTrue(stats["pii_hits"])
 
@@ -188,6 +188,125 @@ class TestPromptLeakage(unittest.TestCase):
             self.assertNotIn(leak, msgs[0]["content"])         # system has no source
         # Only the one reference body; no other corpus message text.
         self.assertEqual(joined.count(ref["parsed"]["body"]), 1)
+
+
+    def test_pii_guard_off_by_default(self):
+        w, p, q = _world_ref_emails()
+        ref = _ref()
+        gen = {"subject": "New note",
+               "body": "Hello, this mentions Kenneth Lay here.",
+               "from_email": p["email"], "to_email": q["email"]}
+        probs, stats = es.guard(ref, gen, w, ["3 March 2025"])   # default off
+        self.assertFalse(any("PII leak" in x for x in probs))
+        self.assertTrue(stats["pii_hits"])                       # still reported
+        probs2, _ = es.guard(ref, gen, w, ["3 March 2025"], pii_guard=True)
+        self.assertTrue(any("PII leak" in x for x in probs2))
+
+
+def _mbox(messages):
+    out = []
+    for (from_, to, subject, body) in messages:
+        out.append("From sender@x.com Mon Mar  3 10:15:00 2025")
+        out.append("From: %s" % from_)
+        out.append("To: %s" % to)
+        out.append("Subject: %s" % subject)
+        out.append("Date: Mon, 3 Mar 2025 10:15:00 -0600")
+        out.append("Content-Type: text/plain; charset=us-ascii")
+        out.append("")
+        out.append(body)
+        out.append("")           # blank line before the next envelope
+    return "\n".join(out).encode("utf-8")
+
+
+class TestMboxSplitter(unittest.TestCase):
+    def test_splits_real_envelopes_only(self):
+        body1 = _body("first message") + "\nFrom the desk of Bob\n"
+        body2 = _body("second message")
+        data = _mbox([("a@x.com", "b@y.com", "one", body1),
+                      ("c@x.com", "d@y.com", "two", body2)])
+        chunks = es._split_mbox(data)
+        self.assertEqual(len(chunks), 2)
+        self.assertIn(b"From the desk of Bob", chunks[0])   # body From not split
+        self.assertIn(b"second message", chunks[1])
+
+    def test_no_envelope_returns_empty(self):
+        self.assertEqual(es._split_mbox(b"just some text\nno envelope\n"), [])
+
+
+class TestIetfSampling(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="ietf-")
+        for lst in ("oauth", "dmarc"):
+            d = os.path.join(self.root, lst)
+            os.makedirs(d, exist_ok=True)
+            data = _mbox([("%s-a@x.com" % lst, "b@y.com", "%s alpha topic" % lst,
+                           _body("list %s message one" % lst)),
+                          ("%s-b@x.com" % lst, "b@y.com", "%s beta topic" % lst,
+                           _body("list %s message two" % lst))])
+            with open(os.path.join(d, "2020-01.mail"), "wb") as fh:
+                fh.write(data)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_ietf_spread_and_determinism(self):
+        refs = es.sample_references(source="ietf", seed=3, n=2, ietf_root=self.root)
+        self.assertEqual(len(refs), 2)
+        self.assertEqual(len({r["group"] for r in refs}), 2)
+        again = es.sample_references(source="ietf", seed=3, n=2, ietf_root=self.root)
+        self.assertEqual([r["sha256"] for r in refs], [r["sha256"] for r in again])
+
+
+class TestSpamSampling(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="spam-")
+        for group in ("easy_ham", "hard_ham"):
+            d = os.path.join(self.root, group)
+            os.makedirs(d, exist_ok=True)
+            _write_msg(os.path.join(d, "00001.abc"), "a@x.com", "b@y.com",
+                       "%s topic" % group, _body("ham body %s" % group))
+        with open(os.path.join(self.root, "easy_ham", "cmds"), "w") as fh:
+            fh.write("not a message at all")
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_spam_balanced_and_skips_cmds(self):
+        refs = es.sample_references(source="spamassassin", seed=4, n=2,
+                                    spam_root=self.root)
+        self.assertEqual({r["group"] for r in refs}, {"easy_ham", "hard_ham"})
+        self.assertFalse(any(r["message_id"].endswith("cmds") for r in refs))
+
+    def test_mix_plan(self):
+        ietf = tempfile.mkdtemp(prefix="mix-ietf-")
+        try:
+            for lst in ("oauth", "dmarc"):
+                d = os.path.join(ietf, lst)
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, "m.mail"), "wb") as fh:
+                    fh.write(_mbox([("%s1@x.com" % lst, "b@y.com", "%s one" % lst,
+                                     _body("one")),
+                                    ("%s2@x.com" % lst, "b@y.com", "%s two" % lst,
+                                     _body("two"))]))
+            spam = tempfile.mkdtemp(prefix="mix-spam-")
+            try:
+                for group in ("easy_ham", "hard_ham"):
+                    d = os.path.join(spam, group)
+                    os.makedirs(d, exist_ok=True)
+                    for j in (1, 2):
+                        _write_msg(os.path.join(d, "0000%d.x" % j), "a@x.com",
+                                   "b@y.com", "%s %d" % (group, j),
+                                   _body("body %s %d" % (group, j)))
+                refs = es.sample_references(source="mix", seed=5, n=8,
+                                            ietf_root=ietf, spam_root=spam)
+                self.assertEqual(len(refs), 8)
+                self.assertEqual(sum(1 for r in refs if r["source"] == "ietf"), 4)
+                self.assertEqual(sum(1 for r in refs if r["group"] == "easy_ham"), 2)
+                self.assertEqual(sum(1 for r in refs if r["group"] == "hard_ham"), 2)
+            finally:
+                shutil.rmtree(spam, ignore_errors=True)
+        finally:
+            shutil.rmtree(ietf, ignore_errors=True)
 
 
 if __name__ == "__main__":

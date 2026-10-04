@@ -1,15 +1,21 @@
-"""Enron style-transfer thin slice (E1).
+"""Cross-corpus style-transfer thin slice (E1 Enron, E2 IETF + SpamAssassin).
 
-Samples reference emails from the read-only Enron maildir (source corpus), then
-asks a local GPU LLM to write *new* synthetic emails in the reference's style.
-The reference is untrusted input used only as style guidance; generated text
-must pass PII, copy, identity and hygiene guards before acceptance.
+Samples reference emails from read-only public corpora (Enron maildir, IETF mbox,
+SpamAssassin dirs) and asks a local GPU LLM to write *new* synthetic emails in the
+reference's style.  The reference is untrusted input used only as style guidance.
 
-Raw Enron text and PII are never written to the repository. The local review
-artifact necessarily shows the reference beside the generated email for human
-inspection; it is labelled EXPERIMENT/unreviewed.
+Guard policy (owner decision for cross-corpus style transfer):
+  * copy (8-gram containment + verbatim sentence) -- ON,
+  * hygiene (punctuation / clause injection) -- ON,
+  * world-identity + consistent dates -- ON,
+  * no fabricated CC/attachment/history -- ON,
+  * PII rejection -- **OFF by default**; retained behind ``--pii-guard``.  When
+    off, generated emails may resemble source names/details and are NOT
+    PII-scrubbed.
 
-This module is thin and import-safe: unit tests drive it with a fake LLM.
+Raw corpus text and PII are never written to the repository. The local review
+artifact necessarily shows the reference beside the generated email; it is
+labelled EXPERIMENT/unreviewed.
 """
 import argparse
 import hashlib
@@ -22,6 +28,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
 from email import utils as _email_utils
+from itertools import islice
 
 from . import audit
 from .errors import BuildError
@@ -33,7 +40,12 @@ from .verify import _check_hygiene
 from .world import World
 
 ENRON_ROOT = "/home/xrim/datasets/email-corpora/enron/maildir"
+IETF_ROOT = "/home/xrim/datasets/email-corpora/ietf"
+IETF_LISTS = ("oauth", "dmarc", "emailcore", "ietf-announce")
+SPAM_ROOT = "/home/xrim/datasets/email-corpora/spamassassin"
+SPAM_SETS = ("easy_ham", "hard_ham")
 SENT_FOLDERS = ("sent", "sent_items", "inbox")
+SOURCES = ("enron", "ietf", "spamassassin", "mix")
 MIN_CHARS, MAX_CHARS = 120, 1500
 MAX_QUOTED_LINES = 1
 COPY_8GRAM_MAX = 0.05            # documented 8-gram containment threshold
@@ -57,6 +69,9 @@ _CLAIM = re.compile(r"(attached|attachment|enclosed|i'?ve cc'?d|\bcc'?d\b|"
                     r"as we discussed earlier|followed this thread)", re.I)
 _DATE_DMY = re.compile(r"\b\d{1,2}\s+[A-Z][a-z]+\s+\d{4}\b")
 _DATE_MDY = re.compile(r"\b[A-Z][a-z]+\s+\d{1,2},?\s+\d{4}\b")
+# Real mbox envelope line (ctime-ish date); a body line merely starting with
+# "From " does not match and is therefore not treated as a separator.
+_MBOX_FROM = re.compile(rb"^From \S+ +\w{3} \w{3} +\d+ \d\d:\d\d:\d\d \d{4}")
 
 
 # ------------------------------------------------------------------ parsing
@@ -83,14 +98,28 @@ def _text_body(msg):
             if payload is None:
                 continue
             charset = part.get_content_charset() or "utf-8"
-            return payload.decode(charset, "replace")
+            return _decode(payload, charset)
         return None
     if msg.get_content_type() != "text/plain":
         return None
     payload = msg.get_payload(decode=True)
     if payload is None:
         return None
-    return payload.decode(msg.get_content_charset() or "utf-8", "replace")
+    return _decode(payload, msg.get_content_charset() or "utf-8")
+
+
+def _decode(payload, charset):
+    try:
+        return payload.decode(charset, "replace")
+    except LookupError:
+        return payload.decode("utf-8", "replace")
+
+
+def _safe_parse(raw):
+    try:
+        return parse_message(raw)
+    except Exception:
+        return None
 
 
 def parse_message(raw):
@@ -133,18 +162,37 @@ def _subject_sig(subject):
     return set(w for w in re.findall(r"[a-z]{3,}", s.lower()))
 
 
-# ------------------------------------------------------------------ sampling
+# ------------------------------------------------------------------ adapters
 
-def sample_references(root=ENRON_ROOT, seed=DEFAULT_SEED, n=8, min_users=5):
-    """Deterministically sample ``n`` clean references from >=``min_users`` users."""
+def _split_mbox(data):
+    """Split an mbox byte string into per-message RFC822 chunks.
+
+    A separator is a line that starts with ``From `` AND matches the ctime-like
+    envelope date AND is the first line or follows a blank line -- so a body line
+    that merely begins with ``From `` is not split.  The envelope line is dropped
+    and any preamble before the first envelope is ignored.  Returns [] when no
+    envelope is found.
+    """
+    lines = data.split(b"\n")
+    starts = []
+    for i, ln in enumerate(lines):
+        if not ln.startswith(b"From ") or not _MBOX_FROM.match(ln):
+            continue
+        if i > 0 and lines[i - 1].strip() != b"":
+            continue
+        starts.append(i)
+    if not starts:
+        return []
+    chunks = []
+    for j, s in enumerate(starts):
+        end = starts[j + 1] if j + 1 < len(starts) else len(lines)
+        chunks.append(b"\n".join(lines[s + 1:end]))
+    return chunks
+
+
+def _iter_enron(root=ENRON_ROOT):
     users = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
-    rng = stream(seed, "enron-users")
-    refs = []
-    used_subjects = []
-    for user in rng.shuffled(users):
-        if len(refs) >= n:
-            break
-        picked = None
+    for user in users:
         for folder in SENT_FOLDERS:
             d = os.path.join(root, user, folder)
             if not os.path.isdir(d):
@@ -156,32 +204,161 @@ def sample_references(root=ENRON_ROOT, seed=DEFAULT_SEED, n=8, min_users=5):
                 raw = _read_message(path)
                 if raw is None:
                     continue
-                parsed = parse_message(raw)
+                parsed = _safe_parse(raw)
                 if not _eligible(parsed):
                     continue
-                sig = _subject_sig(parsed["subject"])
-                if any(audit._jaccard(sig, s) > 0.5 for s in used_subjects):
-                    continue
-                picked = (folder, fname, path, raw, parsed, sig)
-                break
-            if picked:
-                break
-        if not picked:
+                yield {"source": "enron", "user": user, "group": user,
+                       "folder": folder, "message_id": os.path.relpath(path, root),
+                       "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+                       "parsed": parsed}
+
+
+def _iter_ietf(list_name, root=IETF_ROOT, scan_cap=300, file_cap=6):
+    """Yield eligible IETF messages; bounded by ``scan_cap`` parsed messages.
+
+    The mbox dirs are large (hundreds of MB), so scanning is capped rather than
+    draining a whole month or corpus.
+    """
+    d = os.path.join(root, list_name)
+    if not os.path.isdir(d):
+        return
+    files = [f for f in sorted(os.listdir(d)) if f.endswith(".mail")][:file_cap]
+    scanned = 0
+    for fname in files:
+        path = os.path.join(d, fname)
+        raw = _read_message(path, max_bytes=50000000)
+        if not raw:
             continue
-        folder, fname, path, raw, parsed, sig = picked
-        rel = os.path.relpath(path, root)
-        refs.append({
-            "id": "ref%02d" % (len(refs) + 1),
-            "user": user, "folder": folder, "message_id": rel,
-            "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
-            "parsed": parsed, "subject_sig": sig,
-        })
-        used_subjects.append(sig)
+        for idx, chunk in enumerate(_split_mbox(raw)):
+            if scanned >= scan_cap:
+                return
+            scanned += 1
+            parsed = _safe_parse(chunk)
+            if not _eligible(parsed):
+                continue
+            yield {"source": "ietf", "user": list_name, "group": list_name,
+                   "folder": list_name,
+                   "message_id": "%s/%s#%d" % (list_name, fname, idx),
+                   "sha256": hashlib.sha256(chunk).hexdigest(), "bytes": len(chunk),
+                   "parsed": parsed}
+
+
+def _iter_spam(set_name, root=SPAM_ROOT, scan_cap=200):
+    d = os.path.join(root, set_name)
+    if not os.path.isdir(d):
+        return
+    scanned = 0
+    for fname in sorted(os.listdir(d)):
+        path = os.path.join(d, fname)
+        if not os.path.isfile(path) or fname in ("cmds", "cmds.txt"):
+            continue
+        if scanned >= scan_cap:
+            return
+        scanned += 1
+        raw = _read_message(path)
+        if raw is None:
+            continue
+        parsed = _safe_parse(raw)
+        if not _eligible(parsed):
+            continue
+        yield {"source": "spamassassin", "user": set_name, "group": set_name,
+               "folder": set_name, "message_id": os.path.relpath(path, SPAM_ROOT),
+               "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+               "parsed": parsed}
+
+
+def _dedup(cands, used):
+    out = []
+    for c in cands:
+        sig = _subject_sig(c["parsed"]["subject"])
+        if any(audit._jaccard(sig, s) > 0.5 for s in used):
+            continue
+        c = dict(c)
+        c["subject_sig"] = sig
+        out.append(c)
+        used.append(sig)
+    return out
+
+
+def _sample_enron(root, n, min_groups, rng):
+    by_user = {}
+    for c in _iter_enron(root):
+        by_user.setdefault(c["user"], []).append(c)
+    refs, used = [], []
+    for user in rng.shuffled(sorted(by_user)):
+        if len(refs) >= n:
+            break
+        refs.extend(_dedup(by_user[user][:4], used)[:1])
+    return refs, {r["user"] for r in refs}
+
+
+def _sample_ietf(n, min_groups, rng, root=IETF_ROOT):
+    by_list = {}
+    for lst in IETF_LISTS:
+        cands = list(islice(_iter_ietf(lst, root), 12))
+        if cands:
+            by_list[lst] = cands
+    lists = rng.shuffled(sorted(by_list))
+    idx = {l: 0 for l in lists}
+    refs, used = [], []
+    while len(refs) < n:
+        progressed = False
+        for l in lists:
+            if len(refs) >= n:
+                break
+            if idx[l] >= len(by_list[l]):
+                continue
+            c = _dedup([by_list[l][idx[l]]], used)
+            idx[l] += 1
+            if c:
+                refs.append(c[0])
+                progressed = True
+        if not progressed:
+            break
+    return refs, {r["group"] for r in refs}
+
+
+def _sample_spam(n, min_groups, rng, root=SPAM_ROOT):
+    sets = {s: list(islice(_iter_spam(s, root), 20)) for s in SPAM_SETS}
+    e = min(len(sets["easy_ham"]), (n + 1) // 2)
+    h = min(len(sets["hard_ham"]), n - e)
+    refs = [dict(c) for c in sets["easy_ham"][:e] + sets["hard_ham"][:h]]
+    return refs, {r["group"] for r in refs}
+
+
+def sample_references(source="enron", seed=DEFAULT_SEED, n=8, min_groups=5,
+                      enron_root=ENRON_ROOT, ietf_root=IETF_ROOT,
+                      spam_root=SPAM_ROOT):
+    """Deterministically sample ``n`` clean references from one source.
+
+    ``source`` is ``enron|ietf|spamassassin|mix``.  ``mix`` reproduces the E2
+    run plan: 4 IETF references across >=2 lists plus 2 easy_ham + 2 hard_ham.
+    """
+    rng = stream(seed, "style-refs:%s" % source)
+    if source == "enron":
+        refs, groups = _sample_enron(enron_root, n, min_groups, rng)
+        need = min_groups
+    elif source == "ietf":
+        refs, groups = _sample_ietf(n, min_groups, rng, ietf_root)
+        need = 2
+    elif source == "spamassassin":
+        refs, groups = _sample_spam(n, min_groups, rng, spam_root)
+        need = 2
+    elif source == "mix":
+        r1, g1 = _sample_ietf(4, 2, rng, ietf_root)
+        r2, g2 = _sample_spam(4, 2, rng, spam_root)
+        refs, groups = r1 + r2, g1 | g2
+        need = 3
+    else:
+        raise BuildError("unknown source %r (expected %s)" % (source, SOURCES))
     if len(refs) < n:
-        raise BuildError("only %d/%d eligible references found" % (len(refs), n))
-    if len({r["user"] for r in refs}) < min_users:
-        raise BuildError("references come from %d users (<%d)"
-                         % (len({r["user"] for r in refs}), min_users))
+        raise BuildError("only %d/%d eligible references for %s"
+                         % (len(refs), n, source))
+    if len(groups) < need:
+        raise BuildError("references span %d groups (<%d) for %s"
+                         % (len(groups), need, source))
+    for i, r in enumerate(refs):
+        r["id"] = "ref%02d" % (i + 1)
     return refs
 
 
@@ -189,7 +366,8 @@ def provenance_record(ref):
     p = ref["parsed"]
     body = p["body"]
     return {
-        "id": ref["id"], "user": ref["user"], "folder": ref["folder"],
+        "id": ref["id"], "source": ref.get("source"),
+        "user": ref["user"], "group": ref.get("group"), "folder": ref["folder"],
         "message_id": ref["message_id"], "sha256": ref["sha256"],
         "bytes": ref["bytes"], "body_chars": len(body),
         "body_words": len(body.split()),
@@ -268,15 +446,22 @@ def _dates_consistent(text, allowed):
     return problems
 
 
-def guard(ref, gen, world, allowed_dates):
-    """Return (problems, stats) for a generated email ([] when acceptable)."""
+def guard(ref, gen, world, allowed_dates, pii_guard=False):
+    """Return (problems, stats) for a generated email ([] when acceptable).
+
+    ``pii_guard`` defaults to **False** (owner decision for cross-corpus style
+    transfer): PII matches are still computed and reported in ``stats`` but do
+    not reject the message.  Pass ``pii_guard=True`` to reject on PII.  The copy
+    (8-gram/verbatim), hygiene, world-identity and claim guards are always on.
+    """
     problems = []
     text = "%s\n%s" % (gen["subject"], gen["body"])
     low = text.lower()
     pii_hits = [t for t in pii_tokens(ref["parsed"])
                 if re.search(r"(?<![a-z0-9])" + re.escape(t.lower()) + r"(?![a-z0-9])", low)]
-    for t in pii_hits:
-        problems.append("PII leak: %r" % t)
+    if pii_guard:
+        for t in pii_hits:
+            problems.append("PII leak: %r" % t)
     stats = copy_stats(ref["parsed"]["body"], gen["body"])
     if stats["containment"] > COPY_8GRAM_MAX:
         problems.append("copy containment %.3f > %.3f"
@@ -378,7 +563,7 @@ def _max_similarity(text, accepted):
 def generate_for_reference(ref, world, client, *, seed=DEFAULT_SEED, index=0,
                            n_per_ref=2, n_candidates=2, max_retries=2,
                            temperature=0.9, max_tokens=600, accepted=None,
-                           latency_sink=None):
+                           latency_sink=None, pii_guard=False):
     """Generate and guard ``n_per_ref`` emails for one reference."""
     rng = stream(seed, "enron-gen:%s" % ref["id"])
     send = datetime(2026, 6, 1, 9, 0) + timedelta(days=index, minutes=rng.randint(60))
@@ -423,7 +608,7 @@ def generate_for_reference(ref, world, client, *, seed=DEFAULT_SEED, index=0,
                     "to_name": recipient["full"], "to_email": recipient["email"],
                     "date": send.isoformat(), "subject": subject, "body": body,
                 }
-                problems, stats = guard(ref, gen, world, allowed_dates)
+                problems, stats = guard(ref, gen, world, allowed_dates, pii_guard)
                 rec["problems"] = problems
                 rec["copy"] = stats
                 attempts.append(rec)
@@ -511,11 +696,14 @@ def write_artifacts(outdir, refs, generated, summary):
                len(st["verbatim_sentences"]), _html.escape(str(st["pii_hits"])),
                g["style"]["reference"]["words"], g["style"]["generated"]["words"]))
     html = ("<!doctype html><html><head><meta charset='utf-8'>"
-            "<title>Enron style-transfer - EXPERIMENT</title><style>%s</style></head>"
-            "<body><h1>Enron style-transfer &mdash; EXPERIMENT / unreviewed</h1>"
+            "<title>Style-transfer - EXPERIMENT</title><style>%s</style></head>"
+            "<body><h1>Cross-corpus style-transfer &mdash; EXPERIMENT / unreviewed</h1>"
             "<p class='exp'>EXPERIMENT / unreviewed. Left column is the read-only "
-            "Enron source (untrusted); right column is a newly generated synthetic "
-            "email. Do not treat as benchmark gold.</p>%s</body></html>"
+            "public source (untrusted); right column is a newly generated synthetic "
+            "email. Guard policy: copy/8-gram ON, hygiene/world-identity ON, "
+            "PII rejection OFF (per owner) &mdash; outputs may resemble source "
+            "names/details and are not PII-scrubbed. Do not treat as benchmark gold."
+            "</p>%s</body></html>"
             % (css, "".join(rows)))
     hpath = os.path.join(outdir, "review.html")
     with open(hpath, "w") as fh:
@@ -525,7 +713,9 @@ def write_artifacts(outdir, refs, generated, summary):
 
 
 def write_comparison(outdir, refs, generated, summary):
-    lines = ["# Enron style-transfer thin slice (EXPERIMENT, unreviewed)\n",
+    lines = ["# Cross-corpus style-transfer thin slice (EXPERIMENT, unreviewed)\n",
+             "- source: %s" % summary.get("source", "?"),
+             "- guard policy: copy ON, PII rejection OFF (owner decision)\n",
              "- references sampled: %d from %d users"
              % (len(refs), len({r["user"] for r in refs})),
              "- generated emails: %d" % len(generated),
@@ -594,7 +784,8 @@ def _git(*args):
         return None
 
 
-def build_summary(refs, generated, cache_stats, latency, acceptance):
+def build_summary(refs, generated, cache_stats, latency, acceptance,
+                  source=None, pii_guard=False):
     per_ref = {}
     for g in generated:
         s = per_ref.setdefault(g["reference_id"], {"count": 0, "containment_max": 0.0,
@@ -606,7 +797,10 @@ def build_summary(refs, generated, cache_stats, latency, acceptance):
     lat = sorted(latency)
     return {
         "experiment": True, "reviewed": False,
-        "references": len(refs), "reference_users": sorted({r["user"] for r in refs}),
+        "source": source,
+        "guard_policy": {"copy_8gram": True, "verbatim": True, "hygiene": True,
+                         "world_identity": True, "pii_guard": bool(pii_guard)},
+        "references": len(refs), "reference_groups": sorted({r.get("group") for r in refs}),
         "generated": len(generated),
         "acceptance": acceptance,
         "copy_threshold_8gram": COPY_8GRAM_MAX,
@@ -615,14 +809,18 @@ def build_summary(refs, generated, cache_stats, latency, acceptance):
                   "cache_hits": cache_stats.get("cache_hits"),
                   "latency_mean_s": round(sum(lat) / len(lat), 3) if lat else 0.0,
                   "latency_max_s": round(lat[-1], 3) if lat else 0.0},
-        "note": ("E1 thin slice. Generated emails are synthetic and unreviewed; "
-                 "the reference is read-only Enron source used as style guidance."),
+        "note": ("E2 thin slice. Generated emails are synthetic and unreviewed; the "
+                 "reference is read-only public corpus text used as style guidance. "
+                 "PII rejection is off per owner; outputs are not PII-scrubbed."),
     }
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Enron style-transfer thin slice")
+    ap = argparse.ArgumentParser(description="Cross-corpus style-transfer thin slice")
+    ap.add_argument("--source", default="enron", choices=list(SOURCES))
     ap.add_argument("--enron-root", default=ENRON_ROOT)
+    ap.add_argument("--ietf-root", default=IETF_ROOT)
+    ap.add_argument("--spam-root", default=SPAM_ROOT)
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--refs", type=int, default=8)
     ap.add_argument("--per-ref", type=int, default=2)
@@ -630,12 +828,14 @@ def main(argv=None):
     ap.add_argument("--retries", type=int, default=2)
     ap.add_argument("--temperature", type=float, default=0.9)
     ap.add_argument("--max-tokens", type=int, default=600)
+    ap.add_argument("--pii-guard", action="store_true",
+                    help="re-enable PII rejection (off by default per owner)")
     ap.add_argument("--endpoint", default="http://127.0.0.1:8048/v1")
     ap.add_argument("--model", default="gemma-4-26b-a4b")
     ap.add_argument("--revision", default="AWQ-4bit-cached")
-    ap.add_argument("--outdir", default="/home/xrim/datasets/benchmark-v3/review-enron-slice")
-    ap.add_argument("--cache-root", default="/home/xrim/datasets/benchmark-v3/enron-slice-cache")
-    ap.add_argument("--receipt", default="/tmp/opencode/v3-enron-slice-receipt.json")
+    ap.add_argument("--outdir", default="/home/xrim/datasets/benchmark-v3/review-style-slice")
+    ap.add_argument("--cache-root", default="/home/xrim/datasets/benchmark-v3/style-slice-cache")
+    ap.add_argument("--receipt", default="/tmp/opencode/v3-style-slice-receipt.json")
     ap.add_argument("--container-name", default=None)
     ap.add_argument("--run-label", default=None)
     ap.add_argument("--server-command", default=None)
@@ -644,7 +844,9 @@ def main(argv=None):
 
     head_before = _git("rev-parse", "HEAD")
     tree_before = _git("rev-parse", "HEAD^{tree}")
-    refs = sample_references(args.enron_root, args.seed, args.refs)
+    refs = sample_references(source=args.source, seed=args.seed, n=args.refs,
+                             enron_root=args.enron_root, ietf_root=args.ietf_root,
+                             spam_root=args.spam_root)
     world = World.build()
     client = CachedChatClient(
         OpenAICompatClient(args.endpoint, args.model, revision=args.revision),
@@ -658,7 +860,7 @@ def main(argv=None):
             n_candidates=args.candidates, max_retries=args.retries,
             temperature=args.temperature, max_tokens=args.max_tokens,
             accepted=[g["subject"] + "\n" + g["body"] for g in generated],
-            latency_sink=latencies)
+            latency_sink=latencies, pii_guard=args.pii_guard)
         for g, _st in produced:
             generated.append(g)
     acceptance["accepted"] = len(generated)
@@ -678,7 +880,8 @@ def main(argv=None):
         for root, _dirs, files in os.walk(args.cache_root):
             calls += sum(1 for f in files if f.endswith(".json"))
     cache_stats = {"model_calls": calls, "cache_hits": 0, "cache_misses": calls}
-    summary = build_summary(refs, generated, cache_stats, latencies, acceptance)
+    summary = build_summary(refs, generated, cache_stats, latencies, acceptance,
+                            source=args.source, pii_guard=args.pii_guard)
 
     outdir = _artifact_dir(args.outdir)
     written = write_artifacts(outdir, refs, generated, summary)
@@ -686,14 +889,20 @@ def main(argv=None):
 
     head_after = _git("rev-parse", "HEAD")
     tree_after = _git("rev-parse", "HEAD^{tree}")
-    teardown = teardown_container(args.container_name, "e1.enron.owner", args.run_label or "")
+    teardown = teardown_container(args.container_name, "style.slice.owner", args.run_label or "")
     artifacts = {name: _sha(path) for name, path in written.items()}
     receipt = {
-        "mission": "E1 Enron style-transfer thin slice",
+        "mission": "E2 cross-corpus style-transfer thin slice",
         "head_before": head_before, "tree_before": tree_before,
         "head_after": head_after, "tree_after": tree_after,
         "source_unchanged": head_before == head_after and tree_before == tree_after,
-        "enron_root": args.enron_root, "model": args.model,
+        "source": args.source,
+        "source_roots": {"enron": args.enron_root, "ietf": args.ietf_root,
+                         "spamassassin": args.spam_root},
+        "guard_policy": {"copy_8gram": True, "verbatim": True, "hygiene": True,
+                         "world_identity": True, "pii_guard": bool(args.pii_guard),
+                         "pii_default": "off per owner decision"},
+        "model": args.model,
         "runtime_image": "vllm/vllm-openai:v0.22.0", "endpoint": args.endpoint,
         "server_command": args.server_command,
         "seed": args.seed, "temperature": args.temperature,
