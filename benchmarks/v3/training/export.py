@@ -1,45 +1,35 @@
-"""Fail-closed SFT exporter with generation-domain separation (acceptance AC2).
+"""Fail-closed SFT export over real source records (AC2/M2/M3).
 
-* **Separate hashed generation domains.**  Training, development and evaluation
-  each carry their own ``domain_sha256`` derived from ``(domain, seed, revision)``
-  (and a distinct stream), so examples from different domains can never be
-  pooled by accident.
-* **Fail-closed material gating.**  The exporter rejects a case whose split is
-  not allowed (calibration/private/test material for a training export), whose
-  decision gold is unobservable or ambiguous, whose source is real mail, or whose
-  example fails verification.  A rejected case is reported with its reason; it is
-  never silently dropped and never exported.
-* **Contamination.**  Gold ``hidden_evidence`` must not appear in any
-  model-facing input, and -- importantly -- the check folds in the **workflow
-  mailbox source text**, so a workflow body cannot smuggle held-out material.
+Every source record must declare an explicit ``role`` and ``domain``; the
+exporter never relabels an absent-role v3 development record.  A hard denylist
+rejects calibration/private/test/real/ambiguous/unobservable material **before**
+any caller-supplied allow-list is consulted.  Each accepted source yields a
+classifier example **and** a bounded tool dialogue over the same email, and the
+pair must share ``source_id``/``lineage_id`` (cross-task lineage).
+
+``contamination_report`` checks source ids, lineage ids and normalised per-email
+text across **both** tasks and across domains.
 """
 from __future__ import annotations
 
 import re
 
-from ..contracts import GoldLeakageError, assert_no_gold_leakage
 from ..common.hashing import hash_obj
 from .schema import validate_sft_example
-from .samples import (build_decision_example, build_workflow_example,
-                      DEFAULT_IDENTITIES, workflow_source_text)
+from .samples import (ROLE_DEV, ROLE_TRAIN, build_decision_example,
+                      build_dialogue_example)
 from .verify import verify_example
 
-EXPORT_REVISION = "mail-sft-export1"
+EXPORT_REVISION = "mail-sft-export2"
 
-# split -> generation domain
-SPLIT_DOMAIN = {
-    "development": "development",
-    "test": "evaluation",
-    "calibration": "private",
-    "private_test": "private",
-    "private_shift": "private",
-    "real_holdout": "private",
-}
-PRIVATE_SPLITS = tuple(s for s, d in SPLIT_DOMAIN.items() if d == "private")
+GENERATION_DOMAINS = ("training", "development", "evaluation")
+ROLES = (ROLE_TRAIN, ROLE_DEV)
 
-TRAINING_ALLOWED = ("development",)
-DEVELOPMENT_ALLOWED = ("development",)
-EVALUATION_ALLOWED = ("test",)
+# Splits/sources that are never training material, regardless of any override.
+DENIED_SPLITS = ("calibration", "private_test", "private_shift", "test",
+                 "real_holdout")
+DENIED_SOURCES = ("real_mail",)
+AMBIGUOUS_OBS = ("ambiguous", "unavailable")
 
 
 class ExportError(ValueError):
@@ -47,120 +37,91 @@ class ExportError(ValueError):
 
 
 def domain_spec(domain, seed, revision=EXPORT_REVISION):
-    """A generation domain's identity; distinct domains never collide."""
-    if domain not in ("training", "development", "evaluation"):
+    if domain not in GENERATION_DOMAINS:
         raise ExportError("unknown generation domain %r" % domain)
-    body = {"domain": domain, "seed": int(seed), "revision": revision}
     return {"domain": domain, "seed": int(seed),
-            "domain_sha256": hash_obj(body)}
+            "domain_sha256": hash_obj({"domain": domain, "seed": int(seed),
+                                       "revision": revision})}
 
 
-def _model_input_text(example):
-    parts = []
-    for msg in example.get("messages") or []:
-        if msg.get("role") in ("system", "user", "tool"):
-            parts.append(str(msg.get("content") or ""))
-    return "\n".join(parts)
-
-
-def _reject(rejected, case_id, reason):
-    rejected.append({"case_id": case_id, "reason": reason})
-
-
-def export_decision_cases(cases, golds, *, domain, seed, allowed_splits,
-                          identities=None, taxonomy=None):
-    """Export decision examples for one generation domain, fail-closed."""
-    identities = dict(identities or DEFAULT_IDENTITIES)
-    spec = domain_spec(domain, seed)
-    gold_by_case = {}
-    for g in golds or []:
-        gold_by_case.setdefault(g.get("case_id"), g)
-    accepted, rejected = [], []
-    for case in cases or []:
-        cid = case.get("case_id")
-        if case.get("generation_domain") and case["generation_domain"] != domain:
-            _reject(rejected, cid, "mixed_generation_domain"); continue
-        split = case.get("split")
-        if split not in allowed_splits:
-            _reject(rejected, cid, "split_not_allowed:%s" % split); continue
-        gold = gold_by_case.get(cid)
-        if not gold:
-            _reject(rejected, cid, "no_gold"); continue
-        if gold.get("source") == "real_mail":
-            _reject(rejected, cid, "real_mail_material"); continue
-        obs = gold.get("observable") or {}
-        if obs.get("category") in ("ambiguous", "unavailable"):
-            _reject(rejected, cid, "unobservable_decision_gold"); continue
-        example = build_decision_example(case, gold, domain=domain,
-                                         identities=identities, taxonomy=taxonomy)
-        try:
-            assert_no_gold_leakage(_model_input_text(example), gold)
-        except GoldLeakageError as exc:
-            _reject(rejected, cid, "contamination:%s" % exc); continue
-        problems = validate_sft_example(example) + verify_example(example, gold)
-        if problems:
-            _reject(rejected, cid, "verification_failed:%s" % "; ".join(problems))
-            continue
-        example["generation_domain_sha256"] = spec["domain_sha256"]
-        accepted.append(example)
-    return {"domain": spec, "accepted": accepted, "rejected": rejected,
-            "examples": accepted}
-
-
-def export_workflow_scenarios(scenarios, *, domain, seed, identities=None,
-                              trusted_system=None, tools=None):
-    """Export authored workflow examples for one generation domain."""
-    identities = dict(identities or DEFAULT_IDENTITIES)
-    spec = domain_spec(domain, seed)
-    accepted, rejected = [], []
-    for scenario in scenarios or []:
-        sid = scenario.get("id")
-        try:
-            example = build_workflow_example(
-                scenario, domain=domain, identities=identities,
-                trusted_system=trusted_system, tools=tools)
-        except Exception as exc:  # noqa: BLE001 - report, never export silently
-            _reject(rejected, sid, "build_failed:%s" % exc); continue
-        # contamination includes workflow-source text folded into the input.
-        src = workflow_source_text(scenario)
-        gold = {"hidden_evidence": [], "answer": scenario.get("gold")}
-        try:
-            assert_no_gold_leakage(_model_input_text(example), gold)
-        except GoldLeakageError as exc:
-            _reject(rejected, sid, "contamination:%s" % exc); continue
-        if src and src in _model_input_text(example) and not _expected_source(
-                example, src):
-            _reject(rejected, sid, "workflow_source_leak"); continue
-        problems = validate_sft_example(example) + verify_example(
-            example, gold, trace=example.get("trace"))
-        if problems:
-            _reject(rejected, sid, "verification_failed:%s" % "; ".join(problems))
-            continue
-        example["generation_domain_sha256"] = spec["domain_sha256"]
-        example["workflow_source_text"] = src
-        accepted.append(example)
-    return {"domain": spec, "accepted": accepted, "rejected": rejected,
-            "examples": accepted}
-
-
-def _expected_source(example, src):
-    """A workflow's own mailbox text is expected in its own tool results."""
-    return True
-
-
-# ------------------------------------------------------------- contamination
-
-def _norm(text):
+def _norm_text(text):
     return re.sub(r"\s+", " ", (text or "").lower()).strip()
 
 
-def contamination_report(exports):
-    """Cross-domain contamination + separation problems ([] when clean).
+def _email_text(example):
+    e = example.get("source_email") or {}
+    return _norm_text(" ".join([str(e.get(k) or "") for k in
+                                ("from_addr", "to_addr", "subject", "body")]))
 
-    ``exports`` is a sequence of export dicts (from the functions above).
-    Checks: distinct domain hashes, no shared ``source_id`` across domains, no
-    shared workflow source text, and no gold hidden evidence in model input.
-    """
+
+def _reject(rejected, sid, reason):
+    rejected.append({"source_id": sid, "reason": reason})
+
+
+def export_sources(sources, dialogues, taxonomy, *, domain, seed,
+                   identities=None, allowed_roles=(ROLE_TRAIN,)):
+    """Export paired classifier + dialogue examples for one generation domain."""
+    spec = domain_spec(domain, seed)
+    dialog_by_source = {}
+    for d in dialogues or []:
+        dialog_by_source.setdefault(d.get("source_id"), d)
+    accepted, rejected, pairs = [], [], []
+    for source in sources or []:
+        sid = source.get("source_id")
+        role = source.get("role")
+        dom = source.get("domain")
+        if not role:
+            _reject(rejected, sid, "missing_role"); continue
+        if not dom:
+            _reject(rejected, sid, "missing_domain"); continue
+        if role not in allowed_roles:
+            _reject(rejected, sid, "role_not_allowed:%s" % role); continue
+        if dom != domain:
+            _reject(rejected, sid, "mixed_generation_domain:%s" % dom); continue
+        # hard denylist before any allow-list
+        if source.get("split") in DENIED_SPLITS:
+            _reject(rejected, sid, "disallowed_split:%s" % source.get("split")); continue
+        if source.get("source_kind") in DENIED_SOURCES:
+            _reject(rejected, sid, "real_mail_material"); continue
+        intent = source.get("intent") or {}
+        obs = intent.get("observable", "visible")
+        if obs in AMBIGUOUS_OBS or not intent.get("category"):
+            _reject(rejected, sid, "unobservable_decision_gold"); continue
+        if not source.get("lineage_id"):
+            _reject(rejected, sid, "missing_lineage"); continue
+
+        dialogue = dialog_by_source.get(sid)
+        if dialogue is None:
+            _reject(rejected, sid, "no_dialogue"); continue
+        if dialogue.get("lineage_id") != source.get("lineage_id"):
+            _reject(rejected, sid, "dialogue_lineage_mismatch"); continue
+        if dialogue.get("domain") != domain:
+            _reject(rejected, sid, "dialogue_domain_mismatch"); continue
+
+        dec = build_decision_example(source, taxonomy, domain=domain,
+                                     identities=identities)
+        dlg = build_dialogue_example(dialogue, taxonomy, domain=domain,
+                                     identities=identities)
+        dec["generation_domain_sha256"] = spec["domain_sha256"]
+        dlg["generation_domain_sha256"] = spec["domain_sha256"]
+        problems = (validate_sft_example(dec) + validate_sft_example(dlg)
+                    + verify_example(dec, source=source, taxonomy=taxonomy)
+                    + verify_example(dlg, source=source,
+                                     gold=dialogue.get("gold"),
+                                     taxonomy=taxonomy))
+        if problems:
+            _reject(rejected, sid, "verification_failed:%s" % "; ".join(problems))
+            continue
+        accepted.extend([dec, dlg])
+        pairs.append({"source_id": sid, "lineage_id": source["lineage_id"],
+                      "decision_example": dec["example_id"],
+                      "dialogue_example": dlg["example_id"]})
+    return {"domain": spec, "accepted": accepted, "rejected": rejected,
+            "examples": accepted, "pairs": pairs}
+
+
+def contamination_report(exports):
+    """Cross-domain contamination for source ids, lineage ids and email text."""
     problems = []
     hashes = {}
     for exp in exports:
@@ -171,22 +132,44 @@ def contamination_report(exports):
                             % (hashes[h], dom))
         hashes[h] = dom
 
-    source_ids = {}
-    source_texts = {}
+    seen_sid, seen_lin, seen_text = {}, {}, {}
     for exp in exports:
         dom = (exp.get("domain") or {}).get("domain")
-        for example in exp.get("accepted") or []:
-            sid = example.get("source_id")
+        for ex in exp.get("accepted") or []:
+            sid, lin = ex.get("source_id"), ex.get("lineage_id")
+            if sid and sid in seen_sid and seen_sid[sid] != dom:
+                problems.append("source_id %r shared across %r and %r"
+                                % (sid, seen_sid[sid], dom))
             if sid:
-                if sid in source_ids and source_ids[sid] != dom:
-                    problems.append("source_id %r appears in both %r and %r"
-                                    % (sid, source_ids[sid], dom))
-                source_ids[sid] = dom
-            if example.get("task") == "workflow":
-                norm = _norm(example.get("workflow_source_text"))
-                if norm:
-                    if norm in source_texts and source_texts[norm] != dom:
-                        problems.append("workflow source text shared between "
-                                        "%r and %r" % (source_texts[norm], dom))
-                    source_texts[norm] = dom
+                seen_sid[sid] = dom
+            if lin and lin in seen_lin and seen_lin[lin] != dom:
+                problems.append("lineage_id %r shared across %r and %r"
+                                % (lin, seen_lin[lin], dom))
+            if lin:
+                seen_lin[lin] = dom
+            text = _email_text(ex)
+            if text and text in seen_text and seen_text[text] != dom:
+                problems.append("email text shared across %r and %r"
+                                % (seen_text[text], dom))
+            if text:
+                seen_text[text] = dom
+    return problems
+
+
+def assert_cross_task_linkage(export):
+    """Every accepted source must appear as a decision+dialogue pair."""
+    problems = []
+    by_source = {}
+    for ex in export.get("accepted") or []:
+        by_source.setdefault(ex["source_id"], {}).setdefault(ex["task"], []).append(ex)
+    for sid, tasks in by_source.items():
+        if "decision" not in tasks or "workflow" not in tasks:
+            problems.append("source %r is missing a decision or dialogue example"
+                            % sid)
+            continue
+        dec_lin = tasks["decision"][0]["lineage_id"]
+        dlg_lin = tasks["workflow"][0]["lineage_id"]
+        if dec_lin != dlg_lin:
+            problems.append("source %r decision/dialogue lineage differ (%r/%r)"
+                            % (sid, dec_lin, dlg_lin))
     return problems

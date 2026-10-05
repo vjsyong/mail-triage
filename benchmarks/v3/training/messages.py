@@ -95,6 +95,11 @@ def to_native_messages(messages):
         if msg["role"] == "assistant" and msg.get("think"):
             content = "<think>\n%s\n</think>\n\n%s" % (msg["think"], content)
         native["content"] = content
+        # Preserve supervision so the training mask is derived from the canonical
+        # flag, not by assuming every assistant turn is learnable (B1).
+        native["supervised"] = bool(msg.get("supervised"))
+        if msg.get("rejected"):
+            native["rejected"] = True
         if msg["role"] == "assistant" and msg.get("tool_calls"):
             calls = []
             for tc in msg["tool_calls"]:

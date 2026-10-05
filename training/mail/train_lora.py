@@ -30,11 +30,44 @@ def build_batch(tokenizer, example, device, max_len):
             "labels": labels, "supervised_tokens": built["supervised_tokens"]}
 
 
+def _repo_root():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _code_fingerprints():
+    root = _repo_root()
+    paths = [os.path.join(os.path.dirname(__file__), name) for name in (
+        "train_lora.py", "lora_common.py", "generate_teacher.py",
+        "rollout_dialogue.py", "evaluate.py", "briefs.py")]
+    paths.append(os.path.join(root, "engine.py"))
+    return LC.code_fingerprints(paths)
+
+
+def _template_sha256():
+    import hashlib
+    root = _repo_root()
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from benchmarks.v3.training import minicpm
+    text = minicpm.render_messages([
+        {"role": "user", "content": "x"},
+        {"role": "tool", "content": "y", "tool_call_id": "c1"}])
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def loss_on(model, batch):
     import torch
     with torch.no_grad():
         out = model(**batch)
     return float(out.loss.detach().float().cpu())
+
+
+def probe_logits(model, batch):
+    import torch
+    with torch.no_grad():
+        out = model(input_ids=batch["input_ids"],
+                    attention_mask=batch["attention_mask"])
+    return out.logits.detach().float().cpu()
 
 
 def main(argv=None):
@@ -78,6 +111,7 @@ def main(argv=None):
 
     probe_id, probe = batches[0]
     loss_before = loss_on(model, probe)
+    logits_before = probe_logits(model, probe)
 
     base_before = {n: p.detach().float().cpu().clone()
                    for n, p in model.named_parameters()
@@ -103,6 +137,9 @@ def main(argv=None):
 
     model.eval()
     loss_after = loss_on(model, probe)
+    logits_after = probe_logits(model, probe)
+    adapter_delta = float((logits_after - logits_before).abs().max())
+    del logits_before, logits_after
     base_delta = 0.0
     for n, p in model.named_parameters():
         if "lora_" not in n:
@@ -132,6 +169,10 @@ def main(argv=None):
         "model_revision": LC.MODEL_REVISION,
         "model_dir": args.model_dir,
         "base_weights_sha256": base_fingerprint,
+        "examples_file": args.examples,
+        "examples_sha256": LC.sha256_file(args.examples),
+        "code_fingerprints": _code_fingerprints(),
+        "template_sha256": _template_sha256(),
         "adapter_dir": adapter_dir,
         "adapter_files": adapter_files,
         "seed": args.seed,
@@ -150,8 +191,9 @@ def main(argv=None):
         "all_losses_finite": all(abs(l["loss"]) < 1e6 for l in losses),
         "base_weight_max_delta": base_delta,
         "lora_weight_norm": lora_norm,
+        "adapter_logits_delta": adapter_delta,
         "weights_changed": bool(abs(loss_after - loss_before) > 1e-9
-                                or lora_norm > 0),
+                                or lora_norm > 0 or adapter_delta > 0),
         "reload_matches": bool(abs(reload_loss - loss_after) < 1e-3),
         "seconds": round(elapsed, 2),
         "device": device,

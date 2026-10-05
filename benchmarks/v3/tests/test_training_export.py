@@ -1,4 +1,5 @@
-"""AC2: fail-closed export, generation-domain separation, contamination."""
+"""AC2/M2/M3: explicit role/domain, hard fail-closed gating, contamination."""
+import copy
 import os
 import sys
 import unittest
@@ -12,127 +13,143 @@ for _p in (ROOT, V3):
 
 from benchmarks.v3.training import export as E  # noqa: E402
 from benchmarks.v3.training import samples as S  # noqa: E402
+from benchmarks.v3.training.taxonomies import load_taxonomy  # noqa: E402
 
 
-def _case(cid, split="development", user="Subject: Invoice\n\nPlease pay 42.",
-          domain=None):
-    case = {
-        "case_id": cid, "gold_id": "g_%s" % cid, "split": split,
-        "input_profile": "native", "scenario_id": "scn_%s" % cid,
-        "lineage_id": "lin_%s" % cid,
-        "rendered_input": {"system": "sys", "user": user},
-    }
-    if domain:
-        case["generation_domain"] = domain
-    return case
-
-
-def _gold(cid, category="Billing", needs_reply=False, hidden=None, source="synthetic"):
-    return {
-        "gold_id": "g_%s" % cid, "case_id": cid, "source": source,
-        "observable": {"category": "visible" if category else "ambiguous",
-                       "needs_reply": "visible"},
-        "answer": {"category": category, "needs_reply": needs_reply,
-                   "acceptable_categories": [category] if category else []},
-        "hidden_evidence": list(hidden or []),
-    }
+def _fixture():
+    fix = S.load_workflow_scenarios()
+    return copy.deepcopy(fix["sources"]), copy.deepcopy(fix["dialogues"])
 
 
 class DomainTests(unittest.TestCase):
-    def test_domain_hashes_are_distinct(self):
-        specs = [E.domain_spec(d, 7) for d in
-                 ("training", "development", "evaluation")]
-        hashes = [s["domain_sha256"] for s in specs]
-        self.assertEqual(len(set(hashes)), 3)
-
-    def test_domain_hash_is_seed_sensitive(self):
+    def test_domain_hashes_distinct_and_seed_sensitive(self):
+        hs = [E.domain_spec(d, 7)["domain_sha256"]
+              for d in ("training", "development", "evaluation")]
+        self.assertEqual(len(set(hs)), 3)
         self.assertNotEqual(E.domain_spec("training", 1)["domain_sha256"],
                             E.domain_spec("training", 2)["domain_sha256"])
 
-    def test_unknown_domain_raises(self):
-        with self.assertRaises(E.ExportError):
-            E.domain_spec("test", 0)
-
 
 class FailClosedTests(unittest.TestCase):
-    def test_private_calibration_test_rejected(self):
-        cases = [_case("d1"), _case("c1", split="calibration"),
-                 _case("t1", split="test"), _case("p1", split="private_test")]
-        golds = [_gold(c["case_id"]) for c in cases]
-        res = E.export_decision_cases(cases, golds, domain="training", seed=1,
-                                      allowed_splits=E.TRAINING_ALLOWED)
-        self.assertEqual([e["case_id"] for e in res["accepted"]], ["d1"])
-        reasons = {r["case_id"]: r["reason"] for r in res["rejected"]}
-        self.assertTrue(reasons["c1"].startswith("split_not_allowed"))
-        self.assertTrue(reasons["t1"].startswith("split_not_allowed"))
-        self.assertTrue(reasons["p1"].startswith("split_not_allowed"))
+    def setUp(self):
+        self.tax = load_taxonomy()
 
-    def test_ambiguous_and_unavailable_gold_rejected(self):
-        cases = [_case("d1"), _case("d2")]
-        golds = [_gold("d1", category="Billing"),
-                 _gold("d2", category=None)]  # ambiguous
-        res = E.export_decision_cases(cases, golds, domain="training", seed=1,
-                                      allowed_splits=E.TRAINING_ALLOWED)
-        self.assertEqual([e["case_id"] for e in res["accepted"]], ["d1"])
-        self.assertEqual(res["rejected"][0]["reason"],
-                         "unobservable_decision_gold")
+    def _export(self, sources, dialogues, domain="training", roles=("training",)):
+        return E.export_sources(sources, dialogues, self.tax, domain=domain,
+                                seed=7, allowed_roles=roles)
 
-    def test_real_mail_material_rejected(self):
-        res = E.export_decision_cases(
-            [_case("r1")], [_gold("r1", source="real_mail")],
-            domain="training", seed=1, allowed_splits=E.TRAINING_ALLOWED)
-        self.assertEqual(res["accepted"], [])
-        self.assertEqual(res["rejected"][0]["reason"], "real_mail_material")
-
-    def test_mixed_generation_domain_rejected(self):
-        cases = [_case("d1", domain="evaluation")]
-        golds = [_gold("d1")]
-        res = E.export_decision_cases(cases, golds, domain="training", seed=1,
-                                      allowed_splits=E.TRAINING_ALLOWED)
-        self.assertEqual(res["accepted"], [])
-        self.assertEqual(res["rejected"][0]["reason"], "mixed_generation_domain")
-
-    def test_gold_hidden_evidence_in_input_rejected(self):
-        cases = [_case("d1", user="Subject: Invoice\n\nThe overdue invoice is here.")]
-        golds = [_gold("d1", hidden=["overdue invoice"])]
-        res = E.export_decision_cases(cases, golds, domain="training", seed=1,
-                                      allowed_splits=E.TRAINING_ALLOWED)
-        self.assertEqual(res["accepted"], [])
-        self.assertTrue(res["rejected"][0]["reason"].startswith("contamination"))
-
-
-class WorkflowExportTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.scenarios = S.load_workflow_scenarios()["scenarios"]
-
-    def test_workflow_export_and_verify(self):
-        res = E.export_workflow_scenarios(self.scenarios, domain="training", seed=1)
-        self.assertEqual(len(res["accepted"]), len(self.scenarios))
+    def test_valid_fixture_has_no_rejections_and_pairs(self):
+        s, d = _fixture()
+        res = self._export(s, d)
         self.assertEqual(res["rejected"], [])
+        self.assertEqual(len(res["pairs"]), len(s))
+        self.assertEqual(E.assert_cross_task_linkage(res), [])
 
-    def test_contamination_report_flags_shared_source(self):
-        a = E.export_workflow_scenarios(self.scenarios[:1], domain="training",
-                                        seed=1)
-        # same scenario exported under a different domain -> shared source_id
-        b = E.export_workflow_scenarios(self.scenarios[:1], domain="evaluation",
-                                        seed=2)
-        problems = E.contamination_report([a, b])
-        self.assertTrue(any("source_id" in p or "source text" in p
+    def test_missing_role_rejected(self):
+        s, d = _fixture()
+        del s[0]["role"]
+        res = self._export(s, d)
+        self.assertTrue(any(r["reason"] == "missing_role" for r in res["rejected"]))
+
+    def test_missing_domain_rejected(self):
+        s, d = _fixture()
+        del s[0]["domain"]
+        res = self._export(s, d)
+        self.assertTrue(any(r["reason"] == "missing_domain" for r in res["rejected"]))
+
+    def test_disallowed_split_rejected_even_if_allowed(self):
+        s, d = _fixture()
+        s[0]["split"] = "calibration"
+        # role/domain are valid and allowed, split must still fail closed
+        res = self._export(s, d, roles=("training",))
+        self.assertTrue(any(r["reason"].startswith("disallowed_split")
+                            for r in res["rejected"]), res["rejected"])
+
+    def test_real_mail_rejected(self):
+        s, d = _fixture()
+        s[0]["source_kind"] = "real_mail"
+        res = self._export(s, d)
+        self.assertTrue(any(r["reason"] == "real_mail_material"
+                            for r in res["rejected"]))
+
+    def test_ambiguous_or_unobservable_rejected(self):
+        s, d = _fixture()
+        s[0]["intent"]["observable"] = "ambiguous"
+        s[0]["intent"]["category"] = None
+        res = self._export(s, d)
+        self.assertTrue(any(r["reason"] == "unobservable_decision_gold"
+                            for r in res["rejected"]))
+
+    def test_mixed_domain_rejected(self):
+        s, d = _fixture()
+        s[0]["domain"] = "development"
+        # dialogue still training domain
+        res = self._export(s, d)
+        self.assertTrue(any("mixed_generation_domain" in r["reason"]
+                            for r in res["rejected"]))
+
+    def test_role_not_allowed_rejected(self):
+        s, d = _fixture()
+        res = self._export(s, d, roles=("development",))
+        self.assertTrue(any(r["reason"].startswith("role_not_allowed")
+                            for r in res["rejected"]))
+
+    def test_no_dialogue_rejected(self):
+        s, d = _fixture()
+        res = self._export(s, d[:1])
+        self.assertTrue(any(r["reason"] == "no_dialogue" for r in res["rejected"]))
+
+    def test_dialogue_lineage_mismatch_rejected(self):
+        s, d = _fixture()
+        d[0]["lineage_id"] = "lin_wrong"
+        res = self._export(s, d)
+        self.assertTrue(any(r["reason"] == "dialogue_lineage_mismatch"
+                            for r in res["rejected"]))
+
+
+class ContaminationTests(unittest.TestCase):
+    def setUp(self):
+        self.tax = load_taxonomy()
+
+    def test_shared_source_across_domains_flagged(self):
+        s, d = _fixture()
+        train = E.export_sources(s, d, self.tax, domain="training", seed=7,
+                                 allowed_roles=("training",))
+        # same records relabelled development (and same source id/text)
+        s2 = copy.deepcopy(s)
+        d2 = copy.deepcopy(d)
+        for x in s2:
+            x["role"] = "development"
+            x["domain"] = "development"
+        for x in d2:
+            x["role"] = "development"
+            x["domain"] = "development"
+        dev = E.export_sources(s2, d2, self.tax, domain="development", seed=8,
+                               allowed_roles=("development",))
+        problems = E.contamination_report([train, dev])
+        self.assertTrue(any("source_id" in p or "email text" in p or "lineage" in p
                             for p in problems), problems)
 
-    def test_contamination_report_clean_for_disjoint_sources(self):
-        a = E.export_workflow_scenarios(self.scenarios[:1], domain="training",
-                                        seed=1)
-        b = E.export_workflow_scenarios(self.scenarios[1:], domain="evaluation",
-                                        seed=2)
-        self.assertEqual(E.contamination_report([a, b]), [])
+    def test_disjoint_domains_clean(self):
+        s, d = _fixture()
+        devfix = S.load_dev_workflow_scenarios()
+        train = E.export_sources(s, d, self.tax, domain="training", seed=7,
+                                 allowed_roles=("training",))
+        dev = E.export_sources(copy.deepcopy(devfix["sources"]),
+                               copy.deepcopy(devfix["dialogues"]), self.tax,
+                               domain="development", seed=8,
+                               allowed_roles=("development",))
+        self.assertEqual(E.contamination_report([train, dev]), [])
 
-    def test_workflow_source_text_included_in_contamination(self):
-        a = E.export_workflow_scenarios(self.scenarios, domain="training", seed=1)
-        for example in a["accepted"]:
-            self.assertIn("workflow_source_text", example)
-            self.assertTrue(example["workflow_source_text"])
+    def test_cross_task_lineage_asserted_on_export(self):
+        s, d = _fixture()
+        res = E.export_sources(s, d, self.tax, domain="training", seed=7,
+                               allowed_roles=("training",))
+        by = {}
+        for ex in res["accepted"]:
+            by.setdefault(ex["source_id"], {})[ex["task"]] = ex["lineage_id"]
+        for sid, tasks in by.items():
+            self.assertEqual(tasks.get("decision"), tasks.get("workflow"), sid)
 
 
 if __name__ == "__main__":

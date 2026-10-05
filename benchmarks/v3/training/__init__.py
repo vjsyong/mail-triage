@@ -17,10 +17,10 @@ Modules:
 * ``samples``     -- authored example construction
 """
 from .messages import TRAIN_SCHEMA_VERSION
-from .schema import (GENERATION_DOMAINS, TASK_TYPES, gold_answer,
+from .schema import (GENERATION_DOMAINS, ROLES, TASK_TYPES, gold_answer,
                      validate_sft_example)
 
 __all__ = [
-    "TRAIN_SCHEMA_VERSION", "TASK_TYPES", "GENERATION_DOMAINS",
+    "TRAIN_SCHEMA_VERSION", "TASK_TYPES", "GENERATION_DOMAINS", "ROLES",
     "validate_sft_example", "gold_answer",
 ]

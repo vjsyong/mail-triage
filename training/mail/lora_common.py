@@ -25,25 +25,34 @@ def sha256_file(path):
 
 
 def sha256_tree(path):
-    """A stable hash of a directory's file names + contents."""
+    """A stable **full-content** hash of a directory (sorted traversal).
+
+    Every file's complete bytes are hashed; weight blobs are not sampled, so the
+    base-weight digest is a true content hash (M5).
+    """
     h = hashlib.sha256()
+    entries = []
     for root, _dirs, files in os.walk(path):
-        for name in sorted(files):
+        for name in files:
             fp = os.path.join(root, name)
-            rel = os.path.relpath(fp, path)
-            h.update(rel.encode())
-            if name.endswith((".safetensors", ".bin")):
-                # weight blobs: hash by size + first/last MiB (fast, sufficient)
-                size = os.path.getsize(fp)
-                h.update(str(size).encode())
-                with open(fp, "rb") as f:
-                    h.update(f.read(1048576))
-                    if size > 2097152:
-                        f.seek(-1048576, os.SEEK_END)
-                        h.update(f.read(1048576))
-            else:
-                h.update(sha256_file(fp).encode())
+            entries.append((os.path.relpath(fp, path), fp))
+    for rel, fp in sorted(entries):
+        h.update(rel.encode())
+        h.update(b"\0")
+        h.update(sha256_file(fp).encode())
+        h.update(b"\0")
     return h.hexdigest()
+
+
+def code_fingerprints(paths):
+    """Full-content hashes of the code/inputs that produced a run."""
+    out = {}
+    for path in paths:
+        if os.path.isfile(path):
+            out[path] = sha256_file(path)
+        elif os.path.isdir(path):
+            out[path] = sha256_tree(path)
+    return out
 
 
 def load_tokenizer(model_dir=None):

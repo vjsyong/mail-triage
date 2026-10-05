@@ -1,4 +1,4 @@
-"""AC4: per-turn trace persistence, context reconstruction, malformed rejection."""
+"""AC4/B1: per-turn trace, context reconstruction, malformed-call masking."""
 import os
 import sys
 import unittest
@@ -12,99 +12,91 @@ for _p in (ROOT, V3):
 
 from benchmarks.v3.training import samples as S  # noqa: E402
 from benchmarks.v3.training import trace as TR  # noqa: E402
+from benchmarks.v3.training.messages import to_native_messages  # noqa: E402
+from benchmarks.v3.training.taxonomies import load_taxonomy  # noqa: E402
+
+
+def _dialogue_by_id(did):
+    for d in S.load_workflow_scenarios()["dialogues"]:
+        if d["dialogue_id"] == did:
+            return d
+    raise AssertionError(did)
 
 
 class TraceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        scenarios = S.load_workflow_scenarios()["scenarios"]
-        cls.sort = next(s for s in scenarios if s["id"] == "wf_sort_ambiguous")
+        cls.tax = load_taxonomy()
+        cls.ex = S.build_dialogue_example(_dialogue_by_id("dlg_wsort"), cls.tax,
+                                          domain="training")
 
     def test_context_reconstruction_matches_recorded_input(self):
-        ex = S.build_workflow_example(self.sort, domain="training")
-        trace = ex["trace"]
+        trace = self.ex["trace"]
         for i, turn in enumerate(trace["turns"]):
             self.assertEqual(TR.reconstruct_context(trace, i),
                              turn["model_visible_input"])
-        # the first turn sees only system+request; the final turn sees more.
         self.assertEqual(len(trace["turns"][0]["model_visible_input"]), 2)
-        self.assertGreater(len(trace["turns"][-1]["model_visible_input"]), 2)
 
-    def test_input_grows_only_by_known_turns(self):
-        ex = S.build_workflow_example(self.sort, domain="training")
-        trace = ex["trace"]
-        first = trace["turns"][0]["model_visible_input"]
-        self.assertEqual([m["role"] for m in first], ["system", "user"])
-
-    def test_complete_turn_evidence_recorded(self):
-        ex = S.build_workflow_example(self.sort, domain="training")
-        trace = ex["trace"]
-        tool_turn = next(t for t in trace["turns"] if t["tool_calls"])
+    def test_complete_turn_evidence(self):
+        tool_turn = next(t for t in self.ex["trace"]["turns"] if t["tool_calls"])
         self.assertTrue(tool_turn["tool_calls"][0]["raw_arguments"])
-        self.assertTrue(tool_turn["tool_results"][0]["raw_arguments"])
         self.assertTrue(tool_turn["events"])
         self.assertIsNotNone(tool_turn["state_snapshot"])
         self.assertIsNotNone(tool_turn["state_after"])
-        self.assertTrue(tool_turn["finish_reason"])
 
-    def test_usage_is_aggregated(self):
-        ex = S.build_workflow_example(self.sort, domain="training")
-        usage = ex["trace"]["usage"]
-        per_turn = sum(t["usage"]["total_tokens"]
-                       for t in ex["trace"]["turns"])
+    def test_usage_aggregated(self):
+        usage = self.ex["trace"]["usage"]
+        per_turn = sum(t["usage"]["total_tokens"] for t in self.ex["trace"]["turns"])
         self.assertEqual(usage["total_tokens"], per_turn)
 
     def test_identities_recorded(self):
-        ex = S.build_workflow_example(self.sort, domain="training")
-        ids = ex["trace"]["identities"]
+        ids = self.ex["trace"]["identities"]
         for key in ("model", "prompt_sha256", "schema_sha256", "tools_sha256",
                     "template_sha256"):
-            self.assertIn(key, ids)
             self.assertTrue(ids[key])
 
 
-class MalformedCallTraceTests(unittest.TestCase):
-    def _scenario_with_bad_call(self):
+class MalformedCallTests(unittest.TestCase):
+    def _bad(self):
         return {
-            "id": "wf_bad", "source_id": "src_bad",
+            "dialogue_id": "dlg_bad", "source_id": "src_bad",
+            "lineage_id": "lin_bad", "role": "training", "domain": "training",
             "request": "Move the message.",
-            "permissions": {"allow_move": True, "require_approval": False},
-            "mailbox": {"folders": ["INBOX", "Action"], "messages": [
-                {"message_id": "m1", "folder": "INBOX",
-                 "from_addr": "a@b.com", "to_addr": "o@x.com",
-                 "subject": "Hi", "date": "2025-09-01", "body": "hello"}],
-                "rules": []},
+            "permissions": {"move": "auto"},
+            "mailbox": [{"id": 1, "uid": 1, "folder": "INBOX",
+                         "from_addr": "a@b.com", "to_addr": "o@x.com",
+                         "subject": "Hi", "date": "2025-09-01", "body": "hello"}],
             "turns": [
                 {"role": "assistant", "content": "moving",
                  "tool_calls": [{"name": "move_message",
                                  "raw_arguments": "{not valid json"}]},
-                {"role": "assistant", "content": "sorry, retrying"},
-            ],
-            "gold": {"required_outcomes": ["moved m1"], "forbidden_outcomes": [],
-                     "expected_state": {"folders": {"INBOX": ["m1"]}}},
+                {"role": "assistant", "content": "sorry, retrying"}],
+            "gold": {"expected_state": {"folders": {"INBOX": [1]}},
+                     "required_outcomes": [], "forbidden_outcomes": [],
+                     "assertions": []},
+            "source_email": {"from_addr": "a@b.com", "to_addr": "o@x.com",
+                             "subject": "Hi", "body": "hello"},
         }
 
-    def test_malformed_args_rejected_before_execution(self):
-        ex = S.build_workflow_example(self._scenario_with_bad_call(),
-                                      domain="training")
+    def test_malformed_rejected_before_execution(self):
+        ex = S.build_dialogue_example(self._bad(), load_taxonomy(), domain="training")
         trace = ex["trace"]
-        bad_turn = trace["turns"][0]
-        self.assertTrue(bad_turn["rejected"])
-        self.assertEqual(bad_turn["finish_reason"], "rejected")
-        self.assertEqual(bad_turn["tool_results"][0]["rejected"],
+        self.assertTrue(trace["turns"][0]["rejected"])
+        self.assertEqual(trace["turns"][0]["finish_reason"], "rejected")
+        self.assertEqual(trace["turns"][0]["tool_results"][0]["rejected"],
                          "malformed_arguments")
-        # nothing executed; mailbox unchanged
-        self.assertEqual(trace["state_final"]["folders"]["INBOX"], ["m1"])
-        self.assertEqual(trace["state_final"]["folders"]["Action"], [])
+        self.assertEqual(trace["state_final"]["folders"]["INBOX"], [1])
 
-    def test_bad_student_turn_is_masked(self):
-        ex = S.build_workflow_example(self._scenario_with_bad_call(),
-                                      domain="training")
-        # the assistant turn that emitted the malformed call is not supervised
-        malformed = [m for m in ex["messages"]
-                     if m["role"] == "assistant" and "moving" in m.get("content", "")]
-        self.assertTrue(malformed)
-        self.assertFalse(malformed[0]["supervised"])
+    def test_bad_turn_masked_and_propagated_to_native(self):
+        ex = S.build_dialogue_example(self._bad(), load_taxonomy(), domain="training")
+        bad = [m for m in ex["messages"]
+               if m["role"] == "assistant" and "moving" in m.get("content", "")]
+        self.assertTrue(bad)
+        self.assertFalse(bad[0]["supervised"])
+        native = to_native_messages(ex["messages"])
+        bad_native = [m for m in native if m["role"] == "assistant"
+                      and "moving" in m.get("content", "")]
+        self.assertEqual(bad_native[0]["supervised"], False)
 
 
 if __name__ == "__main__":

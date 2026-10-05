@@ -10,6 +10,7 @@ from .messages import TRAIN_SCHEMA_VERSION
 
 TASK_TYPES = ("decision", "workflow")
 GENERATION_DOMAINS = ("training", "development", "evaluation")
+ROLES = ("training", "development")
 
 PUBLIC_METADATA_KEYS = (
     "review_status", "human_seal", "test_qualified", "generation_domain",
@@ -37,6 +38,9 @@ def validate_sft_example(example):
     if example.get("generation_domain") not in GENERATION_DOMAINS:
         problems.append("generation_domain must be one of %s"
                         % (GENERATION_DOMAINS,))
+    if example.get("role") not in ROLES:
+        problems.append("role must be an explicit one of %s (never inferred)"
+                        % (ROLES,))
     if not example.get("example_id"):
         problems.append("example_id is required")
     messages = example.get("messages")
