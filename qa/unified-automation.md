@@ -11,7 +11,11 @@ Integrated acceptance run for the `unified-automation` feature. Worktree:
   TinyJev classifier sidecar/plugin and benchmark changes (no conflicts, no
   automation-shell edits from upstream).
 - **Post-merge docs correction:** `3854119d160600bcf922b207ce5517b90734eac0`.
-  **AR1 review fixes** (see below) are committed on top of that.
+- **AR1 review fixes:** committed as `252ecc5de454d6519a09d878f20dd944f4f65f3e`.
+  Independently reviewed and **APPROVED (round 2 of 3)**; AR1-1 (Major) and AR1-2
+  (Minor) CLOSED with no unresolved blockers/majors and 3 non-blocking nits retained
+  (original newline strip, seeded folder strip, map insertion order). No source was
+  changed after this docs-only correction.
 
 **Screenshot provenance (honest limitation):** the full desktop/393px matrix and its
 `qa/unified-automation/*.png` images were captured on the **pre-merge feature tree**
@@ -49,7 +53,7 @@ and after).
 | TEST4 | `node --check static/ux.js`; `git diff --check`; `git diff master...HEAD --check` @ `60c83bf` | PASS — exit 0, no whitespace/syntax errors |
 | TEST4 | `git diff master...HEAD -- store.py engine.py` review @ `60c83bf` | `engine.py` changes are assistant page-context text/branches only. `store.py` **is** changed across the full PR (+58): the WP1 atomic settings helpers `settings_version` / `save_category_settings`; no `CREATE`/`ALTER`/column/`DEFAULT_SETTINGS` change. The WP4 commit itself did not touch `store.py`. |
 | TEST5 | Isolated real browser (below) | PASS — matrix below (pre-merge); merged smoke PASS |
-| TEST6 | Independent review / traceability closeout | **NOT YET DONE** — no independent reviewer has been launched |
+| TEST6 | Independent review / traceability closeout | **APPROVE (round 2 of 3)** — independent reviewer closed AR1-1 (Major) and AR1-2 (Minor) with no unresolved blockers/majors (3 nits retained); code reviewed `252ecc5`, unchanged by this docs-only correction. PR #4 round-2 approve: <https://github.com/vjsyong/mail-triage/pull/4#issuecomment-5999281643>; original reject: <https://github.com/vjsyong/mail-triage/pull/4#issuecomment-5999079286> |
 
 Mock gates were serialized with `flock -w 900 /tmp/opencode/mail-triage-e2e.lock`
 (shared suite lock; the merged run used `-w 1200`) so parallel agent worktrees never
@@ -136,8 +140,14 @@ authoritative integrated result.
 
 ## Review round AR1 (post-merge HIGH fixes)
 
-PR #4 review raised two issues; both fixed in this round (base `3854119`, fix commit
-on top). **Re-review (round 2) is pending; this document does not claim it.**
+PR #4 review raised two issues; both fixed in this round and independently
+re-reviewed. **Disposition: APPROVE (round 2 of 3), code `252ecc5`** — AR1-1 Major
+and AR1-2 Minor CLOSED, no unresolved blockers/majors, 3 nits retained (see
+Deviations). Round-2 approve:
+<https://github.com/vjsyong/mail-triage/pull/4#issuecomment-5999281643>; original
+reject: <https://github.com/vjsyong/mail-triage/pull/4#issuecomment-5999079286>.
+The gate tables below are prior snapshots and unchanged; this docs-only correction
+did not alter source or re-run identical gates.
 
 | Finding | Severity | Fix | Evidence |
 |---|---|---|---|
@@ -189,9 +199,12 @@ Fix-tree gates (frozen working tree, base `3854119`):
   TinyJev merge; the merged frozen tree `60c83bf` was verified by the full automated
   suite (1026 green) plus a bounded browser smoke only. The pre-merge images are not
   evidence for `60c83bf`.
-- **Independent review not yet done:** TEST6 below is marked NOT YET DONE. The earlier
-  WP4 commit message/QA draft described a review closeout; no independent reviewer has
-  been launched, so this document does not claim one.
+- **Independent review:** AR1-1 (Major) and AR1-2 (Minor) were closed by an
+  independent round-2 reviewer with **APPROVE (round 2 of 3)** against code
+  `252ecc5`; 3 non-blocking nits are retained and unresolved by choice (original
+  leading/trailing newline strip, seeded folder `.strip()`, map insertion order).
+  This docs-only correction does not change source, so the approval stands for the
+  last head; no approval is claimed for any later code.
 - **Store scope correction:** the WP4 commit did not touch `store.py`, but the full PR
   does (WP1 `settings_version` / `save_category_settings`). The PR changes no schema,
   column, default or setting type; it adds an atomic two-key save and digest.
