@@ -149,3 +149,36 @@ stages exit 0** (`<run>/<stage>.exit`, `<run>/run_receipt.json`).
 
 Rounds 1-2 sample artifacts remain under `samples/` for audit and are superseded
 by `samples/round3/` + `samples/evidence_round3.json`.
+
+## Round-4 delivered evidence (S1 correction attempt 2; supersedes round 3)
+
+Frozen code `7074f49` (tree `c3b83b1`), clean worktree. Run
+`/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8`; **all nine
+stages exit 0**.
+
+* **Fix.** `task_request` no-reply is now a real work request ("Please review the
+  document in the shared drive … complete the review in the portal. No reply is
+  needed.") — Action + no email reply, not a no-action notice; `receipt` no longer
+  uses a shipping notice and requires a completed payment/purchase. New
+  `category_gold.py` checks the visible text against the configured definition
+  (Action negation and shipping-only Receipt rejected) in both generation
+  (`generate_teacher.verify_email`) and export (`export.verify_source`).
+* **Regressions.** `test_training_category_gold.py` asserts the exact old
+  no-action text is not Action, shipping-only text is not Receipt, completed
+  payment is Receipt, and a real work request is Action/no-reply; every authored
+  brief variant is visibly coherent. `test_training_reply_gold.py` keeps the S1
+  reply checks.
+* **Run-8.** Teacher train 36/36 (9 reply-true, 27 false, 9 counterfactual pairs),
+  dev 24/24 (6/18, 6 pairs). Dialogues 6/4 accepted (+6/4 clarifications). Export
+  training 36 (6 pairs), dev 24 (4 pairs); contamination `[]`; linkage `[]`.
+* **Train.** 20 steps, loss 2.241 -> 0.040, reload 0.0267, base delta 0, adapter
+  logits delta 38.78; both tasks (`task_counts {decision: 30, workflow: 6}`,
+  `tasks_in_losses [decision, workflow]`); `native_template_sha256` pinned.
+* **Fresh metrics (no improvement required).** BASE `.958` cat / `1.0` reply /
+  `.5` workflow grounded → candidate `1.0` / `1.0` / `.5`. Honest draft.
+* **Committed examples.** `samples/round4/`: Billing reply/no-reply pair + matching
+  dialogues + an **Action / no-reply** decision; each `cli verify`-clean.
+* **Gates:** `521 v3`, `52 v2`, `1026 mock e2e`, `git diff --check` clean.
+
+Rounds 1-3 artifacts remain for audit and are superseded by `samples/round4/` +
+`samples/evidence_round4.json` (run-7 metrics are not reused).
