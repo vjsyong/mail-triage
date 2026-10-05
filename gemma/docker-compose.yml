@@ -64,7 +64,9 @@ services:
               #     count: 1
               #     capabilities: [gpu]
               device_ids:
-                - nvidia.com/gpu=0
+                # GPU 0 (PCI 01:00.0) is in a failed state ("Unknown Error",
+                # NVML nvmlDeviceGetHandleByIndex); run on the healthy RTX 3090.
+                - nvidia.com/gpu=1
               capabilities: [gpu]
     entrypoint:
       - /bin/bash

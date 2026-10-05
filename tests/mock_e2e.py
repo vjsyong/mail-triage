@@ -1254,6 +1254,10 @@ def main():
                  "/healthz"):
         r = client.get(path)
         check("GET %s -> 200" % path, r.status_code == 200)
+    r = client.get("/accounts/new")
+    check("add-account page auto-selects the provider from the email domain",
+          r.status_code == 200 and b"PROVIDER_EMAIL_DOMAINS" in r.data
+          and b"autoProvider" in r.data and b'oninput="autoProvider()"' in r.data)
     r = client.get("/assistant")
     check("GET /assistant -> fresh chat rendered directly (no redirect; canonical URL via replaceState)",
           r.status_code == 200 and b"/assistant/s/" in r.data and b"replaceState" in r.data)
