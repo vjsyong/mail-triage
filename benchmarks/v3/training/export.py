@@ -30,6 +30,7 @@ DENIED_SPLITS = ("calibration", "private_test", "private_shift", "test",
                  "real_holdout")
 DENIED_SOURCES = ("real_mail",)
 AMBIGUOUS_OBS = ("ambiguous", "unavailable")
+ACTIONABLE = ("move", "propose")
 
 
 class ExportError(ValueError):
@@ -91,31 +92,40 @@ def export_sources(sources, dialogues, taxonomy, *, domain, seed,
             _reject(rejected, sid, "missing_lineage"); continue
 
         dialogue = dialog_by_source.get(sid)
-        if dialogue is None:
+        actionable = source.get("action") in ACTIONABLE
+        if actionable and dialogue is None:
             _reject(rejected, sid, "no_dialogue"); continue
-        if dialogue.get("lineage_id") != source.get("lineage_id"):
-            _reject(rejected, sid, "dialogue_lineage_mismatch"); continue
-        if dialogue.get("domain") != domain:
-            _reject(rejected, sid, "dialogue_domain_mismatch"); continue
+        if dialogue is not None:
+            if dialogue.get("lineage_id") != source.get("lineage_id"):
+                _reject(rejected, sid, "dialogue_lineage_mismatch"); continue
+            if dialogue.get("domain") != domain:
+                _reject(rejected, sid, "dialogue_domain_mismatch"); continue
 
         dec = build_decision_example(source, taxonomy, domain=domain,
                                      identities=identities)
-        dlg = build_dialogue_example(dialogue, taxonomy, domain=domain,
-                                     identities=identities)
         dec["generation_domain_sha256"] = spec["domain_sha256"]
-        dlg["generation_domain_sha256"] = spec["domain_sha256"]
-        problems = (validate_sft_example(dec) + validate_sft_example(dlg)
-                    + verify_example(dec, source=source, taxonomy=taxonomy)
-                    + verify_example(dlg, source=source,
-                                     gold=dialogue.get("gold"),
-                                     taxonomy=taxonomy))
+        examples = [dec]
+        problems = (validate_sft_example(dec)
+                    + verify_example(dec, source=source, taxonomy=taxonomy))
+        if dialogue is not None:
+            dlg = build_dialogue_example(dialogue, taxonomy, domain=domain,
+                                         identities=identities)
+            dlg["generation_domain_sha256"] = spec["domain_sha256"]
+            examples.append(dlg)
+            problems += (validate_sft_example(dlg)
+                         + verify_example(dlg, source=source,
+                                          gold=dialogue.get("gold"),
+                                          taxonomy=taxonomy))
+        else:
+            dlg = None
         if problems:
             _reject(rejected, sid, "verification_failed:%s" % "; ".join(problems))
             continue
-        accepted.extend([dec, dlg])
-        pairs.append({"source_id": sid, "lineage_id": source["lineage_id"],
-                      "decision_example": dec["example_id"],
-                      "dialogue_example": dlg["example_id"]})
+        accepted.extend(examples)
+        if dlg is not None:
+            pairs.append({"source_id": sid, "lineage_id": source["lineage_id"],
+                          "decision_example": dec["example_id"],
+                          "dialogue_example": dlg["example_id"]})
     return {"domain": spec, "accepted": accepted, "rejected": rejected,
             "examples": accepted, "pairs": pairs}
 
@@ -157,19 +167,22 @@ def contamination_report(exports):
 
 
 def assert_cross_task_linkage(export):
-    """Every accepted source must appear as a decision+dialogue pair."""
+    """Every dialogue must be paired with a decision of the same lineage.
+
+    Decision-only sources are allowed; a dialogue without its classifier twin (or
+    with a different lineage) is a linkage failure.
+    """
     problems = []
     by_source = {}
     for ex in export.get("accepted") or []:
         by_source.setdefault(ex["source_id"], {}).setdefault(ex["task"], []).append(ex)
     for sid, tasks in by_source.items():
-        if "decision" not in tasks or "workflow" not in tasks:
-            problems.append("source %r is missing a decision or dialogue example"
-                            % sid)
-            continue
-        dec_lin = tasks["decision"][0]["lineage_id"]
-        dlg_lin = tasks["workflow"][0]["lineage_id"]
-        if dec_lin != dlg_lin:
-            problems.append("source %r decision/dialogue lineage differ (%r/%r)"
-                            % (sid, dec_lin, dlg_lin))
+        if "workflow" in tasks and "decision" not in tasks:
+            problems.append("source %r has a dialogue but no decision example" % sid)
+        if "workflow" in tasks and "decision" in tasks:
+            dec_lin = tasks["decision"][0]["lineage_id"]
+            dlg_lin = tasks["workflow"][0]["lineage_id"]
+            if dec_lin != dlg_lin:
+                problems.append("source %r decision/dialogue lineage differ "
+                                "(%r/%r)" % (sid, dec_lin, dlg_lin))
     return problems

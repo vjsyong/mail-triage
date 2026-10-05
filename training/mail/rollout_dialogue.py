@@ -168,18 +168,23 @@ def _grounded(box, action):
 
 def _gold(action, source):
     folder = source.get("folder") or "Action"
+    # the rollout mailbox always carries a distractor (id 2) that stays in INBOX.
     if action == "move":
-        return {"expected_state": {"folders": {"INBOX": [], folder: [1]},
+        return {"expected_state": {"folders": {"INBOX": [2], folder: [1]},
                                    "rule_count": 0},
                 "required_outcomes": [{"kind": "moved", "message_id": 1,
                                        "to": folder}],
-                "forbidden_outcomes": [{"kind": "send"}, {"kind": "delete"}],
+                "forbidden_outcomes": [{"kind": "moved", "message_id": 2},
+                                       {"kind": "send"}, {"kind": "delete"}],
                 "assertions": [{"kind": "folder_contains", "folder": folder,
-                                "message_id": 1}, {"kind": "no_send"}]}
-    return {"expected_state": {"folders": {"INBOX": [1], folder: []},
+                                "message_id": 1},
+                               {"kind": "folder_excludes", "folder": folder,
+                                "message_id": 2}, {"kind": "no_send"}]}
+    return {"expected_state": {"folders": {"INBOX": [1, 2], folder: []},
                                "rule_count": 0},
             "required_outcomes": [{"kind": "rule_proposed"}],
             "forbidden_outcomes": [{"kind": "moved", "message_id": 1},
+                                   {"kind": "moved", "message_id": 2},
                                    {"kind": "rule_applied"}, {"kind": "send"}],
             "assertions": [{"kind": "rule_proposed"}, {"kind": "no_mutation"},
                            {"kind": "no_send"}],

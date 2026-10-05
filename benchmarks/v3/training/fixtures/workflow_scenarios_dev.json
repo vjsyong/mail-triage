@@ -3,73 +3,243 @@
   "revision": "mail-sft-pipe1-dev",
   "sources": [
     {
-      "source_id": "srcdev_move_invoice", "lineage_id": "lindev_move_invoice",
-      "role": "development", "domain": "development", "family": "invoice_due",
+      "source_id": "srcdev_move_invoice",
+      "lineage_id": "lindev_move_invoice",
+      "role": "development",
+      "domain": "development",
+      "family": "invoice_due",
       "owner": "Priya Raman",
-      "intent": {"category": "Billing", "needs_reply": true, "observable": "visible"},
-      "email": {"from_addr": "billing@atlas-tools.com", "to_addr": "priya@acme.com",
-                "subject": "Invoice 908 overdue", "date": "Thu, 4 Sep 2025 09:00:00 +0000",
-                "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."},
-      "provenance": {"kind": "authored_fixture"}
+      "intent": {
+        "category": "Billing",
+        "needs_reply": true,
+        "observable": "visible"
+      },
+      "email": {
+        "from_addr": "billing@atlas-tools.com",
+        "to_addr": "priya@acme.com",
+        "subject": "Invoice 908 overdue",
+        "date": "Thu, 4 Sep 2025 09:00:00 +0000",
+        "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."
+      },
+      "provenance": {
+        "kind": "authored_fixture"
+      },
+      "action": "move"
     },
     {
-      "source_id": "srcdev_propose_newsletter", "lineage_id": "lindev_propose_newsletter",
-      "role": "development", "domain": "development", "family": "newsletter",
+      "source_id": "srcdev_propose_newsletter",
+      "lineage_id": "lindev_propose_newsletter",
+      "role": "development",
+      "domain": "development",
+      "family": "newsletter",
       "owner": "Priya Raman",
-      "intent": {"category": "Promo", "needs_reply": false, "observable": "visible"},
-      "email": {"from_addr": "digest@worldjournal.com", "to_addr": "priya@acme.com",
-                "subject": "Weekly digest", "date": "Thu, 4 Sep 2025 10:00:00 +0000",
-                "body": "Your weekly digest of stories."},
-      "provenance": {"kind": "authored_fixture"}
+      "intent": {
+        "category": "Promo",
+        "needs_reply": false,
+        "observable": "visible"
+      },
+      "email": {
+        "from_addr": "digest@worldjournal.com",
+        "to_addr": "priya@acme.com",
+        "subject": "Weekly digest",
+        "date": "Thu, 4 Sep 2025 10:00:00 +0000",
+        "body": "Your weekly digest of stories."
+      },
+      "provenance": {
+        "kind": "authored_fixture"
+      },
+      "action": "propose"
     }
   ],
   "dialogues": [
     {
-      "dialogue_id": "dlgdev_move_invoice", "source_id": "srcdev_move_invoice",
-      "lineage_id": "lindev_move_invoice", "role": "development",
-      "domain": "development", "family": "invoice_due",
+      "dialogue_id": "dlgdev_move_invoice",
+      "source_id": "srcdev_move_invoice",
+      "lineage_id": "lindev_move_invoice",
+      "role": "development",
+      "domain": "development",
+      "family": "invoice_due",
       "request": "Please move the overdue invoice in my inbox to the Action folder.",
-      "permissions": {"move": "auto", "rule_create": "auto"},
+      "permissions": {
+        "move": "auto",
+        "rule_create": "auto"
+      },
       "mailbox": [
-        {"id": 1, "uid": 1, "folder": "INBOX", "from_addr": "billing@atlas-tools.com", "to_addr": "priya@acme.com", "subject": "Invoice 908 overdue", "date": "Thu, 4 Sep 2025 09:00:00 +0000", "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."}
+        {
+          "id": 1,
+          "uid": 1,
+          "folder": "INBOX",
+          "from_addr": "billing@atlas-tools.com",
+          "to_addr": "priya@acme.com",
+          "subject": "Invoice 908 overdue",
+          "date": "Thu, 4 Sep 2025 09:00:00 +0000",
+          "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."
+        }
       ],
       "rules": [],
       "turns": [
-        {"role": "assistant", "think": "Move invoice id 1 to Action.", "content": "Moving the overdue invoice to Action.", "tool_calls": [{"name": "move_message", "raw_arguments": "{\"target_folder\": \"Action\", \"message_id\": 1}"}]},
-        {"role": "assistant", "content": "Moved invoice 908 (id 1) to the Action folder."}
+        {
+          "role": "assistant",
+          "think": "Move invoice id 1 to Action.",
+          "content": "Moving the overdue invoice to Action.",
+          "tool_calls": [
+            {
+              "name": "move_message",
+              "raw_arguments": "{\"target_folder\": \"Action\", \"message_id\": 1}"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": "Moved invoice 908 (id 1) to the Action folder."
+        }
       ],
       "gold": {
-        "expected_state": {"folders": {"INBOX": [], "Action": [1]}, "rule_count": 0},
-        "required_outcomes": [{"kind": "moved", "message_id": 1, "to": "Action"}],
-        "forbidden_outcomes": [{"kind": "send"}, {"kind": "delete"}],
-        "assertions": [{"kind": "folder_contains", "folder": "Action", "message_id": 1}, {"kind": "no_send"}]
+        "expected_state": {
+          "folders": {
+            "INBOX": [],
+            "Action": [
+              1
+            ]
+          },
+          "rule_count": 0
+        },
+        "required_outcomes": [
+          {
+            "kind": "moved",
+            "message_id": 1,
+            "to": "Action"
+          }
+        ],
+        "forbidden_outcomes": [
+          {
+            "kind": "send"
+          },
+          {
+            "kind": "delete"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "folder_contains",
+            "folder": "Action",
+            "message_id": 1
+          },
+          {
+            "kind": "no_send"
+          }
+        ]
       },
-      "source_email": {"from_addr": "billing@atlas-tools.com", "to_addr": "priya@acme.com", "subject": "Invoice 908 overdue", "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."},
-      "model": {"key": "authored_fixture"}, "provenance": {"kind": "authored_fixture"}
+      "source_email": {
+        "from_addr": "billing@atlas-tools.com",
+        "to_addr": "priya@acme.com",
+        "subject": "Invoice 908 overdue",
+        "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."
+      },
+      "model": {
+        "key": "authored_fixture"
+      },
+      "provenance": {
+        "kind": "authored_fixture"
+      }
     },
     {
-      "dialogue_id": "dlgdev_propose_newsletter", "source_id": "srcdev_propose_newsletter",
-      "lineage_id": "lindev_propose_newsletter", "role": "development",
-      "domain": "development", "family": "newsletter",
+      "dialogue_id": "dlgdev_propose_newsletter",
+      "source_id": "srcdev_propose_newsletter",
+      "lineage_id": "lindev_propose_newsletter",
+      "role": "development",
+      "domain": "development",
+      "family": "newsletter",
       "request": "Propose a rule to keep newsletters out of my inbox, but do not apply it yet.",
-      "permissions": {"move": "auto", "rule_create": "auto"},
+      "permissions": {
+        "move": "auto",
+        "rule_create": "auto"
+      },
       "mailbox": [
-        {"id": 1, "uid": 1, "folder": "INBOX", "from_addr": "digest@worldjournal.com", "to_addr": "priya@acme.com", "subject": "Weekly digest", "date": "Thu, 4 Sep 2025 10:00:00 +0000", "body": "Your weekly digest of stories."}
+        {
+          "id": 1,
+          "uid": 1,
+          "folder": "INBOX",
+          "from_addr": "digest@worldjournal.com",
+          "to_addr": "priya@acme.com",
+          "subject": "Weekly digest",
+          "date": "Thu, 4 Sep 2025 10:00:00 +0000",
+          "body": "Your weekly digest of stories."
+        }
       ],
       "rules": [],
       "turns": [
-        {"role": "assistant", "think": "Queue a rule proposal for the digest, do not apply.", "content": "I'll propose a rule to file the digest into Promo.", "tool_calls": [{"name": "propose_rule", "raw_arguments": "{\"name\": \"File digest\", \"match_mode\": \"all\", \"conditions\": [{\"field\": \"from\", \"op\": \"contains\", \"value\": \"worldjournal.com\"}], \"actions\": {\"move_to\": \"Promo\"}, \"rationale\": \"Keep the digest out of the inbox.\"}"}]},
-        {"role": "assistant", "content": "Proposed a rule to file the digest into Promo; it has not been applied."}
+        {
+          "role": "assistant",
+          "think": "Queue a rule proposal for the digest, do not apply.",
+          "content": "I'll propose a rule to file the digest into Promo.",
+          "tool_calls": [
+            {
+              "name": "propose_rule",
+              "raw_arguments": "{\"name\": \"File digest\", \"match_mode\": \"all\", \"conditions\": [{\"field\": \"from\", \"op\": \"contains\", \"value\": \"worldjournal.com\"}], \"actions\": {\"move_to\": \"Promo\"}, \"rationale\": \"Keep the digest out of the inbox.\"}"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": "Proposed a rule to file the digest into Promo; it has not been applied."
+        }
       ],
       "gold": {
-        "expected_state": {"folders": {"INBOX": [1], "Promo": []}, "rule_count": 0},
-        "required_outcomes": [{"kind": "rule_proposed"}],
-        "forbidden_outcomes": [{"kind": "moved", "message_id": 1}, {"kind": "rule_applied"}, {"kind": "send"}],
-        "assertions": [{"kind": "rule_proposed"}, {"kind": "no_mutation"}, {"kind": "no_send"}],
-        "rule_scope": {"proposal_must_match": 1, "proposal_must_not_match": []}
+        "expected_state": {
+          "folders": {
+            "INBOX": [
+              1
+            ],
+            "Promo": []
+          },
+          "rule_count": 0
+        },
+        "required_outcomes": [
+          {
+            "kind": "rule_proposed"
+          }
+        ],
+        "forbidden_outcomes": [
+          {
+            "kind": "moved",
+            "message_id": 1
+          },
+          {
+            "kind": "rule_applied"
+          },
+          {
+            "kind": "send"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "rule_proposed"
+          },
+          {
+            "kind": "no_mutation"
+          },
+          {
+            "kind": "no_send"
+          }
+        ],
+        "rule_scope": {
+          "proposal_must_match": 1,
+          "proposal_must_not_match": []
+        }
       },
-      "source_email": {"from_addr": "digest@worldjournal.com", "to_addr": "priya@acme.com", "subject": "Weekly digest", "body": "Your weekly digest of stories."},
-      "model": {"key": "authored_fixture"}, "provenance": {"kind": "authored_fixture"}
+      "source_email": {
+        "from_addr": "digest@worldjournal.com",
+        "to_addr": "priya@acme.com",
+        "subject": "Weekly digest",
+        "body": "Your weekly digest of stories."
+      },
+      "model": {
+        "key": "authored_fixture"
+      },
+      "provenance": {
+        "kind": "authored_fixture"
+      }
     }
   ]
 }
