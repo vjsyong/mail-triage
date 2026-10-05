@@ -108,3 +108,44 @@ stages have captured exit 0** (`<run>/<stage>.exit`, receipt
 
 Round-1 sample artifacts under `samples/` are preserved for audit and superseded
 by `samples/round2/` + `samples/evidence_round2.json`.
+
+## Round-3 delivered evidence (supersedes rounds 1-2)
+
+Frozen code `15d26c7` (tree `27b9af7`), clean worktree. One command
+(`training/mail/run_slice.py`) produced run
+`/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-7`; **all nine
+stages exit 0** (`<run>/<stage>.exit`, `<run>/run_receipt.json`).
+
+* **S1 visible reply-gold.** `briefs.py` authors a reply/no-reply obligation per
+  variant (same family holds both), `reply_gold.py` checks it in the visible text
+  (quoted-only phrases do not count), `export.verify_source` rejects a label the
+  visible email does not justify, and `verify_decision` cross-checks the visible
+  obligation. Run-7 teacher: train 36/36 (9 reply-true, 27 reply-false, 9
+  counterfactual pairs with both), dev 24/24 (6/18, 6 pairs).
+* **S2 private internal ids.** `taxonomy_block` renders display name + definition
+  only; `test_training_taxonomy` asserts `c_billing`/`c_action`/… never appear in
+  the classifier or workflow prompt under opaque renaming.
+* **S3 auditable samples.** Committed `samples/round3/*.json` are full samples
+  with a `verification_context` sidecar; `render(example.messages) == native_render`
+  and `cli verify` passes on each. No invented classifier think target.
+* **R2-N1** `cli verify` accepts `--sources`/`--taxonomy` or a sidecar and returns
+  structured `missing_context:*` errors; tested.
+* **R2-N2/N4/N6** README corrected (external lease, not driver-enforced) and the
+  ask/off result-shape and constant-distractor contamination limitations retained.
+* **R2-N3** `code_fingerprints` now cover the benchmark training modules,
+  `run_slice.py` and `engine.py`; `native_template_sha256` pins the released
+  tokenizer template.
+* **R2-N5** the conditional taxonomy assertion is replaced by a direct opaque
+  rename check.
+* **Training/export.** All 36 training examples are paired-or-decision; 6 pairs;
+  contamination `[]`; linkage `[]`. 20-step LoRA touched **both** tasks
+  (`task_counts {decision: 30, workflow: 6}`, `tasks_in_losses [decision, workflow]`);
+  loss 2.241 -> 0.311, reload 0.0177, base-weight delta 0, adapter logits delta
+  36.28.
+* **Fresh metrics (no improvement required).** BASE vs ADAPTER on 24 independent
+  dev records: category .875 -> 1.0, needs_reply 1.0 -> 1.0, workflow grounded .5
+  -> .5. Honest draft result, not a quality claim.
+* **Gates.** `511 v3`, `52 v2`, `1026 mock e2e`, `git diff --check` clean.
+
+Rounds 1-2 sample artifacts remain under `samples/` for audit and are superseded
+by `samples/round3/` + `samples/evidence_round3.json`.
