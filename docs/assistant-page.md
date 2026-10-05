@@ -162,3 +162,41 @@ The existing permission enforcement still applies independently.
   mobile; the user bubble stays black-filled. Mobile no longer overrides
   `.crow.user` with `justify-content:flex-end` - inside a `row-reverse` flex
   that packs LEFT, the opposite of the documented user-right convention.
+
+## Follow-up: turn persistence and retry (2026-10-05)
+
+A turn used to run inside the HTTP response generator: closing the tab (or the
+phone sleeping) killed the SSE connection and, with it, the run. The query was
+lost and the trailing user message sat in the chat with no reply and no way to
+resume it.
+
+- **Background runs.** `/assistant/stream` and `/assistant/regenerate` now start
+  an `AssistantRun` worker thread per chat and SSE-tail its event buffer;
+  disconnecting only drops a subscriber. Runs queue per session (a second send
+  waits for the first), events carry a `run` id, and the reply is persisted by
+  the worker exactly as before: only the final assistant message lands in
+  `assistant_messages`, no schema change.
+- **Re-attach.** `GET /assistant/live?sid=N` replays a chat's in-flight run from
+  event zero (finished runs stay replayable for 45 s). The server marks the
+  rendered chat with `.live-run` only while a run is active; page load and
+  sidebar panel loads call `assistantChat.attach()`, which tails the endpoint
+  or, on 404, re-fetches `/assistant/panel` so a just-finished turn still
+  appears. Transport errors auto-reconnect to the same run (`reconnecting…`,
+  bounded retries) instead of reporting a failure - the work continues
+  server-side regardless.
+- **Stop.** The Stop button POSTs `/assistant/stop` (cooperative cancel checked
+  between events) before aborting the local fetch, so it stops the *run*, not
+  just the view. A cancelled turn persists no reply.
+- **Retry.** `_assistant_prep` gives the trailing user message a `retry` control
+  whenever no reply followed (stopped, failed, or the server restarted), and the
+  in-page failure/stop bubbles grow the same `↻ Retry`. Both post to
+  `/assistant/regenerate`, which now accepts either a trailing assistant reply
+  (replace it) or a trailing user message (re-run with `store_user=False`, no
+  duplicate user row). `user_saved` events tell the client the persisted user
+  message id so a retry targets the right row. While a run is active the server
+  suppresses the retry control - the live view is the affordance then.
+
+Tests: T9c2 covers trailing-user retry and no-duplicate booking; T9c3 starts a
+gated turn, disconnects mid-stream, and proves the reply still lands plus
+`/assistant/live` replays it; T9c4 confirms stop cancels server-side, persists
+no reply, and leaves the page retry-able.

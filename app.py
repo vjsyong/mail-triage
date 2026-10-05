@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 import time
 from html import escape as html_escape
 from urllib.parse import quote
@@ -1437,22 +1438,52 @@ window.assistantChat = function(opts){
   root.addEventListener('scroll', function(){ if(jumpBtn){ jumpBtn.classList.toggle('hidden', nearBottom()); } });
   if(jumpBtn){ jumpBtn.addEventListener('click', function(){ root.scrollTop=root.scrollHeight; }); }
   var currentAbort=null;
-  if(stopBtn){ stopBtn.addEventListener('click', function(){ if(currentAbort) currentAbort.abort(); }); }
+  var activeRunId=0;      /* server-side run id of the stream being tailed */
+  var stopRequested=false;
+  var reconnectTries=0;
+  if(stopBtn){ stopBtn.addEventListener('click', function(){
+    if(!currentAbort) return;
+    stopRequested=true;
+    stopBtn.disabled=true;
+    fetch('/assistant/stop', { method:'POST',
+        headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body: 'session='+encodeURIComponent(sid)+'&run='+encodeURIComponent(activeRunId||0)
+    }).catch(function(){}).then(function(){ if(currentAbort) currentAbort.abort(); });
+  }); }
+  function resyncPanel(){
+    if(!sid) return;
+    var u='/assistant/panel?sid='+encodeURIComponent(sid)
+        +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : '');
+    fetch(u).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+      .then(function(html){
+        root.innerHTML=html;
+        if(!live.parentNode) root.appendChild(live);
+        root.scrollTop=root.scrollHeight;
+        if(opts.onDone) opts.onDone();
+      }).catch(function(){});
+  }
+  function attachNow(onMiss){
+    if(currentAbort || !sid) return false;
+    return !!run('', {mid:0, row:null, user:true, onMiss:onMiss}, true);
+  }
   form.addEventListener('submit', function(e){
     var text=ta.value.trim();
     if(!text){ e.preventDefault(); return; }
     e.preventDefault();
     run(text);
   });
-  function run(text, regen){
-    regen = regen || null;
+  function run(text, regen, attach){
+    regen = regen || null; attach = !!attach;
+    if(attach && (currentAbort || !sid)) return null;
     if(regen && regen.row && regen.row.parentNode) regen.row.remove();
     if(currentAbort) currentAbort.abort();
     currentAbort=new AbortController();
+    activeRunId=0; stopRequested=false;
     var ce=root.querySelector('.chat-empty'); if(ce) ce.remove();
-    if(btn) btn.disabled=true; if(stopBtn) stopBtn.style.display='';
-    if(!regen){ ta.value=''; ta.style.height='auto'; }
-    if(!regen){
+    if(btn) btn.disabled=true;
+    if(stopBtn){ stopBtn.style.display=''; stopBtn.disabled=false; }
+    if(!regen && !attach){ ta.value=''; ta.style.height='auto'; }
+    if(!regen && !attach){
     var urow=mk('div','crow user');
     urow.appendChild(mk('div','avatar you','You'));
     var ub=mk('div','bubble user'); ub.textContent=text;
@@ -1612,7 +1643,28 @@ window.assistantChat = function(opts){
       w.appendChild(mk('div','note','Nothing happens until you click Approve.'));
       box.appendChild(w);
     }
-    var proposals=[], pendingActions=[], doneMsgId=null;
+    var proposals=[], pendingActions=[], doneMsgId=null, userMsgId=0;
+    function addRetryButton(host, mid){
+      var rb=mk('button','regen','\u21bb Retry'); rb.type='button';
+      rb.title='Retry this message';
+      rb.addEventListener('click', function(){
+        if(currentAbort) return;
+        rb.disabled=true;
+        run('', {mid: mid||0, row: null, user: true});
+      });
+      host.appendChild(rb);
+      return rb;
+    }
+    function stopFinish(){
+      if(finished) return; finished=true;
+      stopTimer();
+      status.textContent='stopped';
+      if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none';
+      currentAbort=null; activeRunId=0;
+      var lm=root.querySelector('.live-run'); if(lm) lm.remove();
+      var mrow=mk('div','meta'); addRetryButton(mrow, userMsgId); box.appendChild(mrow);
+      scrollBottom();
+    }
     function finish(){
       if(finished) return; finished=true;
       stopTimer();
@@ -1627,7 +1679,8 @@ window.assistantChat = function(opts){
       if(doneMsgId!=null){ var rg=mk('button','regen','\u21bb'); rg.type='button'; rg.dataset.mid=doneMsgId; rg.title='Regenerate reply'; meta.appendChild(rg); }
       if(proposals.length && doneMsgId!=null) proposals.forEach(function(p,i){ addProposal(p,i,doneMsgId); });
       if(pendingActions.length) pendingActions.forEach(function(a){ addPendingAction(a); });
-      if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null;
+      var lm=root.querySelector('.live-run'); if(lm) lm.remove();
+      if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null; activeRunId=0;
       scrollBottom();
     }
     function fail(msg){
@@ -1636,8 +1689,30 @@ window.assistantChat = function(opts){
       status.textContent='failed';
       var e2=mk('div','msg err','Assistant failed: '+msg);
       box.appendChild(e2);
-      if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null;
+      var mrow=mk('div','meta'); addRetryButton(mrow, userMsgId); box.appendChild(mrow);
+      var lm=root.querySelector('.live-run'); if(lm) lm.remove();
+      if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null; activeRunId=0;
       scrollBottom();
+    }
+    /* transport loss is not failure: the run lives server-side, so quietly
+       re-attach (replaying its events) until it is done or we give up. */
+    function reconnect(){
+      if(finished) return;
+      if(reconnectTries>=8){
+        finished=true; stopTimer(); status.textContent='connection lost';
+        if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none';
+        currentAbort=null; activeRunId=0;
+        if(arow.parentNode) arow.remove();
+        return;
+      }
+      reconnectTries++;
+      finished=true; stopTimer();
+      if(arow.parentNode) arow.remove();
+      if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none';
+      currentAbort=null; activeRunId=0;
+      status.textContent='reconnecting\u2026';
+      setTimeout(function(){ if(!currentAbort && sid) attachNow(); },
+                 Math.min(1200*reconnectTries, 8000));
     }
     function handle(raw){
       var ev=null, data='';
@@ -1648,7 +1723,8 @@ window.assistantChat = function(opts){
       if(!ev) return;
       var d={};
       if(data){ try{ d=JSON.parse(data); }catch(err){ return; } }
-      if(ev==='session'){ sid=d.sid; if(onSession) onSession(sid); }
+      if(ev==='session'){ sid=d.sid; activeRunId=d.run||0; reconnectTries=0; if(onSession) onSession(sid); }
+      else if(ev==='user_saved'){ userMsgId=d.message_id||0; }
       else if(ev==='reasoning'){ det.style.display=''; detSum.textContent='Thinking\u2026'; pre.textContent+=(d.text||''); label('thinking\u2026'); }
       else if(ev==='content'){ content.textContent+=(d.text||''); rawText+=(d.text||''); label('writing\u2026'); }
       else if(ev==='content_break'){ if(content.textContent){ content.textContent+='\n\n'; rawText+='\n\n'; } }
@@ -1672,9 +1748,9 @@ window.assistantChat = function(opts){
         if(opts.onDone) opts.onDone();
       }
       else if(ev==='error'){ fail(d.message||'unknown error'); }
+      else if(ev==='stopped'){ stopFinish(); }
       scrollBottom();
     }
-    var _ep = regen ? '/assistant/regenerate' : '/assistant/stream';
     var _state = !window.__mtContextDetached && window.mtCtxState ? window.mtCtxState() : '';
     var _body = regen
         ? ('session='+encodeURIComponent(sid)+'&mid='+encodeURIComponent(regen.mid||0)
@@ -1683,16 +1759,27 @@ window.assistantChat = function(opts){
         : ('message='+encodeURIComponent(text)+'&session='+encodeURIComponent(sid)
            +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : '')
            +'&state='+encodeURIComponent(_state));
-    fetch(_ep, { method:'POST',
-        headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: _body,
-        signal: currentAbort.signal
-    }).then(function(resp){
+    var _url = attach ? ('/assistant/live?sid='+encodeURIComponent(sid))
+            : (regen ? '/assistant/regenerate' : '/assistant/stream');
+    var _opts = attach
+        ? { method:'GET', headers: {'Accept':'text/event-stream'}, signal: currentAbort.signal }
+        : { method:'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
+            body: _body, signal: currentAbort.signal };
+    fetch(_url, _opts).then(function(resp){
+      if(attach && resp.status===404){
+        finished=true; stopTimer();
+        if(arow.parentNode) arow.remove();
+        if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none';
+        currentAbort=null; activeRunId=0;
+        resyncPanel();
+        if(regen && regen.onMiss) regen.onMiss();
+        return;
+      }
       if(!resp.ok || !resp.body) throw new Error('HTTP '+resp.status);
       var rd=resp.body.getReader(); var dec=new TextDecoder(); var buf='';
       function pump(){
         return rd.read().then(function(r){
-          if(r.done){ if(!finished) fail('stream ended unexpectedly'); return; }
+          if(r.done){ if(!finished) reconnect(); return; }
           buf+=dec.decode(r.value,{stream:true});
           var i;
           while((i=buf.indexOf('\n\n'))>=0){
@@ -1707,15 +1794,25 @@ window.assistantChat = function(opts){
     }).catch(function(err){
       if(finished) return;
       if(err && err.name==='AbortError'){
-        finished=true; stopTimer(); status.textContent='stopped';
-        if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null;
-      } else { fail(''+err); }
+        if(stopRequested){ stopFinish(); }
+        else {
+          finished=true; stopTimer(); status.textContent='stopped';
+          if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none';
+          currentAbort=null; activeRunId=0;
+        }
+      } else { reconnect(); }
     });
   }
   var inst = { liveEl: live, setSession: function(ns){ sid=ns; }, refreshLive: function(){ if(!live.parentNode) root.appendChild(live); },
                isBusy: function(){ return !!currentAbort; },
                abort: function(){ if(currentAbort) currentAbort.abort(); },
-               regen: function(b){ if(currentAbort) return; var row=b.closest('.crow'); var m=b.getAttribute('data-mid')||'0'; run('', {mid: m, row: row}); },
+               attach: function(){ if(!sid || currentAbort) return false;
+                                   if(!root.querySelector('.live-run')) return false;
+                                   return attachNow(); },
+               regen: function(b){ if(currentAbort) return; var row=b.closest('.crow'); var isUser=!!b.closest('.crow.user');
+                                   var m=b.getAttribute('data-mid')||'0';
+                                   if(isUser) b.remove();
+                                   run('', {mid: m, row: isUser?null:row, user:isUser}); },
                clearLive: function(){ live.innerHTML=''; } };
   form.__chat = inst;
   return inst;
@@ -1828,6 +1925,12 @@ window.guardApply = function(f){
       chat.scrollTop = chat.scrollHeight;
     });
   }
+  function bindAndAttach(){
+    var inst = bind();
+    loadHist();
+    if(inst && inst.attach) inst.attach();
+    return inst;
+  }
   /* The live box accumulates every turn this tab has streamed, and refreshLive()
      re-appends it into each freshly loaded panel - so switching chats used to show
      the previous conversation under the new chat's empty state ("New" looked dead).
@@ -1847,8 +1950,8 @@ window.guardApply = function(f){
     curSid = sid;
     try{ localStorage.setItem('assistant_sid', String(sid)); }catch(e){}
     dropLive(switching);
-    loadPanel(sid).then(function(){ bind(); loadHist(); }).catch(function(){
-      newSid().then(function(ns){ curSid = ns; dropLive(true); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+    loadPanel(sid).then(function(){ bindAndAttach(); }).catch(function(){
+      newSid().then(function(ns){ curSid = ns; dropLive(true); return loadPanel(ns); }).then(function(){ bindAndAttach(); });
     });
   }
   function ensure(){
@@ -1856,11 +1959,11 @@ window.guardApply = function(f){
     inited = true;
     var sid = null; try{ sid = parseInt(localStorage.getItem('assistant_sid') || '', 10) || null; }catch(e){}
     if(sid){
-      loadPanel(sid).then(function(){ curSid = sid; bind(); loadHist(); }).catch(function(){
-        newSid().then(function(ns){ curSid = ns; remember(ns); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+      loadPanel(sid).then(function(){ curSid = sid; bindAndAttach(); }).catch(function(){
+        newSid().then(function(ns){ curSid = ns; remember(ns); return loadPanel(ns); }).then(function(){ bindAndAttach(); });
       });
     } else {
-      newSid().then(function(ns){ curSid = ns; remember(ns); return loadPanel(ns); }).then(function(){ bind(); loadHist(); });
+      newSid().then(function(ns){ curSid = ns; remember(ns); return loadPanel(ns); }).then(function(){ bindAndAttach(); });
     }
   }
   document.getElementById('dnew').addEventListener('click', function(){ newSid().then(function(ns){ openSession(ns); }); });
@@ -7138,7 +7241,7 @@ CONVO_TMPL = r"""
     {% if m.role == 'user' %}
     <div class="crow user">
       <div class="avatar you">You</div>
-      <div class="bubble user">{{ m.content }}<div class="meta">{{ m.when }}</div></div>
+      <div class="bubble user">{{ m.content }}<div class="meta"><span>{{ m.when }}</span>{% if m.retry %}<button type="button" class="regen" data-mid="{{ m.id }}" title="Retry this message" aria-label="Retry this message">↻ retry</button>{% endif %}</div></div>
     </div>
     {% else %}
     <div class="crow ai">
@@ -7224,6 +7327,7 @@ CONVO_TMPL = r"""
     </div>
   </div>
 {% endif %}
+{% if live_run %}<div class="live-run" data-run="{{ live_run }}" hidden></div>{% endif %}
 """
 
 ASSISTANT_TMPL = r"""
@@ -7345,7 +7449,7 @@ ASSISTANT_TMPL = r"""
   var clearLink=document.getElementById('aclear'), clearForm=document.getElementById('clearform');
   if(clearLink && clearForm) clearLink.addEventListener('click', function(e){ e.preventDefault(); if(confirm('Clear this chat?')) clearForm.submit(); });
   function initAssistant(){
-  window.assistantChat({
+  var inst = window.assistantChat({
     root: document.getElementById('convo'),
     form: document.getElementById('aform'),
     ta: document.getElementById('msg'),
@@ -7355,6 +7459,7 @@ ASSISTANT_TMPL = r"""
     sessionId: {{ sid }},
     onSession: function(ns){ try{ history.replaceState(null, '', '/assistant/s/' + ns); }catch(e){} }
   });
+  if(inst && inst.attach) inst.attach();  /* a reloaded page re-joins an in-flight turn */
   var ov=document.getElementById('asheet-ov'), rail=document.querySelector('.assistant-rail'), hbtn=document.getElementById('ahist');
   if(ov && rail && window.matchMedia && window.matchMedia('(max-width:767px)').matches){
     document.getElementById('asheet-b').appendChild(rail);
@@ -7561,7 +7666,7 @@ def _suggestions_for_path(path):
     return chips
 
 
-def _assistant_prep(convo):
+def _assistant_prep(convo, active=False):
     for m in convo:
         m["proposals_list"] = []
         if m.get("role") == "assistant" and m.get("proposals"):
@@ -7583,13 +7688,18 @@ def _assistant_prep(convo):
                 pass
     if convo and convo[-1].get("role") == "assistant":
         convo[-1]["regen"] = True
+    elif convo and convo[-1].get("role") == "user" and not active:
+        # no reply followed (stopped, failed, or the server restarted): offer retry
+        convo[-1]["retry"] = True
     return convo
 
 
 def _assistant_fragment(sid, ctx_path="", back=""):
-    convo = _assistant_prep(store.session_messages(sid))
+    live = _assistant_active_run(sid)
+    convo = _assistant_prep(store.session_messages(sid), active=live is not None)
     return convo, _render_src(CONVO_TMPL, convo=convo, sid=sid,
-                              suggest=_suggestions_for_path(ctx_path), back=back)
+                              suggest=_suggestions_for_path(ctx_path), back=back,
+                              live_run=(live.id if live else 0))
 
 
 def _assistant_page(sid):
@@ -7694,6 +7804,202 @@ def _sse(event, data):
     return "event: %s\ndata: %s\n\n" % (event, json.dumps(data, ensure_ascii=False))
 
 
+# ------------------------------------------------- assistant background runs
+#
+# A turn used to live inside the HTTP response: closing the tab (or the phone
+# sleeping) killed the SSE connection and with it the generator, losing the
+# query. Runs now execute in a per-session background worker. The browser tails
+# the worker's events; a disconnect only drops a subscriber, and the reply is
+# persisted exactly as before. /assistant/live re-attaches a reloaded page to a
+# run still in flight, and a trailing user message with no reply (stopped,
+# failed, or the server restarted mid-turn) renders a retry button.
+
+_ASSISTANT_RUN_GRACE = 45     # seconds a finished run stays replayable
+_ASSISTANT_RUNS = {}          # session id -> [AssistantRun, ...] in start order
+_ASSISTANT_RUNS_LOCK = threading.Lock()
+_ASSISTANT_RUN_ID = 0
+
+
+class AssistantRun:
+    """One user turn executing off the request thread.
+
+    Events (UI-shaped, proposals already view-converted) accumulate under
+    ``cond`` so any number of SSE subscribers can replay from index 0 and then
+    follow live; the DB keeps only the final transcript as before."""
+
+    __slots__ = ("id", "sid", "text", "store_user", "page_path", "page_state",
+                 "cond", "events", "done", "finished", "msg_id", "user_msg_id",
+                 "error", "cancelled", "terminal", "prev", "finished_event", "thread")
+
+    def __init__(self, run_id, sid, text, store_user, page_path, page_state, prev):
+        self.id = run_id
+        self.sid = int(sid or 0)
+        self.text = text
+        self.store_user = bool(store_user)
+        self.page_path = page_path
+        self.page_state = page_state
+        self.cond = threading.Condition()
+        self.events = []
+        self.done = False
+        self.finished = None
+        self.msg_id = None
+        self.user_msg_id = None
+        self.error = None
+        self.cancelled = False
+        self.terminal = False
+        self.prev = prev
+        self.finished_event = threading.Event()
+        self.thread = None
+
+
+def _assistant_emit(run, etype, data=None):
+    with run.cond:
+        run.events.append({"event": etype, "data": data or {}})
+        run.cond.notify_all()
+
+
+def _assistant_run_worker(run):
+    if run.prev is not None:
+        run.prev.finished_event.wait()
+    agent = None
+    gen = None
+    try:
+        if run.store_user:
+            run.user_msg_id = store.add_assistant_message(
+                "user", run.text[:4000], session_id=run.sid)
+            _assistant_emit(run, "user_saved", {"message_id": run.user_msg_id})
+        agent = engine.AssistantAgent(session_id=run.sid, page_path=run.page_path,
+                                      page_state=run.page_state)
+        gen = agent.stream(run.text, store_user=False)
+        for ev in gen:
+            if run.cancelled:
+                break
+            etype = ev.pop("type")
+            if etype == "proposals":
+                try:
+                    ev["proposals"] = [_proposal_view(pp)
+                                       for pp in ev.get("proposals") or []]
+                except Exception:
+                    pass
+            if etype == "done":
+                run.msg_id = ev.get("message_id")
+            if etype in ("done", "error"):
+                run.terminal = True
+            _assistant_emit(run, etype, ev)
+    except Exception as exc:
+        if not run.terminal:
+            run.terminal = True
+            run.error = repr(exc)
+            try:
+                store.log_event("error", "assistant run failed: %r" % exc)
+            except Exception:
+                pass
+            _assistant_emit(run, "error", {"message": "assistant failed: %r" % exc})
+    finally:
+        if gen is not None:
+            try:
+                gen.close()
+            except Exception:
+                pass
+        if agent is not None:
+            try:
+                agent.close()
+            except Exception:
+                pass
+        if run.cancelled and not run.terminal:
+            _assistant_emit(run, "stopped", {})
+        with run.cond:
+            run.done = True
+            run.finished = time.time()
+            run.cond.notify_all()
+        run.finished_event.set()
+
+
+def _assistant_prune(sid=None):
+    now = time.time()
+    with _ASSISTANT_RUNS_LOCK:
+        for s in ([int(sid)] if sid else list(_ASSISTANT_RUNS)):
+            runs = [r for r in _ASSISTANT_RUNS.get(s) or []
+                    if not r.done or (now - (r.finished or now)) < _ASSISTANT_RUN_GRACE]
+            if runs:
+                _ASSISTANT_RUNS[s] = runs
+            else:
+                _ASSISTANT_RUNS.pop(s, None)
+
+
+def _assistant_start_run(sid, text, store_user=True, page_path="", page_state=""):
+    global _ASSISTANT_RUN_ID
+    _assistant_prune(sid)
+    with _ASSISTANT_RUNS_LOCK:
+        runs = _ASSISTANT_RUNS.setdefault(int(sid or 0), [])
+        _ASSISTANT_RUN_ID += 1
+        run = AssistantRun(_ASSISTANT_RUN_ID, sid, text, store_user,
+                           page_path, page_state, runs[-1] if runs else None)
+        runs.append(run)
+    t = threading.Thread(target=_assistant_run_worker, args=(run,), daemon=True,
+                         name="assistant-turn-%d" % run.id)
+    run.thread = t
+    t.start()
+    return run
+
+
+def _assistant_active_run(sid):
+    """The oldest run for this chat still executing (None when idle)."""
+    with _ASSISTANT_RUNS_LOCK:
+        for r in _ASSISTANT_RUNS.get(int(sid or 0)) or []:
+            if not r.done:
+                return r
+    return None
+
+
+def _assistant_live_run(sid):
+    """The run a reloaded page should attach to: the active one, else the most
+    recently finished one still inside the replay grace window."""
+    _assistant_prune(sid)
+    with _ASSISTANT_RUNS_LOCK:
+        runs = list(_ASSISTANT_RUNS.get(int(sid or 0)) or [])
+    for r in runs:
+        if not r.done:
+            return r
+    return runs[-1] if runs else None
+
+
+def _assistant_tail(run, cursor=0):
+    """Yield SSE frames for run events from ``cursor``, then follow live.
+
+    Never holds the run lock across a yield: subscribers are independent."""
+    while True:
+        with run.cond:
+            if cursor >= len(run.events) and not run.done:
+                run.cond.wait(10)
+            if cursor < len(run.events):
+                ev = run.events[cursor]
+                cursor += 1
+            else:
+                ev = None
+        if ev is not None:
+            yield _sse(ev["event"], ev["data"])
+        elif run.done:
+            return
+        else:
+            yield ": keep-alive\n\n"
+
+
+def _sse_response(gen):
+    resp = Response(gen, mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+def _assistant_run_response(run, sid):
+    def gen():
+        yield _sse("session", {"sid": sid, "run": run.id})
+        for chunk in _assistant_tail(run):
+            yield chunk
+    return _sse_response(gen())
+
+
 @app.route("/assistant/context.json")
 def assistant_context_json():
     path = (request.args.get("path") or "")[:300]
@@ -7703,44 +8009,65 @@ def assistant_context_json():
 
 @app.route("/assistant/stream", methods=["POST"])
 def assistant_stream():
-    """SSE stream of one assistant turn: reasoning/content deltas, tool
-    start/end events, rule proposals, done/error. Scoped to a chat session."""
+    """Start (or queue) one assistant turn and SSE-tail its background run.
+    Disconnecting only detaches this browser; the run keeps going and its reply
+    is persisted, so the chat can be reopened or re-attached later."""
     text = (request.form.get("message") or "").strip()
     sid = _assistant_sid_from_form()
     page_path = request.form.get("path") or ""
     page_state = (request.form.get("state") or "")[:60000]
-
-    def gen():
-        yield _sse("session", {"sid": sid})
-        if not text:
+    if not text:
+        def gen_empty():
+            yield _sse("session", {"sid": sid})
             yield _sse("error", {"message": "empty message"})
-            return
-        agent = engine.AssistantAgent(session_id=sid, page_path=page_path, page_state=page_state)
-        try:
-            for ev in agent.stream(text):
-                etype = ev.pop("type")
-                if etype == "proposals":
-                    ev["proposals"] = [_proposal_view(pp) for pp in ev.get("proposals") or []]
-                yield _sse(etype, ev)
-        except Exception as exc:  # agent.stream handles its own errors; belt & braces
-            try:
-                store.log_event("error", "assistant stream failed: %r" % exc)
-            except Exception:
-                pass
-            yield _sse("error", {"message": "assistant failed: %r" % exc})
-        finally:
-            agent.close()
+        return _sse_response(gen_empty())
+    run = _assistant_start_run(sid, text, page_path=page_path, page_state=page_state)
+    return _assistant_run_response(run, sid)
 
-    resp = Response(gen(), mimetype="text/event-stream")
-    resp.headers["Cache-Control"] = "no-cache"
-    resp.headers["X-Accel-Buffering"] = "no"
-    return resp
+
+@app.route("/assistant/live")
+def assistant_live():
+    """Re-attach a reloaded page to a chat's in-flight (or just-finished) run,
+    replaying every event from the start so the transcript rebuilds."""
+    try:
+        sid = int(request.args.get("sid") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    run = _assistant_live_run(sid) if sid else None
+    if run is None:
+        return Response("no live run for this chat", status=404, mimetype="text/plain")
+    return _assistant_run_response(run, sid)
+
+
+@app.route("/assistant/stop", methods=["POST"])
+def assistant_stop():
+    """Cooperative cancel: the worker stops before its next event and persists
+    no reply, leaving the trailing user message retry-able."""
+    try:
+        sid = int(request.form.get("session") or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    try:
+        rid = int(request.form.get("run") or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    stopped = 0
+    with _ASSISTANT_RUNS_LOCK:
+        for r in _ASSISTANT_RUNS.get(sid) or []:
+            if r.done or (rid and r.id != rid):
+                continue
+            r.cancelled = True
+            stopped += 1
+            if rid:
+                break
+    return jsonify({"stopped": stopped})
 
 
 @app.route("/assistant/regenerate", methods=["POST"])
 def assistant_regenerate():
-    """SSE stream that regenerates the last assistant reply: the trailing reply
-    is replaced by a fresh run of the same user turn (no duplicate user row)."""
+    """SSE stream that re-runs a turn without duplicating the user row: a
+    trailing assistant reply is replaced, a trailing user message (no reply
+    followed) is retried as-is."""
     sid = _assistant_sid_from_form()
     page_path = request.form.get("path") or ""
     page_state = (request.form.get("state") or "")[:60000]
@@ -7748,38 +8075,25 @@ def assistant_regenerate():
         mid = int(request.form.get("mid") or 0)
     except (TypeError, ValueError):
         mid = 0
-
-    def gen():
-        yield _sse("session", {"sid": sid})
-        msgs = store.session_messages(sid)
-        last = msgs[-1] if msgs else None
-        prev = msgs[-2] if len(msgs) > 1 else None
-        if (not last or last.get("role") != "assistant"
-                or (mid and mid != last.get("id"))
-                or not prev or prev.get("role") != "user"):
-            yield _sse("error", {"message": "nothing to regenerate"})
-            return
+    msgs = store.session_messages(sid)
+    last = msgs[-1] if msgs else None
+    prev = msgs[-2] if len(msgs) > 1 else None
+    text = None
+    if (last and last.get("role") == "assistant"
+            and (not mid or mid == last.get("id"))
+            and prev and prev.get("role") == "user"):
         store.delete_assistant_message(last["id"])
-        agent = engine.AssistantAgent(session_id=sid, page_path=page_path, page_state=page_state)
-        try:
-            for ev in agent.stream(prev["content"], store_user=False):
-                etype = ev.pop("type")
-                if etype == "proposals":
-                    ev["proposals"] = [_proposal_view(pp) for pp in ev.get("proposals") or []]
-                yield _sse(etype, ev)
-        except Exception as exc:  # agent.stream handles its own errors; belt & braces
-            try:
-                store.log_event("error", "assistant regenerate failed: %r" % exc)
-            except Exception:
-                pass
-            yield _sse("error", {"message": "assistant failed: %r" % exc})
-        finally:
-            agent.close()
-
-    resp = Response(gen(), mimetype="text/event-stream")
-    resp.headers["Cache-Control"] = "no-cache"
-    resp.headers["X-Accel-Buffering"] = "no"
-    return resp
+        text = prev["content"]
+    elif last and last.get("role") == "user" and (not mid or mid == last.get("id")):
+        text = last["content"]
+    if text is None:
+        def gen_err():
+            yield _sse("session", {"sid": sid})
+            yield _sse("error", {"message": "nothing to regenerate"})
+        return _sse_response(gen_err())
+    run = _assistant_start_run(sid, text, store_user=False,
+                               page_path=page_path, page_state=page_state)
+    return _assistant_run_response(run, sid)
 
 
 @app.route("/assistant/send", methods=["POST"])
@@ -7789,10 +8103,12 @@ def assistant_send():
     if not text:
         flash("Type a message first.", "err")
         return redirect(url_for("assistant_session", sid=sid))
-    try:
-        engine.assistant_respond(text, session_id=sid)
-    except Exception as exc:
-        flash("Assistant error: %r" % exc, "err")
+    # no-JS fallback: run the same background turn and block for it. Closing the
+    # tab does not cancel the run - it finishes and the reply is in the chat.
+    run = _assistant_start_run(sid, text)
+    run.finished_event.wait(1800)
+    if run.error:
+        flash("Assistant error: %s" % run.error, "err")
     return redirect(url_for("assistant_session", sid=sid))
 
 

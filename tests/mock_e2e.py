@@ -1744,10 +1744,18 @@ def main():
           (b'data-mid="%d"' % _rp1[-1]["id"]) in _rp2.data
           and _rp2.data.count(b'class="regen"') == 1)
     _rneg = store.find_or_create_session()
-    store.add_assistant_message("user", "nothing to redo here", session_id=_rneg)
-    _rn = client.post("/assistant/regenerate", data={"session": _rneg})
-    check("regenerate refuses when the last message is the user's",
-          b"nothing to regenerate" in _rn.data)
+    _rneg_uid = store.add_assistant_message("user", "multi-step retry probe please",
+                                            session_id=_rneg)
+    _rneg_page = client.get("/assistant/s/%d" % _rneg)
+    check("trailing user message with no reply offers retry",
+          (b'data-mid="%d"' % _rneg_uid) in _rneg_page.data
+          and b"retry" in _rneg_page.data
+          and _rneg_page.data.count(b'class="regen"') == 1)
+    _rn = client.post("/assistant/regenerate", data={"session": _rneg, "mid": _rneg_uid})
+    check("retry streams a full run without duplicating the user row",
+          b"event: done" in _rn.data and b"event: error" not in _rn.data
+          and [m["role"] for m in store.session_messages(_rneg)] == ["user", "assistant"]
+          and store.session_messages(_rneg)[0]["id"] == _rneg_uid)
     _ro = store.find_or_create_session()
     store.add_assistant_message("user", "first ask", session_id=_ro)
     _omid = store.add_assistant_message("assistant", "first reply", session_id=_ro)
@@ -1765,6 +1773,96 @@ def main():
     _rem_page2 = client.get("/assistant/s/%d" % _ro)
     check("started chats render without the suggestions",
           b'class="chat-empty"' not in _rem_page2.data)
+
+    section("T9c3 assistant turns run server-side and survive disconnects", "assistant")
+    _gate = threading.Event()
+    _started = threading.Event()
+    _saved_stream_keep = engine.LLMClient.chat_stream
+
+    def _gated_stream(self, system, messages, tools=None, thinking=True):
+        _started.set()
+        _gate.wait(15)
+        yield {"type": "content_delta", "text": "continued after the tab closed"}
+        yield {"type": "turn_done", "finish_reason": "stop"}
+
+    engine.LLMClient.chat_stream = _gated_stream
+    try:
+        _fsid = store.find_or_create_session()
+        _fresp = client.post("/assistant/stream",
+                             data={"session": _fsid, "message": "disconnect probe"},
+                             buffered=False)
+        check("stream request starts the turn off-thread", _started.wait(5))
+        _fuid = store.session_messages(_fsid)[0]["id"]
+        _fpage = client.get("/assistant/s/%d" % _fsid)
+        check("active turn marks the page for re-attach and hides retry",
+              b'class="live-run" data-run="' in _fpage.data
+              and (b'data-mid="%d"' % _fuid) not in _fpage.data)
+        _fit = iter(_fresp.response)
+        next(_fit)                       # consume the first SSE frame, then drop
+        _fresp.close()                   # the tab closes mid-turn
+        _gate.set()
+        _deadline = time.time() + 10
+        while time.time() < _deadline:
+            _frows = store.session_messages(_fsid)
+            if len(_frows) >= 2 and _frows[-1]["role"] == "assistant":
+                break
+            time.sleep(0.1)
+        _frows = store.session_messages(_fsid)
+        check("disconnected turn finished and persisted its reply",
+              [m["role"] for m in _frows] == ["user", "assistant"]
+              and "continued after the tab closed" in _frows[-1]["content"])
+        _flive = client.get("/assistant/live?sid=%d" % _fsid)
+        _flive_body = _flive.data.decode()
+        check("a reloaded page can replay the finished run via /assistant/live",
+              _flive.status_code == 200
+              and "event: user_saved" in _flive_body and "event: done" in _flive_body
+              and "continued after the tab closed" in _flive_body)
+        _fnone = client.get("/assistant/live?sid=%d" % store.find_or_create_session())
+        check("no live run -> 404 so the page resyncs the stored fragment",
+              _fnone.status_code == 404)
+    finally:
+        _gate.set()
+        engine.LLMClient.chat_stream = _saved_stream_keep
+
+    section("T9c4 assistant Stop cancels server-side and leaves a retry", "assistant")
+    _gate2 = threading.Event()
+    _started2 = threading.Event()
+
+    def _gated_stream2(self, system, messages, tools=None, thinking=True):
+        _started2.set()
+        _gate2.wait(15)
+        yield {"type": "content_delta", "text": "this must never be saved"}
+        yield {"type": "turn_done", "finish_reason": "stop"}
+
+    engine.LLMClient.chat_stream = _gated_stream2
+    try:
+        _ssid = store.find_or_create_session()
+        _sresp = client.post("/assistant/stream",
+                             data={"session": _ssid, "message": "stop probe"},
+                             buffered=False)
+        check("stop-probe turn is running", _started2.wait(5))
+        _sstop = client.post("/assistant/stop", data={"session": _ssid})
+        check("stop acknowledges the active run",
+              json.loads(_sstop.data.decode()).get("stopped") == 1)
+        _gate2.set()
+        _deadline = time.time() + 10
+        while time.time() < _deadline and app_mod._assistant_active_run(_ssid) is not None:
+            time.sleep(0.1)
+        _srows = store.session_messages(_ssid)
+        check("cancelled turn persists no reply and leaves the chat idle",
+              [m["role"] for m in _srows] == ["user"]
+              and app_mod._assistant_active_run(_ssid) is None)
+        _spage = client.get("/assistant/s/%d" % _ssid)
+        check("page offers retry after the cancelled turn",
+              (b'data-mid="%d"' % _srows[0]["id"]) in _spage.data
+              and b"retry" in _spage.data)
+        _slive = client.get("/assistant/live?sid=%d" % _ssid).data
+        check("cancelled run's replayed stream ends with stopped, not done",
+              b"event: stopped" in _slive and b"event: done" not in _slive)
+        _sresp.close()
+    finally:
+        _gate2.set()
+        engine.LLMClient.chat_stream = _saved_stream_keep
 
     section("T9d assistant failure is visible, not silent", "assistant")
     r = client.post("/assistant/stream", data={"message": "streamfail please"})
