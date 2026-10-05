@@ -1,0 +1,50 @@
+# TinyJev classifier sidecar for Mail Triage's TinyJev classifier plugin.
+#
+#   docker compose -f tinyjev/docker-compose.yml up -d --build
+#
+# First boot downloads TinyJev-0.6B (~1.2 GB) from HuggingFace into the
+# tinyjev-cache volume, then loads it; the port opens immediately and
+# /healthz returns 503 (with phase + progress) until ready. After that the
+# service is fully offline. To re-download from scratch:
+#   docker compose -f tinyjev/docker-compose.yml down -v
+#
+# The service joins the app's compose network (mail-triage_default) as
+# "tinyjev" so the plugin's default http://tinyjev:8099 resolves from inside
+# the mail-triage container. Start the app stack first (it creates the
+# network); set MT_NETWORK if your app project uses another name.
+services:
+  tinyjev:
+    build: .
+    image: mail-triage-tinyjev:latest
+    container_name: mail-triage-tinyjev
+    ports:
+      - "127.0.0.1:8099:8099"
+    environment:
+      TINYJEV_MODEL: "${TINYJEV_MODEL:-TinyJev-0.6B}"
+      TINYJEV_DEVICE: "cpu"
+      # quantize: "" = fp16 (~1.2 GB), 8 or 4 = quantized backbone (~0.6/0.35 GB)
+      TINYJEV_QUANTIZE: "${TINYJEV_QUANTIZE:-}"
+      # needs_reply via TinyJev's Noul head in the same forward pass
+      TINYJEV_NR: "${TINYJEV_NR:-on}"
+      TINYJEV_NR_THRESHOLD: "${TINYJEV_NR_THRESHOLD:-0.40}"
+      OMP_NUM_THREADS: "${TINYJEV_THREADS:-4}"
+      MKL_NUM_THREADS: "${TINYJEV_THREADS:-4}"
+    volumes:
+      - tinyjev-cache:/data/hf
+    networks:
+      - mt
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8099/healthz', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 60
+      start_period: 120s
+
+volumes:
+  tinyjev-cache:
+
+networks:
+  mt:
+    name: ${MT_NETWORK:-mail-triage_default}
+    external: true

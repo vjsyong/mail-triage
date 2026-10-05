@@ -103,7 +103,10 @@ featurizes the message (`{tokens, from, domain, subject, body}`) and calls your
 `classify()`. Keep it fast - it runs on the classification path - and return
 `{label: "", confidence: 0}` to abstain. `plugins/mt-promo-fastpath` is the
 reference implementation (bit-exact ports of `decision_list`/`naive_bayes`
-predictions from `heuristics.py`).
+predictions from `heuristics.py`). The Plugins page stores the binding: tick
+*classification fast-path* and pick the bound heuristic (it supplies the
+confidence gate and may carry `{"categories": [...]}` in its model JSON) -
+`plugins/mt-tinyjev-classifier` shows the sidecar-backed variant.
 
 ## Draft-provider kind
 

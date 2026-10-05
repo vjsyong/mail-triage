@@ -369,6 +369,7 @@ and proxy log. Back up this directory; see the
 | [Model evaluation](docs/model-evaluation.md) · [Benchmark](benchmarks/README.md) | Current 600-case evaluation, comparison snapshots, and historical study |
 | [RAG evaluation](docs/rag-lite-report.md) | Retrieval ablations, CPU deployment tradeoffs, and measurement limits |
 | [Fusion Lab](docs/fusion-lab.md) | Experimental TinyJev + MiniCPM classification comparison and optional sidecar |
+| [TinyJev classifier](docs/tinyjev-classifier.md) | Local TinyJev-0.6B classifier plugin + model-lifecycle sidecar for the classify path |
 | [Model benchmark plugin](docs/model-bench-plugin.md) | Synthetic endpoint probes, scoring, and resumable benchmark execution |
 | [Learning loop](docs/mail-intelligence/design.md) | Model lifecycle, evaluation, and decision provenance |
 | [Docs index](docs/README.md) | All guides, design records, and research |

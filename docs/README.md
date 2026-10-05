@@ -58,6 +58,10 @@ How this folder is organised: by what you need, not by when it was written.
 - [fusion-lab.md](fusion-lab.md) - TinyJev+MiniCPM local fusion (try-out rig):
   the A/B Fusion Lab plugin, the fusion sidecar, the assistant
   primary/fallback switch, and the measured v2 numbers (2026-10-03)
+- [tinyjev-classifier.md](tinyjev-classifier.md) - the TinyJev classifier on
+  the production classify path: the lifecycle sidecar (download -> load ->
+  ready), the classifier-kind plugin bridge, heuristic binding, and the
+  pipeline contract (2026-10-05)
 - [flows-builder-v2.md](flows-builder-v2.md) - flow canvas (trigger -> filters -> steps)
 - [flows-fuzzy-classifier.md](flows-fuzzy-classifier.md) - AI category + about-topic
   conditions for flows
