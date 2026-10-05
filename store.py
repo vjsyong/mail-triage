@@ -1,5 +1,6 @@
 """SQLite storage for Mail Triage: settings, rules, templates, messages, events."""
 import email.utils
+import hashlib
 import json
 import os
 import sqlite3
@@ -560,6 +561,63 @@ def all_settings():
             except (TypeError, ValueError):
                 out[row["k"]] = row["v"]
     return out
+
+
+_CATEGORY_VERSION_KEYS = ("categories", "category_folders")
+
+
+def settings_version(values):
+    """Deterministic digest of just the category vocabulary and destination map.
+
+    Missing keys use the effective defaults; dictionary key order is canonical
+    while list order is significant. Used for optimistic concurrency without a
+    schema change and without touching any other setting or secret.
+    """
+    snapshot = []
+    for key in _CATEGORY_VERSION_KEYS:
+        value = values.get(key)
+        if value is None:
+            value = DEFAULT_SETTINGS[key]
+        snapshot.append(value)
+    payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def save_category_settings(categories, mapping, expected_version):
+    """Atomically save category vocabulary + destination map if the version matches.
+
+    Opens a connection, takes ``BEGIN IMMEDIATE``, reads the two effective keys,
+    compares ``settings_version`` and returns False without writing on mismatch.
+    On match both JSON values are upserted and committed together. Any exception
+    rolls back and propagates; no schema or default changes are made.
+    """
+    conn = db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        current = {}
+        for key in _CATEGORY_VERSION_KEYS:
+            row = conn.execute("SELECT v FROM settings WHERE k=?", (key,)).fetchone()
+            if row is None:
+                current[key] = DEFAULT_SETTINGS[key]
+                continue
+            try:
+                current[key] = json.loads(row["v"])
+            except (TypeError, ValueError):
+                current[key] = row["v"]
+        if expected_version is None or settings_version(current) != expected_version:
+            conn.rollback()
+            return False
+        for key, value in ((_CATEGORY_VERSION_KEYS[0], categories),
+                           (_CATEGORY_VERSION_KEYS[1], mapping)):
+            conn.execute("INSERT INTO settings (k, v) VALUES (?, ?) "
+                         "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (key, json.dumps(value)))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------- rules
