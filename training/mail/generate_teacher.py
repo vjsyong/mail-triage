@@ -177,8 +177,9 @@ def main(argv=None):
         "seconds": round(time.time() - started, 2),
         "note": "Real model output, deterministically verified; draft only.",
     }
-    LC.write_json(os.path.join(os.path.dirname(args.out), "teacher_receipt.json"),
-                  receipt)
+    base = os.path.basename(args.out).replace(".json", "")
+    LC.write_json(os.path.join(os.path.dirname(args.out),
+                               base + "_receipt.json"), receipt)
     print(json.dumps(receipt, indent=2))
     return 0
 

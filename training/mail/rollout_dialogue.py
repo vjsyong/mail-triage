@@ -97,11 +97,10 @@ def run_dialogue(model, tokenizer, source, tools, taxonomy, public, max_new_toke
                 {"role": "user", "content": request}]
     turns = []
     usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    turn1_had_tool = False
+    clarification = False
+    follow_sent = False
 
-    for phase in ("ambig", "follow", "final"):
-        if phase == "follow":
-            messages.append({"role": "user", "content": follow})
+    for step in range(4):
         text, finish, usage = _generate(model, tokenizer, messages, tools,
                                         max_new_tokens)
         think, content = _split_think(text)
@@ -112,28 +111,31 @@ def run_dialogue(model, tokenizer, source, tools, taxonomy, public, max_new_toke
                                       "raw_arguments": json.dumps(
                                           c["arguments"], ensure_ascii=False)}
                                      for c in calls]})
-        for k, key in enumerate(("prompt_tokens", "completion_tokens", "total_tokens")):
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             usage_total[key] += usage[key]
-        if not calls:
-            if phase == "ambig":
-                pass
-            break
-        if phase == "ambig":
-            turn1_had_tool = True
-        messages.append({"role": "assistant", "content": content if content else None,
-                         "tool_calls": [{"type": "function",
-                                         "function": {"name": c["name"],
-                                                      "arguments": c["arguments"]}}
-                                        for c in calls]})
-        for i, c in enumerate(calls):
-            raw = json.dumps(c["arguments"], ensure_ascii=False)
-            out = execute_tool_call(box, c["name"], raw)
-            payload = out.get("result") if not out.get("rejected") else {
-                "error": out.get("rejected")}
-            messages.append({"role": "tool", "content": json.dumps(payload,
-                            ensure_ascii=False), "tool_call_id": c["id"]})
-        if phase == "final":
-            break
+        if calls:
+            messages.append({"role": "assistant",
+                             "content": content if content else None,
+                             "tool_calls": [{"type": "function",
+                                             "function": {"name": c["name"],
+                                                          "arguments": c["arguments"]}}
+                                            for c in calls]})
+            for c in calls:
+                raw = json.dumps(c["arguments"], ensure_ascii=False)
+                out = execute_tool_call(box, c["name"], raw)
+                payload = out.get("result") if not out.get("rejected") else {
+                    "error": out.get("rejected")}
+                messages.append({"role": "tool",
+                                 "content": json.dumps(payload, ensure_ascii=False),
+                                 "tool_call_id": c["id"]})
+            continue
+        if step == 0:
+            clarification = True
+        if not follow_sent and not _grounded(box, action):
+            messages.append({"role": "user", "content": follow})
+            follow_sent = True
+            continue
+        break
 
     final = box.final_state()
     moved = any(mv["message_id"] == 1 for mv in final["moves"])
@@ -151,9 +153,17 @@ def run_dialogue(model, tokenizer, source, tools, taxonomy, public, max_new_toke
         "gold": _gold(action, source),
         "model": {"key": LC.MODEL_ID, "revision": LC.MODEL_REVISION},
         "usage_total": usage_total,
-        "grounded": grounded, "clarification": not turn1_had_tool,
+        "grounded": grounded, "clarification": clarification,
         "final_state": final,
     }
+
+
+def _grounded(box, action):
+    final = box.final_state()
+    moved = any(mv["message_id"] == 1 for mv in final["moves"])
+    proposed = final["proposal_count"] >= 1
+    return ((action == "move" and moved)
+            or (action == "propose" and proposed and not moved))
 
 
 def _gold(action, source):
@@ -220,8 +230,9 @@ def main(argv=None):
         "rejected_examples": rejected[:10],
         "seconds": round(time.time() - started, 2),
     }
-    LC.write_json(os.path.join(os.path.dirname(args.out), "dialogue_receipt.json"),
-                  receipt)
+    base = os.path.basename(args.out).replace(".json", "")
+    LC.write_json(os.path.join(os.path.dirname(args.out),
+                               base + "_receipt.json"), receipt)
     print(json.dumps(receipt, indent=2))
     return 0
 
