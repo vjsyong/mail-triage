@@ -10,6 +10,8 @@ Integrated acceptance run for the `unified-automation` feature. Worktree:
   `17e1919d7aeca7319863c496461fc793c2e95ef5`. The merge brought in the upstream
   TinyJev classifier sidecar/plugin and benchmark changes (no conflicts, no
   automation-shell edits from upstream).
+- **Post-merge docs correction:** `3854119d160600bcf922b207ce5517b90734eac0`.
+  **AR1 review fixes** (see below) are committed on top of that.
 
 **Screenshot provenance (honest limitation):** the full desktop/393px matrix and its
 `qa/unified-automation/*.png` images were captured on the **pre-merge feature tree**
@@ -131,6 +133,27 @@ authoritative integrated result.
 `mobile393-automation.png`, `mobile393-categories.png`, `mobile393-controls.png`,
 `mobile393-drafting.png`, `mobile393-more.png` (all pre-merge `b651b7b`), plus
 `merged-smoke-automation.png` (merged `60c83bf`).
+
+## Review round AR1 (post-merge HIGH fixes)
+
+PR #4 review raised two issues; both fixed in this round (base `3854119`, fix commit
+on top). **Re-review (round 2) is pending; this document does not claim it.**
+
+| Finding | Severity | Fix | Evidence |
+|---|---|---|---|
+| AR1-1 | Major | `ux.parse_category_rows` now builds the reserved-name set from **surviving current rows by row identity** (`id(server)`), instead of subtracting casefolded removed names globally. A removed row frees only its own name; a case-variant sibling still reserves its name. | `test_category_route_case_variant_replace_rejected_422` (real route form: remove `promo`, add `Promo` → **422, no writes**); `test_category_helper_case_variant_and_replacement` (helper raises; exact-duplicate no-op preserved; single same-save replacement still allowed); `test_category_noop_lossless_sweep` (deterministic combinatorial no-op round-trips); reviewer probe `/tmp/opencode/probe2.py` now reports `POST status: 422`, stored `['Promo','promo']` unchanged (`/tmp/opencode/ar1-fix/probe2_repro.log`) |
+| AR1-2 | Minor | `app._settings_anchor` maps the new `"Reply detection"` scope to `ai-reply` (the existing `#ai-reply` card). Unrelated scopes unchanged. | `test_reply_detection_scope_redirects_to_ai_reply` posts the **actually rendered** reply-detection form → 302 `Location …#ai-reply`, values persisted, and asserts `Filing & drafts→sort-filing`, `Classification→ai-classify`, `Classifiers→ai-classify`, `Checking→mail-check` |
+
+Non-blocking nits explicitly **deferred** (recorded, not changed): original
+leading/trailing newline strip, seeded folder `.strip()`, and map insertion order.
+
+Fix-tree gates (frozen working tree, base `3854119`):
+
+| Test | Command | Result |
+|---|---|---|
+| TEST1 | `.venv/bin/python tests/ux_e2e.py` | PASS — **63 tests**, exit 0 (`/tmp/opencode/ar1-fix/ux_final.log`) |
+| TEST3 | `.venv/bin/python tests/mock_e2e.py --all` (flock shared lock) | PASS — ALL PASS, **1026 passed, 0 failed**, exit 0 (`/tmp/opencode/ar1-fix/mock_all_final.log`/`.exit`) |
+| TEST4 | `node --check static/ux.js`; `git diff --check` | PASS — exit 0 |
 
 ## Acceptance criteria matrix
 

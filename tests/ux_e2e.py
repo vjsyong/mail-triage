@@ -973,6 +973,130 @@ class WorkbenchTests(unittest.TestCase):
             self.assertIn(b'href="/automation/categories"', page, path)
             self.assertIn(b'Manage categories', page, path)
 
+    # ---- AR1 review fixes -------------------------------------------------
+
+    def _route_cat_fields(self, settings):
+        rows = ux.category_rows(settings, [], [])
+        display = [{'original': str(i), 'name': r['name'], 'folder': r['folder'],
+                    'configured': r['configured'], 'mapping_present': r['mapping_present']}
+                   for i, r in enumerate(rows)]
+        return rows, self._cat_fields(display, store.settings_version(settings))
+
+    def _multi_cat_form(self, display, **over):
+        form = MultiDict()
+        form['settings_version'] = 'v'
+        form['row_count'] = str(len(display))
+        for i, r in enumerate(display):
+            form['original_%d' % i] = r['original']
+            form['name_%d' % i] = r['name']
+            form['folder_%d' % i] = r['folder']
+            form['configured_%d' % i] = '1' if r['configured'] else '0'
+            form['mapping_present_%d' % i] = '1' if r['mapping_present'] else '0'
+        for k, v in over.items():
+            form[k] = v
+        return form
+
+    def test_category_route_case_variant_replace_rejected_422(self):
+        # remove the 'promo' row while adding a new 'Promo': the surviving
+        # case-variant sibling must still reserve the name, not free it.
+        store.set_setting('categories', ['Promo', 'promo'])
+        store.set_setting('category_folders', {'Promo': 'P1', 'promo': 'P2'})
+        rows, data = self._route_cat_fields(store.all_settings())
+        promo = next(i for i, r in enumerate(rows) if r['name'] == 'promo')
+        data['remove_%d' % promo] = '1'
+        n = len(rows)
+        data['row_count'] = str(n + 1)
+        data['original_%d' % n] = ''
+        data['name_%d' % n] = 'Promo'
+        data['folder_%d' % n] = ''
+        data['configured_%d' % n] = '1'
+        data['mapping_present_%d' % n] = '0'
+        before = (store.get_setting('categories'), store.get_setting('category_folders'))
+        response = self.client.post('/automation/categories', data=data)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn(b'duplicates an existing', response.data)
+        self.assertEqual((store.get_setting('categories'), store.get_setting('category_folders')),
+                         before)
+
+    def test_category_helper_case_variant_and_replacement(self):
+        def display(settings):
+            rows = ux.category_rows(settings, [], [])
+            return [{'original': str(i), 'name': r['name'], 'folder': r['folder'],
+                     'configured': r['configured'], 'mapping_present': r['mapping_present']}
+                    for i, r in enumerate(rows)]
+        # case-variant sibling reserves the name across a removal
+        s = {'categories': ['Promo', 'promo'], 'category_folders': {'Promo': 'P1', 'promo': 'P2'}}
+        form = self._multi_cat_form(display(s))
+        form['remove_1'] = '1'
+        form['row_count'] = '3'
+        form['original_2'] = ''
+        form['name_2'] = 'Promo'
+        form['folder_2'] = ''
+        form['configured_2'] = '1'
+        form['mapping_present_2'] = '0'
+        with self.assertRaises(ValueError):
+            ux.parse_category_rows(form, s, ux.automation_references(s, [], []))
+        # exact duplicate legacy rows round-trip as a no-op
+        s2 = {'categories': ['Dup', 'Dup'], 'category_folders': {'Dup': 'D'}}
+        cats, mapping = ux.parse_category_rows(
+            self._multi_cat_form(display(s2)), s2, ux.automation_references(s2, [], []))
+        self.assertEqual(cats, ['Dup', 'Dup'])
+        self.assertEqual(mapping, {'Dup': 'D'})
+        # a non-ambiguous same-save replacement (single row) is still allowed
+        s3 = {'categories': ['Promo'], 'category_folders': {'Promo': 'P1'}}
+        form = self._multi_cat_form(display(s3))
+        form['remove_0'] = '1'
+        form['row_count'] = '2'
+        form['original_1'] = ''
+        form['name_1'] = 'Promo'
+        form['folder_1'] = 'P1'
+        form['configured_1'] = '1'
+        form['mapping_present_1'] = '0'
+        cats, mapping = ux.parse_category_rows(
+            form, s3, ux.automation_references(s3, [], []))
+        self.assertEqual(cats, ['Promo'])
+        self.assertEqual(mapping, {'Promo': 'P1'})
+
+    def test_category_noop_lossless_sweep(self):
+        combos = [
+            (['Promo', 'promo'], {'Promo': 'P1', 'promo': 'P2'}),
+            (['Dup', 'Dup'], {'Dup': 'D'}),
+            (['Action', 'Receipt'], {'Receipt': 'Receipts', 'Legacy': 'Old'}),
+            (['A', 'a', 'A'], {'A': 'x', 'a': 'y', 'B': ''}),
+            ([], {}),
+        ]
+        for cats, folders in combos:
+            store.set_setting('categories', cats)
+            store.set_setting('category_folders', folders)
+            _, data = self._route_cat_fields(store.all_settings())
+            response = self.client.post('/automation/categories', data=data)
+            self.assertEqual(response.status_code, 303, (cats, folders, response.status_code))
+            self.assertEqual(store.get_setting('categories'), cats, (cats, folders))
+            self.assertEqual(store.get_setting('category_folders'), folders, (cats, folders))
+
+    def test_reply_detection_scope_redirects_to_ai_reply(self):
+        soup = BeautifulSoup(self.client.get('/settings').data, 'html.parser')
+        form = None
+        for candidate in soup.find_all('form'):
+            if candidate.find('input', {'name': 'reply_tracking_enabled'}):
+                form = candidate
+                break
+        self.assertIsNotNone(form)
+        # the form posts to the current URL (/settings); it carries no separate action
+        self.assertIn(form.get('action'), (None, '', '/settings'))
+        response = self.client.post(form.get('action') or '/settings', data=self._form_data(
+            form, reply_tracking_enabled='1', reply_sent_folder='SentQA'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('#ai-reply', response.headers.get('Location', ''))
+        self.assertTrue(store.get_setting('reply_tracking_enabled'))
+        self.assertEqual(store.get_setting('reply_sent_folder'), 'SentQA')
+        # unrelated anchor scopes are unchanged
+        self.assertEqual(app._settings_anchor('behavior', 'Filing & drafts'), 'sort-filing')
+        self.assertEqual(app._settings_anchor('behavior', 'Classification'), 'ai-classify')
+        self.assertEqual(app._settings_anchor('behavior', 'Classifiers'), 'ai-classify')
+        self.assertEqual(app._settings_anchor('behavior', 'Checking'), 'mail-check')
+        self.assertEqual(app._settings_anchor('behavior', 'Reply detection'), 'ai-reply')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

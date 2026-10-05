@@ -9417,6 +9417,7 @@ def _settings_anchor(section, scope):
     for key, val in (("sorting & filing", "sort-filing"), ("filing & drafts", "sort-filing"),
                      ("drafting", "sort-filing"), ("sorting", "sorting"),
                      ("rules", "sort-rules"), ("classif", "ai-classify"),
+                     ("reply detection", "ai-reply"),
                      ("index", "searchidx"), ("checking", "mail-check"),
                      ("mail source", "mail-src"), ("search", "ai-search"),
                      ("llm", "ai-model"), ("permission", "ai-perms"),

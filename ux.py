@@ -332,10 +332,12 @@ def parse_category_rows(form, current_settings, references):
             raise ValueError("Cannot remove %r: still referenced by %s. Edit those first." % (name, ", ".join(labels)))
         removed.add(row["index"])
 
-    # Names still held by a surviving current row. Removed names are freed so a
-    # remove-and-replace in one save is not misread as a new duplicate.
-    removed_keys = {_name_key(row["server"]["name"]) for row in rows if row["index"] in removed}
-    reserved = {_name_key(r["name"]) for r in current_rows} - removed_keys
+    # Names still held by a surviving current row, keyed by row identity: a
+    # removed row frees only its own name (so remove-and-replace in one save is
+    # allowed), while a case-variant sibling row still reserves its own name.
+    removed_ids = {id(row["server"]) for row in rows
+                   if row["index"] in removed and row["server"] is not None}
+    reserved = {_name_key(r["name"]) for r in current_rows if id(r) not in removed_ids}
 
     categories = []
     restored = []
