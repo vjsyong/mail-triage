@@ -949,6 +949,30 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(engine.assistant_page_context('/flows/new')[3], 'flow:new')
         self.assertEqual(engine.assistant_page_context('/automation')[0], 'page')
 
+    # ---- WP4: followup regressions ---------------------------------------
+
+    def test_seed_flow_blank_category_redirects(self):
+        store.set_setting('categories', ['Receipt'])
+        before = (store.all_settings(), store.list_flows())
+        for qs in ('/flows/new?category=', '/flows/new?category=%20%20'):
+            response = self.client.get(qs, follow_redirects=False)
+            self.assertEqual(response.status_code, 303, qs)
+            self.assertTrue(response.headers.get('Location', '').endswith('/automation/categories'))
+        # no category parameter keeps the ordinary enabled new-flow default
+        page = self.client.get('/flows/new').data
+        self.assertIn(b'name="enabled" value="1" checked', page)
+        self.assertNotIn(b'seeded from a category', page)
+        self.assertEqual(before, (store.all_settings(), store.list_flows()))
+
+    def test_flow_editor_links_category_management(self):
+        fid = store.add_flow('Cat link flow', 'all',
+                             [{'kind': 'category', 'value': 'Receipt'}],
+                             [{'type': 'move', 'folder': 'Receipts'}])
+        for path in ('/flows/new', '/flows/%d/edit' % fid):
+            page = self.client.get(path).data
+            self.assertIn(b'href="/automation/categories"', page, path)
+            self.assertIn(b'Manage categories', page, path)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

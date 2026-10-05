@@ -63,9 +63,24 @@ buttons) - the traceability of a graph with the direction of a sentence.
 
 ## Files
 - `FLOW_EDIT_TMPL` fully rebuilt (self-contained styles + JS render/insert/summary).
-- `_flow_edit_context` now serves categories_json / watch_text / poll_interval /
-  summary_text / is_new; all four call sites (new GET+POST-error, edit GET+POST-error)
-  go through it.
+- `_flow_edit_context` now serves `conditions`, `steps`, `categories`,
+  `templates_meta`, `plugins_meta`, `watch_text`, `poll_interval`, `summary_text`,
+  `is_new` and an optional `seed_note`; all four call sites (new GET+POST-error, edit
+  GET+POST-error) go through it. The inline script receives decoded objects through
+  `|tojson` (never `json.dumps(...)|safe`), so a category/folder/template name
+  containing quotes, backslashes, `&`, `<` or `</script>` cannot terminate the
+  script element.
+- `flow_new` accepts a server-derived seed via `?category=<name>`: it resolves the
+  category against saved settings (exact, or unambiguous case-insensitive), looks up
+  the destination folder server-side, and renders a **disabled** unsaved draft (one
+  move step when mapped, otherwise none) with a precedence banner. Unknown, ambiguous,
+  map-only or blank `category=` flashes an error and redirects 303 to Categories &
+  filing; the ordinary `/flows/new` default is unchanged, and POST validation is the
+  existing one.
+- The filter node carries a **Manage categories →** link to Automation → Categories &
+  filing; each draft step (fixed/template/LLM/plugin) carries a link to the shared
+  Draft destination (`/templates#draft-destination`). Neither changes the posted
+  contract.
 - POST contract unchanged (cond_kind_i / cond_field_i / cond_op_i / cond_value_i /
   cond_score_i + steps_json) - the new UI is presentation + interaction.
 

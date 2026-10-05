@@ -2246,7 +2246,7 @@ color:var(--fg);text-decoration:none}
 </div>
 <div class="nav-label" style="margin:2px 2px 8px">Automation</div>
 <div class="more-list">
-  <a class="more-row" href="{{ url_for('automation') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/></svg><span class="grow"><b>Automation</b><span class="sub">Rules, Flows, Templates, Categories, Drafting and Controls — one workspace</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('automation') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/></svg><span class="grow"><b>Automation</b><span class="sub">Rules, flows, categories, drafting and controls — one workspace</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('simulate') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/></svg><span class="grow"><b>Simulator</b><span class="sub">Draft an email, see how rules and flows would handle it</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('learning_page') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="grow"><b>Learning</b><span class="sub">Models deciding &amp; learning on your mail</span></span><span aria-hidden="true">&#8250;</span></a>
 </div>
@@ -5306,6 +5306,7 @@ FLOW_EDIT_TMPL = """
           <button type="button" class="btn small" onclick="condAdd('field')">+ match text</button>
           <button type="button" class="btn small" onclick="condAdd('category')">+ ✦ AI category</button>
           <button type="button" class="btn small" onclick="condAdd('topic')">+ ✦ about (topic)</button>
+          <a class="sub" style="margin-left:auto;align-self:center" href="{{ url_for('automation_categories') }}">Manage categories →</a>
         </div>
         <details class="fl-help">
           <summary>Filter types &amp; scoring</summary>
@@ -5909,10 +5910,9 @@ def flow_new():
         store.log_event("info", "flow '%s' added (%d step(s))" % (name, len(steps)))
         flash("Flow added.", "ok")
         return redirect(url_for("flows", test=nid))
-    seed = (request.args.get("category") or "").strip()
-    if seed:
+    if "category" in request.args:
         settings = store.all_settings()
-        canonical = _resolve_seed_category(seed, settings)
+        canonical = _resolve_seed_category(request.args.get("category"), settings)
         if not canonical:
             flash("Pick a configured category to build a flow for.", "err")
             return redirect(url_for("automation_categories"), code=303)

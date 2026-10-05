@@ -48,9 +48,18 @@ another device: `ssh -L 8101:127.0.0.1:8101 <this-host>` then open
    the existing invoice rule wins first, even if your draft's conditions match.
 7. **Flows:** edit Lunch drafts, change the fixed draft text without saving,
    choose a lunch email under Test this draft, and Run preview. The generated
-   report uses the unsaved text, with no mailbox or automation changes.
-8. **Settings:** five sections; deep links such as `#ai-perms` and `#ai-search`
-   still work. Advanced endpoint settings are disclosed. Saves remain scoped.
+   report uses the unsaved text, with no mailbox or automation changes. The flow
+   list and editor now render under the shared Automation workspace.
+8. **Automation + Settings:** open **Automation** - one sidebar item (More on
+   mobile) opening Overview · Rules · Flows · Categories & filing · Drafting ·
+   Controls. Controls holds the rule/flow live switches and the classification
+   switches; Categories & filing holds the vocabulary, the folder map and the
+   default-filing opt-in (turning it on asks for confirmation; cancelling leaves it
+   off); Drafting holds the shared draft destination and the draft-producing flows.
+   Settings still has its five sections and unedited system cards; the old
+   filing/automation anchors (`#sort-filing`, `#sorting`, `#sort-rules`,
+   `#ai-classify`, `#ai-classifiers`) now land on cards that link into Automation,
+   while `#ai-perms` and `#ai-search` behave as before. Saves remain scoped.
 9. **Learning:** source/label agreement/next actions are explicit. The category
    learner is watching; live-routing prerequisites are shown before promotion.
 10. **Plugins:** Invoice finder → Use in Assistant opens an editable request.

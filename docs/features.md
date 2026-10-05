@@ -3,6 +3,35 @@
 The [README](../README.md) has the short version; this page keeps the detail. Each
 section is grounded in what the code actually does.
 
+## Automation workspace (the one roof)
+
+Rules, flows, categories, drafting and the live/preview switches are one workspace.
+Desktop navigation carries a single **Automation** item (mobile lists it on **More**),
+and every automation page shows the same local tabs: **Overview · Rules · Flows ·
+Categories & filing · Drafting · Controls**. The existing `/rules`, `/flows` and
+`/templates` pages and their editors keep their canonical URLs; they simply render
+under this shared shell.
+
+- **Overview** explains the two stages (mailbox scan → after classification) and
+  shows, read-only, which rules/flows/classifiers are *enabled* plus the current
+  rule / flow / classification / default-filing modes. It is a read-only summary - no
+  mailbox or model probe is started on GET.
+- **Controls** owns the live/preview switches (rule live mode, flow live mode,
+  classification switches and fast-path classifier switches). Each form saves only
+  its own keys and returns to Controls. Flow live mode is independent of a flow's own
+  Enabled state.
+- **Categories & filing** owns the classification vocabulary, the category→folder
+  map and the automatic-default-filing opt-in. The opt-in is a separate form that
+  confirms when you turn it on; cancelling leaves it off.
+- **Drafting** is the old Templates page plus the shared draft destination and the
+  list of flows containing a draft step.
+
+Settings keeps the system cards (LLM endpoint, embeddings/reranker, mail source,
+checking, search index, agent permissions, reply detection) and, where controls
+moved, shows landmark links into the workspace. Old anchored links such as
+`/settings#sort-filing`, `#sorting`, `#sort-rules`, `#ai-classify` and
+`#ai-classifiers` still open a meaningful destination card.
+
 ## Rules (Rules page)
 
 Match on from / to / subject / body snippet (contains, equals, regex; ALL or ANY),
@@ -22,9 +51,12 @@ the classifier tags the message that way (checked right after classification), a
 an **about (topic)** condition matches by meaning via embeddings - no exact words
 needed. Both take an optional minimum score. Steps: move, tag, flag, mark read,
 draft from a template, or draft with the LLM following your instructions (saved to
-Drafts). Rules stay for single-action cases and run first. Dry-run toggle in
-Settings; the builder is a canvas (trigger -> filters -> step chain), and the
-assistant can propose complete flows for one-click approval. Design records:
+Drafts). Rules stay for single-action cases and run first. Dry-run toggle lives in
+Automation → Controls; the builder is a canvas (trigger -> filters -> step chain),
+and the assistant can propose complete flows for one-click approval. From
+Categories & filing each configured category offers **Create flow**, which opens the
+builder pre-filled with a disabled category-triggered draft (one move step when the
+category has a destination, otherwise none). Design records:
 [docs/flows-builder-v2.md](flows-builder-v2.md), [docs/flows-fuzzy-classifier.md](flows-fuzzy-classifier.md).
 
 ## Classification (Messages + Settings)
@@ -32,7 +64,10 @@ assistant can propose complete flows for one-click approval. Design records:
 Anything no rule matched is classified into your categories (Action, Notification,
 Newsletter, Receipt, Personal, Promo by default) with a confidence, a one-sentence
 summary, and a short reason ("why: ..."), shown on the message page. Auto-filing by
-category starts off - the LLM suggests until you enable it.
+category starts off - the LLM suggests until you enable it; the switch and the
+category→folder map live in Automation → Categories & filing. The classification
+switches (LLM suggestions, hourly cap, batch size, concurrency) live in
+Automation → Controls.
 
 On demand: tick rows and "Classify selected", or "Classify all unclassified" as a
 background job (newest first, progress + Stop). The batch job classifies several
@@ -55,7 +90,8 @@ Every classifier has a **dataset page**: review the exact samples it learns from
 reclassify it with a dropdown - the sample moves between the in-set and out-of-set
 immediately, and for LLM-labeled data the correction also updates the message's own
 record. Removals stick across retraining and auto-refine, and can be re-included.
-The assistant trains, retrains and evaluates them on request. Toggle in Settings.
+The assistant trains, retrains and evaluates them on request. The fast-path switches
+(run before the LLM, auto-retrain) live in Automation → Controls.
 
 ## The learning loop (Learning page)
 
@@ -205,11 +241,15 @@ message) turns the flag off and outranks the model on any re-classify. The simul
 dry-runs a rule, flow or classifier decision against any message and shows the
 stage-by-stage verdict.
 
-## Reply templates and drafting
+## Reply templates and drafting (Drafting page)
 
-Templates carry placeholders and live on the Templates page. Pick a message,
-choose a template (or none), "Draft with LLM", review, copy, or "Save to Drafts" -
-the draft lands in your Drafts folder to send from your normal client.
+Templates carry placeholders and live on the **Drafting** page (the canonical
+`/templates` URL). The same page owns the shared **draft destination** override
+(blank = auto-detect the server's Drafts folder) and lists the flows that contain a
+draft step, whichever mode they use (fixed, template, LLM or plugin) - every draft
+mode saves to that one destination. Pick a message, choose a template (or none),
+"Draft with LLM", review, copy, or "Save to Drafts" - the draft lands in the
+destination to send from your normal client.
 
 ## Accounts and endpoints
 
