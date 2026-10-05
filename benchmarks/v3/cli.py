@@ -2,14 +2,15 @@
 
 Subcommands::
 
-    build      build an offline dataset bundle        (WP2 ``build`` API)
-    validate   schema/lint a dataset bundle           (WP2 ``build`` API)
-    run        execute a dataset through an adapter   (WP4 runner)
-    score      score a run, optionally fit a calibrator (WP5 ``scoring`` API)
-    compare    compare two runs                       (WP5 ``scoring`` API)
-    review     export/import a review worksheet, or seal (WP2 ``build`` API)
-    export     write a dataset (optionally split private material)
-    import     read a dataset bundle back (dataset import, not real-mail intake)
+    build         build an offline dataset bundle        (WP2 ``build`` API)
+    validate      schema/lint a dataset bundle           (WP2 ``build`` API)
+    list-adapters list the registered adapters + declared capabilities (WP4)
+    run           execute a dataset through an adapter   (WP4 runner)
+    score         score a run, optionally fit a calibrator (WP5 ``scoring`` API)
+    compare       compare two runs                       (WP5 ``scoring`` API)
+    review        export/import a review worksheet, or seal (WP2 ``build`` API)
+    export        write a dataset (optionally split private material)
+    import        read a dataset bundle back (dataset import, not real-mail intake)
 
 Fail-closed policy: dataset load/validate/export/import go through the owning
 ``build`` package; a rejected private/real/invalid bundle never creates or
@@ -110,6 +111,15 @@ def _adapter_from_args(args):
                                         model_artifact_sha256=args.prose_model_artifact,
                                         allow_remote=args.allow_remote)
         return FusionAdapter(decision_adapter=decision, prose_adapter=prose)
+    if name.startswith("systemone:"):
+        from .adapters.systemone import build_systemone_adapter  # noqa: PLC0415
+        key = name.split(":", 1)[1]
+        default_device = "cuda:0" if key == "nanojev" else "cpu"
+        return build_systemone_adapter(
+            name, device=args.device or default_device, endpoint=args.endpoint,
+            precision=getattr(args, "precision", None),
+            model_revision=args.model_revision,
+            model_artifact_sha256=args.model_artifact)
     raise AdapterError("unknown adapter %r" % name)
 
 
@@ -151,6 +161,31 @@ def cmd_validate(args):
           markdown=("valid: %s" % args.dataset) if not errs
           else "invalid:\n  " + "\n  ".join(errs))
     return 0 if not errs else 1
+
+
+def cmd_list_adapters(args):
+    """List registered adapters and their declared capabilities (no loading)."""
+    from .adapters import ADAPTERS
+    rows = []
+    for name in sorted(ADAPTERS):
+        cls = ADAPTERS[name]
+        rows.append({
+            "adapter_id": getattr(cls, "adapter_id", name),
+            "capabilities": dict(getattr(cls, "capabilities", {}) or {}),
+            "mock": bool(getattr(cls, "mock", False)),
+            "qualifies_as_baseline": bool(getattr(cls, "qualifies_as_baseline", False)),
+            "model_key": getattr(cls, "backend_model_key", None)
+            or getattr(cls, "model_key", "") or "",
+            "model_revision": getattr(cls, "backend_revision", None)
+            or getattr(cls, "model_revision", None),
+        })
+    markdown = "\n".join(
+        "%-24s decision=%-5s prose=%-5s tools=%-5s mock=%s"
+        % (r["adapter_id"], r["capabilities"].get("decision"),
+           r["capabilities"].get("prose"), r["capabilities"].get("tools"),
+           r["mock"]) for r in rows)
+    _dump({"adapters": rows}, args.json, markdown=markdown)
+    return 0
 
 
 def cmd_run(args):
@@ -340,6 +375,11 @@ def build_parser():
     v.add_argument("--json", action="store_true")
     v.set_defaults(func=cmd_validate)
 
+    la = sub.add_parser("list-adapters",
+                        help="list registered adapters and capabilities (WP4)")
+    la.add_argument("--json", action="store_true")
+    la.set_defaults(func=cmd_list_adapters)
+
     r = sub.add_parser("run", help="run a dataset through an adapter")
     r.add_argument("dataset")
     r.add_argument("--adapter", default="offline-fake")
@@ -359,6 +399,8 @@ def build_parser():
     r.add_argument("--prose-model-revision", default=None)
     r.add_argument("--prose-model-artifact", default=None)
     r.add_argument("--device", default=None)
+    r.add_argument("--precision", default=None,
+                   help="systemone:nanojev storage/autocast precision (fp32|bf16)")
     r.add_argument("--allow-remote", action="store_true")
     r.add_argument("--scorer-revision", default=None)
     r.add_argument("--calibrator-revision", default=None)
