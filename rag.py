@@ -376,6 +376,8 @@ def _index_one(mc, folder, uid, uv):
     if row is None:
         store.insert_message(folder, uid, uv, meta)
         row = store.get_message_by_uid(folder, uid, uv)
+    if row:
+        store.capture_thread_headers(row['id'], meta)
     if row is None:
         raise RuntimeError("could not record message %s uid %s" % (folder, uid))
     if store.message_chunk_count(row["id"]) > 0:

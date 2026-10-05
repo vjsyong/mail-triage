@@ -362,7 +362,7 @@ class IMAPHandler(socketserver.StreamRequestHandler):
                 if ":" in val:
                     a, b = val.split(":", 1)
                     lo = int(a)
-                    hi = max(f["uids"]) if b == "*" else int(b)
+                    hi = max(f["uids"], default=0) if b == "*" else int(b)
                     uids = [u for u in uids if lo <= u <= hi]
                 elif val.isdigit():
                     uids = [u for u in uids if u == int(val)]
@@ -534,7 +534,13 @@ class LLMHandler(BaseHTTPRequestHandler):
         # Answered before the generic branches so the benchmark's fixtures stay
         # deterministic. The classify branch paces itself (sleep) so the
         # plugin's slice/resume wall-clock budget is exercised for real.
-        if "running a benchmark" in system:
+        if 'Assess whether a sent reply' in system:
+            evidence = json.loads(user)
+            sufficient = '40500' in evidence['sent']['text'] or 'SUFFICIENT_REPLY' in evidence['sent']['text']
+            content = json.dumps({'sufficient': sufficient, 'confidence': .98,
+                                  'reason': 'The reply gives the requested next steps and reimbursement code.' if sufficient else 'The response only acknowledges the request.',
+                                  'unanswered_requests': [] if sufficient else ['Provide a substantive response.']})
+        elif "running a benchmark" in system:
             if "connectivity" in system:
                 content = "ok"
             elif "JSON-output" in system:
@@ -1026,13 +1032,17 @@ _FIXTURE_DATE = time.strftime("%a, %d %b %Y %H:%M:%S +0000",
                               time.gmtime(time.time() - 3600))
 
 
-def add_msg(state, frm, subj, body, msgid, folder="INBOX", date=None):
+def add_msg(state, frm, subj, body, msgid, folder="INBOX", date=None, headers=None, to_addr='me@example.com'):
     if date is None:
         date = _FIXTURE_DATE
-    raw = ("From: %s\r\nTo: me@example.com\r\nSubject: %s\r\n"
+    raw = ("From: %s\r\nTo: %s\r\nSubject: %s\r\n"
            "Date: %s\r\nMessage-ID: <%s>\r\n"
            "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s"
-           % (frm, subj, date, msgid, body)).encode()
+            % (frm, to_addr, subj, date, msgid, body)).encode()
+    if headers:
+        prefix, content = raw.split(b'\r\n\r\n', 1)
+        prefix += b'\r\n' + '\r\n'.join('%s: %s' % (k, v) for k, v in headers.items()).encode()
+        raw = prefix + b'\r\n\r\n' + content
     return state.add(folder, raw)
 
 
@@ -3203,7 +3213,8 @@ def main():
           b'sys-ix-actions' in d and b"Index now" in d)
     check("hero keeps the primary metric + context line",
           b'class="metric primary"' in d and b"need a reply" in d
-          and b'class="dstat"' in d and b"Sorted by rules" in d)
+          and b'class="dstat"' in d and b"Filed messages" in d
+          and b"Needs your attention" in d and b"counts overlap" in d)
     check("automation status renders as chips with a settings link",
           b'class="dsc"' in d and b"Auto-filing" in d and b"Settings" in d)
     check("hero counts flows + classifiers, drops parked errors",
@@ -3213,7 +3224,9 @@ def main():
     check("page-head actions tagged for mobile hiding", b'dh-actions' in d)
     check("activity collapses on phones",
           b'class="card flush actwrap"' in d and b'act-sum' in d and b"Full log" in d)
-    check("index card tagged for mobile hiding", b'card ixcard' in d)
+    check("index management is consolidated into disclosed system health",
+          b'class="card syswrap"' in d and d.count(b'Index now') == 1
+          and b'card ixcard' not in d)
     check("mobile collapse script present", b"removeAttribute('open')" in d)
     check("recent mail renders as a stacked feed, not a squished table",
           b'class="mfeed"' in d and d.count(b'class="mrow"') >= 3
@@ -5751,6 +5764,18 @@ def main():
     # restore the pre-T63 endpoint settings
     for _k, _v in _g_front.items():
         store.set_setting(_k, _v if _v is not None else "")
+
+    section("T64 UX workbench regressions", "ui", "core", "learning")
+    ux_run = subprocess.run([sys.executable, os.path.join(HERE, 'ux_e2e.py')],
+                            capture_output=True, text=True, timeout=60)
+    print(ux_run.stdout + ux_run.stderr)
+    check("UX workbench behavioral regressions", ux_run.returncode == 0)
+
+    section("T65 Sent reply resolution regressions", "core", "ui", "learning", "rag")
+    reply_run = subprocess.run([sys.executable, os.path.join(HERE, 'reply_e2e.py')],
+                               capture_output=True, text=True, timeout=90)
+    print(reply_run.stdout + reply_run.stderr)
+    check("Sent reply resolution regressions", reply_run.returncode == 0)
 
     # ==== suite tail (always runs, even in a partial run) ====
     if globals().get("_PARTIAL_NOTE"):

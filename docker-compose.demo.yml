@@ -1,0 +1,19 @@
+services:
+  ux-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    image: mail-triage-ux:demo
+    container_name: mail-triage-ux-demo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8101:8097"
+    volumes:
+      - ux-demo-data:/data
+    networks:
+      - sandbox
+volumes:
+  ux-demo-data:
+networks:
+  sandbox:
+    driver: bridge

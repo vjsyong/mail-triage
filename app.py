@@ -31,6 +31,8 @@ import plugins
 import proxy
 import rag
 import store
+import ux
+import replies
 
 app = Flask(__name__)
 
@@ -383,6 +385,7 @@ BASE_TMPL = r"""<!doctype html>
 <meta name="turbo-cache-control" content="no-cache">
 <meta name="view-transition" content="same-origin">
 <script src="/static/turbo.js?v=8.0.12" defer></script>
+<script src="/static/ux.js?v=1" defer></script>
 <meta name="theme-color" content="#fafafa">
 <meta name="color-scheme" content="light">
 <title>Mail Triage</title>
@@ -1005,7 +1008,21 @@ form.px-swf{display:flex;align-items:center}
 .px-go{color:var(--dim);font-size:1.2rem;line-height:1;padding:0 2px}
 .px-go:hover{color:var(--fg);text-decoration:none}
 </style>
-<script>try{var v=localStorage.getItem('asb_open');if(v===null||v==='1')document.documentElement.classList.add('asb-open');var w=parseInt(localStorage.getItem('asb_w')||'',10);if(w>=280)document.documentElement.style.setProperty('--asb-w',Math.min(720,w)+'px');}catch(e){}</script>
+<style>
+/* Workbench primitives: shared by list, editor previews and settings. */
+[hidden]{display:none!important}
+.ux-search{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:14px 0}
+.ux-search>label{flex:1;min-width:160px;margin:0}.ux-search input{margin-top:5px}
+.ux-filters{margin:8px 0 14px}.ux-filters .grid3{margin-top:10px}
+.ux-preview{margin:14px 0;scroll-margin-top:18px}.ux-preview>summary{cursor:pointer;font-weight:600}
+.ux-preview label{margin-top:10px}.ux-preview-output{margin-top:12px;white-space:normal}
+.ux-preview-output li{margin:6px 0}.ux-preview-output pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.ux-context{display:flex;align-items:center;gap:8px}.ux-context button{margin-left:auto;min-width:32px;min-height:32px;background:none;border:0;cursor:pointer}
+.ux-advanced{margin:12px 0}.ux-advanced>summary{cursor:pointer;font-weight:600;padding:8px 0}
+.ux-demo{padding:10px 14px;border:1px solid var(--acc);background:var(--hover);margin-bottom:14px;font-size:.85rem}
+@media(min-width:1024px) and (max-width:1599px){html.asb-open body.with-asb .main{margin-right:46px}html.asb-open .asb{box-shadow:-10px 0 30px #0002}}
+</style>
+<script>try{var v=localStorage.getItem('asb_open');if(v==='1')document.documentElement.classList.add('asb-open');var w=parseInt(localStorage.getItem('asb_w')||'',10);if(w>=280)document.documentElement.style.setProperty('--asb-w',Math.min(720,w)+'px');}catch(e){}</script>
 </head><body{% if setup or show_asb %} class="{{ (('setup ' if setup else '') + ('with-asb' if show_asb else ''))|trim }}"{% endif %}>
 <a class="skip" href="#main">Skip to content</a>
 {% set p = request.path %}
@@ -1073,8 +1090,9 @@ form.px-swf{display:flex;align-items:center}
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% for cat, msg in messages %}<div class="msg {{ cat }}" role="status">{{ msg }}</div>{% endfor %}
       {% endwith %}
+      {% if cfg.get('UX_DEMO') == '1' %}<div class="ux-demo"><b>UX demo</b> · Synthetic mailbox and mock AI · Changes affect this sandbox only.</div>{% endif %}
       {{ body|safe }}
-      <div class="foot">Times in {{ tz }} · app data in {{ cfg.DATA_DIR }} · never deletes mail (worst case: files it into a folder)</div>
+      <div class="foot">Times in {{ tz }} · app data in {{ cfg.DATA_DIR }} · no permanent deletion · optional Move to Trash follows your mail provider's retention policy</div>
     </main>
   </div>
 </div>
@@ -1657,7 +1675,7 @@ window.assistantChat = function(opts){
       scrollBottom();
     }
     var _ep = regen ? '/assistant/regenerate' : '/assistant/stream';
-    var _state = window.mtCtxState ? window.mtCtxState() : '';
+    var _state = !window.__mtContextDetached && window.mtCtxState ? window.mtCtxState() : '';
     var _body = regen
         ? ('session='+encodeURIComponent(sid)+'&mid='+encodeURIComponent(regen.mid||0)
            +'&path='+encodeURIComponent(window.mtCtxPath ? window.mtCtxPath() : '')
@@ -1879,6 +1897,7 @@ window.guardApply = function(f){
    context chip in the drawer + assistant page up to date. */
 (function(){
   window.mtCtxPath = function(){
+    if(window.__mtContextDetached) return '';
     var p = location.pathname;
     if (p.indexOf('/assistant') !== 0) return p + location.search;
     try { return sessionStorage.getItem('mtLastCtx') || ''; } catch(e){ return ''; }
@@ -1894,9 +1913,12 @@ window.guardApply = function(f){
     fetch('/assistant/context.json?path=' + encodeURIComponent(path))
       .then(function(r){ return r.json(); })
       .then(function(d){
+        if(window.__mtContextDetached || window.mtCtxPath() !== path) return;
         chips.forEach(function(c){
           if (!c) return;
-          c.textContent = d.desc ? ('Context: ' + d.desc) : '';
+           c.textContent = d.desc ? ('Using context: ' + d.desc) : '';
+           c.classList.add('ux-context');
+           if(d.desc){var remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remove assistant context');remove.addEventListener('click',function(){window.__mtContextDetached=true;lastFetched=null;updateChips();window.__mtCtxKey='';window.dispatchEvent(new CustomEvent('mt:ctxkey',{detail:''}));});c.appendChild(remove);}
           c.hidden = !d.desc;
         });
         window.__mtCtxKey = d.key || '';
@@ -1906,6 +1928,7 @@ window.guardApply = function(f){
   }
   function remember(){
     if (location.pathname.indexOf('/assistant') !== 0){
+      window.__mtContextDetached = false;
       try { sessionStorage.setItem('mtLastCtx', location.pathname + location.search); } catch(e){}
     }
     updateChips();
@@ -2180,7 +2203,10 @@ DASH_TMPL = """
 .dashgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start;margin-top:14px}
 @media(max-width:1023px){.dashgrid{grid-template-columns:1fr}}
 .dashgrid .card{margin:0}
-.syswrap>summary{display:none}
+.syswrap>summary{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600}
+.dash-workbench{display:flex;flex-direction:column}.dash-workbench>[data-order="1"]{order:1}.dash-workbench>[data-order="2"]{order:2}.dash-workbench>[data-order="3"]{order:3}.dash-workbench>[data-order="4"]{order:4}.dash-workbench>[data-order="5"]{order:5}
+.dash-attention{display:flex;gap:16px;flex-wrap:wrap}.dash-attention a{display:flex;align-items:center;gap:8px;font-weight:600;padding:8px 0}.dash-attention b{font-size:1.35rem}
+.dash-workbench .dashgrid{grid-template-columns:1fr}.dash-workbench .metrics{margin-top:14px}.dash-workbench .sys{margin-top:14px}.dash-workbench .frow:nth-of-type(n+5){display:none}
 .actwrap>summary{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;cursor:pointer;list-style:none}
 .actwrap>summary::-webkit-details-marker{display:none}
 .actwrap>summary h3{margin:0}
@@ -2255,8 +2281,20 @@ DASH_TMPL = """
   </div>
 </div>
 {% endif %}
-
-<details class="card syswrap" open data-alert="{{ '1' if sys_alert else '0' }}">
+<div class="dash-workbench" id="dash-workbench">
+<section class="card" data-order="1"><div class="card-h"><h3>Needs your attention</h3></div><div class="dash-attention">
+<a href="{{ url_for('messages', f='needs_reply') }}"><b>{{ st.needs_reply }}</b> need a reply</a>
+<a href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> errors</a>
+<a href="{{ url_for('assistant') }}"><b>{{ pending_approvals }}</b> pending approvals</a>
+</div>{% if not st.needs_reply and not st.errors and not pending_approvals %}<p class="sub">You're caught up — browse recent mail below.</p>{% endif %}
+  <div class="dsc" role="group" aria-label="Automation status">
+    <span class="dschip{{ ' off' if not settings.rules_apply else '' }}" title="{{ 'Rules act live' if settings.rules_apply else 'Rules act in dry-run (suggest only)' }}">Rules {{ 'live' if settings.rules_apply else 'dry-run' }}</span>
+    <span class="dschip{{ ' off' if not settings.llm_suggest else '' }}" title="{{ 'LLM classification on' if settings.llm_suggest else 'LLM classification off' }}">LLM {{ 'on' if settings.llm_suggest else 'off' }}</span>
+    <span class="dschip{{ ' off' if not settings.llm_apply else '' }}" title="{{ 'Auto-filing ON' if settings.llm_apply else 'Auto-filing off (suggests only)' }}">Auto-filing {{ 'ON' if settings.llm_apply else 'off' }}</span>
+    <a class="dschip chg" href="{{ url_for('settings') }}">Settings →</a>
+  </div>
+</section>
+<details class="card syswrap" data-order="5" {{ 'open' if sys_alert else '' }} data-alert="{{ '1' if sys_alert else '0' }}">
   <summary class="sys-sum"><span class="dot {{ 'err' if sys_alert else 'ok' }}"></span><span class="sys-sum-t">{% if sys_alert %}Something needs attention{% else %}All systems normal{% endif %}</span><span class="sys-chev" aria-hidden="true"></span></summary>
   <div class="sys">
     <div class="sysitem">
@@ -2277,8 +2315,9 @@ DASH_TMPL = """
     <div class="sysitem">
       <span class="dot {{ 'ok' if px.running else ('warn' if px.installed else 'err') }}"></span>
       <div>
-        <b>Proxy</b>
-        {% if px.running %}
+        <b>{{ 'Mail connection' if px.external else 'Proxy' }}</b>
+        {% if px.external %}<span class="sub">External IMAP · managed outside this app</span>
+        {% elif px.running %}
         <span class="sub">running · {% for l in px.listener_rows %}<span class="mono" style="font-size:.74rem">127.0.0.1:{{ l.port }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</span>
         {% elif not px.installed %}
         <span class="sub syserr">emailproxy package missing</span>
@@ -2329,14 +2368,14 @@ DASH_TMPL = """
     <a class="btn small" href="{{ url_for('messages', f='queued') }}">View queue</a>
   </div>
   {% endif %}
-  <div class="sysline sys-ix-actions">
+  <div class="sysline" style="display:flex">
     <span class="sub" style="font-weight:600">Search index</span>
     <form class="inline" method="post" action="{{ url_for('index_run') }}"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Index now</button></form>
     <form class="inline" method="post" action="{{ url_for('index_rebuild') }}" onsubmit="return confirm('Rebuild the search index from scratch? Mail is untouched.');"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Rebuild</button></form>
   </div>
 </details>
 
-<div class="card">
+<details class="card" data-order="4"><summary style="cursor:pointer;font-weight:600">Automation &amp; historical statistics</summary><p class="sub">Filing and classification counts overlap; they are not shares of one total.</p>
   <div class="metrics">
     <div class="metric primary">
       <b>{% if st.needs_reply %}<a href="{{ url_for('messages', f='needs_reply') }}">{{ st.needs_reply }}</a>{% else %}{{ st.needs_reply }}{% endif %}</b>
@@ -2350,12 +2389,12 @@ DASH_TMPL = """
     </div>
     <div class="metric">
       <b>{{ st.moved }}</b>
-      <span class="lbl">sorted by rules</span>
+      <span class="lbl">filed by automation or you</span>
       <span class="ctx">{{ (st.moved * 100 // st.total) if st.total else 0 }}% of {{ st.total }} seen</span>
     </div>
     <div class="metric">
       <b>{{ st.classified }}</b>
-      <span class="lbl">LLM classified</span>
+      <span class="lbl">currently classified</span>
       <span class="ctx">{{ (st.classified * 100 // st.total) if st.total else 0 }}% of {{ st.total }} seen</span>
     </div>
     <div class="metric">
@@ -2375,26 +2414,20 @@ DASH_TMPL = """
     </div>
   </div>
   <div class="dstat">
-    <div class="dsrow"><span class="dsk">Sorted by rules</span><span class="dsv">{{ "{:,}".format(st.moved) }}</span></div>
-    <div class="dsrow"><span class="dsk">LLM classified</span><span class="dsv">{{ "{:,}".format(st.classified) }}<span class="dsp">{{ (st.classified * 100 // st.total) if st.total else 0 }}% of {{ "{:,}".format(st.total) }}</span></span></div>
+    <div class="dsrow"><span class="dsk">Filed messages</span><span class="dsv">{{ "{:,}".format(st.moved) }}</span></div>
+    <div class="dsrow"><span class="dsk">Currently classified</span><span class="dsv">{{ "{:,}".format(st.classified) }}<span class="dsp">{{ (st.classified * 100 // st.total) if st.total else 0 }}% of {{ "{:,}".format(st.total) }}</span></span></div>
     <div class="dsrow"><span class="dsk">Rules active</span><span class="dsv"><a href="{{ url_for('rules') }}">{{ st.rules }}</a></span></div>
     <div class="dsrow"><span class="dsk">Flows active</span><span class="dsv"><a href="{{ url_for('flows') }}">{{ st.flows }}</a></span></div>
     <div class="dsrow"><span class="dsk">Classifiers active</span><span class="dsv"><a href="{{ url_for('classifiers') }}">{{ st.classifiers }}</a></span></div>
-  </div>
-  <div class="dsc">
-    <span class="dschip{{ ' off' if not settings.rules_apply else '' }}" title="{{ 'Rules act live' if settings.rules_apply else 'Rules act in dry-run (suggest only)' }}">Rules {{ 'live' if settings.rules_apply else 'dry-run' }}</span>
-    <span class="dschip{{ ' off' if not settings.llm_suggest else '' }}" title="{{ 'LLM classification on' if settings.llm_suggest else 'LLM classification off' }}">LLM {{ 'on' if settings.llm_suggest else 'off' }}</span>
-    <span class="dschip{{ ' off' if not settings.llm_apply else '' }}" title="{{ 'Auto-filing ON' if settings.llm_apply else 'Auto-filing off (suggests only)' }}">Auto-filing {{ 'ON' if settings.llm_apply else 'off' }}</span>
-    <a class="dschip chg" href="{{ url_for('settings') }}">Settings →</a>
   </div>
   <div class="dashactions">
     <a class="btn primary" href="{{ url_for('messages') }}">Open messages</a>
     <form class="inline" method="post" action="{{ url_for('check_now') }}"><button class="btn" type="submit" {{ 'disabled' if worker_state.running else '' }}>Check now</button></form>
   </div>
-</div>
+</details>
 
 {% if filings %}
-<div class="card" id="filings">
+<div class="card" id="filings" data-order="3">
   <div class="card-h" style="margin-bottom:2px"><h3>Recent filings</h3><span class="sub">Machine moves — Undo puts one back and keeps automation off it.</span></div>
   {% for f in filings %}
   <div class="frow">
@@ -2412,7 +2445,7 @@ DASH_TMPL = """
 </div>
 {% endif %}
 
-<div class="dashgrid">
+<div class="dashgrid" data-order="2">
   <div class="card flush">
     <div class="card-h" style="padding:14px 16px 10px;margin:0">
       <h3>Recent mail</h3>
@@ -2439,28 +2472,8 @@ DASH_TMPL = """
     </div>
     {% endif %}
   </div>
-  <div style="display:flex;flex-direction:column;gap:14px">
-    <div class="card ixcard">
-      <div class="card-h"><h3>Search index</h3>
-        {% if ix.running %}<span class="badge acc">indexing</span>
-        {% elif ix.last_error %}<span class="badge err">error</span>
-        {% elif ix.chunks %}<span class="badge ok">ready</span>
-        {% else %}<span class="badge warn">not built</span>{% endif %}
-      </div>
-      <div class="sub">{{ ix.messages }} messages · {{ ix.chunks }} chunks · folders {{ ix.folders_done }}/{{ ix.folders_total }}{% if ix.last_ok %} · last run {{ ix.last_ok_r }}{% endif %}</div>
-      <div class="row" style="margin-top:10px">
-        <form class="inline" method="post" action="{{ url_for('index_run') }}"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Index now</button></form>
-        <form class="inline" method="post" action="{{ url_for('index_rebuild') }}" onsubmit="return confirm('Rebuild the search index from scratch? Mail is untouched.');"><button class="btn small" type="submit" {{ 'disabled' if ix.running else '' }}>Rebuild</button></form>
-      </div>
-    </div>
-    <details class="card flush actwrap" open>
-      <summary class="act-sum"><h3>Activity</h3><a class="sub act-lnk" href="{{ url_for('log') }}">Full log →</a><span class="act-chev" aria-hidden="true"></span></summary>
-      <div class="logpanel" style="border:0;max-height:320px;overflow:auto">
-        {% for e in events %}<div class="logrow"><span class="mono">{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span class="lmsg">{{ e.message }}</span></div>
-        {% else %}<div class="sub">No events yet.</div>{% endfor %}
-      </div>
-    </details>
-  </div>
+</div>
+<details class="card flush actwrap" data-order="5"><summary class="act-sum"><h3>Recent activity</h3><a class="sub act-lnk" href="{{ url_for('log') }}">Full log</a><span class="act-chev" aria-hidden="true"></span></summary><div class="logpanel">{% for e in events[:6] %}<div class="logrow"><span>{{ e.when }}</span> <span class="badge {{ e.cls }}">{{ e.level }}</span> <span>{{ e.message }}</span></div>{% endfor %}</div></details>
 </div>
 <script>
 (function(){
@@ -2520,9 +2533,7 @@ def dashboard():
     for m in msgs:
         m["when"] = fmt_ts(m.get("processed_at"))
         m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
-        llm = m.get("llm_category") or ""
-        if llm and m.get("llm_confidence") is not None:
-            llm += " (%.0f%%)" % (m["llm_confidence"] * 100)
+        llm = _category_caption(m)
         if m.get("llm_needs_reply"):
             llm += " · needs reply"
         m["llm"] = llm
@@ -2535,6 +2546,7 @@ def dashboard():
     except Exception as exc:
         px = {"running": False, "installed": True, "ports": {}, "restarts": 0,
               "last_error": repr(exc)}
+    px['external'] = store.get_setting('proxy_mode') == 'external'
     px["listener_rows"] = [{"port": port} for port, _up in sorted((px.get("ports") or {}).items())]
     llm_cfg = engine.llm_config()
     lh = dict(llm_health.state)
@@ -2548,14 +2560,14 @@ def dashboard():
         f["when_h"] = fmt_ts(f.get("ts"))
         f["who"] = {"rule": "rule", "flow": "flow", "auto-file": "LLM", "assistant": "assistant",
                     "manual": "you", "trash": "→ Trash"}.get(f.get("source") or "", f.get("source") or "move")
-    sys_alert = bool(ws.get("last_error") or not px.get("running")
+    sys_alert = bool(ws.get("last_error") or (not px.get('external') and not px.get("running"))
                      or ix_st.get("last_error") or not llm_cfg.get("base")
                      or lh.get("down"))
     return render(_render_src(
         DASH_TMPL, worker_state=ws, st=stats(), messages=msgs, events=events,
         settings=store.all_settings(), ix=ix_st, px=px, filings=filings,
         llm=llm_cfg, lh=lh, llm_used=store.llm_count_last_hour(), sys_alert=sys_alert,
-        setup=setup_state()))
+        setup=setup_state(), pending_approvals=store.count_pending_agent_actions()))
 
 
 @app.route("/check", methods=["POST"])
@@ -2670,7 +2682,7 @@ RULES_TMPL = """
   <div class="tablewrap"><table class="tbl" style="max-width:560px">
     <thead><tr><th>rule</th><th class="r">matches</th></tr></thead>
     <tbody>
-    {% for t in test_results %}<tr><td>{{ t.name }}</td><td class="r mono">{{ t.count }}</td></tr>{% endfor %}
+     {% for t in test_results %}<tr><td>{{ t.name }}{% if not t.count %}<div class="sub">No winning matches in this sample; an earlier rule may claim them.</div>{% endif %}</td><td class="r mono">{{ t.count }}</td></tr>{% endfor %}
     <tr><td class="sub">unmatched (would go to LLM)</td><td class="r mono">{{ test_unmatched }}</td></tr>
     </tbody></table></div>
 </div>
@@ -2683,7 +2695,7 @@ RULES_TMPL = """
     {% for r in rules %}
     <tr{% if not r.enabled %} style="opacity:.55"{% endif %}>
       <td class="sub mono">{{ loop.index }}</td>
-      <td><b>{{ r.name }}</b>{% if not r.enabled %} <span class="badge">disabled</span>{% endif %}</td>
+      <td><b>{{ r.name }}</b>{% if not r.enabled %} <span class="badge">disabled</span>{% endif %}{% if r.diagnostic %}<div class="sub" style="color:var(--warn)">{{ r.diagnostic }}</div>{% endif %}</td>
       <td class="mono" style="font-size:.79rem">{{ r.summary }}</td>
       <td class="sub">{{ r.actions }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
@@ -2841,6 +2853,7 @@ PLUGIN_DETAIL_TMPL = """
     <dt>Source</dt><dd>{{ 'shipped with the app' if p.root == 'builtin' else 'user plugin' }} &middot; v{{ p.version }}</dd>
   </dl>
   {% if p.tools %}
+  {% if p.enabled %}<p><a class="btn primary" href="{{ url_for('assistant', prompt='Use the ' ~ p.name ~ ' plugin to help me with my mail. Ask me for any missing details first.') }}">Use in Assistant</a> <span class="sub">Opens an editable request; your permissions still apply.</span></p>{% endif %}
   <div class="sub" style="margin-top:14px;font-weight:600">Assistant tools</div>
   {% for t in p.tools %}
   <div class="pxd-ev"><span class="mono pxd-tn">{{ t.name }}</span><span class="sub" style="min-width:0">{{ t.description }}</span></div>
@@ -3157,8 +3170,8 @@ body.setup .bottom-nav{display:none !important}
     </section>
   </div>
 
-  <div class="wz-foot">Everything runs on this machine. Mail Triage never deletes mail - worst case it files
-  it into a folder. Reopen this setup any time from the More page.</div>
+  <div class="wz-foot">Mail Triage does not permanently delete mail. Optional Move to Trash follows your
+  provider's retention policy. Reopen this setup any time from the More page.</div>
   <noscript><div class="wz-note">The guided view needs JavaScript. You can use the normal pages instead:
   <a href="{{ url_for('accounts') }}">Accounts</a>, <a href="{{ url_for('settings') }}">Settings</a>,
   <a href="{{ url_for('dashboard') }}">Dashboard</a>.</div></noscript>
@@ -4631,7 +4644,9 @@ def classifier_dataset_reinclude(hid):
 @app.route("/rules")
 def rules():
     rules_list = store.list_rules()
+    diagnostics = ux.rule_diagnostics(rules_list)
     for r in rules_list:
+        r['diagnostic'] = diagnostics.get(r['id'], '')
         r["summary"] = summarize_conditions(r)
         r["actions"] = summarize_actions(r)
     tr, tu = None, None
@@ -4671,7 +4686,7 @@ RULE_EDIT_TMPL = """
     <div class="page-desc">Rules run before classifiers and the LLM, in list order — first match wins.</div>
   </div>
 </div>
-<form method="post">
+<form method="post" id="ruleform">
   <div class="card">
     <div class="card-h"><h3>Basics</h3></div>
     <div class="grid2">
@@ -4692,7 +4707,7 @@ RULE_EDIT_TMPL = """
       <div class="grid3 sub cond-head" style="margin-bottom:2px"><div>field</div><div>operator</div><div>value</div></div>
       {% for i in range(5) %}
       {% set c = conditions[i] if conditions|length > i else {} %}
-      <div class="grid3{{ ' cond-extra' if i >= 2 else '' }}" style="margin-bottom:6px">
+      <div class="grid3 rule-cond" {{ 'hidden' if i >= ([conditions|length,1]|max) else '' }} style="margin-bottom:6px">
         <select name="cond_field_{{ i }}" aria-label="Condition {{ i+1 }} field">
           {% for f in ['from','to','subject','body'] %}
           <option value="{{ f }}" {{ 'selected' if c.get('field')==f else '' }}>{{ f }}</option>{% endfor %}
@@ -4704,7 +4719,8 @@ RULE_EDIT_TMPL = """
         <input type="text" name="cond_value_{{ i }}" value="{{ c.get('value','') if c.get('op') != 'plugin' else c.get('plugin','') }}" placeholder="value to match (or plugin id)" aria-label="Condition {{ i+1 }} value">
       </div>
       {% endfor %}
-      <button type="button" class="btn small cond-more" onclick="this.parentNode.querySelectorAll('.cond-extra').forEach(function(e){e.classList.remove('cond-extra');}); this.remove();">Show 3 more conditions</button>
+      <button type="button" class="btn small" data-add-rule-condition {{ 'hidden' if conditions|length >= 5 else '' }}>Add condition</button>
+      <noscript><style>.rule-cond[hidden]{display:grid!important}</style></noscript>
     </div>
     <div class="sub" style="margin-top:6px">Values of 3 characters or fewer match whole words only — “PO” will not fire on “support”.</div>
   </div>
@@ -4720,7 +4736,8 @@ RULE_EDIT_TMPL = """
       </div>
     </div>
   </div>
-  <div class="savebar"><button class="btn primary" type="submit">Save rule</button><a class="btn" href="{{ url_for('rules') }}">Cancel</a><span class="sub">Test the whole list (dry run) from the Rules page.</span></div>
+  {{ editor_preview('rule', rule.id if rule and rule.id else 0)|safe }}
+  <div class="savebar"><button class="btn primary" type="submit">Save rule</button><button class="btn" type="button" data-open-preview>Test this draft</button><a class="btn" href="{{ url_for('rules') }}">Cancel</a></div>
 </form>
 """
 
@@ -5136,8 +5153,10 @@ FLOW_EDIT_TMPL = """
   </div>
 </div>
 
+{{ editor_preview('flow', request.view_args.get('flow_id', 0))|safe }}
 <div class="savebar">
   <button class="btn primary" type="submit">Save flow</button>
+  <button class="btn" type="button" data-open-preview>Test this draft</button>
   <a class="btn" href="{{ url_for('flows') }}">Cancel</a>
   <span class="fl-save-hint">A flow only moves, tags, marks, stars, or drafts — it never deletes mail.</span>
 </div>
@@ -5873,6 +5892,13 @@ def template_delete(tid):
 # ---------------------------------------------------------------- messages
 
 MESSAGES_TMPL = """
+<style>
+.mailtbl{table-layout:fixed;width:100%}.mailtbl th:nth-child(1){width:34px}.mailtbl th:nth-child(2){width:104px}.mailtbl th:nth-child(3){width:170px}.mailtbl th:nth-child(5){width:80px}.mailtbl th:nth-child(6){width:116px}.mailtbl th:nth-child(7){width:100px}
+.mailtbl td{overflow-wrap:anywhere}.mailtbl td:nth-child(3){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mailtbl td:nth-child(4) a{display:block;font-weight:600}.mailtbl td:nth-child(4) .sub{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:3px}
+@media(min-width:768px) and (max-width:1399px){.mailtbl th:nth-child(3){width:140px}.mailtbl th:nth-child(5),.mailtbl td:nth-child(5){display:none}.mailtbl th:nth-child(6){width:108px}.mailtbl th:nth-child(7){width:90px}}
+@media(max-width:767px){.mailtbl{table-layout:auto}}
+</style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Messages</h1>
@@ -5920,18 +5946,34 @@ MESSAGES_TMPL = """
 <script>(function(){ var me=location.pathname; (function r(){ setTimeout(function(){ if(location.pathname!==me) return; if(document.hidden){ r(); } else { location.reload(); } }, 10000); })(); })();</script>
 {% endif %}
 
+<form method="get" class="card" aria-label="Search and filter mail">
+  <input type="hidden" name="f" value="{{ filt }}">
+  <input type="hidden" name="per" value="{{ per }}">
+  <div class="ux-search"><label for="mail-q">Search mail<input id="mail-q" type="search" name="q" value="{{ search_form.q }}" placeholder="Sender, subject or message text…"></label><button class="btn primary" type="submit">Search</button>{% if search_active %}<a class="btn" href="{{ url_for('messages', f=filt) }}">Clear filters</a>{% endif %}</div>
+  <details class="ux-filters" {{ 'open' if search_advanced else '' }}><summary>More filters{% if search_active %} · applied{% endif %}</summary>
+    <div class="grid3">
+      <div><label for="mail-sender">Sender</label><input id="mail-sender" name="sender" value="{{ search_form.sender }}" placeholder="name@example.com"></div>
+      <div><label for="mail-category">Category</label><select id="mail-category" name="category"><option value="">All categories</option>{% for c in categories %}<option {{ 'selected' if search_form.category==c else '' }}>{{ c }}</option>{% endfor %}</select></div>
+      <div><label for="mail-folder">Folder</label><select id="mail-folder" name="folder"><option value="">All folders</option>{% for folder in folders %}<option {{ 'selected' if search_form.folder==folder else '' }}>{{ folder }}</option>{% endfor %}</select></div>
+      <div><label for="mail-after">From date</label><input id="mail-after" type="date" name="after" value="{{ search_form.after }}"></div>
+      <div><label for="mail-before">Through date</label><input id="mail-before" type="date" name="before" value="{{ search_form.before }}"></div>
+    </div><button class="btn small" type="submit" style="margin-top:10px">Apply filters</button>
+  </details>
+</form>
 <div class="card flush">
   <form id="bulk" method="post">
     <input type="hidden" name="f" value="{{ filt }}">
     <div class="toolbar">
       <span class="tchips">
       {% for key, label, n in filter_chips %}
-      <a class="chip{{ ' active' if filt==key else '' }}" href="{{ url_for('messages', f=key) }}">{{ label }} <span class="n">{{ n }}</span></a>
+      <a class="chip{{ ' active' if filt==key else '' }}" href="{{ url_for('messages', f=key, **search_form) }}">{{ label }} <span class="n">{{ n }}</span></a>
       {% endfor %}
       </span>
       <span class="tactions">
-      <button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify all<span class="mhide"> unclassified</span> ({{ unclassified }})</button>
+      {% if unclassified or classify_state.running %}<button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify all<span class="mhide"> unclassified</span> ({{ unclassified }})</button>{% endif %}
+      {% if tagged_count %}
       <button class="btn small" type="submit" formaction="{{ url_for('learn_rules') }}" {{ 'disabled' if not tagged_count else '' }} title="{{ 'Nothing to learn from yet — tag some messages first' if not tagged_count else '' }}">Learn rules<span class="mhide"> from tags</span> ({{ tagged_count }})</button>
+      {% endif %}
       </span>
     </div>
     <div class="bulkbar" id="bulkbar" role="region" aria-label="Bulk actions">
@@ -5946,10 +5988,10 @@ MESSAGES_TMPL = """
       <button class="btn small primary" type="submit" formaction="{{ url_for('messages_classify') }}">Classify selected</button>
     </div>
     {% if msgs %}
-    <div class="tablewrap"><table class="tbl mcards">
+    <div class="tablewrap"><table class="tbl mcards mailtbl">
       <thead><tr>
         <th class="sel"><input type="checkbox" id="selall" aria-label="Select all on this page"></th>
-        <th>date</th><th>from</th><th>subject</th><th>tag</th><th>status</th><th>LLM</th>
+        <th>date</th><th>from</th><th>subject</th><th>tag</th><th>status</th><th>category</th>
       </tr></thead>
       <tbody>
       {% for m in msgs %}
@@ -5957,7 +5999,7 @@ MESSAGES_TMPL = """
         <td class="sel"><input type="checkbox" name="ids" value="{{ m.id }}" aria-label="Select message"></td>
         <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
         <td class="sub" title="{{ m.from_addr }}">{{ m.from_addr|clip(34) }}</td>
-        <td><a href="{{ url_for('message_detail', mid=m.id, f=filt) }}" title="{{ m.subject }}">{{ m.subject|clip(84) or '(no subject)' }}</a>
+        <td><a href="{{ url_for('message_detail', mid=m.id, f=filt, **search_form) }}" title="{{ m.subject }}">{{ m.subject|clip(84) or '(no subject)' }}</a>
           {% if m.llm_summary %}<div class="sub" style="font-size:.78rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(150) }}</div>{% endif %}</td>
         <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
         <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.snoozed_active %} <span class="badge warn" title="until {{ m.snoozed_h }}">snoozed</span>{% endif %}{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
@@ -5967,19 +6009,19 @@ MESSAGES_TMPL = """
       </tbody></table></div>
     {% else %}
     <div class="empty">
-      <h4>No messages{% if filt != 'all' %} match this filter{% endif %} yet</h4>
-      <p>{% if filt == 'all' %}Mail shows up here after the watcher's first pass.{% else %}Try another filter, or check again shortly.{% endif %}</p>
-      {% if filt == 'all' %}<form class="inline" method="post" action="{{ url_for('check_now') }}"><button class="btn primary" type="submit">Check now</button></form>
+      <h4>No messages{% if filt != 'all' or search_active %} match these filters{% endif %}</h4>
+      <p>{% if filt == 'all' and not search_active %}Mail shows up here after the watcher's first pass.{% else %}Try a different search or clear your filters.{% endif %}</p>
+      {% if filt == 'all' and not search_active %}<button class="btn primary" type="submit" formaction="{{ url_for('check_now') }}">Check now</button>
       {% else %}<a class="btn" href="{{ url_for('messages') }}">Show all messages</a>{% endif %}
     </div>
     {% endif %}
     <div class="pager">
-      {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per) }}">← Newer</a>{% endif %}
-      {% if page < pages %}<a class="btn small primary" href="{{ url_for('messages', f=filt, page=page+1, per=per) }}">Older →</a>{% endif %}
-      {% if page < pages %}<a class="btn small plast" href="{{ url_for('messages', f=filt, page=pages, per=per) }}">Last »</a>{% endif %}
+      {% if page > 1 %}<a class="btn small" href="{{ url_for('messages', f=filt, page=page-1, per=per, **search_form) }}">← Newer</a>{% endif %}
+      {% if page < pages %}<a class="btn small primary" href="{{ url_for('messages', f=filt, page=page+1, per=per, **search_form) }}">Older →</a>{% endif %}
+      {% if page < pages %}<a class="btn small plast" href="{{ url_for('messages', f=filt, page=pages, per=per, **search_form) }}">Last »</a>{% endif %}
       <span class="sub pageno">page {{ page }} of {{ pages }}</span>
       <span class="sub pp" style="margin-left:auto">per page:
-        {% for n in [50, 100, 250, 500] %}<a class="chip{{ ' active' if per==n else '' }}" style="height:24px;padding:0 8px" href="{{ url_for('messages', f=filt, page=1, per=n) }}">{{ n }}</a>{% endfor %}
+        {% for n in [50, 100, 250, 500] %}<a class="chip{{ ' active' if per==n else '' }}" style="height:24px;padding:0 8px" href="{{ url_for('messages', f=filt, page=1, per=n, **search_form) }}">{{ n }}</a>{% endfor %}
       </span>
     </div>
   </form>
@@ -6029,6 +6071,7 @@ def _proposal_views():
 @app.route("/messages")
 def messages():
     filt = request.args.get("f", "all")
+    search_form, search = _mail_search()
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:
@@ -6038,17 +6081,14 @@ def messages():
     except ValueError:
         per = 100
     per = max(10, min(500, per))
-    total = store.count_messages(filt)
+    total = store.count_messages(filt, search=search)
     pages = max(1, (total + per - 1) // per)
     page = min(page, pages)
-    msgs = store.messages(limit=per, filt=filt, offset=(page - 1) * per)
+    msgs = store.messages(limit=per, filt=filt, offset=(page - 1) * per, search=search)
     for m in msgs:
         m["when"] = fmt_ts(m.get("date_ts") or m.get("processed_at"))
         m["badge"] = STATUS_BADGES.get(m.get("status"), ("", m.get("status", "")))
-        llm = m.get("llm_category") or ""
-        if llm and m.get("llm_confidence") is not None:
-            llm += " (%.0f%%)" % (m["llm_confidence"] * 100)
-        m["llm"] = llm
+        m["llm"] = _category_caption(m)
         su = m.get("snoozed_until") or 0
         m["snoozed_active"] = bool(su and su > time.time())
         m["snoozed_h"] = fmt_ts(su) if su else ""
@@ -6059,7 +6099,7 @@ def messages():
         + [json.loads(r.get("actions") or "{}").get("move_to", "")
            for r in store.list_rules() if r.get("enabled")]))
     tag_options = [t for t in tag_options if t]
-    filter_chips = [(key, label, store.count_messages(key)) for key, label in (
+    filter_chips = [(key, label, store.count_messages(key, search=search)) for key, label in (
         ("all", "All"), ("queued", "Awaiting LLM"), ("needs_reply", "Needs reply"),
         ("moved", "Sorted"), ("tagged", "Tagged"), ("snoozed", "Snoozed"),
         ("errors", "Errors"))]
@@ -6069,7 +6109,44 @@ def messages():
         classify_state=dict(classifier.state),
         unclassified=store.unclassified_count(),
         tagged_count=len(store.tagged_examples(1000)),
-        tag_options=tag_options, filter_chips=filter_chips))
+        tag_options=tag_options, filter_chips=filter_chips,
+        search_form=search_form, search_active=any(search_form.values()),
+        search_advanced=any(v for k, v in search_form.items() if k != 'q'),
+        categories=settings.get('categories') or [], folders=_mail_folders()))
+
+
+def _mail_search():
+    form = {k: (request.args.get(k) or '').strip()[:200]
+            for k in ('q', 'sender', 'category', 'folder', 'after', 'before')}
+    search = {k: form[k] for k in ('q', 'sender', 'category', 'folder')}
+    from datetime import datetime, timezone
+    offset = tz_offset_hours() * 3600
+    for key in ('after', 'before'):
+        if form[key]:
+            try:
+                search[key] = datetime.strptime(form[key], '%Y-%m-%d').replace(tzinfo=timezone.utc).timestamp() - offset
+                if key == 'before':
+                    search[key] += 86400
+            except ValueError:
+                form[key] = ''
+                flash('Invalid date filter ignored; use YYYY-MM-DD.', 'warn')
+    return form, search
+
+
+def _mail_folders():
+    with store.db() as conn:
+        return [r[0] for r in conn.execute('SELECT DISTINCT folder FROM messages ORDER BY folder') if r[0]]
+
+
+def _category_caption(message):
+    caption = message.get('llm_category') or ''
+    if not caption:
+        return ''
+    if message.get('classified_by') == 'user':
+        return caption + ' · your correction'
+    if message.get('llm_confidence') is not None:
+        caption += ' (%.0f%%)' % (message['llm_confidence'] * 100)
+    return caption
 
 
 @app.route("/messages/tag", methods=["POST"])
@@ -6236,10 +6313,16 @@ MESSAGE_TMPL = """
 .emailbody h1{font-size:1.35em;margin:.6em 0 .4em}.emailbody h2{font-size:1.2em;margin:.6em 0 .4em}.emailbody h3{font-size:1.05em;margin:.5em 0 .3em}
 .emailbody blockquote{margin:10px 0;padding-left:12px;border-left:2px solid var(--line);color:var(--dim)}
 .emailbody p{margin:0 0 .7em}
+.message-workbench{position:sticky;top:0;z-index:20;background:var(--card);border:1px solid var(--line);padding:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.message-workbench .btn{min-height:38px}.message-workbench details{position:relative}.message-workbench details>div{position:absolute;top:100%;right:0;background:var(--card);border:1px solid var(--line);padding:10px;min-width:190px;z-index:21}
+.reply-panel{margin:0 0 14px}.reply-panel>summary{font-weight:600;cursor:pointer}.reply-panel form{margin-top:12px}
+.msg-disclosure>summary{cursor:pointer;font-weight:600;padding-bottom:8px}
+.category-correction{margin:10px 0}.category-correction label{margin:0}.category-correction select{width:auto;min-width:140px}
+@media(max-width:767px){.message-workbench{top:0}.message-workbench .btn{min-height:44px}.message-workbench details>div{left:0;right:auto}.message-workbench{gap:6px}.msgrid{gap:10px}}
 </style>
 <div class="page-head">
   <div style="min-width:0">
-    <div class="backlink"><a href="{{ url_for('messages', f=filt) if filt != 'all' else url_for('messages') }}">← Messages{{ ' (' + filt.replace('_', ' ') + ')' if filt != 'all' else '' }}</a></div>
+    <div class="backlink"><a href="{{ url_for('messages', f=filt, **search_form) }}">← Messages{{ ' (' + filt.replace('_', ' ') + ')' if filt != 'all' else '' }}</a></div>
     <h1 class="page-title" style="font-size:1.12rem">{{ m.subject[:100] or '(no subject)' }}</h1>
     <div class="page-desc msgfrom">{{ m.from_addr }} · <span title="{{ m.date }}">{{ m.date_disp or m.date }}</span> · {{ m.folder }}</div>
   </div>
@@ -6252,23 +6335,48 @@ MESSAGE_TMPL = """
 
 {% set can_file = m.llm_suggested_folder and not (m.action_taken or '').startswith('move') %}
 <div class="qbar">
-  {% if prev_id %}<a class="btn small" href="{{ url_for('message_detail', mid=prev_id, f=filt) }}">← Newer</a>
+  {% if prev_id %}<a class="btn small" href="{{ url_for('message_detail', mid=prev_id, f=filt, **search_form) }}">← Newer</a>
   {% else %}<span class="btn small qoff">← Newer</span>{% endif %}
-  {% if next_id %}<a class="btn small" href="{{ url_for('message_detail', mid=next_id, f=filt) }}">Older →</a>
+  {% if next_id %}<a class="btn small" href="{{ url_for('message_detail', mid=next_id, f=filt, **search_form) }}">Older →</a>
   {% else %}<span class="btn small qoff">Older →</span>{% endif %}
   <span class="sp"></span>
   {% if can_file %}<form class="inline" method="post" action="{{ url_for('message_file', mid=m.id) }}"><input type="hidden" name="next" value="1"><input type="hidden" name="f" value="{{ filt }}"><button class="btn primary small" type="submit">File &amp; next</button></form>{% endif %}
-  {% if m.llm_needs_reply %}<form class="inline" method="post" action="{{ url_for('message_needs_reply', mid=m.id) }}"><input type="hidden" name="next" value="1"><input type="hidden" name="f" value="{{ filt }}"><button class="btn small" type="submit">No reply<span class="mhide">, next</span></button></form>{% endif %}
+  {% if m.llm_needs_reply %}<form class="inline" method="post" action="{{ url_for('message_needs_reply', mid=m.id, **search_form) }}"><input type="hidden" name="next" value="1"><input type="hidden" name="f" value="{{ filt }}"><button class="btn small" type="submit">No reply needed &amp; next</button></form>{% endif %}
 </div>
+<div class="message-workbench" aria-label="Message actions">
+  <button class="btn primary" type="button" data-open-reply>Draft reply</button>
+  {% if m.snoozed_active %}<form class="inline" method="post" action="{{ url_for('message_snooze', mid=m.id) }}"><input type="hidden" name="hours" value="0"><button class="btn" type="submit">Wake now</button></form>
+  {% else %}<details><summary class="btn">Snooze</summary><div class="stack">{% for h,label in [(24,'1 day'),(72,'3 days'),(168,'1 week')] %}<form method="post" action="{{ url_for('message_snooze', mid=m.id) }}"><input type="hidden" name="hours" value="{{ h }}"><button class="btn" type="submit">{{ label }}</button></form>{% endfor %}</div></details>{% endif %}
+  <form class="inline" method="post" action="{{ url_for('message_needs_reply', mid=m.id) }}"><input type="hidden" name="value" value="{{ 0 if m.llm_needs_reply else 1 }}"><button class="btn" type="submit">{{ 'No reply needed' if m.llm_needs_reply else 'Needs reply' }}</button></form>
+</div>
+<details class="card reply-panel" id="reply-composer" {{ 'open' if draft or draft_error else '' }}>
+  <summary>Replies · draft and review</summary>
+  <p class="sub">Drafts land in your Drafts folder — nothing is sent automatically.</p>
+  <form method="post" action="{{ url_for('message_draft', mid=m.id, f=filt, **search_form) }}" class="row">
+    <select name="template_id" aria-label="Reply template" style="width:auto;max-width:100%"><option value="">No template — freeform</option>{% for t in templates %}<option value="{{ t.id }}" {{ 'selected' if draft_template_id==t.id else '' }}>{{ t.name }}</option>{% endfor %}</select>
+    <button class="btn primary" type="submit">Draft with LLM</button>
+  </form>
+  {% if draft %}<form method="post" action="{{ url_for('message_save', mid=m.id) }}"><label for="reply-body">Draft body</label><textarea id="reply-body" name="body" rows="8">{{ draft }}</textarea><div class="row" style="margin-top:8px"><button class="btn primary" type="submit">Save to Drafts</button><button class="btn" type="button" onclick="cp(document.getElementById('reply-body').value,this)">Copy</button><span class="sub">Review and send from your mail client.</span></div></form>
+  {% elif draft_error %}<div class="msg err" role="alert">Draft failed: {{ draft_error }}</div>{% endif %}
+</details>
+{% if reply_state or m.llm_needs_reply or reply_targets %}
+<div class="card" id="reply-status">
+  <div class="card-h"><h3>Reply status</h3>{% if reply_state %}<span class="badge {{ 'ok' if reply_state.state == 'answered' else 'warn' if reply_state.state in ['partial','uncertain','matched'] else '' }}">{{ {'answered':'Answered','partial':'Partial reply','uncertain':'Needs review','matched':'Reply check pending','reopened':'Reopened by you','cleared':'Cleared by you'}.get(reply_state.state, reply_state.state) }}</span>{% elif m.llm_needs_reply %}<span class="badge warn">Awaiting your reply</span>{% endif %}</div>
+  {% if reply_state %}<p>{{ reply_state.reason }}</p>{% if reply_state.sent %}<p class="sub"><a href="{{ url_for('message_detail', mid=reply_state.sent.id) }}">View sent reply →</a>{% if reply_state.state in ['answered','partial','uncertain'] %} · {{ '%.0f' % (reply_state.confidence*100) }}% assessment confidence{% endif %}</p>{% endif %}{% endif %}
+  {% for target in reply_targets %}<p><a href="{{ url_for('message_detail', mid=target.id) }}">{{ target.subject }}</a> <span class="badge {{ 'ok' if target.state == 'answered' else 'warn' }}">{{ 'Answered' if target.state == 'answered' else 'Needs review' }}</span></p>{% endfor %}
+  <div class="row"><form method="post" action="{{ url_for('message_check_replies', mid=m.id, f=filt, **search_form) }}"><button class="btn small" type="submit">Check sent replies</button></form><span class="sub">{% if reply_tracking %}Confirmed sent replies clear the flag; marking Needs reply reopens it.{% else %}Automatic checks are paused in AI settings.{% endif %}</span></div>
+</div>
+{% endif %}
 <div class="msgrid">
   <div class="stack">
     <div class="card">
       <div class="row" style="margin-bottom:10px">
         {% if m.user_tag %}<span class="badge warn">tag: {{ m.user_tag }}</span>{% endif %}
         {% if m.action_taken %}<span class="badge">{{ m.action_taken|replace('move:', 'moved to ') }}</span>{% endif %}
-        {% if m.llm_category %}<span class="badge acc">LLM: {{ m.llm_category }}{% if m.llm_confidence is not none %} ({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
+        {% if m.llm_category %}<span class="badge acc">{{ 'Your correction' if m.classified_by == 'user' else 'LLM' }}: {{ m.llm_category }}{% if m.llm_confidence is not none and m.classified_by != 'user' %} ({{ '%.0f' % (m.llm_confidence*100) }}%){% endif %}</span>{% endif %}
         {% if m.classified_by and m.classified_by.startswith('heuristic') %}<span class="badge acc">⚙ {{ m.classified_by }}</span>{% endif %}
       </div>
+      <form class="row category-correction" method="post" action="{{ url_for('message_category', mid=m.id) }}"><label for="correct-category">Correct category</label><select id="correct-category" name="category" required><option value="">Choose category…</option>{% for c in categories %}<option {{ 'selected' if m.llm_category==c else '' }}>{{ c }}</option>{% endfor %}</select><button class="btn small" type="submit">Save correction</button><span class="sub">Teaches the models; does not move mail.</span></form>
       {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_reason %} · why: {{ m.llm_reason }}{% endif %}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
       {% if m.llm_thinking %}<details class="sub" style="margin:8px 0 0"><summary style="cursor:pointer">classifier thinking</summary><pre class="mono" style="white-space:pre-wrap;font-size:.8rem;color:var(--dim);margin:6px 0">{{ m.llm_thinking }}</pre></details>{% endif %}
       {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
@@ -6289,8 +6397,8 @@ MESSAGE_TMPL = """
   </div>
 
   <div class="stickycol">
-    <div class="card">
-      <div class="card-h"><h3>Details</h3></div>
+    <details class="card msg-disclosure">
+      <summary>Details</summary>
       <div class="kv">
         <div class="k">From</div><div class="msgfrom">{{ m.from_addr or '—' }}</div>
         <div class="k">To</div><div class="msgfrom">{{ m.to_addr or '—' }}</div>
@@ -6298,8 +6406,9 @@ MESSAGE_TMPL = """
         <div class="k">Folder</div><div>{{ m.folder }} <span class="sub">uid {{ m.uid }}</span></div>
         <div class="k">Message-ID</div><div class="mono" style="font-size:.77rem">{{ m.msgid or '—' }}</div>
       </div>
-    </div>
-    <div class="card" id="audit">
+    </details>
+    <details class="card msg-disclosure" id="audit">
+      <summary>Audit trail · {{ m.audit|length }} events</summary>
       <div class="card-h"><h3>Audit trail</h3><span class="sub">How this email was triaged, oldest first{% if m.audit %} · {{ m.audit|length }} event{{ 's' if m.audit|length != 1 else '' }}{% endif %}</span></div>
       {% for ev in m.audit %}
       <div class="arow2">
@@ -6321,7 +6430,7 @@ MESSAGE_TMPL = """
       </div>
       {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>
       <form class="inline" method="post" action="{{ url_for('message_sweep', mid=m.id) }}" style="margin-top:8px"><button class="btn small" type="submit">Rebuild this email's history</button></form>{% endfor %}
-    </div>
+    </details>
     <div class="card">
       <div class="card-h"><h3>Actions</h3></div>
       <div class="row">
@@ -6349,7 +6458,7 @@ MESSAGE_TMPL = """
         <label>Needs reply</label>
         <div class="row">
           {% if m.llm_needs_reply %}
-          <span class="sub" style="margin-right:auto">flagged by the LLM</span>
+            <span class="sub" style="margin-right:auto">{{ 'flagged by you' if m.nr_user == 1 else 'flagged by the LLM' }}</span>
           <form class="inline" method="post" action="{{ url_for('message_needs_reply', mid=m.id) }}"><button class="btn small" type="submit">No reply needed</button></form>
           {% elif m.nr_cleared %}
           <span class="sub">✓ cleared by you — a re-classify won't re-flag it</span>
@@ -6372,33 +6481,9 @@ MESSAGE_TMPL = """
         </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-h"><h3>Replies</h3><span class="sub">Drafts land in your Drafts folder — nothing is sent automatically.</span></div>
-      <div class="row">
-        <form class="inline" method="post" action="{{ url_for('message_draft', mid=m.id) }}">
-          <select name="template_id" style="width:auto;min-width:160px" aria-label="Reply template">
-            <option value="">(no template — freeform)</option>
-            {% for t in templates %}<option value="{{ t.id }}" {{ 'selected' if draft_template_id==t.id else '' }}>{{ t.name }}</option>{% endfor %}
-          </select>
-          <button class="btn primary" type="submit">Draft with LLM</button>
-        </form>
-        <span class="sub">{% if not llm_configured %}LLM key not configured — see Settings.{% endif %}</span>
-      </div>
-      {% if draft %}
-      <form method="post" action="{{ url_for('message_save', mid=m.id) }}" style="margin-top:10px">
-        <textarea name="body" rows="12" aria-label="Draft body">{{ draft }}</textarea>
-        <p class="row" style="margin-top:8px">
-          <button class="btn primary" type="submit">Save to Drafts</button>
-          <button class="btn" type="button" onclick="cp(document.querySelector('textarea[name=body]').value, this)">Copy</button>
-          <span class="sub">Review and send from your mail client.</span>
-        </p>
-      </form>
-      {% elif draft_error %}
-      <div class="msg err" style="margin-top:10px">Draft failed: {{ draft_error }}</div>
-      {% endif %}
-    </div>
     {% if m.decisions %}
-    <div class="card" id="decisions">
+    <details class="card msg-disclosure" id="decisions">
+      <summary>Machine decisions</summary>
       <div class="card-h"><h3>Machine decisions</h3><span class="sub">learning loop · shadow rows never change behavior</span></div>
       {% for d in m.decisions %}
       <div class="arow2">
@@ -6414,7 +6499,7 @@ MESSAGE_TMPL = """
         </div>
       </div>
       {% endfor %}
-    </div>
+    </details>
     {% endif %}
   </div>
 </div>
@@ -6484,7 +6569,10 @@ def message_body_html(text):
                                         if l.strip().startswith("&gt;")) >= 2:
             idx = i
             break
-        if re.match(r"^On .{3,90} wrote:$", s) or s.startswith("-----Original Message-----"):
+        if re.match(r"^On .{3,90} wrote:$", s) or s.startswith("-----Original Message-----") or (
+                re.match(r'^(From:|发件人:)', s) and
+                sum(bool(re.match(r'^(From:|Sent:|Date:|To:|Subject:|发件人:|日期:|收件人:|主题:)', l.strip()))
+                    for l in lines[i:i + 12]) >= 3):
             idx = i
             break
     if idx is None:
@@ -6657,8 +6745,24 @@ def _message_decisions(mid, limit=14):
     return out
 
 
+_VIEW_RESULTS = {}
+
+
 def _render_message(m, classify_result=None, draft=None, draft_error=None, draft_template_id=0,
                     show_images=False, plain=False, filt="all", prev_id=None, next_id=None):
+    if request.method == 'POST' and 'text/vnd.turbo-stream.html' in request.headers.get('Accept', ''):
+        # Turbo requires a redirect after successful forms. Hold the generated
+        # preview briefly so it remains editable on the canonical viewer GET.
+        now = time.time()
+        for key in [k for k, v in _VIEW_RESULTS.items() if now - v[0] > 1800]:
+            _VIEW_RESULTS.pop(key, None)
+        key = os.urandom(16).hex()
+        _VIEW_RESULTS[key] = (now, m['id'], {'classify_result': classify_result, 'draft': draft,
+                                           'draft_error': draft_error, 'draft_template_id': draft_template_id})
+        while len(_VIEW_RESULTS) > 30:
+            _VIEW_RESULTS.pop(min(_VIEW_RESULTS, key=lambda k: _VIEW_RESULTS[k][0]))
+        return redirect(url_for('message_detail', mid=m['id'], result=key,
+                                f=request.args.get('f') or 'all', **_mail_search()[0]), code=303)
     if "body" not in m:
         payload = _message_body_payload(m)
         m["body"] = payload["text"]
@@ -6678,11 +6782,17 @@ def _render_message(m, classify_result=None, draft=None, draft_error=None, draft
     m["email_has_remote"] = has_remote
     m["show_images"] = show_images
     m["plain_view"] = plain
+    reply_state = replies.view_state(m)
+    headers = store.thread_headers(m['id'])
+    targets = store.reply_targets(m['id']) if headers.get('sent_folder') else []
     return render(_render_src(
         MESSAGE_TMPL, m=m, templates=store.list_templates(), draft=draft,
         draft_error=draft_error, draft_template_id=draft_template_id,
         classify_result=classify_result, llm_configured=bool(config.LLM_API_KEY),
-        filt=filt, prev_id=prev_id, next_id=next_id))
+        filt=filt, prev_id=prev_id, next_id=next_id,
+        search_form=_mail_search()[0], categories=store.get_setting('categories') or [],
+        reply_state=reply_state, reply_targets=targets,
+        reply_tracking=store.get_setting('reply_tracking_enabled') and store.get_setting('llm_suggest')))
 
 
 @app.route("/messages/<int:mid>")
@@ -6695,22 +6805,36 @@ def message_detail(mid):
     su = m.get("snoozed_until") or 0
     m["snoozed_active"] = bool(su and su > time.time())
     m["snoozed_h"] = fmt_ts(su) if su else ""
-    m["nr_cleared"] = store.user_needs_reply(mid) == 0
+    m['nr_user'] = store.user_needs_reply(mid)
+    m["nr_cleared"] = m['nr_user'] == 0
     m["audit"] = []
     for ev in store.get_msg_events(mid, limit=200):
+        if ev['kind'] == 'thread_headers':
+            continue  # machine-readable evidence, not an actionable audit event
         d = {"when": fmt_ts(ev["ts"]), "kind": ev["kind"], "detail": ev["detail"], "meta": None}
         if ev["kind"] == "classify":
             try:
                 d["meta"] = json.loads(ev["detail"])
             except (TypeError, ValueError):
                 pass
+        elif ev['kind'] == 'reply_state':
+            evidence = json.loads(ev['detail'])
+            d['detail'] = '%s · sent message #%s · %s' % (evidence['state'], evidence['sent_id'], evidence['reason'])
         m["audit"].append(d)
     show_images = request.args.get("imgs") == "1" or bool(store.get_setting("render_images"))
     plain = request.args.get("view") == "plain"
     filt = request.args.get("f") or "all"
-    prev_id, next_id = store.neighbors(mid, filt)
+    prev_id, next_id = store.neighbors(mid, filt, search=_mail_search()[1])
+    options = {}
+    key = request.args.get('result') or ''
+    if key:
+        hit = _VIEW_RESULTS.get(key)
+        if hit and hit[1] == mid and time.time() - hit[0] <= 1800:
+            options = hit[2]
+        else:
+            flash('That generated preview has expired. Generate it again from Draft reply.', 'warn')
     return _render_message(m, show_images=show_images, plain=plain, filt=filt,
-                           prev_id=prev_id, next_id=next_id)
+                           prev_id=prev_id, next_id=next_id, **options)
 
 
 def _data_dir():
@@ -6880,8 +7004,17 @@ def message_tag(mid):
 
 @app.route("/messages/<int:mid>/needs-reply", methods=["POST"])
 def message_needs_reply(mid):
+    if request.form.get('value') == '1':
+        if store.correct_needs_reply(mid, True):
+            store.log_msg_event(mid, 'needs_reply', 'flagged by you')
+            learning.observe(mid, 'needs_reply', '1', source='ui')
+            flash('Marked as needing a reply — your correction survives reclassification.', 'ok')
+        else:
+            flash('No such message.', 'err')
+        return redirect(url_for('message_detail', mid=mid))
     n, _ = store.clear_needs_reply([mid])
     if n:
+        store.correct_needs_reply(mid, False)
         store.log_msg_event(mid, "needs_reply", "cleared (by ui)")
         learning.observe(mid, "needs_reply", "cleared", source="ui")
         store.record_label(mid, "needs_reply", "0", source="explicit_user_correction",
@@ -6892,11 +7025,42 @@ def message_needs_reply(mid):
         flash("This message was not flagged.", "warn")
     filt = request.form.get("f") or "all"
     if request.form.get("next") == "1":
-        _p, next_id = store.neighbors(mid, filt)
+        _p, next_id = store.neighbors(mid, filt, search=_mail_search()[1])
         if next_id and next_id != mid:
-            return redirect(url_for("message_detail", mid=next_id, f=filt))
-        return redirect(url_for("messages", f=filt))
+            return redirect(url_for("message_detail", mid=next_id, f=filt, **_mail_search()[0]))
+        return redirect(url_for("messages", f=filt, **_mail_search()[0]))
     return redirect(url_for("message_detail", mid=mid))
+
+
+@app.route('/messages/<int:mid>/category', methods=['POST'])
+def message_category(mid):
+    category = (request.form.get('category') or '').strip()
+    if not store.get_message(mid):
+        flash('No such message.', 'err')
+        return redirect(url_for('messages'))
+    if category not in (store.get_setting('categories') or []):
+        flash('Choose one of your configured categories.', 'err')
+        return redirect(url_for('message_detail', mid=mid))
+    store.update_message(mid, llm_category=category, classified_by='user', llm_confidence=1.0,
+                         llm_suggested_folder=(store.get_setting('category_folders') or {}).get(category, ''))
+    store.record_category_correction(mid, category)
+    learning.observe(mid, 'relabel', category, source='ui')
+    store.log_msg_event(mid, 'category', 'corrected by you: ' + category)
+    flash('Saved as your correction: %s. Mail was not moved.' % category, 'ok')
+    return redirect(url_for('message_detail', mid=mid))
+
+
+@app.route('/messages/<int:mid>/check-replies', methods=['POST'])
+def message_check_replies(mid):
+    if not store.get_message(mid):
+        flash('No such message.', 'err')
+        return redirect(url_for('messages'))
+    if not store.get_setting('reply_tracking_enabled') or not store.get_setting('llm_suggest'):
+        flash('Automatic reply checks are paused. Enable Detect answered mail and LLM classification in AI settings.', 'warn')
+    else:
+        worker.trigger()
+        flash('Mailbox check queued, including sent replies. Refresh shortly to see the result.', 'ok')
+    return redirect(url_for('message_detail', mid=mid, f=request.args.get('f') or 'all', **_mail_search()[0]))
 
 
 @app.route("/messages/<int:mid>/file", methods=["POST"])
@@ -7145,7 +7309,7 @@ ASSISTANT_TMPL = r"""
       <form id="aform" class="composer" method="post" action="{{ url_for('assistant_send') }}">
         <input type="hidden" name="session" value="{{ sid }}">
         <div class="am-ctx" id="amctx" hidden></div>
-        <textarea name="message" id="msg" rows="1" enterkeyhint="send" placeholder="Message the assistant…"></textarea>
+        <textarea name="message" id="msg" rows="1" enterkeyhint="send" placeholder="Message the assistant…">{{ (request.args.get('prompt') or '')[:1000] }}</textarea>
         <div class="comp-row">
           <span class="sub" style="font-size:.78rem">Enter sends · Shift+Enter new line</span>
           <span class="row" style="margin-left:auto">
@@ -7387,7 +7551,14 @@ def _suggestions_for_path(path):
                 {"label": "Explain this rule", "prompt": "Explain what rule #%d (\u201c%s\u201d) matches and does, in two lines." % (rid, nm)},
                 {"label": "Any conflicts?", "prompt": "Would rule #%d (\u201c%s\u201d) conflict with my other rules? Check match order too." % (rid, nm)},
             ]
-    return ASSIST_SUGGESTIONS.get(key) or ASSIST_SUGGESTIONS["default"]
+    chips = list(ASSIST_SUGGESTIONS.get(key) or ASSIST_SUGGESTIONS["default"])
+    if key in ('default', 'dashboard', 'assistant'):
+        for pid, label, prompt in [('mt-invoice-finder', 'Find invoices', 'Find recent invoices using the Invoice finder plugin.'),
+                                   ('mt-daily-digest', 'Daily digest', 'Give me a daily digest using the Daily digest plugin.')]:
+            row = plugins.get(pid)
+            if row and row.get('enabled') and engine.agent_permissions().get('plugin:' + pid) != 'off':
+                chips.append({'label': label, 'prompt': prompt})
+    return chips
 
 
 def _assistant_prep(convo):
@@ -7857,9 +8028,17 @@ def _save_behavior_settings():
                           [x.strip() for x in (f.get("watch_folders") or "INBOX").split(",") if x.strip()])
     if has("my_name"):
         store.set_setting("my_name", (f.get("my_name") or "").strip())
+    if has('reply_sent_folder'):
+        store.set_setting('reply_sent_folder', (f.get('reply_sent_folder') or '').strip())
+    if has('reply_identity_addresses'):
+        aliases = [a.strip().lower() for a in (f.get('reply_identity_addresses') or '').split(',') if a.strip()]
+        if any(not re.fullmatch(r'[^@\s,<>]+@[^@\s,<>]+', a) for a in aliases):
+            flash('Sending aliases were not saved. Enter comma-separated email addresses.', 'err')
+        else:
+            store.set_setting('reply_identity_addresses', aliases)
     for k in ("rules_apply", "heuristics_enabled", "heuristic_autorefine", "llm_suggest",
               "llm_apply", "index_enabled", "rerank_enabled",
-              "render_images", "flows_apply"):
+              "render_images", "flows_apply", "reply_tracking_enabled"):
         if has(k):
             store.set_setting(k, f.get(k) not in (None, "", "0"))
     for cap, _l, _r, _t, _d in engine.AGENT_CAPS:
@@ -8158,20 +8337,10 @@ SETTINGS_TMPL = """
 <nav class="setnav" aria-label="Settings sections">
   <span class="sn-h">Settings</span>
   <a href="#general">General</a>
-  <a href="#ai">AI Settings</a>
-  <a class="sn-sub" href="#ai-model">Language model</a>
-  <a class="sn-sub" href="#ai-classify">Classification</a>
-  <a class="sn-sub" href="#ai-classifiers">Classifiers</a>
-  <a class="sn-sub" href="#ai-search">Embeddings &amp; reranker</a>
-  <a class="sn-sub" href="#ai-perms">Assistant</a>
-  <a href="#mail">Mail &amp; connection</a>
-  <a class="sn-sub" href="#mail-src">Mail source</a>
-  <a class="sn-sub" href="#mail-check">Checking</a>
-  <a href="#sorting">Sorting &amp; filing</a>
-  <a class="sn-sub" href="#sort-rules">Rules</a>
-  <a class="sn-sub" href="#sort-filing">Filing &amp; drafts</a>
-  <a href="#searchidx">Search index</a>
-  <a href="#status">System status</a>
+  <a href="#ai">AI</a>
+  <a href="#mail">Mail</a>
+  <a href="#sorting">Automation</a>
+  <a href="#searchidx">Search</a>
 </nav>
 <div class="setbody">
 
@@ -8280,6 +8449,12 @@ SETTINGS_TMPL = """
         <div class="st-c"><label class="check"><input type="checkbox" name="llm_suggest" value="1" {{ 'checked' if s.llm_suggest else '' }}><input type="hidden" name="llm_suggest" value="0"> <span>Enabled</span></label></div></div>
       <div class="setrow"><div class="st-l"><b>Auto-file by LLM category</b><span class="sub">Uses the folder map under Sorting &amp; filing. Off = suggest only.</span></div>
         <div class="st-c"><label class="check"><input type="checkbox" name="llm_apply" value="1" {{ 'checked' if s.llm_apply else '' }}><input type="hidden" name="llm_apply" value="0"> <span>Enabled</span></label></div></div>
+      <div class="setrow"><div class="st-l"><b>Detect answered mail</b><span class="sub">Check Sent replies for thread membership and whether they address the request. Sufficient replies clear Needs reply at 90% or higher assessment confidence. Uses the automatic-call budget; LLM classification must be on.</span></div>
+        <div class="st-c"><label class="px-sw"><input type="checkbox" name="reply_tracking_enabled" value="1" {{ 'checked' if s.reply_tracking_enabled else '' }} aria-label="Detect answered mail"><span class="px-tr"></span></label><input type="hidden" name="reply_tracking_enabled" value="0"></div></div>
+      <details class="ux-advanced"><summary>Advanced · sent-reply matching</summary>
+        <div class="setrow"><div class="st-l"><b>Sent folder</b><span class="sub">Blank discovers the server's Sent folder, including Sent Items.</span></div><div class="st-c"><input type="text" name="reply_sent_folder" value="{{ s.reply_sent_folder }}" placeholder="Auto-detect" aria-label="Sent folder override"></div></div>
+        <div class="setrow"><div class="st-l"><b>Other sending addresses</b><span class="sub">Comma-separated aliases you send as. Your primary mailbox address is recognized automatically. These are matching preferences, not account credentials.</span></div><div class="st-c"><input type="text" name="reply_identity_addresses" value="{{ s.reply_identity_addresses|join(', ') }}" placeholder="alias@example.com" aria-label="Sending aliases"></div></div>
+      </details>
       <div class="setrow"><div class="st-l"><b>Max automatic calls per hour</b><span class="sub">Hourly cap for background classification.</span></div>
         <div class="st-c"><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0" aria-label="Max LLM calls per hour"></div></div>
       <div class="setrow"><div class="st-l"><b>Classifications per check</b><span class="sub">How many queued messages each cycle picks up.</span></div>
@@ -8569,19 +8744,6 @@ SETTINGS_TMPL = """
   if(!sel || !ext) return;
   function upd(){ ext.classList.toggle('hidden', sel.value !== 'external'); }
   sel.addEventListener('change', upd);
-})();
-</script>
-
-<script>
-(function(){
-  var links=Array.prototype.slice.call(document.querySelectorAll('.setnav a'));
-  var secs=['general','ai','mail','sorting','searchidx','status'].map(function(id){return document.getElementById(id);}).filter(Boolean);
-  if(!links.length || !secs.length || !window.IntersectionObserver) return;
-  function set(id){ links.forEach(function(a){ a.classList.toggle('on', a.getAttribute('href')==='#'+id); }); }
-  var io=new IntersectionObserver(function(es){
-    es.forEach(function(e){ if(e.isIntersecting) set(e.target.id); });
-  },{rootMargin:'-25% 0px -60% 0px'});
-  secs.forEach(function(s){ io.observe(s); });
 })();
 </script>
 
@@ -9995,7 +10157,7 @@ LEARN_TMPL = """<style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Learning</h1>
-    <div class="page-desc">All the small models that handle your mail so the AI doesn't have to: the fast-paths your labels taught (they already decide when confident) and the newer learners taught by the AI's own answers (watching quietly until you promote them).</div>
+    <div class="page-desc">Review the models helping with triage, correct their mistakes and decide which may act.</div>
   </div>
   {% if s %}<form method="post" action="{{ url_for('learning_train') }}"><input type="hidden" name="task" value="{{ s.task }}"><button class="btn primary" type="submit">Retrain {{ titles.get(s.task, s.task)|lower }}</button></form>{% endif %}
 </div>
@@ -10010,9 +10172,8 @@ LEARN_TMPL = """<style>
 {% else %}
 {% macro spec_actions(sp) %}{% if sp.status == 'validated' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="shadow"><button class="btn small" type="submit">Start watching new mail</button></form>
     <span class="sub">Changes nothing — it only records what it would decide.</span>
-    {% elif sp.status == 'shadow' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="active"><button class="btn small" type="submit">Let it take over confident calls</button></form>
+    {% elif sp.status == 'shadow' %}<div class="sub">{% if rep.route_mode != 'enforce' %}<b>Live routing is off.</b> Promotion changes this model's state; it cannot bypass AI calls until live routing is configured.{% elif not rep.enabled %}<b>Learning is disabled.</b> Enable learning before this model can take over.{% else %}Live routing is on. Review disagreements before promoting.{% endif %}</div><a class="btn small" href="#learning-disagreements" data-open-disagreements>Review disagreements</a><form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="active"><button class="btn small" type="submit">Promote model</button></form>
     <form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
-    <span class="sub">Takes effect once live routing is on; everything is reversible.</span>
     {% elif sp.status == 'active' %}<form method="post" action="{{ url_for('learning_transition', sid=sp.id) }}"><input type="hidden" name="to" value="retired"><button class="btn small" type="submit">Retire</button></form>
     <span class="sub">Retiring keeps every version and all history.</span>
     {% endif %}{% endmacro %}
@@ -10023,14 +10184,15 @@ LEARN_TMPL = """<style>
   {% endif %}<div class="dsrow"><span class="dsk">Agrees with the AI on new mail</span><span class="dsv">{% if sp_live.n %}{{ sp_live.agree }} of {{ sp_live.n }}{% else %}no checks yet{% endif %}</span></div>{% endmacro %}
 <div class="card">
   <div class="card-h"><h3>Working on your mail</h3><span class="sub">{{ rep.counts.classifiers_live }} fast-path{{ 's' if rep.counts.classifiers_live != 1 else '' }} deciding · {{ rep.counts.learners_running }} learner{{ 's' if rep.counts.learners_running != 1 else '' }} watching — nothing acts without you</span></div>
-  <div class="sub">Two families, same controls: <b>fast-paths</b> were taught by your labels and answer before the AI even sees the email; <b>learners</b> were taught by the AI's own answers and watch quietly until you promote them. <a href="{{ url_for('classifiers') }}">Manage all classifiers →</a></div>
+  <div class="sub">Fast-paths answer before the AI; newer learners watch until promoted. Training data may include both AI labels and your corrections. <a href="{{ url_for('classifiers') }}">Manage all classifiers →</a></div>
 </div>
 <div class="mgrid">
 {% for c in rep.classifiers %}
 <div class="card">
   <div class="card-h"><h3>{{ c.name }}</h3><span class="badge {{ 'ok' if c.status == 'live' else '' }}">{{ 'deciding live' if c.status == 'live' else 'paused' }}</span></div>
-  <div class="sub" style="margin-bottom:8px">Sorts “{{ c.job }}” mail before the AI sees it{% if c.weak %} — learned mostly from the AI's own classifications{% else %} — learned from your labels{% endif %}.</div>
-  <div class="dsrow"><span class="dsk">Self-check accuracy</span><span class="dsv">{{ '%.0f' % (c.accuracy * 100) if c.accuracy is not none else '—' }}%</span></div>
+  <div class="sub" style="margin-bottom:8px">Sorts “{{ c.job }}” mail before the AI sees it.</div>
+  <div class="dsrow"><span class="dsk">Training source</span><span class="dsv">{{ 'AI labels + corrections' if c.weak else 'Your labels' }}</span></div>
+  <div class="dsrow"><span class="dsk">Held-out label agreement</span><span class="dsv">{{ '%.0f' % (c.accuracy * 100) if c.accuracy is not none else '—' }}%</span></div>
   <div class="dsrow"><span class="dsk">Learned from</span><span class="dsv">{{ "{:,}".format(c.samples) if c.samples else '—' }} examples</span></div>
   <div class="row" style="margin-top:12px;align-items:center;gap:8px">
     <form class="px-swf" method="post" action="{{ url_for('classifier_toggle', hid=c.id) }}">
@@ -10043,7 +10205,8 @@ LEARN_TMPL = """<style>
 {% endfor %}
 <div class="card">
   <div class="card-h"><h3>{{ titles.get(s.task, s.task) }}</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ {'validated': 'ready to watch', 'shadow': 'watching quietly', 'active': 'taking over', 'degraded': 'needs attention', 'retired': 'retired'}.get(s.status, s.status) }}</span></div>
-  <div class="sub" style="margin-bottom:8px">{% if s.task == 'category' %}One job: which category does this email belong to? It guesses the same six categories the AI uses. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% else %}One job: does this email need a reply from you? The same call the AI makes on every email today. It was taught by imitating the AI's past answers — your corrections are what will upgrade it.{% endif %}</div>
+  <div class="sub" style="margin-bottom:8px">{{ 'Predicts the category.' if s.task == 'category' else 'Predicts whether you need to reply.' }} Correct categories and reply flags directly on any message.</div>
+  <div class="dsrow"><span class="dsk">Training source</span><span class="dsv">{% if ds.by_source %}{% for source,n in ds.by_source.items() %}{{ 'AI labels' if source == 'llm_annotation' else 'Human / other labels' }}: {{ n }}{{ ' · ' if not loop.last }}{% endfor %}{% else %}AI labels; corrections used when available{% endif %}</span></div>
   {{ spec_stats(s, m, live) }}
   <div class="sub" style="margin-top:8px">These compare it to the AI's answers on your newest 20% of mail — a ceiling, not the truth: the AI is not always right. Corrections from you weigh several times more than the AI's own labels when retraining.</div>
   <div class="row" style="margin-top:12px;align-items:center;gap:8px">{{ spec_actions(s) }}</div>
@@ -10079,7 +10242,7 @@ LEARN_TMPL = """<style>
     <form method="post" action="{{ url_for('learning_eval_sample') }}"><button class="btn small" type="submit">Build the test set</button></form>
   {% endif %}
 </div>
-<div class="card">
+<details class="card"><summary style="cursor:pointer;font-weight:600">Training and observation history</summary>
   <div class="card-h"><h3>The newest learner</h3><span class="badge {{ {'validated':'acc','shadow':'warn','active':'ok','degraded':'warn','rejected':'err'}.get(s.status, '') }}">{{ stat_word }}</span></div>
   <div class="lead">{% if s.status == 'shadow' %}Watching quietly — it sees every classified email, records what it would decide, and changes nothing.
     {% elif s.status == 'active' %}Taking over confident calls — everything it is unsure about still goes to the AI.
@@ -10103,7 +10266,7 @@ LEARN_TMPL = """<style>
     <div class="lstep {{ 'now' if s.status == 'active' else 'todo' }}"><span class="dot {{ 'acc' if s.status == 'active' else '' }}"></span><div><b>4 · Take over confident calls</b>{% if s.status == 'active' %} <span class="badge ok">on</span>{% endif %}
       <div class="sub">{{ 'Emails it is confident about stop going to the AI. The rest still escalate.' if s.status == 'active' else 'The end goal: emails it is confident about stop going to the AI. Needs more watching time and your go-ahead.' }}</div></div></div>
   </div>
-</div>
+</details>
 <div class="card">
   <div class="card-h"><h3>What can be trained next</h3><span class="sub">candidates found in your data — nothing trains without you</span></div>
   {% for p in rep.proposals %}
@@ -10119,7 +10282,7 @@ LEARN_TMPL = """<style>
   {% endfor %}
 </div>
 <div class="card">
-  <details class="lfold">
+  <details class="lfold" id="learning-disagreements">
     <summary>Where it disagrees with the AI{% if rep.disagreements %} · {{ rep.disagreements|length }} recent{% endif %}</summary>
     <div class="lfold-i">
       <div class="sub" style="margin-bottom:8px">Shadow checks — the AI's decision still ran; these are the moments the model would have said something different. Open one to judge for yourself.</div>
@@ -10129,8 +10292,8 @@ LEARN_TMPL = """<style>
         {% for d in rep.disagreements %}
         <tr>
           <td><a href="{{ url_for('message_detail', mid=d.msg_id) }}">{{ d.subject or ('#' ~ d.msg_id) }}</a><div class="sub">{{ titles.get(d.task, d.task) }} · {{ d.from_addr }}</div></td>
-          <td><span class="badge warn">{{ 'needs reply' if d.specialist else 'no reply' }}</span> <span class="sub">{{ '%.2f' % d.specialist_conf }}</span></td>
-          <td><span class="badge">{{ 'needs reply' if d.system else 'no reply' }}</span> <span class="sub">{{ d.system_source }}</span></td>
+          <td><span class="badge warn">{{ d.specialist if d.task == 'category' else ('needs reply' if d.specialist else 'no reply') }}</span> <span class="sub">{{ '%.2f' % d.specialist_conf }}</span></td>
+          <td><span class="badge">{{ d.system if d.task == 'category' else ('needs reply' if d.system else 'no reply') }}</span> <span class="sub">{{ d.system_source }}</span></td>
           <td class="sub hide-m">{{ fmt_ts(d.ts) }}</td>
         </tr>
         {% endfor %}
@@ -10278,6 +10441,95 @@ def llm_health_json():
     st = dict(llm_health.state)
     st["checked_r"] = rel_time(st.get("checked_at"))
     return jsonify(st)
+
+
+def _editor_preview(kind, editor_id=0):
+    return _render_src(ux.EDITOR_PREVIEW_TMPL, kind=kind, editor_id=editor_id,
+                       recent=store.messages(limit=20))
+
+
+app.jinja_env.globals['editor_preview'] = _editor_preview
+
+
+@app.route('/messages/<int:mid>/preview.json')
+def message_preview(mid):
+    row = store.get_message(mid)
+    if not row:
+        return jsonify(error='No such message.'), 404
+    return jsonify(from_addr=row.get('from_addr') or '', to_addr=row.get('to_addr') or '',
+                   subject=row.get('subject') or '', body=(row.get('snippet') or '')[:8000])
+
+
+@app.route('/automation/preview', methods=['POST'])
+def automation_preview():
+    kind = request.form.get('preview_kind')
+    if kind not in ('rule', 'flow'):
+        return jsonify(error='Choose a rule or flow editor.'), 400
+    try:
+        editor_id = int(request.form.get('preview_id') or 0)
+    except ValueError:
+        return jsonify(error='Invalid editor id.'), 400
+    if editor_id and not (store.get_rule(editor_id) if kind == 'rule' else store.get_flow(editor_id)):
+        return jsonify(error='This automation no longer exists.'), 404
+    name, mode, conds, actions, enabled = _rule_from_form() if kind == 'rule' else _flow_from_form()
+    if not conds:
+        return jsonify(error='Add at least one condition before testing.'), 400
+    if kind == 'flow' and not actions:
+        return jsonify(error='Add at least one complete step before testing.'), 400
+    for c in conds:
+        if c.get('op') == 'regex':
+            try:
+                re.compile(c.get('value') or '')
+            except re.error:
+                return jsonify(error='Fix the invalid regular expression before testing.'), 400
+    draft = {'id': editor_id or -1, 'name': name, 'match_mode': mode, 'enabled': 1,
+             'conditions': json.dumps(conds), 'actions': json.dumps(actions)}
+    rules = store.list_rules(enabled_only=True)
+    flows = store.list_flows(enabled_only=True)
+    # Replace in original position, including a disabled editor's position.
+    rows = store.list_rules() if kind == 'rule' else store.list_flows()
+    overlaid = []
+    for row in rows:
+        if row['id'] == editor_id:
+            overlaid.append(draft)
+        elif row.get('enabled'):
+            overlaid.append(row)
+    if not editor_id:
+        overlaid.append(draft)
+    if kind == 'rule':
+        rules = overlaid
+    else:
+        flows = overlaid
+    fields = {k: (request.form.get('preview_' + k) or '')[:8000 if k == 'body' else 300]
+              for k in ('from', 'to', 'subject', 'body')}
+    if not any(fields.values()):
+        return jsonify(error='Choose a recent message or enter an example.'), 400
+    try:
+        result = engine.simulate_email(fields['from'], fields['subject'], fields['body'],
+                                       to_addr=fields['to'], use_llm=request.form.get('preview_llm') == '1',
+                                       rules=rules, flows=flows)
+        condition_results = []
+        ctx = {'text': fields['subject'] + '\n' + fields['body'], 'verdict': result.get('verdict') or {}}
+        matched = engine.rule_matches(draft, fields) if kind == 'rule' else engine.flow_matches(draft, fields, ctx)
+        for c in conds:
+            if (c.get('kind') or 'field') == 'field':
+                ok = engine.rule_matches({'conditions': json.dumps([c]), 'match_mode': 'all'}, fields)
+                condition_results.append({'text': summarize_conditions({'conditions': json.dumps([c])}),
+                                          'result': 'matches' if ok else 'does not match'})
+            else:
+                condition_results.append({'text': c.get('kind') + ': ' + c.get('value', ''),
+                                          'result': 'evaluated in the pipeline' if result.get('use_llm') else 'enable classifier to evaluate'})
+        outcome = (('Guard “%s” keeps this mail in place.' % result['guard']) if result.get('guard') else
+                   ('Rule “%s” wins before flows.' % result['rule']['name']) if result.get('rule') else
+                   ('Flow “%s” wins.' % result['flow']['name']) if result.get('flow') else
+                   'No automation matches this example.')
+        proposed = [summarize_actions(draft)] if kind == 'rule' else engine._sim_flow_steps(draft, store.all_settings())
+        report = _render_src(ux.PREVIEW_REPORT_TMPL, result=result, outcome=outcome, name=name, proposed=proposed,
+                             matched=matched, conditions=condition_results,
+                             placement='the end of the list' if not editor_id else 'its existing list position')
+        return jsonify(html=report, matched=matched, result=result)
+    except Exception as exc:
+        return jsonify(error='Preview could not run: %s' % exc), 422
 
 
 if __name__ == "__main__":

@@ -14,6 +14,9 @@ DEFAULT_SETTINGS = {
     "rules_apply": True,          # run rule actions (move/flag/read) for real
     "llm_suggest": True,          # classify unmatched mail with the LLM
     "llm_apply": False,           # act on LLM category -> folder mapping (off until trusted)
+    "reply_tracking_enabled": True,
+    "reply_sent_folder": "",     # blank discovers Sent special-use / conventional folders
+    "reply_identity_addresses": [],  # optional sending aliases, not account credentials
     "max_llm_per_hour": 40,
     "llm_batch_per_cycle": 5,
     "flows_apply": True,          # run multi-step flow automations for real (off = dry-run)
@@ -993,7 +996,130 @@ def insert_message(folder, uid, uidvalidity, fields):
              fields.get("body_html", ""), fields.get("body_cids", ""),
              fields.get("body_html_at") or 0,
              fields.get("date_ts") or date_ts_from(fields.get("date", "")) or int(time.time())))
-        return cur.lastrowid, conn.total_changes
+        result = (cur.lastrowid, conn.total_changes)
+        row = conn.execute('SELECT id FROM messages WHERE folder=? AND uid=? AND uidvalidity=?',
+                           (folder, uid, uidvalidity)).fetchone()
+        if row:
+            _capture_thread_headers(conn, row['id'], fields)
+        return result
+
+
+def _capture_thread_headers(conn, mid, fields, sent_folder='', sent_uid=0, sent_uv=0):
+    if 'in_reply_to' not in fields and 'references' not in fields:
+        return
+    old = conn.execute("SELECT detail FROM msg_events WHERE msg_id=? AND kind='thread_headers' ORDER BY id DESC LIMIT 1", (mid,)).fetchone()
+    previous = json.loads(old['detail']) if old else {}
+    if previous.get('sent_folder') and not sent_folder:
+        return  # generic index recapture must not replace verified Sent evidence with a stale draft
+    recipients = fields.get('recipients') or [fields.get('to_addr') or '']
+    payload = {k: str(fields.get(k) or '')[:limit] for k, limit in
+               [('msgid', 512), ('from_addr', 254), ('date', 100),
+                ('in_reply_to', 1000), ('auto_submitted', 100)]}
+    # Preserve the newest end of long reference chains and bounded recipients.
+    payload['references'] = str(fields.get('references') or '')[-3000:]
+    payload['recipients'] = [str(a).lower()[:254] for a in recipients[:50] if a]
+    payload['reply_to'] = [str(a).lower()[:254] for a in (fields.get('reply_to') or [])[:20] if a]
+    payload['sent_folder'] = sent_folder or previous.get('sent_folder') or ''
+    if sent_folder:
+        payload.update(sent_uid=sent_uid, sent_uv=sent_uv, sent_at=date_ts_from(fields.get('date')))
+    if payload != previous:
+        conn.execute('INSERT INTO msg_events (msg_id,ts,kind,detail) VALUES (?,?,?,?)',
+                     (mid, time.time(), 'thread_headers', json.dumps(payload, ensure_ascii=False)))
+
+
+def capture_thread_headers(mid, fields, sent_folder='', sent_uid=0, sent_uv=0):
+    with db() as conn:
+        _capture_thread_headers(conn, mid, fields, sent_folder, sent_uid, sent_uv)
+
+
+def thread_headers(mid):
+    with db() as conn:
+        row = conn.execute("SELECT detail FROM msg_events WHERE msg_id=? AND kind='thread_headers' ORDER BY id DESC LIMIT 1", (mid,)).fetchone()
+    return json.loads(row['detail']) if row else {}
+
+
+def sent_reply_evidence(since, limit=5000):
+    with db() as conn:
+        rows = conn.execute("SELECT m.*, e.detail AS header_evidence, e.ts AS sent_observed_at FROM messages m JOIN msg_events e ON e.msg_id=m.id "
+                            "WHERE e.kind='thread_headers' AND e.id=(SELECT MAX(h.id) FROM msg_events h WHERE h.msg_id=m.id AND h.kind='thread_headers') "
+                            "AND json_extract(e.detail,'$.sent_folder')<>'' "
+                            "AND coalesce(json_extract(e.detail,'$.sent_at'),m.date_ts)>=? "
+                            "ORDER BY m.date_ts DESC,m.id DESC LIMIT ?", (since, limit)).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        headers = json.loads(item.pop('header_evidence'))
+        if headers.get('sent_folder'):
+            item['date_ts'] = headers.get('sent_at') or item['date_ts']
+            item['headers'] = headers
+            result.append(item)
+    return result
+
+
+def outstanding_replies(limit=2000):
+    with db() as conn:
+        return [dict(r) for r in conn.execute('SELECT * FROM messages WHERE llm_needs_reply=1 ORDER BY date_ts DESC,id DESC LIMIT ?', (limit,))]
+
+
+def reply_correction(mid, conn=None):
+    if conn is None:
+        with db() as connection:
+            return reply_correction(mid, connection)
+    row = conn.execute("SELECT id,ts,label FROM labels WHERE msg_id=? AND task='needs_reply' "
+                       "AND source='explicit_user_correction' ORDER BY ts DESC,id DESC LIMIT 1", (mid,)).fetchone()
+    return dict(row) if row else None
+
+
+def reply_checks(mid):
+    with db() as conn:
+        rows = conn.execute("SELECT id,ts,detail FROM msg_events WHERE msg_id=? AND kind='reply_state' ORDER BY id DESC LIMIT 200", (mid,)).fetchall()
+    return [dict(json.loads(r['detail']), event_id=r['id'], checked_at=r['ts']) for r in rows]
+
+
+def effective_needs_reply(mid, model_value):
+    correction = reply_correction(mid)
+    if correction and correction['label'] == '0':
+        return 0
+    answered = next((s for s in reply_checks(mid) if s.get('state') == 'answered'), None)
+    if answered and (not correction or correction['ts'] <= answered['checked_at']):
+        return 0
+    return int(correction['label'] == '1') if correction else int(bool(model_value))
+
+
+def apply_reply_check(mid, result, correction_revision):
+    """Commit evidence and flag together; an intervening manual change wins."""
+    with db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        switches = conn.execute("SELECT v FROM settings WHERE k IN ('reply_tracking_enabled','llm_suggest')").fetchall()
+        if any(not json.loads(r['v']) for r in switches):
+            return False
+        row = conn.execute('SELECT llm_needs_reply FROM messages WHERE id=?', (mid,)).fetchone()
+        if not row or not row['llm_needs_reply'] or reply_correction(mid, conn) != correction_revision:
+            return False
+        if result['state'] == 'answered':
+            conn.execute('UPDATE messages SET llm_needs_reply=0 WHERE id=?', (mid,))
+        conn.execute('INSERT INTO msg_events (msg_id,ts,kind,detail) VALUES (?,?,?,?)',
+                     (mid, time.time(), 'reply_state', json.dumps(result, ensure_ascii=False)))
+    return True
+
+
+def reply_resolved_ids():
+    """Historical positive requirement: a reply outcome is not a negative label."""
+    with db() as conn:
+        rows = conn.execute("SELECT msg_id,detail FROM msg_events WHERE kind='reply_state'").fetchall()
+    return {r['msg_id'] for r in rows if json.loads(r['detail']).get('state') == 'answered'}
+
+
+def reply_targets(sent_id):
+    with db() as conn:
+        rows = conn.execute("SELECT e.msg_id,e.detail,m.subject FROM msg_events e JOIN messages m ON m.id=e.msg_id "
+                            "WHERE e.kind='reply_state' ORDER BY e.id DESC LIMIT 5000").fetchall()
+    found = {}
+    for row in rows:
+        detail = json.loads(row['detail'])
+        if detail.get('sent_id') == sent_id and row['msg_id'] not in found:
+            found[row['msg_id']] = {'id': row['msg_id'], 'subject': row['subject'], **detail}
+    return list(found.values())
 
 
 def snooze_message(mid, until_ts):
@@ -1028,11 +1154,37 @@ def user_needs_reply(msg_id):
     with db() as conn:
         row = conn.execute(
             "SELECT label FROM labels WHERE msg_id=? AND task='needs_reply' "
-            "AND source='explicit_user_correction' ORDER BY id DESC LIMIT 1",
+            "AND source='explicit_user_correction' ORDER BY ts DESC, id DESC LIMIT 1",
             (int(msg_id),)).fetchone()
     if not row:
         return None
     return 1 if str(row["label"]) == "1" else 0
+
+
+def correct_needs_reply(msg_id, value):
+    """Refresh the existing correction's timestamp when a user reverses it again.
+
+    Labels are deduplicated by value; timestamp ordering makes 0 -> 1 -> 0
+    honor the most recent intent without changing the schema or losing labels.
+    """
+    with db() as conn:
+        if not conn.execute("SELECT id FROM messages WHERE id=?", (msg_id,)).fetchone():
+            return False
+        conn.execute("UPDATE messages SET llm_needs_reply=? WHERE id=?", (int(value), msg_id))
+        conn.execute("INSERT INTO labels (ts,msg_id,task,label,confidence,source,source_detail) "
+                     "VALUES (?,?, 'needs_reply',?,1.0,'explicit_user_correction','viewer correction') "
+                     "ON CONFLICT(msg_id,task,label,source) DO UPDATE SET ts=excluded.ts",
+                     (time.time(), msg_id, str(int(value))))
+    return True
+
+
+def record_category_correction(msg_id, category):
+    """Keep the latest correction current even when returning to an old label."""
+    with db() as conn:
+        conn.execute("INSERT INTO labels (ts,msg_id,task,label,confidence,source,source_detail) "
+                     "VALUES (?,?,'category',?,1.0,'explicit_user_correction','viewer correction') "
+                     "ON CONFLICT(msg_id,task,label,source) DO UPDATE SET ts=excluded.ts",
+                     (time.time(), msg_id, json.dumps(category)))
 
 
 def record_move(msg, to_folder, source, from_folder=None):
@@ -1214,43 +1366,68 @@ _MSG_LIST_COLS = ("id, folder, uid, uidvalidity, msgid, from_addr, to_addr, subj
                   "processed_at, user_tag, body_html_at")
 
 
-def messages(limit=50, filt="all", order="date", offset=0):
+def _message_search_where(search=None):
+    """Bound list predicates shared by counts, paging and viewer neighbors."""
+    search = search or {}
+    clauses, params = [], []
+    for key, columns in (("q", ("from_addr", "to_addr", "subject", "snippet")),
+                         ("sender", ("from_addr",))):
+        value = search.get(key, "")
+        if value:
+            value = "%" + value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            clauses.append("(" + " OR ".join(c + " LIKE ? ESCAPE '\\'" for c in columns) + ")")
+            params.extend([value] * len(columns))
+    for key, col in (("category", "llm_category"), ("folder", "folder")):
+        if search.get(key):
+            clauses.append(col + " = ?")
+            params.append(search[key])
+    for key, op in (("after", ">="), ("before", "<")):
+        if search.get(key) is not None:
+            clauses.append("sort_ts " + op + " ?")
+            params.append(search[key])
+    return (" AND " + " AND ".join(clauses) if clauses else ""), params
+
+
+def messages(limit=50, filt="all", order="date", offset=0, search=None):
     # NOTE: heavy columns (body_html/body_cids/llm_thinking) are excluded here -
     # lists only need the light fields; use get_message(id) for the full row.
-    q = "SELECT " + _MSG_LIST_COLS + " FROM messages" + _messages_filter_where(filt)
+    extra, params = _message_search_where(search)
+    q = "SELECT " + _MSG_LIST_COLS + " FROM messages" + _messages_filter_where(filt) + extra
     if order == "id":
         q += " ORDER BY id DESC"
     else:
         q += " ORDER BY sort_ts DESC, id DESC"
     q += " LIMIT ? OFFSET ?"
     with db() as conn:
-        return [dict(r) for r in conn.execute(q, (limit, offset))]
+        return [dict(r) for r in conn.execute(q, (*params, limit, offset))]
 
 
-def neighbors(mid, filt="all"):
+def neighbors(mid, filt="all", search=None):
     """Adjacent ids in list order (sort_ts DESC, id DESC) for the viewer queue.
     Returns (newer_id, older_id) - i.e. (prev, next) as shown in the list."""
     cur = get_message(mid)
     if not cur:
         return None, None
-    where = _messages_filter_where(filt)
+    extra, params = _message_search_where(search)
+    where = _messages_filter_where(filt) + extra
     s, i = cur.get("sort_ts") or 0, cur["id"]
     with db() as conn:
         newer = conn.execute(
             "SELECT id FROM messages" + where +
             " AND (sort_ts > ? OR (sort_ts = ? AND id > ?)) ORDER BY sort_ts ASC, id ASC LIMIT 1",
-            (s, s, i)).fetchone()
+            (*params, s, s, i)).fetchone()
         older = conn.execute(
             "SELECT id FROM messages" + where +
             " AND (sort_ts < ? OR (sort_ts = ? AND id < ?)) ORDER BY sort_ts DESC, id DESC LIMIT 1",
-            (s, s, i)).fetchone()
+            (*params, s, s, i)).fetchone()
     return (newer[0] if newer else None), (older[0] if older else None)
 
 
-def count_messages(filt="all"):
-    q = "SELECT COUNT(*) FROM messages" + _messages_filter_where(filt)
+def count_messages(filt="all", search=None):
+    extra, params = _message_search_where(search)
+    q = "SELECT COUNT(*) FROM messages" + _messages_filter_where(filt) + extra
     with db() as conn:
-        return conn.execute(q).fetchone()[0]
+        return conn.execute(q, params).fetchone()[0]
 
 
 def queued_messages(limit=10):

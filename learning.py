@@ -233,7 +233,10 @@ def _standardize_fit(X):
     stds = []
     for j in range(len(X[0])):
         var = sum((row[j] - means[j]) ** 2 for row in X) / n
-        stds.append(math.sqrt(var) or 1.0)
+        # Constant features can leave rounding noise (~1e-15). Scales below
+        # the artifact's six-decimal precision would serialize as zero.
+        scale = math.sqrt(var)
+        stds.append(scale if scale >= 1e-6 else 1.0)
     return means, stds
 
 
@@ -588,11 +591,12 @@ def build_dataset(task, limit=6000):
     except Exception:
         pass
     samples, meta = [], []
+    resolved = store.reply_resolved_ids() if task == 'needs_reply' else set()
     for r in rows:
-        raw = r["llm_category"] if multi else r[col]
+        raw = r["llm_category"] if multi else (1 if r['id'] in resolved else r[col])
         strong = labels_by_msg.get(r["id"]) or []
         if strong:
-            best = max(strong, key=lambda l: label_weight(l["source"]))
+            best = max(strong, key=lambda l: (label_weight(l["source"]), l['ts'], l['id']))
             src = best["source"]
             try:
                 val = json.loads(best["label"])
