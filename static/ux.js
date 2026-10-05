@@ -153,7 +153,11 @@
             var field = el.getAttribute('data-tpl');
             el.setAttribute('name', field + '_' + i);
             el.removeAttribute('data-tpl');
-            if (el.type === 'checkbox') { el.checked = false; } else { el.value = ''; }
+            // Hidden metadata (original='', configured='1', mapping_present='0')
+            // keeps its template value so a new row is valid. Clear only what
+            // the user types, and never pre-check a removal on a new row.
+            if (el.type === 'text') { el.value = ''; }
+            else if (el.type === 'checkbox') { el.checked = false; }
           });
           count.value = String(i + 1);
           tpl.parentNode.insertBefore(row, add.closest('.cat-add') || add);

@@ -10902,11 +10902,11 @@ AUTOMATION_OVERVIEW_TMPL = """
   <div class="row"><a class="btn" href="{{ url_for('simulate') }}">Test on a message</a><a class="btn" href="{{ url_for('automation_controls') }}">Controls</a></div>
 </div>
 <div class="card">
-  <div class="card-h"><h3>At a glance</h3><span class="sub">read from saved settings — no mailbox or model probe</span></div>
+  <div class="card-h"><h3>At a glance</h3><span class="sub">enabled entities, independent of live/dry-run modes — no mailbox or model probe</span></div>
   <div class="row">
-    <span class="stat"><b>{{ rules_on }}/{{ rules_total }}</b><span>rules live</span></span>
-    <span class="stat"><b>{{ flows_on }}/{{ flows_total }}</b><span>flows live</span></span>
-    <span class="stat"><b>{{ heur_on }}/{{ heur_total }}</b><span>classifiers live</span></span>
+    <span class="stat"><b>{{ rules_on }}/{{ rules_total }}</b><span>rules enabled</span></span>
+    <span class="stat"><b>{{ flows_on }}/{{ flows_total }}</b><span>flows enabled</span></span>
+    <span class="stat"><b>{{ heur_on }}/{{ heur_total }}</b><span>classifiers enabled</span></span>
   </div>
   <div class="kv">
     <div class="k">Rule live processing</div><div>{% if s.rules_apply %}<span class="badge ok">On</span>{% else %}<span class="badge warn">Preview only</span>{% endif %}</div>
@@ -10987,7 +10987,6 @@ AUTOMATION_CATEGORIES_TMPL = """
       <input type="hidden" data-tpl="mapping_present" value="0">
       <div><input type="text" data-tpl="name" value="" placeholder="New category" aria-label="Category name"></div>
       <div><input type="text" data-tpl="folder" value="" placeholder="Keep in current folder" aria-label="Destination folder"></div>
-      <div class="cat-actions"><label class="check"><input type="checkbox" data-tpl="remove" value="1"> <span>Remove on save</span></label></div>
     </div>
     {% if not conflict %}
     <div class="cat-add"><button type="button" class="btn" data-add-category-row>Add category</button></div>
@@ -10997,7 +10996,7 @@ AUTOMATION_CATEGORIES_TMPL = """
 </form>
 <div class="card" id="filing-switch">
   <div class="card-h"><h3>Automatic default filing</h3><span class="sub">{{ 'On' if s.llm_apply else 'Off' }}</span></div>
-  <p class="sub" style="margin-top:0">When on, a classified message with no category flow recorded as handling it is moved to its category destination. Low-confidence and guarded mail keeps the protections above. Off = suggestions only.</p>
+  <p class="sub" style="margin-top:0">When on, a classified message with no category flow recorded as handling it is moved to its category destination. Kept, guarded and already-filed mail is protected by the existing checks. Off = suggestions only.</p>
   <form method="post" action="{{ url_for('settings') }}" id="filing-form" data-stored="{{ '1' if s.llm_apply else '0' }}">
     <input type="hidden" name="section" value="behavior">
     <input type="hidden" name="scope" value="Filing &amp; drafts">
@@ -11022,7 +11021,7 @@ AUTOMATION_CONTROLS_TMPL = """
 <noscript><div class="msg warn">JavaScript is off. Each switch is submitted with its own Save button.</div></noscript>
 <div class="card" id="ctl-rules">
   <div class="card-h"><h3>Rules</h3><span class="sub">first-match sorting and guards</span></div>
-  <form method="post">
+  <form method="post" action="{{ url_for('settings') }}">
     <input type="hidden" name="section" value="behavior">
     <input type="hidden" name="scope" value="Rules live">
     <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
@@ -11034,7 +11033,7 @@ AUTOMATION_CONTROLS_TMPL = """
 </div>
 <div class="card" id="ctl-flows">
   <div class="card-h"><h3>Flows</h3><span class="sub">multi-step automations</span></div>
-  <form method="post">
+  <form method="post" action="{{ url_for('settings') }}">
     <input type="hidden" name="section" value="behavior">
     <input type="hidden" name="scope" value="Flows live">
     <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
@@ -11046,7 +11045,7 @@ AUTOMATION_CONTROLS_TMPL = """
 </div>
 <div class="card" id="ctl-classify">
   <div class="card-h"><h3>Classification</h3><span class="sub">rules first, then classifiers, then the LLM</span></div>
-  <form method="post">
+  <form method="post" action="{{ url_for('settings') }}">
     <input type="hidden" name="section" value="behavior">
     <input type="hidden" name="scope" value="Classification">
     <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
@@ -11063,7 +11062,7 @@ AUTOMATION_CONTROLS_TMPL = """
 </div>
 <div class="card" id="ctl-fastpath">
   <div class="card-h"><h3>Fast-path classifiers</h3><span class="row"><a class="sub" href="{{ url_for('classifiers') }}">Manage classifiers →</a><a class="sub" href="{{ url_for('learning_page') }}">Learning →</a></span></div>
-  <form method="post">
+  <form method="post" action="{{ url_for('settings') }}">
     <input type="hidden" name="section" value="behavior">
     <input type="hidden" name="scope" value="Classifiers">
     <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">

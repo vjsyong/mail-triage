@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from werkzeug.datastructures import MultiDict
+from bs4 import BeautifulSoup
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.update(IMAP_HOST='127.0.0.1', IMAP_PORT='9', IMAP_USER='demo@example.com',
@@ -516,6 +517,21 @@ class WorkbenchTests(unittest.TestCase):
         j = html.find('</nav>', i)
         return html[i:j]
 
+    def _form_data(self, form, **over):
+        """Build posted data from a rendered form's own fields, then override."""
+        data = {}
+        for el in form.find_all(['input', 'select', 'textarea']):
+            name = el.get('name')
+            if not name:
+                continue
+            typ = (el.get('type') or '').lower()
+            if typ == 'checkbox':
+                data[name] = el.get('value', '1') if el.has_attr('checked') else ''
+            else:
+                data[name] = el.get('value') or ''
+        data.update(over)
+        return data
+
     def _cat_fields(self, rows, version, **over):
         data = {'settings_version': version, 'row_count': str(len(rows))}
         for i, r in enumerate(rows):
@@ -728,6 +744,108 @@ class WorkbenchTests(unittest.TestCase):
                         page.index("['/automation', 1, 30]"))
         self.assertLess(page.index("['/automation', 1, 30]"),
                         page.index("['/simulate', 0, 39]"))
+
+    # ---- WP2 corrections -------------------------------------------------
+
+    def test_controls_rendered_forms_post_to_settings_action(self):
+        # The Controls page is GET-only; its forms must target the Settings POST.
+        self.assertEqual(self.client.post('/automation/controls').status_code, 405)
+        soup = BeautifulSoup(self.client.get('/automation/controls').data, 'html.parser')
+        scopes = {}
+        for form in soup.find_all('form'):
+            scope = form.find('input', {'name': 'scope'})
+            if scope is None:
+                continue  # base-shell forms (assistant/sidebar) are not scoped settings forms
+            self.assertEqual(form.get('action'), '/settings', scope.get('value'))
+            scopes[scope.get('value')] = form
+        self.assertEqual(set(scopes),
+                         {'Rules live', 'Flows live', 'Classification', 'Classifiers'})
+        store.set_setting('rules_apply', False)
+        store.set_setting('flows_apply', False)
+        store.set_setting('heuristics_enabled', False)
+        store.set_setting('heuristic_autorefine', False)
+        store.set_setting('llm_suggest', False)
+        # submit each form using its own extracted action and fields
+        form = scopes['Rules live']
+        self.assertEqual(self.client.post(form.get('action'), data=self._form_data(form, rules_apply='1')).status_code, 302)
+        self.assertTrue(store.get_setting('rules_apply'))
+        self.assertFalse(store.get_setting('flows_apply'))
+        form = scopes['Flows live']
+        self.client.post(form.get('action'), data=self._form_data(form, flows_apply='1'))
+        self.assertTrue(store.get_setting('flows_apply'))
+        self.assertTrue(store.get_setting('rules_apply'))
+        form = scopes['Classifiers']
+        self.client.post(form.get('action'), data=self._form_data(form, heuristics_enabled='1'))
+        self.assertTrue(store.get_setting('heuristics_enabled'))
+        self.assertFalse(store.get_setting('heuristic_autorefine'))
+        self.assertTrue(store.get_setting('rules_apply'))
+        form = scopes['Classification']
+        self.client.post(form.get('action'), data=self._form_data(
+            form, llm_suggest='1', max_llm_per_hour='9', llm_batch_per_cycle='2',
+            classify_concurrency='5'))
+        self.assertTrue(store.get_setting('llm_suggest'))
+        self.assertEqual(store.get_setting('max_llm_per_hour'), 9)
+        self.assertEqual(store.get_setting('llm_batch_per_cycle'), 2)
+        self.assertEqual(store.get_setting('classify_concurrency'), 5)
+        # the classification form did not touch the live switches
+        self.assertTrue(store.get_setting('rules_apply'))
+        self.assertTrue(store.get_setting('flows_apply'))
+
+    def test_filing_and_drafting_rendered_forms_use_settings_action(self):
+        soup = BeautifulSoup(self.client.get('/automation/categories').data, 'html.parser')
+        filing = soup.find('form', {'id': 'filing-form'})
+        self.assertIsNotNone(filing)
+        self.assertEqual(filing.get('action'), '/settings')
+        store.set_setting('llm_apply', False)
+        self.assertEqual(self.client.post(filing.get('action'),
+                                          data=self._form_data(filing, llm_apply='1')).status_code, 302)
+        self.assertTrue(store.get_setting('llm_apply'))
+        soup = BeautifulSoup(self.client.get('/templates').data, 'html.parser')
+        dest = None
+        for form in soup.find_all('form'):
+            if form.find('input', {'name': 'drafts_folder'}):
+                dest = form
+                break
+        self.assertIsNotNone(dest)
+        self.assertEqual(dest.get('action'), '/settings')
+        self.client.post(dest.get('action'), data=self._form_data(dest, drafts_folder='SavedBox'))
+        self.assertEqual(store.get_setting('drafts_folder'), 'SavedBox')
+
+    def test_blank_row_template_preserves_new_row_metadata(self):
+        soup = BeautifulSoup(self.client.get('/automation/categories').data, 'html.parser')
+        row = soup.find(id='cat-blank-row')
+        self.assertIsNotNone(row)
+        self.assertEqual(row.find(attrs={'data-tpl': 'original'}).get('value'), '')
+        self.assertEqual(row.find(attrs={'data-tpl': 'configured'}).get('value'), '1')
+        self.assertEqual(row.find(attrs={'data-tpl': 'mapping_present'}).get('value'), '0')
+        self.assertEqual(row.find(attrs={'data-tpl': 'name'}).get('type'), 'text')
+        self.assertEqual(row.find(attrs={'data-tpl': 'folder'}).get('type'), 'text')
+        # new rows must not offer removal (the parser rejects it)
+        self.assertIsNone(row.find(attrs={'data-tpl': 'remove'}))
+        self.assertNotIn('Remove on save', row.get_text())
+        # the clone keeps hidden metadata and clears only typed text
+        ux_js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                  'static', 'ux.js'), encoding='utf-8').read()
+        self.assertIn("el.type === 'text'", ux_js)
+        self.assertNotIn("el.type === 'checkbox') { el.checked = false; } else { el.value = ''", ux_js)
+
+    def test_overview_counts_enabled_not_live(self):
+        store.set_setting('rules_apply', False)
+        store.set_setting('flows_apply', False)
+        page = self.client.get('/automation').data
+        self.assertIn(b'rules enabled', page)
+        self.assertIn(b'flows enabled', page)
+        self.assertIn(b'classifiers enabled', page)
+        self.assertNotIn(b'rules live', page)
+        self.assertNotIn(b'flows live', page)
+        self.assertNotIn(b'classifiers live', page)
+        self.assertIn(b'Preview only', page)
+        self.assertIn(b'Dry-run', page)
+
+    def test_filing_copy_has_no_confidence_gate_claim(self):
+        page = self.client.get('/automation/categories').data
+        self.assertNotIn(b'low-confidence', page.lower())
+        self.assertIn(b'Kept, guarded and already-filed', page)
 
 
 if __name__ == '__main__':
