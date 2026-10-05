@@ -1,0 +1,18 @@
+{
+  "note": "World configuration. The owner approved realistic commercial-looking domains for the preview; 'commercial' maps to .com. Every organization, person and address in this world is FICTIONAL and generated only; no mail is ever sent and no real domain is contacted. The 'reserved' profile (.example) remains available as a switch. This is the single place that controls the suffix, and the lint derives its domain checks from it.",
+  "tld_profile": "commercial",
+  "tld_profiles": {
+    "commercial": "com",
+    "reserved": "example"
+  },
+  "business": {
+    "weekdays": [0, 1, 2, 3, 4],
+    "weekend": [5, 6],
+    "send_hours": [8, 9, 10, 11, 13, 14, 15, 16, 17]
+  },
+  "style_shift_org_ids": ["pinnacle", "beacon"],
+  "horizon": {
+    "start": "2025-01-06",
+    "days": 330
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "note": "Synthetic name pools by region used to build world people deterministically. Names are ordinary given/family names, not copied from any corpus or real person.",
+  "given": {
+    "uk": ["Oliver", "Amelia", "George", "Isla", "Harry", "Freya", "Jack", "Poppy", "Alfie", "Evie", "Callum", "Niamh", "Rhys", "Imogen", "Duncan", "Sian"],
+    "us": ["Ethan", "Ava", "Mason", "Sophia", "Logan", "Mia", "Lucas", "Harper", "Owen", "Ella", "Marcus", "Chloe", "Derek", "Nadia", "Cody", "Paige"],
+    "eu": ["Lukas", "Sofia", "Jonas", "Emilia", "Matteo", "Anna", "Pieter", "Lotte", "Tomas", "Zofia", "Niels", "Maja", "Anders", "Elise", "Marek", "Katrin"],
+    "au": ["Noah", "Ruby", "Lachlan", "Matilda", "Cooper", "Zoe", "Flynn", "Ivy", "Hugo", "Tahlia", "Angus", "Layla", "Miles", "Georgia", "Darcy", "Sienna"]
+  },
+  "family": {
+    "uk": ["Whitfield", "Barnes", "Hughes", "Doyle", "Palmer", "Reid", "Foster", "Chapman", "Naylor", "Bramley", "Kendall", "Osborne"],
+    "us": ["Bennett", "Coleman", "Fletcher", "Hayes", "Monroe", "Preston", "Quinn", "Ramsey", "Sutton", "Vaughn", "Whitaker", "Zimmer"],
+    "eu": ["Novak", "Fischer", "Bauer", "Moreau", "Kowalski", "Jansen", "Lindqvist", "Vermeer", "Rossi", "Petrov", "Haddad", "Meyer"],
+    "au": ["Callaghan", "Dawson", "Ellery", "Hampton", "Kingsley", "Lockhart", "Marlowe", "Nolan", "Pemberton", "Rafferty", "Sinclair", "Trent"]
+  },
+  "contacts": {
+    "note": "Friend/neighbour pool for personal correspondence; each is a world person on a personal domain.",
+    "given": ["Sam", "Ravi", "Elena", "Tom", "Bea", "Yusuf", "Nina", "Oscar", "Grace", "Theo", "Maya", "Jonah"],
+    "family": ["Avery", "Booth", "Castillo", "Dempsey", "Ellis", "Farrell", "Grant", "Hale", "Iqbal", "Jensen", "Kerr", "Lowry"]
+  }
+}
