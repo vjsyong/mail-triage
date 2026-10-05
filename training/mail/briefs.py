@@ -37,10 +37,12 @@ FAMILIES = [
     {"family": "invoice_due", "category": "Billing", "folder": "Billing",
      "action": "move", "variants": [
          {"needs_reply": True, "reply": REPLY_PHRASE,
+          "category_evidence": ["invoice", "overdue"],
           "purpose": ("an overdue-invoice reminder from a supplier's billing team that "
                       "asks the owner to reply and confirm when they will pay"),
           "facts": ["Invoice {n}", "{amount}", "overdue"]},
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
+          "category_evidence": ["invoice", "overdue"],
           "purpose": ("an automated overdue-invoice notification telling the owner to pay "
                       "through the online billing portal, which states no reply is needed"),
           "facts": ["Invoice {n}", "{amount}", "overdue", "online billing portal"]},
@@ -48,51 +50,65 @@ FAMILIES = [
     {"family": "receipt", "category": "Receipt", "folder": "Receipts",
      "action": "none", "variants": [
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
-          "purpose": "an automated purchase receipt confirmation",
-          "facts": ["Order {n}", "total {amount}", "receipt"]},
+          "category_evidence": ["payment received", "receipt for"],
+          "purpose": ("an automated purchase receipt confirming the payment was received "
+                      "for a completed order"),
+          "facts": ["Order {n}", "total {amount}", "payment received", "receipt"]},
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
-          "purpose": "an automated order-shipped notice with tracking",
-          "facts": ["Order {n}", "tracking", "shipped"]},
+          "category_evidence": ["purchase completed", "payment received"],
+          "purpose": ("a confirmation that an online purchase has been completed and "
+                      "paid for"),
+          "facts": ["purchase completed", "payment received", "receipt"]},
      ]},
     {"family": "newsletter", "category": "Promo", "folder": "Promo",
      "action": "propose", "variants": [
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
+          "category_evidence": ["sale", "unsubscribe"],
           "purpose": "a short marketing newsletter from a shop",
           "facts": ["sale", "unsubscribe"]},
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
+          "category_evidence": ["discount", "unsubscribe"],
           "purpose": "a promotional offer email from a shop",
           "facts": ["discount", "unsubscribe"]},
      ]},
     {"family": "login_alert", "category": "Security", "folder": "Security",
      "action": "none", "variants": [
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
+          "category_evidence": ["sign-in", "new device"],
           "purpose": "an automated account security sign-in alert",
           "facts": ["sign-in", "new device"]},
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
-          "purpose": "an automated password-changed security notice",
-          "facts": ["password", "changed"]},
+          "category_evidence": ["password", "security"],
+          "purpose": "an automated account security notice that the password was changed",
+          "facts": ["password", "changed", "security alert"]},
      ]},
     {"family": "friend_note", "category": "Personal", "folder": "Personal",
      "action": "none", "variants": [
          {"needs_reply": True, "reply": REPLY_PHRASE,
+          "category_evidence": ["dinner"],
           "purpose": ("a personal note from a friend inviting the owner to dinner and "
                       "asking them to reply"),
           "facts": ["dinner", "Saturday"]},
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
+          "category_evidence": ["friend", "note"],
           "purpose": ("a personal note from a friend sharing some news, with no reply "
                       "needed"),
-          "facts": ["news"]},
+          "facts": ["from a friend", "some news"]},
      ]},
     {"family": "task_request", "category": "Action", "folder": "Action",
      "action": "none", "variants": [
          {"needs_reply": True, "reply": REPLY_PHRASE,
+          "category_evidence": ["please review", "review the", "approve the"],
           "purpose": ("a colleague asking the owner to review a document and reply to "
                       "confirm approval"),
-          "facts": ["review", "document", "approval"]},
+          "facts": ["Please review the document", "approval"]},
          {"needs_reply": False, "no_reply": NO_REPLY_PHRASE,
-          "purpose": ("an automated notification that a document is ready in the shared "
-                      "drive, with no action required"),
-          "facts": ["document", "ready"]},
+          "category_evidence": ["please review", "review the", "complete the review"],
+          "purpose": ("a work request asking the owner to review a document in the shared "
+                      "drive and complete the review in the portal; no email reply is "
+                      "needed"),
+          "facts": ["Please review the document in the shared drive",
+                    "complete the review in the portal"]},
      ]},
 ]
 
@@ -130,6 +146,7 @@ def build_briefs(seed, per_family=2):
                 "needs_reply": var["needs_reply"],
                 "reply_phrase": reply_phrase,
                 "no_reply_phrase": no_reply_phrase,
+                "category_evidence": list(var.get("category_evidence") or []),
                 "action": fam["action"],
                 "folder": fam["folder"],
                 "purpose": var["purpose"],

@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 
 from ..common.hashing import hash_obj
+from .category_gold import category_problems
 from .reply_gold import reply_problems
 from .schema import validate_sft_example
 from .samples import (ROLE_DEV, ROLE_TRAIN, build_decision_example,
@@ -75,6 +76,11 @@ def verify_source(source, taxonomy):
         text = "%s\n%s" % (email.get("subject", ""), email.get("body", ""))
         for p in reply_problems(text, needs_reply):
             problems.append("reply_gold:%s" % p)
+    email = source.get("email") or {}
+    text = "%s\n%s" % (email.get("subject", ""), email.get("body", ""))
+    for p in category_problems(text, intent.get("category"),
+                               source.get("category_evidence")):
+        problems.append("category_gold:%s" % p)
     return problems
 
 

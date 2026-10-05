@@ -24,6 +24,7 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 from benchmarks.v3.training import reply_gold  # noqa: E402
+from benchmarks.v3.training import category_gold  # noqa: E402
 
 SYSTEM = ("You write short, realistic business and personal emails for a mail "
           "triage dataset. Output exactly a subject line beginning with "
@@ -66,6 +67,9 @@ def verify_email(subject, body, brief):
             break
     problems.extend(reply_gold.reply_problems(subject + "\n" + body,
                                               brief["needs_reply"]))
+    problems.extend(category_gold.category_problems(
+        subject + "\n" + body, brief["category"],
+        brief.get("category_evidence")))
     return problems
 
 
@@ -162,6 +166,7 @@ def main(argv=None):
                        "observable": "visible"},
             "reply_phrase": brief.get("reply_phrase"),
             "no_reply_phrase": brief.get("no_reply_phrase"),
+            "category_evidence": list(brief.get("category_evidence") or []),
             "action": brief["action"], "folder": brief["folder"],
             "brief_id": brief["brief_id"],
             "email": email,
