@@ -17,6 +17,7 @@ for _p in (ROOT, V3):
         sys.path.insert(0, _p)
 
 from benchmarks.v3.build import style_slice as es  # noqa: E402
+from benchmarks.v3.build import plausibility as pl  # noqa: E402
 from benchmarks.v3.build.world import World  # noqa: E402
 
 
@@ -431,6 +432,23 @@ class TestDateNormalization(unittest.TestCase):
                "to_email": q["email"]}
         probs, _ = es.guard(ref, gen, w, ["1 June 2026"], register="newsletter")
         self.assertFalse(any("match the provided dates" in x for x in probs))
+
+
+class TestHygieneFalsePositive(unittest.TestCase):
+    def test_email_local_part_is_not_a_duplicated_word(self):
+        footer = ("Quanta Telecom Updates\nupdates@quanta-telecom.com\n"
+                  "To manage your subscription visit our portal.")
+        self.assertFalse(pl._DUPLICATE_WORD.search(footer))
+
+    def test_real_doubled_word_still_detected(self):
+        self.assertTrue(pl._DUPLICATE_WORD.search("Please the the attached form."))
+        self.assertTrue(pl._DUPLICATE_WORD.search("we should and and then go"))
+
+    def test_newsletter_footer_passes_guard_hygiene(self):
+        from benchmarks.v3.build.verify import _check_hygiene
+        footer = ("Quanta Telecom Updates\nupdates@quanta-telecom.com\n"
+                  "Unsubscribe at http://updates.quanta-telecom.com")
+        self.assertEqual([p for p in _check_hygiene(footer) if "duplicated" in p], [])
 
 
 if __name__ == "__main__":

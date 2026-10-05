@@ -28,7 +28,10 @@ _TIME_FIELDS = ("send", "txn", "due", "event", "arrival", "until", "register_by"
                 "deadline_soon", "deadline_late", "deadline_past", "deadline2")
 _ORDERED_FIELDS = ("txn", "due", "event", "arrival", "until", "register_by",
                    "meeting", "milestone", "checkpoint", "rsvp")
-_DUPLICATE_WORD = re.compile(r"\b([a-z]{3,})\s+\1\b", re.I)
+# A repeated word is a hygiene defect, but the second occurrence must not be the
+# local part of an email address ("Quanta Telecom Updates\nupdates@x.com" is a
+# footer, not a doubled word), hence the ``(?!@)`` guard.
+_DUPLICATE_WORD = re.compile(r"\b([a-z]{3,})\s+\1(?!@)\b", re.I)
 _DOMAIN = re.compile(r"@([a-z0-9-]+(?:\.[a-z0-9-]+)*)")
 # Rendered calendar dates: full-month forms only (abbreviated header dates are
 # checked separately), with an optional weekday.
