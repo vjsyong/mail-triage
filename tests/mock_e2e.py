@@ -1224,6 +1224,32 @@ def main():
     check("assistant read self-heals a stale row + writes back",
           rrse["ok"] and healed["folder"] == "UIDBox" and healed["uid"] == dst1)
 
+    section("T2c rejected OAuth session triggers one token self-heal + retry", "core")
+    _saved_connect_heal = engine.MailClient.connect
+    _saved_delay_heal = engine.IMAP_RETRY_DELAY
+    _saved_heal_fn = engine.imap_token_selfheal
+    _connect_attempts, _heal_calls = [], []
+    _reject_n = engine.IMAP_RETRIES + 1
+
+    def _reject_then_ok(self):
+        _connect_attempts.append(1)
+        if len(_connect_attempts) <= _reject_n:
+            raise imaplib.IMAP4.error(b'User is authenticated but not connected.')
+        return _saved_connect_heal(self)
+
+    engine.MailClient.connect = _reject_then_ok
+    engine.IMAP_RETRY_DELAY = 0.05
+    engine.imap_token_selfheal = lambda exc: (_heal_calls.append(str(exc)), True)[1]
+    try:
+        _heal_summary = engine.process_mailbox()
+    finally:
+        engine.MailClient.connect = _saved_connect_heal
+        engine.IMAP_RETRY_DELAY = _saved_delay_heal
+        engine.imap_token_selfheal = _saved_heal_fn
+    check("far-side rejections are retried with exactly one token self-heal",
+          isinstance(_heal_summary, str) and len(_heal_calls) == 1
+          and len(_connect_attempts) == _reject_n + 1)
+
     section("T3 dry-run mode", "base")
     store.set_setting("rules_apply", False)
     add_msg(state, "boss@work.com", "Second budget note", "Another budget item.", "b2@x")
@@ -2960,6 +2986,44 @@ def main():
           and b"not authorised" in r.data)
     r = client.post("/api/proxy/auth/nobody@example.com")
     check("auth start rejects unknown accounts", r.status_code == 404)
+
+    section("T27b stale-session self-heal: expire access token, keep refresh", "proxy")
+    _cache_file = proxy_mod.cache_path()
+    os.makedirs(os.path.dirname(_cache_file), exist_ok=True)
+    with open(_cache_file, "w", encoding="utf-8") as _fh:
+        _fh.write("[acct@example.com]\naccess_token = stale-tok\n"
+                  "access_token_expiry = 9999999999\nrefresh_token = ref-tok\n")
+    _st0 = proxy_mod.token_status("acct@example.com")
+    check("cache fixture carries both tokens",
+          _st0["access_token"] and _st0["refresh_token"] and _st0["expires_at"] == 9999999999)
+    check("expire_cached_access_token strips only the access token",
+          proxy_mod.expire_cached_access_token("acct@example.com") is True)
+    _st1 = proxy_mod.token_status("acct@example.com")
+    check("access token gone, refresh token kept",
+          not _st1["access_token"] and _st1["refresh_token"] and _st1["expires_at"] is None
+          and _st1["authorized"] is True)
+    check("expiring again is a no-op",
+          proxy_mod.expire_cached_access_token("acct@example.com") is False)
+    eng_mod._imap_healed_at[0] = 0.0
+    _heal_seen = []
+    _saved_expire = proxy_mod.expire_access_token
+    proxy_mod.expire_access_token = lambda email: (_heal_seen.append(email), (True, None))[1]
+    try:
+        _ok1 = eng_mod.imap_token_selfheal(
+            imaplib.IMAP4.error(b'User is authenticated but not connected.'))
+        check("a rejected session heals the configured account once",
+              _ok1 is True and _heal_seen == ["acct@example.com"])
+        _ok2 = eng_mod.imap_token_selfheal(
+            imaplib.IMAP4.error(b'User is authenticated but not connected.'))
+        check("self-heal is throttled against proxy restart loops",
+              _ok2 is False and len(_heal_seen) == 1)
+        check("network timeouts and HTTP errors never trigger a token heal",
+              eng_mod.imap_token_selfheal(TimeoutError("timed out")) is False
+              and eng_mod.imap_token_selfheal(
+                  eng_mod.requests.exceptions.ConnectionError("boom")) is False)
+    finally:
+        proxy_mod.expire_access_token = _saved_expire
+        eng_mod._imap_healed_at[0] = 0.0
     ok, rerr = proxy_mod.remove_account("acct@example.com")
     check("removing the last account is a clean outcome", ok and not rerr)
     check("account removed", proxy_mod.list_accounts() == [])

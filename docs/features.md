@@ -217,7 +217,12 @@ the draft lands in your Drafts folder to send from your normal client.
 exact redirect URI to register at the provider, drives the Authorise flow (open the
 login link, paste the final URL back for loopback flows), reports token status
 live, and can reset tokens or remove accounts. The email-oauth2-proxy runs as a
-child process inside the container and exposes a plain local IMAP listener.
+child process inside the container and exposes a plain local IMAP listener. The
+worker self-heals a stale session: when the far server rejects the login itself
+(Office365's "User is authenticated but not connected."), it expires just the
+cached access token and restarts the proxy so the refresh token gets a fresh one
+(throttled; if the refresh token is also dead the cycle reports a credentials
+error and the Accounts page asks for re-authorisation).
 
 **Settings**: the LLM endpoint (any OpenAI-compatible server: base URL, model, API
 key, timeout, thinking mode, optional fallback endpoint) and the RAG endpoints

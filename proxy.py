@@ -634,6 +634,45 @@ def reset_tokens(email):
     return ok, err
 
 
+def expire_cached_access_token(email):
+    """Pure cache-file edit: remove only the access token + expiry of an account,
+    keeping the refresh token. Returns True when something was removed."""
+    path = cache_path()
+    cache = _load_ini(path)
+    if not cache.has_section(email):
+        return False
+    changed = False
+    for key in ("access_token", "access_token_expiry"):
+        if cache.has_option(email, key):
+            cache.remove_option(email, key)
+            changed = True
+    if not changed:
+        return False
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        cache.write(fh)
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
+    return True
+
+
+def expire_access_token(email):
+    """Force a fresh OAuth exchange on the account's next connection: drop the
+    cached access token (the refresh token stays) and restart the proxy so it
+    reloads the cache.
+
+    Office365 answers a stale XOAUTH2 token with
+    "NO ... User is authenticated but not connected."; emailproxy forwards that
+    NO and closes without clearing its cache, so every retry keeps failing until
+    the token's recorded expiry. Expiring it here makes emailproxy refresh via
+    the refresh token on the next connect - no re-authorisation needed."""
+    ok, err = manager.apply(edit_fn=lambda: expire_cached_access_token(email))
+    if ok:
+        store.log_event("info", "emailproxy: access token expired for %s - it will be "
+                        "refreshed on the next connection" % email)
+    return ok, err
+
+
 def remove_account(email):
     """Remove an account: tokens, config entry and DB row (proxy stopped during the edit)."""
     def _edit():

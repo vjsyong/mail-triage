@@ -2601,6 +2601,59 @@ def _imap_disconnect(exc):
     return isinstance(exc, (imaplib.IMAP4.error, OSError))
 
 
+IMAP_TOKEN_HEAL_COOLDOWN = 900  # seconds between automatic OAuth token self-heals
+_imap_healed_at = [0.0]
+
+# Far-side login rejections that mean the cached access token is stale/revoked,
+# where reconnecting cannot help until the token is refreshed:
+#   - Office365 IMAP NO: "User is authenticated but not connected."
+#   - Gmail / Yahoo NO [AUTHENTICATIONFAILED]
+#   - Office365 LOGIN BAD [Command Argument Error. 11] after a stale token
+_IMAP_TOKEN_REJECT_HINTS = ("not connected", "authenticationfailed",
+                            "command argument error")
+
+
+def _imap_token_rejected(exc):
+    """True when the far server rejected the credentials themselves."""
+    if (not isinstance(exc, (imaplib.IMAP4.error, OSError))
+            or isinstance(exc, requests.exceptions.RequestException)):
+        return False
+    msg = str(exc).lower()
+    return any(hint in msg for hint in _IMAP_TOKEN_REJECT_HINTS)
+
+
+def imap_token_selfheal(exc):
+    """One automatic OAuth refresh when the far server rejects a session.
+
+    Expires just the cached access token and restarts the embedded proxy (the
+    refresh token is kept), so the next connection performs a real token
+    exchange. Returns True when a heal was performed and the caller should
+    retry. Throttled so a persistently bad refresh token cannot restart the
+    proxy in a loop - that case surfaces as an authenticate/credentials error
+    for the user to act on."""
+    if not _imap_token_rejected(exc):
+        return False
+    now = time.time()
+    if now - _imap_healed_at[0] < IMAP_TOKEN_HEAL_COOLDOWN:
+        return False
+    if (store.get_setting("proxy_mode") or "embedded").lower() != "embedded":
+        return False
+    try:
+        acct = proxy.get_account((imap_config().get("user") or "").strip() or None)
+    except Exception:
+        acct = None
+    if not acct:
+        return False
+    _imap_healed_at[0] = now  # throttle regardless of the outcome
+    ok, err = proxy.expire_access_token(acct["email"])
+    if ok:
+        store.log_event("warn", "mail session rejected (%s) - expired the cached OAuth "
+                        "access token so the proxy refreshes it; retrying" % str(exc)[:120])
+        return True
+    store.log_event("error", "OAuth token self-heal failed for %s: %s" % (acct["email"], err))
+    return False
+
+
 def _mail_pass(mc, settings, rules, flows):
     scanned = moved = 0
     for folder in settings.get("watch_folders") or ["INBOX"]:
@@ -2626,7 +2679,9 @@ def process_mailbox():
 
     A dropped proxy session (EOF, 'User is authenticated but not connected.')
     is transient on the far side: reconnect and retry the pass before letting
-    the cycle fail, so one blip does not paint the dashboard red."""
+    the cycle fail, so one blip does not paint the dashboard red. If the far
+    server keeps rejecting the login itself, refresh the OAuth token once
+    (imap_token_selfheal) and retry - retrying alone can never fix that."""
     settings = store.all_settings()
     rules = [r for r in store.list_rules() if r.get("enabled")]
     flows = [f for f in store.list_flows() if f.get("enabled")]
@@ -2642,6 +2697,9 @@ def process_mailbox():
             if attempt <= IMAP_RETRIES and _imap_disconnect(exc):
                 store.log_event("warn", "check hit a connection error (%r) — reconnecting "
                                 "(retry %d/%d)" % (exc, attempt, IMAP_RETRIES))
+                time.sleep(IMAP_RETRY_DELAY)
+                continue
+            if _imap_disconnect(exc) and imap_token_selfheal(exc):
                 time.sleep(IMAP_RETRY_DELAY)
                 continue
             raise
