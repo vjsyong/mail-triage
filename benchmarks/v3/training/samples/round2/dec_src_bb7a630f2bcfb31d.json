@@ -1,0 +1,69 @@
+{
+ "example_id": "dec_src_bb7a630f2bcfb31d",
+ "generation_domain": "training",
+ "identities": {
+  "model": "openbmb/MiniCPM5-2B",
+  "model_revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+  "prompt_revision": "mail-sft-prompt2",
+  "schema_revision": "mail-sft-0.1",
+  "taxonomy_revision": "mail-sft-tax1",
+  "template_revision": "minicpm5-native-v1"
+ },
+ "lineage_id": "lin_src_bb7a630f2bcfb31d",
+ "mask": [
+  false,
+  false,
+  true
+ ],
+ "messages": [
+  {
+   "content": "You triage incoming email for Priya Raman.\nCategories (choose/route by these definitions, independent of display names):\n- Action (c_action): Mail that asks the owner to do something or reply.\n- Receipt (c_receipt): A confirmation that a purchase, order or payment completed.\n- Billing (c_billing): A bill, invoice or amount owed, including overdue reminders.\n- Promo (c_promo): Bulk marketing, offers and newsletters.\n- Personal (c_personal): A personal note from a known contact.\n- Security (c_security): An account or login security alert.\nReply with a single JSON object: {\"category\": <name>, \"needs_reply\": true|false, \"summary\": \"<one sentence>\", \"reason\": \"<why, max 15 words>\"}.",
+   "role": "system",
+   "supervised": false
+  },
+  {
+   "content": "From: invoice.due@beaconpublishing.com\nTo: priya@acme.example\nSubject: Overdue Invoice Reminder\nDate: Mon, 1 Sep 2025 09:00:00 +0000\n\nDear Client,\nPlease be advised that Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0.",
+   "role": "user",
+   "supervised": false
+  },
+  {
+   "content": "{\"category\": \"Billing\", \"needs_reply\": true, \"summary\": \"Dear Client, Please be advised that Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0.\", \"reason\": \"Matches Billing: A bill, invoice or amount owed, including overdue reminders.\"}",
+   "role": "assistant",
+   "supervised": true
+  }
+ ],
+ "metadata": {
+  "human_seal": false,
+  "provenance": {
+   "attempt": 0,
+   "finish_reason": "stop",
+   "kind": "teacher_generation",
+   "raw_completion": "Subject: Overdue Invoice Reminder\nDear Client,\nPlease be advised that Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0.",
+   "seed": 11,
+   "teacher": {
+    "model": "openbmb/MiniCPM5-2B",
+    "revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52"
+   },
+   "temperature": 0.8,
+   "usage": {
+    "completion_tokens": 41,
+    "prompt_tokens": 110,
+    "total_tokens": 151
+   },
+   "verified": true
+  },
+  "review_status": "draft",
+  "test_qualified": false
+ },
+ "native_render": "<s><|im_start|>system\nYou triage incoming email for Priya Raman.\nCategories (choose/route by these definitions, independent of display names):\n- Action (c_action): Mail that asks the owner to do something or reply.\n- Receipt (c_receipt): A confirmation that a purchase, order or payment completed.\n- Billing (c_billing): A bill, invoice or amount owed, including overdue reminders.\n- Promo (c_promo): Bulk marketing, offers and newsletters.\n- Personal (c_personal): A personal note from a known contact.\n- Security (c_security): An account or login security alert.\nReply with a single JSON object: {\"category\": <name>, \"needs_reply\": true|false, \"summary\": \"<one sentence>\", \"reason\": \"<why, max 15 words>\"}.<|im_end|>\n<|im_start|>user\nFrom: invoice.due@beaconpublishing.com\nTo: priya@acme.example\nSubject: Overdue Invoice Reminder\nDate: Mon, 1 Sep 2025 09:00:00 +0000\n\nDear Client,\nPlease be advised that Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0.<|im_end|>\n<|im_start|>assistant\n<think>\nMatch the message to one authored category.\n</think>\n\n{\"category\": \"Billing\", \"needs_reply\": true, \"summary\": \"Dear Client, Please be advised that Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0.\", \"reason\": \"Matches Billing: A bill, invoice or amount owed, including overdue reminders.\"}<|im_end|>\n",
+ "role": "training",
+ "source_id": "src_bb7a630f2bcfb31d",
+ "target": {
+  "category": "Billing",
+  "needs_reply": true,
+  "reason": "Matches Billing: A bill, invoice or amount owed, including overdue reminders.",
+  "summary": "Dear Client, Please be advised that Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0."
+ },
+ "task": "decision",
+ "tools": []
+}

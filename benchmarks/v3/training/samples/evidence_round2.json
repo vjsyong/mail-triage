@@ -1,0 +1,183 @@
+{
+ "ac6_teacher": {
+  "dev": {
+   "accepted": 24,
+   "briefs": 24
+  },
+  "train": {
+   "accepted": 36,
+   "briefs": 36
+  }
+ },
+ "all_exit_zero": true,
+ "committed_samples": {
+  "files": [
+   "dec_src_37f1737ac997d091.json",
+   "dec_src_b5786e98cdd9de14.json",
+   "dec_src_bb7a630f2bcfb31d.json",
+   "dlg_dlg_b_invoice_due_11_0.json",
+   "dlg_dlg_b_invoice_due_11_1.json"
+  ],
+  "round2_dir": "benchmarks/v3/training/samples/round2"
+ },
+ "dialogue_rollout": {
+  "dev": {
+   "accepted": 4,
+   "clarification_dialogues": 4,
+   "rejected": 4
+  },
+  "train": {
+   "accepted": 6,
+   "clarification_dialogues": 6,
+   "rejected": 6
+  }
+ },
+ "eval": {
+  "adapter_files_sha256": {
+   "README.md": "7c72c464106496a7913f8d6efbc7b0b0d7d3e27303413cb038114c6a2a04efe5",
+   "adapter_config.json": "f64aa92e45c2f48d002489fcd482fff8d3868d204d9f470e234fd62ea261f185",
+   "adapter_model.safetensors": "188d3dfd8a81b1264e4ad66d2a899b96146ea0c6914988fdcfc4195414956f4d",
+   "chat_template.jinja": "bc1f78ef8a86b6bdf64a056cf89dd0ac506db4f198ab363d85168e2500ab44dd",
+   "tokenizer.json": "3e065a558a034185fe299917b398685c1facd0169a9eea1e629eb30c171fed81",
+   "tokenizer_config.json": "b89503c3e5070c6b6d33daf2e20cb4a5c88537c1670d9b7e0cfb4506a61448a9"
+  },
+  "base": {
+   "category_accuracy": 0.958,
+   "clarification_dialogues": 8,
+   "decision_n": 24,
+   "needs_reply_accuracy": 0.75,
+   "valid_json_rate": 1.0,
+   "workflow_grounded_rate": 0.5,
+   "workflow_n": 8,
+   "workflow_state_match_rate": 0.5
+  },
+  "candidate": {
+   "category_accuracy": 0.958,
+   "clarification_dialogues": 8,
+   "decision_n": 24,
+   "needs_reply_accuracy": 0.958,
+   "valid_json_rate": 1.0,
+   "workflow_grounded_rate": 0.0,
+   "workflow_n": 8,
+   "workflow_state_match_rate": 0.0
+  },
+  "honest_note": "20-step adapter improved needs_reply (0.75->0.958) but degraded bounded tool grounding (0.5->0.0). Tiny smoke; not a quality claim."
+ },
+ "export": {
+  "contamination": [],
+  "counts": {
+   "development": {
+    "accepted": 22,
+    "rejected": 5,
+    "rejected_reasons": [
+     "no_dialogue",
+     "verification_failed"
+    ]
+   },
+   "training": {
+    "accepted": 36,
+    "rejected": 6,
+    "rejected_reasons": [
+     "no_dialogue"
+    ]
+   }
+  },
+  "cross_task_linkage": {
+   "development": [],
+   "training": []
+  },
+  "pairs": {
+   "development": 3,
+   "training": 6
+  }
+ },
+ "frozen_code": {
+  "head": "bcf43d0d74f1238fc8fea81fd37b30da42e5d393",
+  "tree": "71ac3961ac513b214c62ccbd80ccd7dc0eb882a5",
+  "worktree_clean": true
+ },
+ "human_seal": false,
+ "kind": "mail-sft-gpu-evidence-round2",
+ "model": {
+  "base_weights_sha256": "636294b1fb9bc81fbe1d80e0f5c99a00ee0e3574debacfe46005576466d257ee",
+  "id": "openbmb/MiniCPM5-2B",
+  "revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52"
+ },
+ "notes": "Synthetic DRAFT. Weights/venvs/verbose logs outside Git; compact public samples + this summary are the only committed artifacts. Earlier round1 artifacts preserved for audit.",
+ "review_status": "draft",
+ "run_dir": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6",
+ "stages": {
+  "briefs": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/briefs.exit"
+  },
+  "briefs_dev": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/briefs_dev.exit"
+  },
+  "build_slice": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/build_slice.exit"
+  },
+  "dialogues": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/dialogues.exit"
+  },
+  "dialogues_dev": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/dialogues_dev.exit"
+  },
+  "evaluate": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/evaluate.exit"
+  },
+  "teacher": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/teacher.exit"
+  },
+  "teacher_dev": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/teacher_dev.exit"
+  },
+  "train": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6/train.exit"
+  }
+ },
+ "supersedes": "benchmarks/v3/training/samples/training_evidence.json (round1, kept for audit)",
+ "test_qualified": false,
+ "train": {
+  "adapter_logits_delta": 31.5625,
+  "all_losses_finite": true,
+  "base_weight_max_delta": 0.0,
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "loss_after": 0.002949,
+  "loss_before": 1.624061,
+  "loss_first": 1.624061,
+  "loss_last": 0.019803,
+  "loss_reload": 0.002949,
+  "optimizer_steps_performed": 20,
+  "parameters": {
+   "total": 2529314816,
+   "trainable": 12558336,
+   "trainable_fraction": 0.004965
+  },
+  "peak_mem_mib": 21229,
+  "reload_matches": true,
+  "steps": 20,
+  "weights_changed": true
+ },
+ "train_env": {
+  "code_fingerprints": {
+   "/home/xrim/mail-triage-wt/mail-triage-sft/engine.py": "2a938e548dba382f0bf331508148c18cfde1c5a56aa9b2901c3a1960bce449a3",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/briefs.py": "732e51001b114e71c45b55a8f704b4e41d6657e351267cbf85872dce99f19dee",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/evaluate.py": "46e5d148812c46005c062e3f68bc5e1b1ccdc01fbe6a9b5aa297be44fb1f68a6",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/generate_teacher.py": "2107cb32e65e84fadfc83e1cb0e9225a91011dc13634858a21216b24ff722402",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/lora_common.py": "7f90651f2068c5b2fc63220f0f3d4da7e7138fb08733ff636f53182454222070",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/rollout_dialogue.py": "89cb809c4c583ea1b12eef16f1e079bf98e1feb76b61082a5d023fd8338aa5dc",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/train_lora.py": "7b4ad0b7a5ca0b1b570ff545305f69ebfb8d8e1ec33c88701eac837b4a31ed2d"
+  },
+  "examples_sha256": "f3f8ec8e64d0b2295add578e416a290bbfb0b7e6477dd429e5913d743f7bbd6e",
+  "template_sha256": "07fcbd94a2e7ca9af3d57427f8794aeb6b4868d1e3fcaa67ad9bf690dae65b1f"
+ }
+}

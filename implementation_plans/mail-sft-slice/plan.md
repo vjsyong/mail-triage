@@ -80,3 +80,31 @@ regressions are reported honestly; no synthetic green. Weights, venvs and verbos
 artifacts stay outside Git; only compact public synthetic DRAFT samples plus an
 evidence summary are committed. Earlier (round-1) sample artifacts are preserved
 for audit and superseded by the round-2 evidence.
+
+## Round-2 delivered evidence (supersedes round 1)
+
+Frozen code `bcf43d0` (tree `71ac3961`), clean worktree. One command
+(`training/mail/run_slice.py`) produced run
+`/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-6`; **all nine
+stages have captured exit 0** (`<run>/<stage>.exit`, receipt
+`<run>/run_receipt.json`).
+
+* Teacher (real MiniCPM5-2B, pinned revision): train sources 36/36 accepted, dev
+  sources 24/24 accepted.
+* Bounded model dialogues over the same emails: train 6 accepted / 6 rejected
+  (6 clarifications), dev 4 accepted / 4 rejected (4 clarifications).
+* Export: training 36 accepted (6 classifier+dialogue pairs), development 22
+  accepted (3 pairs); contamination `[]`; cross-task linkage `[]`.
+* AC1–AC5: `benchmarks/v3/tests/test_training_*.py` (69 tests) + the committed
+  `samples/round2/*.json` (canonical messages, mask, MiniCPM5 native render,
+  production tool results).
+* AC7: 20 optimizer steps, loss 1.624 -> 0.020 (finite), base weights unchanged
+  (delta 0), adapter logits delta 31.56 (real effect), adapter saved and reload
+  matches (0.00295); 12.56 M / 2.53 B trainable (0.50%).
+* M4 BASE vs ADAPTER on independent dev records: category 0.958 / 0.958,
+  needs_reply 0.75 -> **0.958**, workflow grounded 0.5 -> **0.0** (honest
+  regression), invalid JSON 0.0.
+* AC8: `493 v3`, `52 v2`, `1026 mock e2e`, `git diff --check` clean.
+
+Round-1 sample artifacts under `samples/` are preserved for audit and superseded
+by `samples/round2/` + `samples/evidence_round2.json`.
