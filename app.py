@@ -386,7 +386,7 @@ BASE_TMPL = r"""<!doctype html>
 <meta name="turbo-cache-control" content="no-cache">
 <meta name="view-transition" content="same-origin">
 <script src="/static/turbo.js?v=8.0.12" defer></script>
-<script src="/static/ux.js?v=1" defer></script>
+<script src="/static/ux.js?v=2" defer></script>
 <meta name="theme-color" content="#fafafa">
 <meta name="color-scheme" content="light">
 <title>Mail Triage</title>
@@ -1023,6 +1023,21 @@ form.px-swf{display:flex;align-items:center}
 .ux-context{display:flex;align-items:center;gap:8px}.ux-context button{margin-left:auto;min-width:32px;min-height:32px;background:none;border:0;cursor:pointer}
 .ux-advanced{margin:12px 0}.ux-advanced>summary{cursor:pointer;font-weight:600;padding:8px 0}
 .ux-demo{padding:10px 14px;border:1px solid var(--acc);background:var(--hover);margin-bottom:14px;font-size:.85rem}
+/* ---- automation workspace chrome ---- */
+.ws-nav{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line);margin:0 0 18px;scrollbar-width:none}
+.ws-nav::-webkit-scrollbar{display:none}
+.ws-nav a{padding:8px 12px;color:var(--dim);font-size:.86rem;font-weight:500;white-space:nowrap;border-bottom:2px solid transparent}
+.ws-nav a:hover{color:var(--ink);background:var(--hover);text-decoration:none}
+.ws-nav a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--acc)}
+.cat-row{display:grid;grid-template-columns:minmax(160px,1.1fr) minmax(150px,1fr) auto;gap:10px 14px;align-items:start;padding:12px 0;border-top:1px solid var(--line)}
+.cat-row:first-of-type{border-top:0}
+.cat-row .cat-name{font-weight:600;overflow-wrap:anywhere}
+.cat-row .cat-meta{grid-column:1 / -1;font-size:.78rem;color:var(--dim)}
+.cat-row .cat-meta .mono{font-size:.74rem}
+.cat-row .cat-refs{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px}
+.cat-row .cat-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.cat-row.locked{background:var(--card2)}
+@media(max-width:767px){.cat-row{grid-template-columns:1fr}}
 @media(min-width:1024px) and (max-width:1599px){html.asb-open body.with-asb .main{margin-right:46px}html.asb-open .asb{box-shadow:-10px 0 30px #0002}}
 </style>
 <script>try{var v=localStorage.getItem('asb_open');if(v==='1')document.documentElement.classList.add('asb-open');var w=parseInt(localStorage.getItem('asb_w')||'',10);if(w>=280)document.documentElement.style.setProperty('--asb-w',Math.min(720,w)+'px');}catch(e){}</script>
@@ -1050,16 +1065,12 @@ form.px-swf{display:flex;align-items:center}
         <path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/>', pend) }}
       {% for it in ext_nav if it.group == 'mail' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
       <div class="nav-label">Automation</div>
-      {{ navitem(url_for('rules'), 'Rules', p.startswith('/rules'), '
-        <path d="M3 6h18M7 12h10M10 18h4"/>') }}
+      {{ navitem(url_for('automation'), 'Automation', ws_section is not none, '
+        <path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/>') }}
       {{ navitem(url_for('simulate'), 'Simulator', p.startswith('/simulate'), '
         <path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/>') }}
-      {{ navitem(url_for('flows'), 'Flows', p.startswith('/flows'), '
-        <path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/>') }}
       {{ navitem(url_for('learning_page'), 'Learning', p.startswith('/learning'), '
         <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>') }}
-      {{ navitem(url_for('templates'), 'Templates', p.startswith('/templates'), '
-        <path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/>') }}
       {% for it in ext_nav if it.group == 'automation' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
       <div class="nav-label">System</div>
       {{ navitem(url_for('accounts'), 'Accounts', p.startswith('/accounts'), '
@@ -1109,7 +1120,7 @@ form.px-swf{display:flex;align-items:center}
   <a href="{{ url_for('assistant') }}" class="{{ 'on' if p.startswith('/assistant') else '' }}" {{ 'aria-current="page"'|safe if p.startswith('/assistant') else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
     <span>Assistant</span></a>
-  {% set morepaths = ('/more','/welcome','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/extensions','/log','/proxy') %}
+  {% set morepaths = ('/more','/welcome','/automation','/rules','/flows','/classifiers','/templates','/accounts','/settings','/plugins','/extensions','/log','/proxy') %}
   <a href="{{ url_for('more') }}" class="{{ 'on' if p.startswith(morepaths) else '' }}" {{ 'aria-current="page"'|safe if p.startswith(morepaths) else '' }}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
     <span>More</span></a>
@@ -1356,12 +1367,15 @@ if(!window.__mtVt){
     ['/messages/', 0, 11],  /* message viewer */
     ['/messages', 1, 10],   /* message list (filters/pages share this) */
     ['/assistant', 0, 20],
-    ['/rules/', 0, 31], ['/rules', 1, 30],
-    ['/simulate', 0, 35],
+    ['/automation/categories', 1, 35],
+    ['/automation/controls', 1, 38],
+    ['/automation', 1, 30],
+    ['/rules/', 0, 32], ['/rules', 1, 31],
+    ['/flows/', 0, 34], ['/flows', 1, 33],
+    ['/templates/', 0, 37], ['/templates', 1, 36],
+    ['/simulate', 0, 39],
     ['/classifiers/', 0, 41], ['/classifiers', 1, 40],
     ['/learning', 0, 42],
-    ['/flows/', 0, 51], ['/flows', 1, 50],
-    ['/templates/', 0, 61], ['/templates', 1, 60],
     ['/accounts/', 0, 71], ['/accounts', 1, 70],
     ['/settings', 0, 80],
     ['/more', 0, 90],
@@ -2157,6 +2171,18 @@ def _render_src(src, **ctx):
     return tpl.render(**ctx)
 
 
+WORKSPACE_TMPL = """
+<nav class="ws-nav" aria-label="Automation sections">
+  <a href="{{ url_for('automation') }}"{{ ' aria-current="page"'|safe if section == 'overview' else '' }}>Overview</a>
+  <a href="{{ url_for('rules') }}"{{ ' aria-current="page"'|safe if section == 'rules' else '' }}>Rules</a>
+  <a href="{{ url_for('flows') }}"{{ ' aria-current="page"'|safe if section == 'flows' else '' }}>Flows</a>
+  <a href="{{ url_for('automation_categories') }}"{{ ' aria-current="page"'|safe if section == 'categories' else '' }}>Categories &amp; filing</a>
+  <a href="{{ url_for('templates') }}"{{ ' aria-current="page"'|safe if section == 'drafting' else '' }}>Drafting</a>
+  <a href="{{ url_for('automation_controls') }}"{{ ' aria-current="page"'|safe if section == 'controls' else '' }}>Controls</a>
+</nav>
+"""
+
+
 def render(body, setup=False):
     ws = dict(worker.state)
     info = dict(_header_info())
@@ -2165,8 +2191,12 @@ def render(body, setup=False):
         ext_nav = plugins.ui_nav_items()
     except Exception:
         ext_nav = []
+    ws_section = ux.automation_section(request.path) if not setup else None
+    if ws_section:
+        body = _render_src(WORKSPACE_TMPL, section=ws_section) + body
     return _render_src(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
                                   info=info,
+                                  ws_section=ws_section,
                                   show_asb=(not setup) and not request.path.startswith("/assistant"),
                                   setup=setup,
                                   ext_nav=ext_nav,
@@ -2216,11 +2246,9 @@ color:var(--fg);text-decoration:none}
 </div>
 <div class="nav-label" style="margin:2px 2px 8px">Automation</div>
 <div class="more-list">
-  <a class="more-row" href="{{ url_for('rules') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"/></svg><span class="grow"><b>Rules</b><span class="sub">First-match sorting rules and guards</span></span><span aria-hidden="true">&#8250;</span></a>
+  <a class="more-row" href="{{ url_for('automation') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/></svg><span class="grow"><b>Automation</b><span class="sub">Rules, Flows, Templates, Categories, Drafting and Controls — one workspace</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('simulate') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/></svg><span class="grow"><b>Simulator</b><span class="sub">Draft an email, see how rules and flows would handle it</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('flows') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h9M4 18h5M17 9l3 3-3 3"/></svg><span class="grow"><b>Flows</b><span class="sub">Multi-step automations</span></span><span aria-hidden="true">&#8250;</span></a>
   <a class="more-row" href="{{ url_for('learning_page') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg><span class="grow"><b>Learning</b><span class="sub">Models deciding &amp; learning on your mail</span></span><span aria-hidden="true">&#8250;</span></a>
-  <a class="more-row" href="{{ url_for('templates') }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/></svg><span class="grow"><b>Templates</b><span class="sub">Reply templates</span></span><span aria-hidden="true">&#8250;</span></a>
 </div>
 <div class="nav-label" style="margin:14px 2px 8px">System</div>
 <div class="more-list">
@@ -5911,10 +5939,44 @@ def flow_move(flow_id):
 TEMPLATES_TMPL = """
 <div class="page-head">
   <div>
-    <h1 class="page-title">Reply templates</h1>
-    <div class="page-desc">Used as guidance when the LLM drafts a reply — placeholders: {sender} {subject} {date} {my_name}{% if infill %}; blocks tagged {llm-infill}...{/llm-infill} are filled by the LLM Draft Infill plugin{% endif %}</div>
+    <h1 class="page-title">Drafting</h1>
+    <div class="page-desc">Reply templates and where drafts are saved. Used as guidance when the LLM drafts a reply — placeholders: {sender} {subject} {date} {my_name}{% if infill %}; blocks tagged {llm-infill}...{/llm-infill} are filled by the LLM Draft Infill plugin{% endif %}</div>
   </div>
   <div class="row"><a class="btn primary" href="{{ url_for('template_new') }}">New template</a></div>
+</div>
+<div class="card" id="draft-destination">
+  <div class="card-h"><h3>Draft destination</h3><span class="sub">shared by every draft step and the assistant</span></div>
+  <p class="sub" style="margin-top:0">Where flow and assistant drafts are saved. Blank follows the server's Drafts folder automatically.</p>
+  <form method="post" action="{{ url_for('settings') }}">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Drafting">
+    <input type="hidden" name="next" value="{{ url_for('templates') }}#draft-destination">
+    <div class="setrow"><div class="st-l"><b>Drafts folder override</b><span class="sub">Blank = auto-detect the server's Drafts special-use folder.</span></div>
+      <div class="st-c"><input type="text" name="drafts_folder" value="{{ s.drafts_folder }}" placeholder="Auto-detect" aria-label="Drafts folder override"></div></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save destination</button><span class="sub">{{ 'Using the saved override.' if s.drafts_folder else 'Auto-detect.' }}</span></div>
+  </form>
+</div>
+<div class="card" id="draft-flows">
+  <div class="card-h"><h3>Flows with draft steps</h3><span class="sub">each draft step saves to the destination above</span></div>
+  {% if drafting.invalid_flows %}
+  <div class="msg err">Some flows have unreadable actions and cannot be listed here:
+    {% for f in drafting.invalid_flows %}<div><a href="{{ url_for('flow_edit', flow_id=f.id) }}">#{{ f.id }} {{ f.name }}</a> — {{ f.reason }}</div>{% endfor %}
+  </div>
+  {% endif %}
+  {% if drafting.flows %}
+  <div class="tablewrap"><table class="tbl">
+    <thead><tr><th>Flow</th><th>State</th><th class="r"></th></tr></thead>
+    <tbody>
+    {% for f in drafting.flows %}
+    <tr><td><a href="{{ url_for('flow_edit', flow_id=f.id) }}">{{ f.name or ('Flow #%d' % f.id) }}</a></td>
+      <td>{% if f.enabled %}<span class="badge ok">Enabled</span>{% else %}<span class="badge">Disabled</span>{% endif %}</td>
+      <td class="r"><a class="btn small" href="{{ url_for('flow_edit', flow_id=f.id) }}">Edit</a></td></tr>
+    {% endfor %}
+    </tbody></table></div>
+  <p class="sub" style="margin:10px 0 0"><a href="{{ url_for('templates') }}#draft-destination">Draft destination</a> applies to all of these and to assistant drafts.</p>
+  {% else %}
+  <div class="empty"><h4>No flows produce drafts</h4><p>Add a Draft step in a flow to save replies from your templates automatically.</p><a class="btn" href="{{ url_for('flows') }}">Open flows</a></div>
+  {% endif %}
 </div>
 <div class="card flush" id="templates">
   {% if templates %}
@@ -5995,7 +6057,9 @@ def _infill_plugin_enabled():
 @app.route("/templates")
 def templates():
     return render(_render_src(TEMPLATES_TMPL, templates=store.list_templates(),
-                              infill=_infill_plugin_enabled()))
+                              infill=_infill_plugin_enabled(),
+                              s=store.all_settings(),
+                              drafting=ux.drafting_flows(store.list_flows())))
 
 
 @app.route("/templates/new", methods=["GET", "POST"])
@@ -8805,26 +8869,22 @@ SETTINGS_TMPL = """
 
   <div class="card" id="ai-classify">
     <div class="card-h"><h3>Classification</h3><span class="sub">rules first, then classifiers, then the LLM</span></div>
+    <p class="sub" style="margin-top:0">Classification switches (LLM suggestions, budgets and concurrency) moved into the Automation workspace, next to the rest of the mail-handling controls.</p>
+    <div class="row"><a class="btn primary" href="{{ url_for('automation_controls') }}">Open Controls</a><a class="btn" href="{{ url_for('automation') }}">Automation overview</a></div>
+  </div>
+
+  <div class="card" id="ai-reply">
+    <div class="card-h"><h3>Reply detection</h3><span class="sub">detects whether incoming mail was answered</span></div>
     <form method="post">
       <input type="hidden" name="section" value="behavior">
-      <input type="hidden" name="scope" value="Classification">
-      <div class="setrow"><div class="st-l"><b>Classify unmatched mail with the LLM</b><span class="sub">Anything no rule or classifier claimed gets a category, summary and confidence.</span></div>
-        <div class="st-c"><label class="check"><input type="checkbox" name="llm_suggest" value="1" {{ 'checked' if s.llm_suggest else '' }}><input type="hidden" name="llm_suggest" value="0"> <span>Enabled</span></label></div></div>
-      <div class="setrow"><div class="st-l"><b>Auto-file by LLM category</b><span class="sub">Uses the folder map under Sorting &amp; filing. Off = suggest only.</span></div>
-        <div class="st-c"><label class="check"><input type="checkbox" name="llm_apply" value="1" {{ 'checked' if s.llm_apply else '' }}><input type="hidden" name="llm_apply" value="0"> <span>Enabled</span></label></div></div>
+      <input type="hidden" name="scope" value="Reply detection">
       <div class="setrow"><div class="st-l"><b>Detect answered mail</b><span class="sub">Check Sent replies for thread membership and whether they address the request. Sufficient replies clear Needs reply at 90% or higher assessment confidence. Uses the automatic-call budget; LLM classification must be on.</span></div>
-        <div class="st-c"><label class="px-sw"><input type="checkbox" name="reply_tracking_enabled" value="1" {{ 'checked' if s.reply_tracking_enabled else '' }} aria-label="Detect answered mail"><span class="px-tr"></span></label><input type="hidden" name="reply_tracking_enabled" value="0"></div></div>
+        <div class="st-c"><label class="px-sw" title="Detect answered mail"><input type="checkbox" name="reply_tracking_enabled" value="1" {{ 'checked' if s.reply_tracking_enabled else '' }} aria-label="Detect answered mail"><span class="px-tr"></span></label><input type="hidden" name="reply_tracking_enabled" value="0"></div></div>
       <details class="ux-advanced"><summary>Advanced · sent-reply matching</summary>
         <div class="setrow"><div class="st-l"><b>Sent folder</b><span class="sub">Blank discovers the server's Sent folder, including Sent Items.</span></div><div class="st-c"><input type="text" name="reply_sent_folder" value="{{ s.reply_sent_folder }}" placeholder="Auto-detect" aria-label="Sent folder override"></div></div>
         <div class="setrow"><div class="st-l"><b>Other sending addresses</b><span class="sub">Comma-separated aliases you send as. Your primary mailbox address is recognized automatically. These are matching preferences, not account credentials.</span></div><div class="st-c"><input type="text" name="reply_identity_addresses" value="{{ s.reply_identity_addresses|join(', ') }}" placeholder="alias@example.com" aria-label="Sending aliases"></div></div>
       </details>
-      <div class="setrow"><div class="st-l"><b>Max automatic calls per hour</b><span class="sub">Hourly cap for background classification.</span></div>
-        <div class="st-c"><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0" aria-label="Max LLM calls per hour"></div></div>
-      <div class="setrow"><div class="st-l"><b>Classifications per check</b><span class="sub">How many queued messages each cycle picks up.</span></div>
-        <div class="st-c"><input type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1" aria-label="Batch size"></div></div>
-      <div class="setrow"><div class="st-l"><b>Classify concurrency</b><span class="sub">Parallel requests for &ldquo;Classify all&rdquo; (1&ndash;16; 16 measured best on this GPU).</span></div>
-        <div class="st-c"><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16" aria-label="Concurrency"></div></div>
-      <div class="savebar"><button class="btn primary" type="submit">Save classification</button></div>
+      <div class="savebar"><button class="btn primary" type="submit">Save reply detection</button><span class="sub">Applies to future checks.</span></div>
     </form>
   </div>
 
@@ -8834,16 +8894,9 @@ SETTINGS_TMPL = """
   </div>
 
   <div class="card" id="ai-classifiers">
-    <div class="card-h"><h3>Classifiers</h3><a class="sub" href="{{ url_for('classifiers') }}">Manage classifiers →</a></div>
-    <form method="post">
-      <input type="hidden" name="section" value="behavior">
-      <input type="hidden" name="scope" value="Classifiers">
-      <div class="setrow"><div class="st-l"><b>Run trained classifiers before the LLM</b><span class="sub">Deterministic verdicts from your own labels — faster and immune to prompt injection.</span></div>
-        <div class="st-c"><label class="check"><input type="checkbox" name="heuristics_enabled" value="1" {{ 'checked' if s.heuristics_enabled else '' }}><input type="hidden" name="heuristics_enabled" value="0"> <span>Enabled</span></label></div></div>
-      <div class="setrow"><div class="st-l"><b>Auto-retrain classifiers</b><span class="sub">Retrains tag-sourced classifiers as new labels arrive.</span></div>
-        <div class="st-c"><label class="check"><input type="checkbox" name="heuristic_autorefine" value="1" {{ 'checked' if s.heuristic_autorefine else '' }}><input type="hidden" name="heuristic_autorefine" value="0"> <span>Enabled</span></label></div></div>
-      <div class="savebar"><button class="btn primary" type="submit">Save classifiers</button></div>
-    </form>
+    <div class="card-h"><h3>Classifiers</h3><span class="row"><a class="sub" href="{{ url_for('automation_controls') }}">Switches in Automation →</a><a class="sub" href="{{ url_for('classifiers') }}">Manage classifiers →</a></span></div>
+    <p class="sub" style="margin-top:0">The fast-path switches (run classifiers before the LLM, auto-retrain) moved into Automation → Controls. Review, retrain and edit datasets here.</p>
+    <div class="row"><a class="btn" href="{{ url_for('automation_controls') }}">Classifier switches</a><a class="btn" href="{{ url_for('classifiers') }}">Manage classifiers</a><a class="btn" href="{{ url_for('learning_page') }}">Learning</a></div>
   </div>
 
   <div class="card" id="ai-search">
@@ -9032,32 +9085,15 @@ SETTINGS_TMPL = """
   <div class="sec-desc">What happens to arriving mail and where it ends up.</div>
 
   <div class="card" id="sort-rules">
-    <div class="card-h"><h3>Rules &amp; flows</h3><span class="row"><a class="sub" href="{{ url_for('rules') }}">Manage rules →</a><a class="sub" href="{{ url_for('flows') }}">Flows →</a></span></div>
-    <form method="post">
-      <input type="hidden" name="section" value="behavior">
-      <input type="hidden" name="scope" value="Rules">
-      <div class="setrow"><div class="st-l"><b>Apply rule actions for real</b><span class="sub">Uncheck for dry-run (suggest only). Rules match on from / to / subject / body.</span></div>
-        <div class="st-c"><label class="check"><input type="checkbox" name="rules_apply" value="1" {{ 'checked' if s.rules_apply else '' }}><input type="hidden" name="rules_apply" value="0"> <span>Enabled</span></label></div></div>
-      <div class="setrow"><div class="st-l"><b>Apply flow actions for real</b><span class="sub">Multi-step automations (Flows). Uncheck for dry-run.</span></div>
-        <div class="st-c"><label class="check"><input type="checkbox" name="flows_apply" value="1" {{ 'checked' if s.flows_apply else '' }}><input type="hidden" name="flows_apply" value="0"> <span>Enabled</span></label></div></div>
-      <div class="savebar"><button class="btn primary" type="submit">Save rules &amp; flows</button></div>
-    </form>
+    <div class="card-h"><h3>Rules &amp; flows</h3><span class="sub">live / preview switches and editors</span></div>
+    <p class="sub" style="margin-top:0">The rule-live and flow-live switches live in Automation → Controls; the editors keep their existing pages.</p>
+    <div class="row"><a class="btn" href="{{ url_for('automation_controls') }}">Live switches</a><a class="btn" href="{{ url_for('rules') }}">Rules</a><a class="btn" href="{{ url_for('flows') }}">Flows</a></div>
   </div>
 
   <div class="card" id="sort-filing">
-    <div class="card-h"><h3>Filing &amp; drafts</h3></div>
-    <form method="post">
-      <input type="hidden" name="section" value="behavior">
-      <input type="hidden" name="scope" value="Filing &amp; drafts">
-      <div class="setrow"><div class="st-l"><b>Categories</b><span class="sub">Comma separated. The set the LLM may classify into — used by classifiers, tags and the folder map.</span></div>
-        <div class="st-c"><input type="text" name="categories" value="{{ s.categories|join(', ') }}" aria-label="Categories"></div></div>
-      <div class="setrow"><div class="st-l"><b>Category &rarr; folder map</b><span class="sub">One per line, &ldquo;Category = Folder&rdquo;; blank folder = keep in inbox. Only used when auto-filing is on.</span></div>
-        <div class="st-c"><textarea name="category_folders" rows="7" aria-label="Category folder map">{% for k, v in s.category_folders.items() %}{{ k }} = {{ v }}
-{% endfor %}</textarea></div></div>
-      <div class="setrow"><div class="st-l"><b>Drafts folder</b><span class="sub">Blank = auto-detect.</span></div>
-        <div class="st-c"><input type="text" name="drafts_folder" value="{{ s.drafts_folder }}" aria-label="Drafts folder"></div></div>
-      <div class="savebar"><button class="btn primary" type="submit">Save filing &amp; drafts</button></div>
-    </form>
+    <div class="card-h"><h3>Filing &amp; drafts</h3><span class="sub">moved to Automation</span></div>
+    <p class="sub" style="margin-top:0">Category vocabulary, the category destination map, the default-filing switch and the draft destination moved into the Automation workspace.</p>
+    <div class="row"><a class="btn primary" href="{{ url_for('automation_categories') }}">Categories &amp; filing</a><a class="btn" href="{{ url_for('templates') }}#draft-destination">Drafting</a></div>
   </div>
 </section>
 
@@ -9288,7 +9324,8 @@ _SETTINGS_ANCHORS = {"llm": "ai-model", "rag": "ai-search", "connection": "mail-
 
 def _settings_anchor(section, scope):
     s = (scope or "").lower()
-    for key, val in (("sorting & filing", "sort-filing"), ("sorting", "sorting"),
+    for key, val in (("sorting & filing", "sort-filing"), ("filing & drafts", "sort-filing"),
+                     ("drafting", "sort-filing"), ("sorting", "sorting"),
                      ("rules", "sort-rules"), ("classif", "ai-classify"),
                      ("index", "searchidx"), ("checking", "mail-check"),
                      ("mail source", "mail-src"), ("search", "ai-search"),
@@ -10852,6 +10889,325 @@ def message_preview(mid):
         return jsonify(error='No such message.'), 404
     return jsonify(from_addr=row.get('from_addr') or '', to_addr=row.get('to_addr') or '',
                    subject=row.get('subject') or '', body=(row.get('snippet') or '')[:8000])
+
+
+# ---------------------------------------------------------------- automation workspace
+
+AUTOMATION_OVERVIEW_TMPL = """
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Automation</h1>
+    <div class="page-desc">What happens to your mail, why, and where to change it.</div>
+  </div>
+  <div class="row"><a class="btn" href="{{ url_for('simulate') }}">Test on a message</a><a class="btn" href="{{ url_for('automation_controls') }}">Controls</a></div>
+</div>
+<div class="card">
+  <div class="card-h"><h3>At a glance</h3><span class="sub">read from saved settings — no mailbox or model probe</span></div>
+  <div class="row">
+    <span class="stat"><b>{{ rules_on }}/{{ rules_total }}</b><span>rules live</span></span>
+    <span class="stat"><b>{{ flows_on }}/{{ flows_total }}</b><span>flows live</span></span>
+    <span class="stat"><b>{{ heur_on }}/{{ heur_total }}</b><span>classifiers live</span></span>
+  </div>
+  <div class="kv">
+    <div class="k">Rule live processing</div><div>{% if s.rules_apply %}<span class="badge ok">On</span>{% else %}<span class="badge warn">Preview only</span>{% endif %}</div>
+    <div class="k">Flow live processing</div><div>{% if s.flows_apply %}<span class="badge ok">On</span>{% else %}<span class="badge warn">Dry-run</span>{% endif %}</div>
+    <div class="k">Automatic classification</div><div>{% if s.llm_suggest %}<span class="badge ok">On</span>{% else %}<span class="badge">Off</span>{% endif %}</div>
+    <div class="k">Default filing</div><div>{% if s.llm_apply %}<span class="badge ok">On</span>{% else %}<span class="badge">Off</span>{% endif %} <a href="{{ url_for('automation_categories') }}">change</a></div>
+  </div>
+  <div class="row"><a class="btn primary" href="{{ url_for('simulate') }}">Test on a message</a><a class="btn" href="{{ url_for('learning_page') }}">Review classifiers</a><a class="btn" href="{{ url_for('automation_categories') }}">Categories &amp; filing</a></div>
+</div>
+<div class="card">
+  <div class="card-h"><h3>How mail is handled</h3><span class="sub">two stages</span></div>
+  <p><b>1. Mailbox scan.</b> Rules run first. Remaining eligible mail may match non-category flows (text or topic). Matching guard rules protect mail; topic filters use embeddings.</p>
+  <p><b>2. After classification.</b> A user correction, a fast-path classifier or the LLM supplies a verdict; eligible category-bearing flows are evaluated in order. Default filing is the fallback when it is enabled and no flow has been recorded as handling the message. Kept, already-filed and guarded mail is protected by the existing checks.</p>
+</div>
+<div class="card">
+  <div class="card-h"><h3>Things to know</h3></div>
+  <ul class="sub" style="margin:0;padding-left:18px;line-height:1.8">
+    <li>Preview is not the same as Disabled.</li>
+    <li>A preview (dry-run) category flow can still suppress default filing.</li>
+    <li>A flow action failure may leave fallback filing eligible.</li>
+    <li>A blank default destination means no fallback move, not a global guard.</li>
+    <li>Default filing being off does not prevent a live flow from moving mail.</li>
+    <li>Category suggestion maps exist even when default filing is off.</li>
+    <li>Not every category verdict is an LLM result — corrections and classifiers also produce verdicts.</li>
+  </ul>
+</div>
+"""
+
+
+AUTOMATION_CATEGORIES_TMPL = """
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Categories &amp; filing</h1>
+    <div class="page-desc">The classification vocabulary and where each category is filed. Blank destination keeps the message in its current folder.</div>
+  </div>
+</div>
+{% if error %}
+<div class="msg err" id="form-err" tabindex="-1" role="alert">{{ error }}</div>
+{% endif %}
+{% if conflict %}
+<div class="msg err" id="form-err" tabindex="-1" role="alert">Nothing was saved — the categories changed since this form was loaded. <a href="{{ url_for('automation_categories') }}">Reload current categories</a> before editing.</div>
+{% endif %}
+<form method="post" id="cat-form" action="{{ url_for('automation_categories') }}">
+  <input type="hidden" name="settings_version" value="{{ version }}">
+  <input type="hidden" name="row_count" value="{{ rows|length }}">
+  <div class="card">
+    <div class="card-h"><h3>Classification vocabulary &amp; destinations</h3><span class="sub">names are read-only; add or remove whole categories</span></div>
+    <p class="sub" style="margin-top:0">Removing a category never rewrites historical labels, trained classifiers or plugin settings. Categories already used by a flow or fast-path classifier must be edited there first.</p>
+    {% for r in rows %}
+    {% set i = loop.index0 %}
+    <div class="cat-row{{ ' locked' if r.duplicate or r.readonly else '' }}" data-row-index="{{ i }}">
+      <input type="hidden" name="original_{{ i }}" value="{{ r.original }}">
+      <input type="hidden" name="configured_{{ i }}" value="{{ '1' if r.configured else '0' }}">
+      <input type="hidden" name="mapping_present_{{ i }}" value="{{ '1' if r.mapping_present else '0' }}">
+      <div>
+        <input type="text" name="name_{{ i }}" value="{{ r.name }}" placeholder="New category" aria-label="Category name"{{ ' readonly'|safe if (r.existing or r.readonly or conflict) else '' }}>
+        {% if r.legacy %}<span class="sub">Legacy mapping · not offered for classification</span>{% endif %}
+        {% if r.duplicate %}<span class="sub">Exact duplicate — cleanup needs a separate repair; this row is read-only.</span>{% endif %}
+      </div>
+      <div>
+        <input type="text" name="folder_{{ i }}" value="{{ r.folder }}" placeholder="Keep in current folder" aria-label="Destination folder"{{ ' readonly'|safe if (r.duplicate or r.readonly or conflict) else '' }}>
+      </div>
+      <div class="cat-actions">
+        {% if r.legacy %}<label class="check"><input type="checkbox" name="restore_{{ i }}" value="1"{{ ' checked' if r.restore else '' }}{{ ' disabled'|safe if (r.readonly or conflict) else '' }}> <span>Restore to vocabulary</span></label>{% endif %}
+        {% if r.existing and not r.duplicate %}<label class="check"><input type="checkbox" name="remove_{{ i }}" value="1"{{ ' checked' if r.remove else '' }}{{ ' disabled'|safe if (r.readonly or conflict) else '' }}> <span>Remove on save</span></label>{% endif %}
+      </div>
+      {% if r.flow_refs or r.classifier_refs %}
+      <div class="cat-refs">
+        {% for f in r.flow_refs %}<a class="chip" href="{{ url_for('flow_edit', flow_id=f.id) }}">flow #{{ f.id }} · {{ f.name }}{{ ' · disabled' if not f.enabled else '' }}</a>{% endfor %}
+        {% for c in r.classifier_refs %}<a class="chip" href="{{ url_for('classifiers') }}">classifier #{{ c.id }} · {{ c.name }}{{ ' · disabled' if not c.enabled else '' }}</a>{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <div class="cat-row" id="cat-blank-row" hidden>
+      <input type="hidden" data-tpl="original" value="">
+      <input type="hidden" data-tpl="configured" value="1">
+      <input type="hidden" data-tpl="mapping_present" value="0">
+      <div><input type="text" data-tpl="name" value="" placeholder="New category" aria-label="Category name"></div>
+      <div><input type="text" data-tpl="folder" value="" placeholder="Keep in current folder" aria-label="Destination folder"></div>
+      <div class="cat-actions"><label class="check"><input type="checkbox" data-tpl="remove" value="1"> <span>Remove on save</span></label></div>
+    </div>
+    {% if not conflict %}
+    <div class="cat-add"><button type="button" class="btn" data-add-category-row>Add category</button></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save categories</button><span class="sub">All changes save together.</span></div>
+    {% endif %}
+  </div>
+</form>
+<div class="card" id="filing-switch">
+  <div class="card-h"><h3>Automatic default filing</h3><span class="sub">{{ 'On' if s.llm_apply else 'Off' }}</span></div>
+  <p class="sub" style="margin-top:0">When on, a classified message with no category flow recorded as handling it is moved to its category destination. Low-confidence and guarded mail keeps the protections above. Off = suggestions only.</p>
+  <form method="post" action="{{ url_for('settings') }}" id="filing-form" data-stored="{{ '1' if s.llm_apply else '0' }}">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Filing &amp; drafts">
+    <input type="hidden" name="next" value="{{ url_for('automation_categories') }}">
+    <div class="setrow"><div class="st-l"><b>Enable automatic default filing</b><span class="sub">Rules and flows still apply first.</span></div>
+      <div class="st-c"><label class="px-sw" title="Enable automatic default filing"><input type="checkbox" name="llm_apply" value="1" {{ 'checked' if s.llm_apply else '' }} aria-label="Enable automatic default filing"><span class="px-tr"></span></label><input type="hidden" name="llm_apply" value="0"></div></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save filing switch</button></div>
+  </form>
+</div>
+<noscript><div class="msg warn">JavaScript is off. Use each form's Save button; the category add-row button needs JavaScript, but existing rows can still be edited and saved.</div></noscript>
+{% if error or conflict %}<script>(function(){var e=document.getElementById('form-err');if(e)e.focus();})();</script>{% endif %}
+"""
+
+
+AUTOMATION_CONTROLS_TMPL = """
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Controls</h1>
+    <div class="page-desc">Explicit switches. Saving preferences does not process mail immediately; the worker reads them on its next check.</div>
+  </div>
+</div>
+<noscript><div class="msg warn">JavaScript is off. Each switch is submitted with its own Save button.</div></noscript>
+<div class="card" id="ctl-rules">
+  <div class="card-h"><h3>Rules</h3><span class="sub">first-match sorting and guards</span></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Rules live">
+    <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
+    <div class="setrow"><div class="st-l"><b>Apply rule actions for real</b><span class="sub">Off = preview only (suggest, never move).</span></div>
+      <div class="st-c"><label class="px-sw" title="Apply rule actions for real"><input type="checkbox" name="rules_apply" value="1" {{ 'checked' if s.rules_apply else '' }} aria-label="Apply rule actions for real"><span class="px-tr"></span></label><input type="hidden" name="rules_apply" value="0"></div></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save rule mode</button><span class="sub">{{ 'Live' if s.rules_apply else 'Preview only' }}</span></div>
+  </form>
+  <div class="row" style="margin-top:8px"><a class="btn" href="{{ url_for('rules') }}">Edit rules</a></div>
+</div>
+<div class="card" id="ctl-flows">
+  <div class="card-h"><h3>Flows</h3><span class="sub">multi-step automations</span></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Flows live">
+    <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
+    <div class="setrow"><div class="st-l"><b>Apply flow actions for real</b><span class="sub">Off = dry-run. Independent of each flow's Enabled state.</span></div>
+      <div class="st-c"><label class="px-sw" title="Apply flow actions for real"><input type="checkbox" name="flows_apply" value="1" {{ 'checked' if s.flows_apply else '' }} aria-label="Apply flow actions for real"><span class="px-tr"></span></label><input type="hidden" name="flows_apply" value="0"></div></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save flow mode</button><span class="sub">{{ 'Live' if s.flows_apply else 'Dry-run' }}</span></div>
+  </form>
+  <div class="row" style="margin-top:8px"><a class="btn" href="{{ url_for('flows') }}">Edit flows</a></div>
+</div>
+<div class="card" id="ctl-classify">
+  <div class="card-h"><h3>Classification</h3><span class="sub">rules first, then classifiers, then the LLM</span></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Classification">
+    <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
+    <div class="setrow"><div class="st-l"><b>Classify unmatched mail with the LLM</b><span class="sub">Anything no rule or classifier claimed gets a category, summary and confidence.</span></div>
+      <div class="st-c"><label class="px-sw" title="Classify unmatched mail with the LLM"><input type="checkbox" name="llm_suggest" value="1" {{ 'checked' if s.llm_suggest else '' }} aria-label="Classify unmatched mail with the LLM"><span class="px-tr"></span></label><input type="hidden" name="llm_suggest" value="0"></div></div>
+    <div class="setrow"><div class="st-l"><b>Max automatic calls per hour</b><span class="sub">Hourly cap for background classification.</span></div>
+      <div class="st-c"><input type="number" name="max_llm_per_hour" value="{{ s.max_llm_per_hour }}" min="0" aria-label="Max LLM calls per hour"></div></div>
+    <div class="setrow"><div class="st-l"><b>Classifications per check</b><span class="sub">How many queued messages each cycle picks up.</span></div>
+      <div class="st-c"><input type="number" name="llm_batch_per_cycle" value="{{ s.llm_batch_per_cycle }}" min="1" aria-label="Batch size"></div></div>
+    <div class="setrow"><div class="st-l"><b>Classify concurrency</b><span class="sub">Parallel requests for “Classify all” (1–16; 16 measured best on this GPU).</span></div>
+      <div class="st-c"><input type="number" name="classify_concurrency" value="{{ s.classify_concurrency }}" min="1" max="16" aria-label="Concurrency"></div></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save classification</button></div>
+  </form>
+</div>
+<div class="card" id="ctl-fastpath">
+  <div class="card-h"><h3>Fast-path classifiers</h3><span class="row"><a class="sub" href="{{ url_for('classifiers') }}">Manage classifiers →</a><a class="sub" href="{{ url_for('learning_page') }}">Learning →</a></span></div>
+  <form method="post">
+    <input type="hidden" name="section" value="behavior">
+    <input type="hidden" name="scope" value="Classifiers">
+    <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
+    <div class="setrow"><div class="st-l"><b>Run trained classifiers before the LLM</b><span class="sub">Deterministic verdicts from your own labels — faster and immune to prompt injection.</span></div>
+      <div class="st-c"><label class="px-sw" title="Run trained classifiers before the LLM"><input type="checkbox" name="heuristics_enabled" value="1" {{ 'checked' if s.heuristics_enabled else '' }} aria-label="Run trained classifiers before the LLM"><span class="px-tr"></span></label><input type="hidden" name="heuristics_enabled" value="0"></div></div>
+    <div class="setrow"><div class="st-l"><b>Auto-retrain classifiers</b><span class="sub">Retrains tag-sourced classifiers as new labels arrive.</span></div>
+      <div class="st-c"><label class="px-sw" title="Auto-retrain classifiers"><input type="checkbox" name="heuristic_autorefine" value="1" {{ 'checked' if s.heuristic_autorefine else '' }} aria-label="Auto-retrain classifiers"><span class="px-tr"></span></label><input type="hidden" name="heuristic_autorefine" value="0"></div></div>
+    <div class="savebar"><button class="btn primary" type="submit">Save classifiers</button></div>
+  </form>
+</div>
+<div class="card" id="ctl-filing">
+  <div class="card-h"><h3>Default filing</h3><span class="sub">read-only here</span></div>
+  <div class="kv"><div class="k">Automatic default filing</div><div>{% if s.llm_apply %}<span class="badge ok">On</span>{% else %}<span class="badge">Off</span>{% endif %}</div></div>
+  <p class="sub" style="margin:0">Edit this switch (and the category destinations) on the Categories &amp; filing page so the confirmation sits with the consequence.</p>
+  <div class="row" style="margin-top:8px"><a class="btn" href="{{ url_for('automation_categories') }}">Categories &amp; filing</a></div>
+</div>
+"""
+
+
+def _category_display_rows(settings, flows, heuristics):
+    rows = ux.category_rows(settings, flows, heuristics)
+    counts = {}
+    for r in rows:
+        if r["configured"]:
+            counts[r["name"]] = counts.get(r["name"], 0) + 1
+    out = []
+    for i, r in enumerate(rows):
+        out.append({
+            "original": str(i), "existing": True, "name": r["name"], "folder": r["folder"],
+            "configured": r["configured"], "mapping_present": r["mapping_present"],
+            "legacy": not r["configured"],
+            "duplicate": r["configured"] and counts.get(r["name"], 0) > 1,
+            "remove": False, "restore": False,
+            "flow_refs": r["flow_refs"], "classifier_refs": r["classifier_refs"],
+            "readonly": False,
+        })
+    for _ in range(3):
+        out.append({"original": "", "existing": False, "name": "", "folder": "",
+                    "configured": True, "mapping_present": False, "legacy": False,
+                    "duplicate": False, "remove": False, "restore": False,
+                    "flow_refs": [], "classifier_refs": [], "readonly": False})
+    return out
+
+
+def _posted_category_rows(form, settings, flows, heuristics):
+    """Rebuild display rows from a posted form for 422/409 renders."""
+    try:
+        current = ux.category_rows(settings, flows, heuristics)
+    except ValueError:
+        current = []
+    counts = {}
+    for r in current:
+        if r["configured"]:
+            counts[r["name"]] = counts.get(r["name"], 0) + 1
+    try:
+        row_count = int((form.get("row_count") or "0").strip() or 0)
+    except (TypeError, ValueError):
+        row_count = 0
+    rows = []
+    for i in range(max(0, min(row_count, 500))):
+        original = (form.get("original_%d" % i) or "").strip()
+        server = None
+        if original.isdigit() and 0 <= int(original) < len(current):
+            server = current[int(original)]
+        configured = (form.get("configured_%d" % i) or "0") == "1"
+        mapping_present = (form.get("mapping_present_%d" % i) or "0") == "1"
+        if server is not None:
+            configured = server["configured"]
+            mapping_present = server["mapping_present"]
+        name = server["name"] if server is not None else (form.get("name_%d" % i) or "")
+        rows.append({
+            "original": original, "existing": server is not None, "name": name,
+            "folder": form.get("folder_%d" % i) or "",
+            "configured": configured, "mapping_present": mapping_present,
+            "legacy": not configured,
+            "duplicate": configured and counts.get(name, 0) > 1,
+            "remove": (form.get("remove_%d" % i) or "") == "1",
+            "restore": (form.get("restore_%d" % i) or "") == "1",
+            "flow_refs": server["flow_refs"] if server else [],
+            "classifier_refs": server["classifier_refs"] if server else [],
+            "readonly": False,
+        })
+    return rows
+
+
+@app.route("/automation")
+def automation():
+    s = store.all_settings()
+    rules = store.list_rules()
+    flows = store.list_flows()
+    heur = store.list_heuristics()
+    return render(_render_src(
+        AUTOMATION_OVERVIEW_TMPL, s=s,
+        rules_on=sum(1 for r in rules if r.get("enabled")), rules_total=len(rules),
+        flows_on=sum(1 for f in flows if f.get("enabled")), flows_total=len(flows),
+        heur_on=sum(1 for h in heur if h.get("enabled")), heur_total=len(heur)))
+
+
+@app.route("/automation/categories", methods=["GET", "POST"])
+def automation_categories():
+    s = store.all_settings()
+    flows = store.list_flows()
+    heuristics = store.list_heuristics()
+    if request.method == "POST":
+        posted_version = (request.form.get("settings_version") or "").strip()
+        current_version = store.settings_version(s)
+        if posted_version != current_version:
+            return render(_render_src(
+                AUTOMATION_CATEGORIES_TMPL,
+                rows=_posted_category_rows(request.form, s, flows, heuristics),
+                version=current_version, error=None, conflict=True, s=s)), 409
+        try:
+            references = ux.automation_references(s, flows, heuristics)
+        except ValueError as exc:
+            return render(_render_src(
+                AUTOMATION_CATEGORIES_TMPL, rows=[], version=current_version,
+                error=str(exc), conflict=False, s=s)), 422
+        try:
+            categories, mapping = ux.parse_category_rows(request.form, s, references)
+        except ValueError as exc:
+            return render(_render_src(
+                AUTOMATION_CATEGORIES_TMPL,
+                rows=_posted_category_rows(request.form, s, flows, heuristics),
+                version=current_version, error=str(exc), conflict=False, s=s)), 422
+        if not store.save_category_settings(categories, mapping, posted_version):
+            return render(_render_src(
+                AUTOMATION_CATEGORIES_TMPL,
+                rows=_posted_category_rows(request.form, s, flows, heuristics),
+                version=store.settings_version(store.all_settings()), error=None, conflict=True, s=s)), 409
+        flash("Categories and filing saved.", "ok")
+        return redirect(url_for("automation_categories"), code=303)
+    try:
+        rows = _category_display_rows(s, flows, heuristics)
+        error = None
+    except ValueError as exc:
+        rows, error = [], str(exc)
+    return render(_render_src(
+        AUTOMATION_CATEGORIES_TMPL, rows=rows, version=store.settings_version(s),
+        error=error, conflict=False, s=s))
+
+
+@app.route("/automation/controls")
+def automation_controls():
+    return render(_render_src(AUTOMATION_CONTROLS_TMPL, s=store.all_settings()))
 
 
 @app.route('/automation/preview', methods=['POST'])

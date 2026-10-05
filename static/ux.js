@@ -134,12 +134,57 @@
     window.addEventListener('hashchange', selectSection);
   }
 
+  function categories() {
+    var form = document.getElementById('cat-form');
+    if (form && !form.dataset.uxReady) {
+      form.dataset.uxReady = '1';
+      var count = form.querySelector('[name=row_count]');
+      var tpl = document.getElementById('cat-blank-row');
+      var add = form.querySelector('[data-add-category-row]');
+      if (add && tpl && count) {
+        add.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          var i = parseInt(count.value, 10) || 0;
+          var row = tpl.cloneNode(true);
+          row.removeAttribute('id');
+          row.removeAttribute('hidden');
+          row.dataset.rowIndex = String(i);
+          Array.prototype.forEach.call(row.querySelectorAll('[data-tpl]'), function (el) {
+            var field = el.getAttribute('data-tpl');
+            el.setAttribute('name', field + '_' + i);
+            el.removeAttribute('data-tpl');
+            if (el.type === 'checkbox') { el.checked = false; } else { el.value = ''; }
+          });
+          count.value = String(i + 1);
+          tpl.parentNode.insertBefore(row, add.closest('.cat-add') || add);
+          var first = row.querySelector('input[name="name_' + i + '"]');
+          if (first) first.focus();
+        });
+      }
+    }
+    var filing = document.getElementById('filing-form');
+    if (filing && !filing.dataset.uxReady) {
+      filing.dataset.uxReady = '1';
+      var box = filing.querySelector('input[type=checkbox][name=llm_apply]');
+      filing.addEventListener('submit', function (ev) {
+        // Runs on the form (before the shared busy guard). Cancel leaves it off.
+        if (filing.dataset.stored !== '1' && box && box.checked) {
+          if (!window.confirm('Enable automatic default filing? Future classifications may move mail using the category destinations. Protective rules still apply.')) {
+            ev.preventDefault();
+            box.checked = false;
+          }
+        }
+      });
+    }
+  }
+
   function initialize() {
     var disagreements = document.getElementById('learning-disagreements');
     if (disagreements && location.hash === '#learning-disagreements') disagreements.open = true;
     var dashboard = document.getElementById('dash-workbench');
     if (dashboard) Array.from(dashboard.children).sort(function (a, b) { return Number(a.dataset.order) - Number(b.dataset.order); }).forEach(function (child) { dashboard.appendChild(child); });
     settings();
+    categories();
     var composer = document.querySelector('#aform textarea');
     if (!composer) composer = document.querySelector('.assistant-main textarea');
     var prompt = new URLSearchParams(location.search).get('prompt');
@@ -161,6 +206,10 @@
   document.addEventListener('turbo:before-cache', function () {
     var nav = document.querySelector('.setnav');
     if (nav) delete nav.dataset.uxReady;
+    var catForm = document.getElementById('cat-form');
+    if (catForm) delete catForm.dataset.uxReady;
+    var filingForm = document.getElementById('filing-form');
+    if (filingForm) delete filingForm.dataset.uxReady;
     if (window.__mtUxSettingsHash) {
       window.removeEventListener('hashchange', window.__mtUxSettingsHash);
       window.__mtUxSettingsHash = null;

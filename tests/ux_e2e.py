@@ -502,6 +502,233 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual((store.get_setting('categories'), store.get_setting('category_folders')),
                          before)
 
+    # ---- WP2: workspace chrome, routes and scoped forms ------------------
+
+    def _ws_nav(self, response):
+        html = response.data.decode('utf-8')
+        i = html.find('<nav class="ws-nav"')
+        j = html.find('</nav>', i)
+        return html[i:j]
+
+    def _side_nav(self, response):
+        html = response.data.decode('utf-8')
+        i = html.find('<nav class="nav">')
+        j = html.find('</nav>', i)
+        return html[i:j]
+
+    def _cat_fields(self, rows, version, **over):
+        data = {'settings_version': version, 'row_count': str(len(rows))}
+        for i, r in enumerate(rows):
+            data['original_%d' % i] = r['original']
+            data['name_%d' % i] = r['name']
+            data['folder_%d' % i] = r['folder']
+            data['configured_%d' % i] = '1' if r['configured'] else '0'
+            data['mapping_present_%d' % i] = '1' if r['mapping_present'] else '0'
+        data.update(over)
+        return data
+
+    def _current_cat_fields(self):
+        s = store.all_settings()
+        rows = ux.category_rows(s, store.list_flows(), store.list_heuristics())
+        display = [{'original': str(i), 'name': r['name'], 'folder': r['folder'],
+                    'configured': r['configured'], 'mapping_present': r['mapping_present']}
+                   for i, r in enumerate(rows)]
+        return s, display, store.settings_version(s)
+
+    def test_automation_workspace_chrome_and_single_nav(self):
+        for path, active in (('/automation', 'overview'), ('/automation/categories', 'categories'),
+                             ('/automation/controls', 'controls'), ('/rules', 'rules'),
+                             ('/flows', 'flows'), ('/templates', 'drafting')):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            nav = self._ws_nav(response)
+            self.assertIn('aria-label="Automation sections"', nav, path)
+            self.assertEqual(nav.count('aria-current="page"'), 1, path)
+        for path, needle in (('/rules', 'href="/rules" aria-current="page"'),
+                             ('/flows', 'href="/flows" aria-current="page"'),
+                             ('/templates', 'href="/templates" aria-current="page"'),
+                             ('/automation/categories', 'href="/automation/categories" aria-current="page"'),
+                             ('/automation/controls', 'href="/automation/controls" aria-current="page"')):
+            self.assertIn(needle, self._ws_nav(self.client.get(path)), path)
+        # Settings is off-workspace
+        self.assertNotIn('<nav class="ws-nav"', self.client.get('/settings').data.decode())
+        # More carries one Automation hub row instead of separate Rules/Flows/Templates rows
+        more = self.client.get('/more').data
+        self.assertIn(b'href="/automation"', more)
+        self.assertNotIn(b'href="/rules"', more)
+        self.assertNotIn(b'href="/flows"', more)
+        self.assertNotIn(b'href="/templates"', more)
+        # desktop sidebar exposes one Automation item, no separate Rules/Flows/Templates items
+        side = self._side_nav(self.client.get('/'))
+        self.assertIn('href="/automation"', side)
+        self.assertNotIn('href="/rules"', side)
+        self.assertNotIn('href="/flows"', side)
+        self.assertNotIn('href="/templates"', side)
+
+    def test_workspace_get_is_read_only_and_probe_free(self):
+        before = (store.all_settings(), store.list_rules(), store.list_flows(),
+                  store.list_heuristics(), store.messages())
+        with patch.object(engine, 'MailClient', side_effect=AssertionError('GET touched mail')):
+            for path in ('/automation', '/automation/categories', '/automation/controls',
+                         '/rules', '/flows', '/templates'):
+                self.assertEqual(self.client.get(path).status_code, 200, path)
+        after = (store.all_settings(), store.list_rules(), store.list_flows(),
+                 store.list_heuristics(), store.messages())
+        self.assertEqual(before, after)
+
+    def test_category_editor_renders_rows_map_only_and_spares(self):
+        store.set_setting('categories', ['Action', 'Receipt'])
+        store.set_setting('category_folders', {'Receipt': 'Receipts', 'Promo': 'Promotions'})
+        response = self.client.get('/automation/categories')
+        self.assertEqual(response.status_code, 200)
+        page = response.data
+        self.assertIn(b'name="settings_version"', page)
+        self.assertIn(b'name="row_count" value="6"', page)  # 3 rows + 3 spares
+        self.assertIn(b'Legacy mapping', page)
+        self.assertIn(b'Keep in current folder', page)
+        self.assertIn(b'id="cat-blank-row"', page)
+        self.assertIn(b'name="restore_2"', page)   # Promo is map-only
+        self.assertIn(b'id="filing-form"', page)
+        self.assertIn(b'data-stored="0"', page)
+        ux_js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                  'static', 'ux.js'), encoding='utf-8').read()
+        self.assertIn('Enable automatic default filing? Future classifications may move mail', ux_js)
+
+    def test_category_post_valid_303_and_lossless(self):
+        s, rows, version = self._current_cat_fields()
+        response = self.client.post('/automation/categories', data=self._cat_fields(rows, version))
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(store.get_setting('categories'), s['categories'])
+        self.assertEqual(store.get_setting('category_folders'), s['category_folders'])
+        # add a new category with a destination
+        rows2 = list(rows)
+        response = self.client.post('/automation/categories', data=self._cat_fields(
+            rows2, version, row_count=str(len(rows2) + 1), **{
+                'original_%d' % len(rows2): '', 'name_%d' % len(rows2): 'Fresh',
+                'folder_%d' % len(rows2): 'FreshBox',
+                'configured_%d' % len(rows2): '1', 'mapping_present_%d' % len(rows2): '0'}))
+        self.assertEqual(response.status_code, 303)
+        self.assertIn('Fresh', store.get_setting('categories'))
+        self.assertEqual(store.get_setting('category_folders').get('Fresh'), 'FreshBox')
+
+    def test_category_post_stale_409_no_writes(self):
+        s, rows, version = self._current_cat_fields()
+        before = (store.get_setting('categories'), store.get_setting('category_folders'))
+        response = self.client.post('/automation/categories',
+                                    data=self._cat_fields(rows, 'stale-token'))
+        self.assertEqual(response.status_code, 409)
+        self.assertIn(b'Nothing was saved', response.data)
+        self.assertIn(b'Reload current categories', response.data)
+        self.assertEqual((store.get_setting('categories'), store.get_setting('category_folders')),
+                         before)
+
+    def test_category_post_invalid_422_preserves_input(self):
+        s, rows, version = self._current_cat_fields()
+        before = (store.get_setting('categories'), store.get_setting('category_folders'))
+        i = len(rows)
+        response = self.client.post('/automation/categories', data=self._cat_fields(
+            rows, version, row_count=str(i + 1), **{
+                'original_%d' % i: '', 'name_%d' % i: s['categories'][0],
+                'folder_%d' % i: '', 'configured_%d' % i: '1', 'mapping_present_%d' % i: '0'}))
+        self.assertEqual(response.status_code, 422)
+        self.assertIn(b'id="form-err"', response.data)
+        self.assertIn(b'duplicates an existing', response.data)
+        self.assertIn(('value="%s"' % s['categories'][0]).encode(), response.data)
+        self.assertEqual((store.get_setting('categories'), store.get_setting('category_folders')),
+                         before)
+
+    def test_category_post_referenced_removal_422(self):
+        store.add_flow('Rec flow', 'all', [{'kind': 'category', 'value': 'Receipt'}],
+                       [{'type': 'tag', 'tag': 'x'}], enabled=False)
+        s, rows, version = self._current_cat_fields()
+        idx = next(i for i, r in enumerate(rows) if r['name'] == 'Receipt')
+        before = (store.get_setting('categories'), store.get_setting('category_folders'))
+        response = self.client.post('/automation/categories',
+                                    data=self._cat_fields(rows, version, **{'remove_%d' % idx: '1'}))
+        self.assertEqual(response.status_code, 422)
+        self.assertIn(b'referenced', response.data)
+        self.assertEqual((store.get_setting('categories'), store.get_setting('category_folders')),
+                         before)
+
+    def test_category_save_does_not_touch_live_switches(self):
+        s, rows, version = self._current_cat_fields()
+        store.set_setting('llm_apply', False)
+        store.set_setting('drafts_folder', 'KeepMe')
+        self.client.post('/automation/categories', data=self._cat_fields(rows, version))
+        self.assertFalse(store.get_setting('llm_apply'))
+        self.assertEqual(store.get_setting('drafts_folder'), 'KeepMe')
+
+    def test_controls_forms_own_exact_keys(self):
+        page = self.client.get('/automation/controls')
+        self.assertEqual(page.status_code, 200)
+        for name in (b'rules_apply', b'flows_apply', b'llm_suggest', b'max_llm_per_hour',
+                     b'llm_batch_per_cycle', b'classify_concurrency', b'heuristics_enabled',
+                     b'heuristic_autorefine'):
+            self.assertIn(b'name="%s"' % name, page.data)
+        store.set_setting('rules_apply', False)
+        store.set_setting('flows_apply', False)
+        r = self.client.post('/settings', data={'section': 'behavior', 'scope': 'Rules live',
+                                                'next': '/automation/controls', 'rules_apply': '1'})
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(store.get_setting('rules_apply'))
+        self.assertFalse(store.get_setting('flows_apply'))
+        r = self.client.post('/settings', data={'section': 'behavior', 'scope': 'Flows live',
+                                                'next': '/automation/controls', 'flows_apply': '1'})
+        self.assertTrue(store.get_setting('flows_apply'))
+        store.set_setting('heuristics_enabled', False)
+        self.client.post('/settings', data={'section': 'behavior', 'scope': 'Classifiers',
+                                            'next': '/automation/controls',
+                                            'heuristics_enabled': '1', 'heuristic_autorefine': '0'})
+        self.assertTrue(store.get_setting('heuristics_enabled'))
+        self.assertFalse(store.get_setting('heuristic_autorefine'))
+        self.client.post('/settings', data={'section': 'behavior', 'scope': 'Classification',
+                                            'next': '/automation/controls', 'llm_suggest': '0',
+                                            'max_llm_per_hour': '7', 'llm_batch_per_cycle': '3',
+                                            'classify_concurrency': '4'})
+        self.assertFalse(store.get_setting('llm_suggest'))
+        self.assertEqual(store.get_setting('max_llm_per_hour'), 7)
+        self.assertEqual(store.get_setting('classify_concurrency'), 4)
+        # the classification form must not have changed the live switches
+        self.assertTrue(store.get_setting('rules_apply'))
+
+    def test_drafting_page_destination_and_flow_cards(self):
+        store.add_flow('Drafter', 'all', [{'kind': 'category', 'value': 'Receipt'}],
+                       [{'type': 'draft', 'mode': 'fixed', 'body': 'hi'}])
+        store.add_flow('Mover', 'all', [{'kind': 'category', 'value': 'Receipt'}],
+                       [{'type': 'move', 'folder': 'X'}])
+        response = self.client.get('/templates')
+        page = response.data
+        self.assertIn(b'Drafting', page)
+        self.assertIn(b'id="draft-destination"', page)
+        self.assertIn(b'name="drafts_folder"', page)
+        self.assertIn(b'Drafter', page)
+        self.assertNotIn(b'Mover', page)
+        self.assertIn(b'/automation/controls', self._ws_nav(response).encode() + response.data)
+
+    def test_settings_landmarks_and_reply_detection(self):
+        page = self.client.get('/settings').data
+        for anchor in (b'id="sorting"', b'id="sort-rules"', b'id="sort-filing"',
+                       b'id="ai-classify"', b'id="ai-classifiers"', b'id="ai-reply"'):
+            self.assertIn(anchor, page)
+        self.assertIn(b'/automation/categories', page)
+        self.assertIn(b'/automation/controls', page)
+        for field in (b'reply_tracking_enabled', b'reply_sent_folder', b'reply_identity_addresses'):
+            self.assertIn(b'name="%s"' % field, page)
+        # moved controls are gone from Settings
+        for gone in (b'name="llm_apply"', b'name="llm_suggest"', b'name="heuristics_enabled"',
+                     b'name="categories"', b'name="category_folders"'):
+            self.assertNotIn(gone, page)
+        self.assertEqual(app._settings_anchor('behavior', 'Filing & drafts'), 'sort-filing')
+        self.assertEqual(app._settings_anchor('behavior', 'Sorting & filing'), 'sort-filing')
+        self.assertEqual(app._settings_anchor('behavior', 'Checking'), 'mail-check')
+
+    def test_vtpos_orders_workspace_sections(self):
+        page = self.client.get('/').data.decode()
+        self.assertLess(page.index("['/automation/categories', 1, 35]"),
+                        page.index("['/automation', 1, 30]"))
+        self.assertLess(page.index("['/automation', 1, 30]"),
+                        page.index("['/simulate', 0, 39]"))
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
