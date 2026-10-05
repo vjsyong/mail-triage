@@ -703,7 +703,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   #templates .tbl.mcards td:nth-child(3){order:3;flex:1 1 100%;margin-top:6px}
   #templates .tbl.mcards .rowacts{justify-content:flex-start !important;gap:8px;min-height:44px}
   #rules .tbl.mcards .rowacts .btn,#classifiers .tbl.mcards .rowacts .btn,#templates .tbl.mcards .rowacts .btn{min-height:44px}
-  .row.chiprow{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px;max-width:100%}
+  .row.chiprow{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px;max-width:100%;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}
   .row.chiprow::-webkit-scrollbar{display:none}
   .row.chiprow>*{flex:none}
   .dsx .tbl.mcards tr{display:flex;flex-wrap:wrap;gap:2px 8px}
@@ -2575,9 +2575,9 @@ def message_sweep(mid):
     if n:
         store.log_msg_event(mid, "backfill", "%d event%s reconstructed from stored state"
                             % (n, "" if n == 1 else "s"))
-        flash("Backfilled %d event%s from stored state." % (n, "" if n == 1 else "s"), "ok")
+        flash("Rebuilt %d event%s from stored state." % (n, "" if n == 1 else "s"), "ok")
     else:
-        flash("Nothing to backfill — no stored signals for this message.", "err")
+        flash("Nothing to rebuild — no stored signals for this message.", "err")
     return redirect(url_for("message_detail", mid=mid))
 
 
@@ -5876,7 +5876,7 @@ MESSAGES_TMPL = """
 <div class="page-head">
   <div>
     <h1 class="page-title">Messages</h1>
-    <div class="page-desc">Newest first — select rows to tag, classify or file in bulk.</div>
+    <div class="page-desc">Newest first — select rows to tag or classify in bulk.</div>
   </div>
   <div class="row"><span class="sub">{{ total }} message{{ 's' if total != 1 else '' }} · page {{ page }} of {{ pages }}</span></div>
 </div>
@@ -6320,7 +6320,7 @@ MESSAGE_TMPL = """
         </div>
       </div>
       {% else %}<div class="sub">Nothing recorded yet — events appear as rules, flows, the classifier and you act on it.</div>
-      <form class="inline" method="post" action="{{ url_for('message_sweep', mid=m.id) }}" style="margin-top:8px"><button class="btn small" type="submit">Backfill from stored state</button></form>{% endfor %}
+      <form class="inline" method="post" action="{{ url_for('message_sweep', mid=m.id) }}" style="margin-top:8px"><button class="btn small" type="submit">Rebuild this email's history</button></form>{% endfor %}
     </div>
     <div class="card">
       <div class="card-h"><h3>Actions</h3></div>
