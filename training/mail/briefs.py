@@ -63,8 +63,9 @@ def build_briefs(seed, per_family=2):
         for k in range(per_family):
             w = WORLD[(seed + i + k) % len(WORLD)]
             n = 1000 + (seed * 17 + i * 31 + k) % 8999
+            ref = "REF-%d-%s-%d" % (seed, fam["family"].upper(), k)
             facts = [f.format(n=n, amount=_money(1200 + n % 900 * 100))
-                     for f in fam["facts"]]
+                     for f in fam["facts"]] + [ref]
             out.append({
                 "brief_id": "b_%s_%d_%d" % (fam["family"], seed, k),
                 "seed": seed,
