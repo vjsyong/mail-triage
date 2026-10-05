@@ -1,0 +1,52 @@
+{
+ "decision": {
+  "category": "Receipt",
+  "needs_reply": false,
+  "reason": "Your receipt from Helios Energy - INV-0100 fits the Receipt category: A confirmation that a purchase, order or payment completed.",
+  "summary": "Your receipt from Helios Energy - INV-0100"
+ },
+ "example_id": "sft_case_r0000_native_training",
+ "generation_domain": "training",
+ "identities": {
+  "model": "openbmb/MiniCPM5-2B",
+  "model_revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+  "prompt_revision": "mail-sft-prompt1",
+  "schema_revision": "mail-sft-0.1",
+  "taxonomy_revision": "mail-sft-tax1",
+  "template_revision": "minicpm5-native-v1"
+ },
+ "lineage_id": "lin_r0000",
+ "mask": [
+  false,
+  false,
+  true
+ ],
+ "messages": [
+  {
+   "content": "You triage incoming email for Priya Raman. Reply with a single JSON object and nothing else. Shape: {\"category\": one of [Action, Notification, Newsletter, Receipt, Personal, Promo], \"needs_reply\": true|false, \"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", \"reason\": \"why that category, max 15 words\"}",
+   "role": "system",
+   "supervised": false
+  },
+  {
+   "content": "From: billing@helios-energy.com\nTo: priya.raman@acme.com\nSubject: Your receipt from Helios Energy - INV-0100\nDate: Mon, 17 Feb 2025 10:30:00 +0000\n\nHello Priya,\n\nThank you for your payment of £980.50 to Helios Energy on 14 February 2025. Reference INV-0100. This message is your receipt and no reply is needed.\n\nHelios Energy\n\nThank you for your prompt attention.",
+   "role": "user",
+   "supervised": false
+  },
+  {
+   "content": "{\"category\": \"Receipt\", \"needs_reply\": false, \"summary\": \"Your receipt from Helios Energy - INV-0100\", \"reason\": \"Your receipt from Helios Energy - INV-0100 fits the Receipt category: A confirmation that a purchase, order or payment completed.\"}",
+   "role": "assistant",
+   "supervised": true
+  }
+ ],
+ "metadata": {
+  "generation_domain": "training",
+  "human_seal": false,
+  "provenance": "synthetic_authored",
+  "review_status": "draft",
+  "test_qualified": false
+ },
+ "native_render": "<s><|im_start|>system\nYou triage incoming email for Priya Raman. Reply with a single JSON object and nothing else. Shape: {\"category\": one of [Action, Notification, Newsletter, Receipt, Personal, Promo], \"needs_reply\": true|false, \"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", \"reason\": \"why that category, max 15 words\"}<|im_end|>\n<|im_start|>user\nFrom: billing@helios-energy.com\nTo: priya.raman@acme.com\nSubject: Your receipt from Helios Energy - INV-0100\nDate: Mon, 17 Feb 2025 10:30:00 +0000\n\nHello Priya,\n\nThank you for your payment of £980.50 to Helios Energy on 14 February 2025. Reference INV-0100. This message is your receipt and no reply is needed.\n\nHelios Energy\n\nThank you for your prompt attention.<|im_end|>\n<|im_start|>assistant\n<think>\nMatch the message to the single best authored category.\n</think>\n\n{\"category\": \"Receipt\", \"needs_reply\": false, \"summary\": \"Your receipt from Helios Energy - INV-0100\", \"reason\": \"Your receipt from Helios Energy - INV-0100 fits the Receipt category: A confirmation that a purchase, order or payment completed.\"}<|im_end|>\n",
+ "source_id": "src_b573d6f2ebc4d737",
+ "task": "decision",
+ "tools": []
+}

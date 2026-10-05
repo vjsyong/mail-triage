@@ -1,0 +1,49 @@
+{
+  "note": "Authored synthetic taxonomy for the SFT training slice. Category identity is the stable 'id'; semantic coverage is keyed to authored intents, never to the display 'name', so a renamed taxonomy still resolves identically. 'roles', 'authoring_notes' and any 'covers'/'definition_intents' map are authoring-only and are stripped by public_projection before any model-facing render.",
+  "revision": "mail-sft-tax1",
+  "intents": {
+    "action_request": {"description": "The sender asks the owner to do something or reply."},
+    "receipt_confirmation": {"description": "Confirms that a purchase, order or payment completed."},
+    "billing_due": {"description": "A bill, invoice or amount is owed, including overdue reminders."},
+    "newsletter_bulk": {"description": "Bulk marketing, an offer, or a newsletter subscription."},
+    "personal_note": {"description": "A personal note from someone the owner knows."},
+    "security_alert": {"description": "An account or login security notification."},
+    "misc_note": {"description": "An authored purpose that no category covers (taxonomy gap probe)."}
+  },
+  "categories": [
+    {"id": "c_action", "name": "Action", "folder": "Action",
+     "definition": "Mail that asks the owner to do something or reply.",
+     "covers": ["action_request"], "roles": ["action", "reply"],
+     "authoring_notes": "role hint 'reply' is authoring-only"},
+    {"id": "c_receipt", "name": "Receipt", "folder": "Receipts",
+     "definition": "A confirmation that a purchase, order or payment completed.",
+     "covers": ["receipt_confirmation"], "roles": ["finance"],
+     "authoring_notes": "hidden"},
+    {"id": "c_billing", "name": "Billing", "folder": "Billing",
+     "definition": "A bill, invoice or amount owed, including overdue reminders.",
+     "covers": ["billing_due"], "roles": ["billing"],
+     "authoring_notes": "hidden"},
+    {"id": "c_promo", "name": "Promo", "folder": "Promo",
+     "definition": "Bulk marketing, offers and newsletters.",
+     "covers": ["newsletter_bulk"], "roles": ["marketing"],
+     "authoring_notes": "hidden"},
+    {"id": "c_personal", "name": "Personal", "folder": "Personal",
+     "definition": "A personal note from a known contact.",
+     "covers": ["personal_note"], "roles": ["personal"],
+     "authoring_notes": "hidden"},
+    {"id": "c_security", "name": "Security", "folder": "Security",
+     "definition": "An account or login security alert.",
+     "covers": ["security_alert"], "roles": ["security"],
+     "authoring_notes": "hidden"}
+  ],
+  "families": {
+    "invoice_due": ["billing_due"],
+    "receipt": ["receipt_confirmation"],
+    "newsletter": ["newsletter_bulk"],
+    "friend_note": ["personal_note"],
+    "login_alert": ["security_alert"],
+    "task_request": ["action_request"],
+    "action_and_billing": ["action_request", "billing_due"],
+    "uncovered_purpose": ["misc_note"]
+  }
+}
