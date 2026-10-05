@@ -31,11 +31,9 @@ from benchmarks.v3.training.tools_native import native_tool_schemas  # noqa: E40
 
 
 def _classify(model, tokenizer, source, system):
-    prompt = tokenizer.apply_chat_template(
-        [{"role": "system", "content": system},
-         {"role": "user", "content": _user_body(source["email"])}],
-        tokenize=False, add_generation_prompt=True, enable_thinking=False)
-    text, _finish, _usage = RD._generate(model, tokenizer, prompt, None, 160)
+    messages = [{"role": "system", "content": system},
+                {"role": "user", "content": _user_body(source["email"])}]
+    text, _finish, _usage = RD._generate(model, tokenizer, messages, None, 160)
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
         return None
@@ -71,14 +69,10 @@ def evaluate(model, tokenizer, sources, taxonomy, max_new_tokens):
             dlg = RD.run_dialogue(model, tokenizer, src, tools, taxonomy, public,
                                   max_new_tokens)
             final = dlg["final_state"]
-            target = src.get("folder")
-            if src["action"] == "move":
-                state_ok = (final["folders"].get(target) == [1]
-                            and final["folders"].get("INBOX", []) == [])
-            else:
-                state_ok = (final["proposal_count"] >= 1
-                            and final["rule_count"] == 0
-                            and final["folders"].get("INBOX") == [1])
+            expected = RD._gold(src["action"], src)["expected_state"]["folders"]
+            folders_match = all(sorted(final["folders"].get(f, [])) == sorted(ids)
+                                for f, ids in expected.items())
+            state_ok = bool(dlg["grounded"]) and folders_match
             workflow.append({"source_id": src["source_id"],
                              "grounded": dlg["grounded"],
                              "state_matches_gold": state_ok,

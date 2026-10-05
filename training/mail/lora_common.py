@@ -91,27 +91,33 @@ def tool_defs(example):
 def supervised_spans(tokenizer, messages, tools):
     """Character spans of supervised (assistant) segments in the native render.
 
-    Re-renders the conversation prefix per message; the new suffix is that
-    message's segment.  Assistant segments that are supervised become spans.  The
-    released template has no ``{% generation %}`` marker, so the assistant mask is
-    derived here rather than from ``return_assistant_tokens_mask`` (which would be
-    all zeros).
+    Renders the full conversation once and locates each ``<|im_start|>assistant``
+    block up to its ``<|im_end|>``.  This is robust to consecutive ``tool``
+    messages (which reflow between prefixes) and matches the released template.
+    Only assistant segments whose canonical ``supervised`` flag is true become
+    spans, so rejected turns and inputs are never trained.
     """
-    meta = [m for m in messages]
-    spans = []
-    prev = ""
-    full = ""
-    for i, msg in enumerate(meta):
-        cur = tokenizer.apply_chat_template(
-            messages[:i + 1], tools=tools or None, tokenize=False,
-            add_generation_prompt=False)
-        if not cur.startswith(prev):
-            raise RuntimeError("template render is not prefix-stable at message %d"
-                               % i)
-        if msg.get("role") == "assistant" and _supervised(msg):
-            spans.append((len(prev), len(cur)))
-        prev = cur
-        full = cur
+    full = tokenizer.apply_chat_template(
+        messages, tools=tools or None, tokenize=False,
+        add_generation_prompt=False)
+    start_tok = "<|im_start|>assistant\n"
+    end_tok = "<|im_end|>"
+    segments = []
+    pos = 0
+    while True:
+        s = full.find(start_tok, pos)
+        if s < 0:
+            break
+        e = full.find(end_tok, s + len(start_tok))
+        if e < 0:
+            break
+        segments.append((s, e + len(end_tok)))
+        pos = e + len(end_tok)
+    assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+    if len(segments) != len(assistant_msgs):
+        raise RuntimeError("assistant segment count %d != assistant messages %d"
+                           % (len(segments), len(assistant_msgs)))
+    spans = [seg for seg, msg in zip(segments, assistant_msgs) if _supervised(msg)]
     return full, spans
 
 
