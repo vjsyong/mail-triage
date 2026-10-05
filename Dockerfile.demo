@@ -1,0 +1,15 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY config.py store.py engine.py app.py rag.py rag_lite.py heuristics.py proxy.py learning.py plugins.py plugin_rt.py plugin_worker.py plugin_ui.py ux.py replies.py demo.py ./
+COPY schemas/ /app/schemas/
+COPY sdk/ /app/sdk/
+COPY plugins/ /app/plugins/
+COPY fonts/ /app/fonts/
+COPY icons/ /app/icons/
+COPY static/ /app/static/
+COPY tests/mock_e2e.py /app/tests/mock_e2e.py
+ENV DATA_DIR=/data UI_HOST=0.0.0.0 UI_PORT=8097 UX_DEMO=1
+HEALTHCHECK --interval=30s --timeout=6s --start-period=60s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8097/healthz', timeout=5)"
+CMD ["python", "demo.py"]

@@ -1,0 +1,16 @@
+.venv
+data
+__pycache__
+*.pyc
+.env
+.git
+.codegraph
+ragmodels
+benchmarks
+docs
+qa
+gemma
+embed
+fusion
+tests/*
+!tests/mock_e2e.py
