@@ -68,3 +68,25 @@ them to `{}`.
 A tiny run proves the pipeline, not model quality. Training failures or quality
 regressions are reported honestly; no synthetic green. Weights, venvs and verbose
 artifacts stay outside Git; only compact public synthetic samples are committed.
+
+## Delivered evidence (this slice)
+
+* **AC1–AC5**: `benchmarks/v3/tests/test_training_*.py` (57 tests) plus the
+  committed `samples/*.json` (canonical messages, per-turn mask, MiniCPM5 native
+  render, trace summary). `samples.py` + a separate `mail-sft-0.1` schema and CLI
+  keep v3.0 semantics unchanged.
+* **AC6**: `training/mail/generate_teacher.py` on the pinned MiniCPM5-2B over
+  three seed batches (11/22/33): 9 accepted / 9 rejected of 18; committed
+  `samples/teacher/teacher_generations.json`. The pinned 2B is the recorded
+  teacher (no temporary container started).
+* **AC7**: `training/mail/train_lora.py` — 20 optimizer steps, loss 3.072 -> 0.181
+  (all finite), base weights unchanged (max delta 0), LoRA weight norm 28.24,
+  adapter saved and reloaded (reload loss 0.181 matches). Trainable params
+  12.56M / 2.53B (0.50%), peak 13.3 GiB on GPU0. `training/mail/evaluate.py` on
+  independent development cases (seed 101 + disjoint dev workflow scenarios),
+  identical config: classification base 1.0 -> adapter **0.833 (regression)**;
+  bounded tool calls 0.5 base / 0.5 adapter. Reported honestly; not a quality
+  claim.
+* **AC8**: `481 v3 / 57 training included`, `52 v2`, `1026 mock e2e`, `git diff
+  --check` clean. Committed evidence summary at
+  `benchmarks/v3/training/samples/training_evidence.json`.

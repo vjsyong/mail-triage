@@ -46,6 +46,13 @@ def load_workflow_scenarios(path=None):
         return json.load(f)
 
 
+def load_dev_workflow_scenarios(path=None):
+    """Independent development workflow scenarios (BASE vs ADAPTER eval)."""
+    path = path or os.path.join(FIXTURES, "workflow_scenarios_dev.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _subject_of(user_text):
     m = re.search(r"^Subject:\s*(.*)$", user_text or "", re.M)
     return (m.group(1).strip() if m else "")

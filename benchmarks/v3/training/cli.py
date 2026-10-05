@@ -90,6 +90,22 @@ def compact_sample(example):
     return out
 
 
+def _aggregate_counts(exports):
+    """Per-domain accepted/rejected counts, summing same-domain exports."""
+    out = {}
+    for exp in exports:
+        dom = exp["domain"]["domain"]
+        row = out.setdefault(dom, {"accepted": 0, "rejected": 0,
+                                   "rejected_reasons": set()})
+        row["accepted"] += len(exp["accepted"])
+        row["rejected"] += len(exp["rejected"])
+        for r in exp["rejected"]:
+            row["rejected_reasons"].add(r["reason"].split(":")[0])
+    for row in out.values():
+        row["rejected_reasons"] = sorted(row["rejected_reasons"])
+    return out
+
+
 def build_slice(out_dir, *, seed=7, triage_roots=8, sample_dir=None):
     os.makedirs(out_dir, exist_ok=True)
     taxonomy = None
@@ -113,6 +129,9 @@ def build_slice(out_dir, *, seed=7, triage_roots=8, sample_dir=None):
         dev_bundle["cases"], dev_bundle["gold"], domain="development",
         seed=seed + 101, allowed_splits=E.DEVELOPMENT_ALLOWED,
         identities=IDENTITIES, taxonomy=taxonomy)
+    dev_wf = E.export_workflow_scenarios(
+        S.load_dev_workflow_scenarios()["scenarios"], domain="development",
+        seed=seed + 101, identities=IDENTITIES)
 
     ev_bundle = B.build_dataset(seed=seed + 202, triage_roots=triage_roots,
                                 workflow_roots=0, include_variants=False)
@@ -121,7 +140,7 @@ def build_slice(out_dir, *, seed=7, triage_roots=8, sample_dir=None):
         seed=seed + 202, allowed_splits=E.DEVELOPMENT_ALLOWED,
         identities=IDENTITIES, taxonomy=taxonomy)
 
-    exports = [train, train_wf, dev, ev]
+    exports = [train, train_wf, dev, dev_wf, ev]
     contamination = E.contamination_report(exports)
 
     all_examples = []
@@ -149,12 +168,7 @@ def build_slice(out_dir, *, seed=7, triage_roots=8, sample_dir=None):
         "taxonomy_revision": taxonomy["revision"],
         "domains": {exp["domain"]["domain"]: exp["domain"]["domain_sha256"]
                     for exp in exports},
-        "counts": {exp["domain"]["domain"]: {
-            "accepted": len(exp["accepted"]),
-            "rejected": len(exp["rejected"]),
-            "rejected_reasons": sorted({r["reason"].split(":")[0]
-                                        for r in exp["rejected"]}),
-        } for exp in exports},
+        "counts": _aggregate_counts(exports),
         "contamination": contamination,
         "committed_samples": committed,
         "review_status": "draft",

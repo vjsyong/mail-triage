@@ -1,0 +1,21 @@
+# Pinned training environment for the mail SFT slice (AC7).
+#
+# This is an overlay installed with `pip install --no-deps --target` on top of
+# /home/xrim/jev-sweep/venv-cuda (torch 2.14.0+cu130 / transformers 5.17.0),
+# which is itself never modified.  Only these versions are exercised.
+#
+#   pip install --no-deps --target <train-env> \
+#       peft==0.21.2 accelerate==1.15.0 psutil==7.2.2 PyYAML==6.0.3
+#   PYTHONPATH=<train-env> <venv-cuda>/bin/python ...
+#
+# Base interpreter stack (already present in venv-cuda and not re-installed):
+#   torch==2.14.0+cu130
+#   transformers==5.17.0
+#   safetensors==0.8.0
+#   tokenizers==0.23.2
+#   numpy==2.5.3
+#   huggingface_hub==1.33.0
+peft==0.21.2
+accelerate==1.15.0
+psutil==7.2.2
+PyYAML==6.0.3
