@@ -59,7 +59,7 @@ builder pre-filled with a disabled category-triggered draft (one move step when 
 category has a destination, otherwise none). Design records:
 [docs/flows-builder-v2.md](flows-builder-v2.md), [docs/flows-fuzzy-classifier.md](flows-fuzzy-classifier.md).
 
-## Classification (Messages + Settings)
+## Classification (Messages + Automation)
 
 Anything no rule matched is classified into your categories (Action, Notification,
 Newsletter, Receipt, Personal, Promo by default) with a confidence, a one-sentence
@@ -71,8 +71,9 @@ Automation → Controls.
 
 On demand: tick rows and "Classify selected", or "Classify all unclassified" as a
 background job (newest first, progress + Stop). The batch job classifies several
-messages in parallel against the local model (Settings -> "Classify concurrency",
-default 8, cap 16; measured ~41 msg/min at 16 on an RTX 3090). Each message keeps
+messages in parallel against the local model (Automation → Controls → "Classify
+concurrency", default 8, cap 16; measured ~41 msg/min at 16 on an RTX 3090). Each
+message keeps
 the model's reasoning, collapsible on its page; there is also a single "Classify
 with LLM" button and "File to <suggested folder>".
 
