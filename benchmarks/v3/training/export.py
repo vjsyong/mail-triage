@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 
 from ..common.hashing import hash_obj
+from .reply_gold import reply_problems
 from .schema import validate_sft_example
 from .samples import (ROLE_DEV, ROLE_TRAIN, build_decision_example,
                       build_dialogue_example)
@@ -59,6 +60,24 @@ def _reject(rejected, sid, reason):
     rejected.append({"source_id": sid, "reason": reason})
 
 
+def verify_source(source, taxonomy):
+    """Authored-intent problems justified by the **visible** email (S1)."""
+    problems = []
+    intent = source.get("intent") or {}
+    names = [c.get("name") for c in taxonomy["categories"]]
+    if intent.get("category") not in names:
+        problems.append("category_not_in_taxonomy")
+    needs_reply = intent.get("needs_reply")
+    if not isinstance(needs_reply, bool):
+        problems.append("needs_reply_not_boolean")
+    else:
+        email = source.get("email") or {}
+        text = "%s\n%s" % (email.get("subject", ""), email.get("body", ""))
+        for p in reply_problems(text, needs_reply):
+            problems.append("reply_gold:%s" % p)
+    return problems
+
+
 def export_sources(sources, dialogues, taxonomy, *, domain, seed,
                    identities=None, allowed_roles=(ROLE_TRAIN,)):
     """Export paired classifier + dialogue examples for one generation domain."""
@@ -90,6 +109,11 @@ def export_sources(sources, dialogues, taxonomy, *, domain, seed,
             _reject(rejected, sid, "unobservable_decision_gold"); continue
         if not source.get("lineage_id"):
             _reject(rejected, sid, "missing_lineage"); continue
+        src_problems = verify_source(source, taxonomy)
+        if src_problems:
+            _reject(rejected, sid,
+                    "source_verification_failed:" + "; ".join(src_problems))
+            continue
 
         dialogue = dialog_by_source.get(sid)
         actionable = source.get("action") in ACTIONABLE

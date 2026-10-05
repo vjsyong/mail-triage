@@ -68,7 +68,9 @@ def _tool_definitions(tools):
     body = ("# Tools\n\nYou are provided with function signatures within "
             "<tools></tools> XML tags:\n<tools>")
     for tool in tools:
-        body += "\n" + json.dumps(tool, ensure_ascii=False)
+        # sorted keys make the reference render stable across JSON round-trips so
+        # render(example.messages) == the committed native_render (S3).
+        body += "\n" + json.dumps(tool, ensure_ascii=False, sort_keys=True)
     return body + _TOOL_GUIDELINES
 
 

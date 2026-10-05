@@ -20,6 +20,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lora_common as LC  # noqa: E402
 
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if REPO not in sys.path:
+    sys.path.insert(0, REPO)
+from benchmarks.v3.training import reply_gold  # noqa: E402
+
 SYSTEM = ("You write short, realistic business and personal emails for a mail "
           "triage dataset. Output exactly a subject line beginning with "
           "'Subject:' followed by a blank line and the email body. Invent no "
@@ -59,6 +64,8 @@ def verify_email(subject, body, brief):
         if phrase in low:
             problems.append("refusal_or_leak:%s" % phrase)
             break
+    problems.extend(reply_gold.reply_problems(subject + "\n" + body,
+                                              brief["needs_reply"]))
     return problems
 
 
@@ -146,12 +153,15 @@ def main(argv=None):
                  "body": chosen["body"]}
         sid = source_id_for(email)
         records.append({
-            "source_id": sid, "lineage_id": "lin_" + sid,
+            "source_id": sid, "lineage_id": "lin_" + brief["pair_id"],
+            "pair_id": brief["pair_id"], "variant": brief["variant"],
             "role": args.role, "domain": args.domain, "family": brief["family"],
             "owner": "Priya Raman",
             "intent": {"category": brief["category"],
                        "needs_reply": brief["needs_reply"],
                        "observable": "visible"},
+            "reply_phrase": brief.get("reply_phrase"),
+            "no_reply_phrase": brief.get("no_reply_phrase"),
             "action": brief["action"], "folder": brief["folder"],
             "brief_id": brief["brief_id"],
             "email": email,
@@ -164,15 +174,26 @@ def main(argv=None):
                 "usage": chosen["usage"],
                 "raw_completion": chosen["raw"][:600],
                 "verified": True,
+                "visible_reply_obligation": reply_gold.visible_reply_obligation(
+                    chosen["subject"] + "\n" + chosen["body"]),
             },
         })
         accepted += 1
     LC.write_json(args.out, records)
+    pairs = {}
+    for r in records:
+        pairs.setdefault(r["pair_id"], set()).add(r["intent"]["needs_reply"])
     receipt = {
         "kind": "mail-sft-teacher-sources",
         "teacher": {"model": LC.MODEL_ID, "revision": LC.MODEL_REVISION},
         "role": args.role, "domain": args.domain,
         "briefs": len(briefs), "accepted": accepted, "rejected": rejected,
+        "reply_true_accepted": sum(1 for r in records
+                                   if r["intent"]["needs_reply"]),
+        "reply_false_accepted": sum(1 for r in records
+                                    if not r["intent"]["needs_reply"]),
+        "counterfactual_pairs_with_both": sum(
+            1 for v in pairs.values() if len(v) == 2),
         "attempts_per_brief": args.attempts,
         "seconds": round(time.time() - started, 2),
         "note": "Real model output, deterministically verified; draft only.",

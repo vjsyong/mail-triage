@@ -19,7 +19,7 @@
         "to_addr": "priya@acme.com",
         "subject": "Invoice 908 overdue",
         "date": "Thu, 4 Sep 2025 09:00:00 +0000",
-        "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."
+        "body": "Invoice 908 for 88.00 is overdue. Please arrange payment. Please reply to confirm when you will pay."
       },
       "provenance": {
         "kind": "authored_fixture"
@@ -73,7 +73,7 @@
           "to_addr": "priya@acme.com",
           "subject": "Invoice 908 overdue",
           "date": "Thu, 4 Sep 2025 09:00:00 +0000",
-          "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."
+          "body": "Invoice 908 for 88.00 is overdue. Please arrange payment. Please reply to confirm when you will pay."
         }
       ],
       "rules": [],
@@ -134,7 +134,7 @@
         "from_addr": "billing@atlas-tools.com",
         "to_addr": "priya@acme.com",
         "subject": "Invoice 908 overdue",
-        "body": "Invoice 908 for 88.00 is overdue. Please arrange payment."
+        "body": "Invoice 908 for 88.00 is overdue. Please arrange payment. Please reply to confirm when you will pay."
       },
       "model": {
         "key": "authored_fixture"

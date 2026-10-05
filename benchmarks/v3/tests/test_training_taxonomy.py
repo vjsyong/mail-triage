@@ -42,8 +42,12 @@ class TaxonomyResolutionTests(unittest.TestCase):
             base = T.resolve_semantics(self.tax, family, "policy_conditioned")
             ren = T.resolve_semantics(renamed, family, "policy_conditioned")
             self.assertEqual(base["observable"], ren["observable"], family)
-            self.assertIsNotNone(base["category"]) if base["observable"] == T.VISIBLE \
-                else self.assertIsNone(ren["category"], family)
+            if base["observable"] == T.VISIBLE:
+                self.assertIsNotNone(ren["category"], family)
+                # direct check: the renamed result is the opaque label, not None
+                self.assertTrue(ren["category"].startswith("ZZ_"), family)
+            else:
+                self.assertIsNone(ren["category"], family)
 
     def test_resolution_is_keyed_by_id_not_name(self):
         renamed = T.rename(self.tax, {"c_billing": "Totally Unrelated Word"})
@@ -103,6 +107,33 @@ class TaxonomyTransformTests(unittest.TestCase):
         self.assertEqual(T.resolve_semantics(changed, "invoice_due",
                                              "policy_conditioned")["category"],
                          "Billing")
+
+    def test_internal_ids_never_appear_model_facing(self):
+        """S2: the stable internal ids stay private; only names+definitions show."""
+        public = T.public_projection(self.tax)
+        clf = T.render_classifier_prompt(public)
+        wf = T.render_workflow_prompt(public)
+        for cat in self.tax["categories"]:
+            for text in (clf, wf):
+                self.assertNotIn(cat["id"], text)
+                self.assertNotIn("(%s)" % cat["id"], text)
+        for opaque in ("c_billing", "c_action", "c_receipt", "c_promo",
+                       "c_personal", "c_security"):
+            self.assertNotIn(opaque, clf)
+            self.assertNotIn(opaque, wf)
+        # opaque rename still shows only the new display label + definition
+        renamed = T.rename(self.tax, {c["id"]: "Label_%d" % i
+                                      for i, c in enumerate(self.tax["categories"])})
+        renamed_clf = T.render_classifier_prompt(T.public_projection(renamed))
+        self.assertIn("Label_", renamed_clf)
+        for opaque in ("c_billing", "c_action"):
+            self.assertNotIn(opaque, renamed_clf)
+        self.assertNotIn("c_billing", renamed_clf)
+
+    def test_public_prompt_view_has_only_name_and_definition(self):
+        view = T.public_prompt_view(T.public_projection(self.tax))
+        for c in view["categories"]:
+            self.assertEqual(set(c), {"name", "definition"})
 
     def test_definition_text_is_name_independent(self):
         a = T.public_projection(self.tax)

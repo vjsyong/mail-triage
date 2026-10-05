@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 
+from .reply_gold import visible_reply_obligation
 from .schema import gold_answer
 
 _STOP = {"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "is",
@@ -84,6 +85,13 @@ def verify_decision(example, source, taxonomy):
     if obj.get("needs_reply") != intent.get("needs_reply"):
         problems.append("needs_reply %r != authored intent %r"
                         % (obj.get("needs_reply"), intent.get("needs_reply")))
+    # the label must be justified by the visible email, not only the hidden intent
+    email = (source or {}).get("email") or example.get("source_email") or {}
+    vis = visible_reply_obligation("%s\n%s" % (email.get("subject", ""),
+                                               email.get("body", "")))
+    if vis is not None and obj.get("needs_reply") != vis:
+        problems.append("needs_reply %r contradicts the visible email obligation %r"
+                        % (obj.get("needs_reply"), vis))
 
     src = _source_text(example)
     src_tokens = _significant(src)
@@ -325,9 +333,17 @@ def verify_example(example, *, source=None, gold=None, taxonomy=None):
     """Route to the task verifier; returns problems ([] = valid)."""
     problems = list(verify_envelope(example))
     if example.get("task") == "decision":
-        problems.extend(verify_decision(example, source, taxonomy))
+        if taxonomy is None:
+            problems.append("missing_context:taxonomy")
+        elif source is None:
+            problems.append("missing_context:source")
+        else:
+            problems.extend(verify_decision(example, source, taxonomy))
     elif example.get("task") == "workflow":
-        problems.extend(verify_dialogue(example, source, gold, taxonomy))
+        if gold is None:
+            problems.append("missing_context:gold")
+        else:
+            problems.extend(verify_dialogue(example, source, gold, taxonomy))
     else:
         problems.append("unknown task %r" % example.get("task"))
     return problems

@@ -20,7 +20,7 @@ import sys
 
 from ..common.hashing import hash_obj
 from . import export as E
-from . import minicpm, samples as S
+from . import minicpm, samples as S, taxonomies
 from .messages import to_native_messages
 from .taxonomies import load_taxonomy
 
@@ -65,42 +65,60 @@ def _assistant_json(example):
     return None
 
 
-def compact_sample(example):
-    """A compact, committable view of an example (canonical + native render)."""
+def full_sample(example, source=None, gold=None, taxonomy=None):
+    """A full, auditable committed sample.
+
+    Keeps every message field (including ``think`` and tool calls) so that
+    ``render(example.messages) == native_render``, plus a ``verification_context``
+    sidecar (source record, gold, taxonomy revision/public view) matching the
+    example's ``source_id`` so ``cli verify`` works offline without pretending
+    self-gold.
+    """
     messages = example["messages"]
     native = to_native_messages(messages)
     rendered = minicpm.render_messages(native, tools=example.get("tools") or None)
-    out = {
-        "example_id": example["example_id"],
-        "task": example["task"],
-        "role": example.get("role"),
-        "generation_domain": example["generation_domain"],
+    context = {
         "source_id": example.get("source_id"),
-        "lineage_id": example.get("lineage_id"),
-        "tools": _tool_names(example),
-        "messages": [{k: m[k] for k in ("role", "content", "supervised")
-                      if k in m} for m in messages],
-        "mask": [bool(m.get("supervised")) for m in messages],
-        "native_render": rendered,
-        "identities": example["identities"],
-        "metadata": example["metadata"],
+        "taxonomy_revision": (taxonomy or {}).get("revision"),
+        "public_taxonomy": (taxonomies.public_prompt_view(
+            taxonomies.public_projection(taxonomy))
+            if taxonomy is not None else None),
+        "source": source,
+        "gold": gold if gold is not None else example.get("gold"),
     }
-    if example["task"] == "decision":
-        out["target"] = _assistant_json(example)
-    trace = example.get("trace")
-    if trace:
-        out["trace_summary"] = {
-            "usage": trace["usage"], "usage_source": trace.get("usage_source"),
-            "state_final": trace.get("state_final"),
-            "turns": [{"index": t["index"], "finish_reason": t["finish_reason"],
-                       "rejected": t["rejected"],
-                       "tool_calls": [c["name"] for c in t["tool_calls"]],
-                       "events": [{"tool": e.get("tool"), "status": e.get("status"),
-                                   "mutated": e.get("mutated")}
-                                  for e in t["events"]]}
-                      for t in trace["turns"]],
-        }
-    return out
+    return {
+        "schema_version": example["schema_version"],
+        "example": example,
+        "native_render": rendered,
+        "verification_context": context,
+    }
+
+
+def _choose_samples(train, sources):
+    """Pick a reply/no-reply counterfactual pair and its dialogues (auditable)."""
+    by_id = {s["source_id"]: s for s in sources}
+    by_source = {}
+    for ex in train.get("accepted") or []:
+        by_source.setdefault(ex["source_id"], {})[ex["task"]] = ex
+    pair_groups = {}
+    for sid, src in by_id.items():
+        if sid in by_source:
+            pair_groups.setdefault(src.get("pair_id") or src["source_id"],
+                                   []).append((src, by_source[sid]))
+    chosen = []
+    for group in pair_groups.values():
+        values = {s["intent"]["needs_reply"] for s, _ in group}
+        if len(values) == 2:
+            for src, tasks in sorted(group, key=lambda t: t[0]["intent"]["needs_reply"]):
+                if "decision" in tasks:
+                    chosen.append((tasks["decision"], src))
+                if "workflow" in tasks:
+                    chosen.append((tasks["workflow"], src))
+            break
+    if not chosen:
+        for ex in (train.get("accepted") or [])[:4]:
+            chosen.append((ex, by_id.get(ex["source_id"])))
+    return chosen[:4]
 
 
 def build_slice(out_dir, *, seed=7, sources=None, dialogues=None,
@@ -145,12 +163,13 @@ def build_slice(out_dir, *, seed=7, sources=None, dialogues=None,
     sample_dir = sample_dir or os.path.join(out_dir, "samples")
     os.makedirs(sample_dir, exist_ok=True)
     committed = []
-    chosen = [e for e in train["accepted"][:4]] + [e for e in dev["accepted"][:1]]
-    for ex in chosen[:5]:
-        compact = compact_sample(ex)
+    chosen = _choose_samples(train, sources)
+    for ex, src in chosen:
+        gold = ex.get("gold")
+        sample = full_sample(ex, source=src, gold=gold, taxonomy=taxonomy)
         path = os.path.join(sample_dir, "%s.json" % ex["example_id"])
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(compact, f, ensure_ascii=False, indent=1, sort_keys=True)
+            json.dump(sample, f, ensure_ascii=False, indent=1, sort_keys=True)
             f.write("\n")
         committed.append(os.path.relpath(path, REPO_ROOT))
 
@@ -200,10 +219,34 @@ def cmd_render(args):
 
 
 def cmd_verify(args):
+    """Verify an example; accept explicit or sidecar source/gold context."""
     from .verify import verify_example
-    example = _load_json(args.example)
-    problems = verify_example(example)
-    print(json.dumps({"problems": problems}, indent=2))
+    obj = _load_json(args.example)
+    context = {}
+    if isinstance(obj, dict) and "example" in obj:
+        context = obj.get("verification_context") or {}
+        example = obj["example"]
+    else:
+        example = obj
+    source = None
+    if args.sources:
+        for s in _load_json(args.sources):
+            if s.get("source_id") == example.get("source_id"):
+                source = s
+                break
+    if source is None and context.get("source") \
+            and context["source"].get("source_id") == example.get("source_id"):
+        source = context["source"]
+    tax = _load_json(args.taxonomy) if args.taxonomy else load_taxonomy()
+    gold = example.get("gold")
+    if gold is None and context.get("gold") is not None:
+        gold = context["gold"]
+    problems = verify_example(example, source=source, gold=gold, taxonomy=tax)
+    payload = {"example_id": example.get("example_id"),
+               "source_id": example.get("source_id"),
+               "resolved_source": source is not None,
+               "problems": problems}
+    print(json.dumps(payload, indent=2))
     return 0 if not problems else 1
 
 
@@ -225,8 +268,11 @@ def build_parser():
     r.add_argument("example")
     r.set_defaults(func=cmd_render)
 
-    v = sub.add_parser("verify", help="verify one example")
+    v = sub.add_parser("verify", help="verify one example (uses --sources/sidecar)")
     v.add_argument("example")
+    v.add_argument("--sources", default=None,
+                   help="JSON list of source records to resolve by source_id")
+    v.add_argument("--taxonomy", default=None, help="taxonomy JSON path")
     v.set_defaults(func=cmd_verify)
     return p
 

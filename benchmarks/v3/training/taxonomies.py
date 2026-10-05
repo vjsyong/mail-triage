@@ -163,16 +163,23 @@ def assert_public_clean(public):
 def taxonomy_block(public):
     """The authored public category descriptions, rendered once for all prompts.
 
-    The classifier and the workflow prompts embed this exact block, so the model
-    sees the same taxonomy description in both tasks (AC2).  Only public fields
-    (id/name/folder/definition) are present -- never covers/roles/authoring notes.
+    Only the **configured display name and definition** are rendered -- never the
+    stable internal category id, ``covers`` or any authoring map (S2).  The
+    classifier and the workflow prompts embed this exact block, so the model sees
+    the same taxonomy description in both tasks without the internal ontology.
     """
     assert_public_clean(public)
     lines = ["Categories (choose/route by these definitions, independent of display names):"]
     for c in public["categories"]:
-        lines.append("- %s (%s): %s" % (c.get("name"), c.get("id"),
-                                        c.get("definition")))
+        lines.append("- %s: %s" % (c.get("name"), c.get("definition")))
     return "\n".join(lines)
+
+
+def public_prompt_view(public):
+    """The strict model-facing view: display names + definitions only."""
+    return {"revision": public.get("revision"),
+            "categories": [{"name": c.get("name"), "definition": c.get("definition")}
+                           for c in public["categories"]]}
 
 
 def render_classifier_prompt(public, owner=""):

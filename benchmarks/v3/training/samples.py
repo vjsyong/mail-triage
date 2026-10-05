@@ -112,7 +112,7 @@ def build_decision_example(source, taxonomy, *, domain, identities=None):
         message("system", system, supervised=False),
         message("user", user, supervised=False),
         message("assistant", json.dumps(decision, ensure_ascii=False),
-                supervised=True, think="Match the message to one authored category."),
+                supervised=True),
     ]
     return {
         "schema_version": TRAIN_SCHEMA_VERSION,

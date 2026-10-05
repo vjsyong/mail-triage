@@ -34,13 +34,34 @@ def _repo_root():
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
+def _task_counts(examples):
+    counts = {}
+    for ex in examples or []:
+        counts[ex.get("task")] = counts.get(ex.get("task"), 0) + 1
+    return counts
+
+
 def _code_fingerprints():
     root = _repo_root()
+    bench = os.path.join(root, "benchmarks", "v3", "training")
     paths = [os.path.join(os.path.dirname(__file__), name) for name in (
         "train_lora.py", "lora_common.py", "generate_teacher.py",
-        "rollout_dialogue.py", "evaluate.py", "briefs.py")]
+        "rollout_dialogue.py", "evaluate.py", "briefs.py", "run_slice.py")]
+    for name in ("samples.py", "export.py", "verify.py", "native_state.py",
+                 "engine_contract.py", "taxonomies.py", "messages.py",
+                 "minicpm.py", "cli.py", "schema.py", "reply_gold.py",
+                 "__init__.py"):
+        paths.append(os.path.join(bench, name))
     paths.append(os.path.join(root, "engine.py"))
     return LC.code_fingerprints(paths)
+
+
+def _native_template_sha256(model_dir):
+    path = os.path.join(model_dir, "chat_template.jinja")
+    if os.path.isfile(path):
+        return LC.sha256_file(path)
+    return LC.sha256_file(os.path.join(model_dir, "tokenizer_config.json")) \
+        if os.path.isfile(os.path.join(model_dir, "tokenizer_config.json")) else ""
 
 
 def _template_sha256():
@@ -96,7 +117,7 @@ def main(argv=None):
     for ex in examples:
         b = build_batch(tokenizer, ex, device, args.max_len)
         if b is not None:
-            batches.append((ex["example_id"], b))
+            batches.append((ex["example_id"], ex.get("task"), b))
     if not batches:
         raise SystemExit("no trainable examples with supervised tokens")
 
@@ -109,7 +130,7 @@ def main(argv=None):
     model.train()
     param_report = LC.trainable_parameter_report(model)
 
-    probe_id, probe = batches[0]
+    _, _, probe = batches[0]
     loss_before = loss_on(model, probe)
     logits_before = probe_logits(model, probe)
 
@@ -122,7 +143,7 @@ def main(argv=None):
     losses = []
     started = time.time()
     for step in range(args.steps):
-        ex_id, batch = batches[step % len(batches)]
+        ex_id, ex_task, batch = batches[step % len(batches)]
         out = model(**{k: batch[k] for k in
                        ("input_ids", "attention_mask", "labels")})
         loss = out.loss
@@ -132,6 +153,7 @@ def main(argv=None):
         loss.backward()
         opt.step()
         losses.append({"step": step, "example_id": ex_id,
+                       "task": ex_task,
                        "loss": round(float(loss.detach().cpu()), 6)})
     elapsed = time.time() - started
 
@@ -173,6 +195,9 @@ def main(argv=None):
         "examples_sha256": LC.sha256_file(args.examples),
         "code_fingerprints": _code_fingerprints(),
         "template_sha256": _template_sha256(),
+        "native_template_sha256": _native_template_sha256(args.model_dir),
+        "task_counts": _task_counts(examples),
+        "tasks_touched": sorted(_task_counts(examples)),
         "adapter_dir": adapter_dir,
         "adapter_files": adapter_files,
         "seed": args.seed,
@@ -183,6 +208,7 @@ def main(argv=None):
         "max_len": args.max_len,
         "parameters": param_report,
         "losses": losses,
+        "tasks_in_losses": sorted({l["task"] for l in losses}),
         "loss_first": losses[0]["loss"],
         "loss_last": losses[-1]["loss"],
         "loss_before_training": round(loss_before, 6),
