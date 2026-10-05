@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# post-checkout: initialise CodeGraph in a freshly created worktree.
+#
+# Git runs this hook after `git worktree add`, with cwd set to the new working
+# tree. Initialising is best-effort and never blocks the checkout: a
+# per-worktree index is built in the background, and any tree that already has
+# an index is left alone. Enable it with:
+#
+#   git config core.hooksPath githooks
+command -v codegraph >/dev/null 2>&1 || exit 0
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -n "$root" ] || exit 0
+
+# Already indexed (main checkout or a worktree we've seen before): nothing to do.
+[ -e "$root/.codegraph/codegraph.db" ] && exit 0
+
+log="${TMPDIR:-/tmp}/codegraph-init-$(basename "$root").log"
+codegraph init "$root" >"$log" 2>&1 &
+exit 0
