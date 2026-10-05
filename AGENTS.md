@@ -18,27 +18,33 @@ deletes mail.
 `master` and is the source every deploy builds from. (`git worktree list` shows
 existing ones.)
 
+Every mail-triage worktree lives under a shared `mail-triage-wt/` directory beside
+the main checkout, one subdirectory per feature.
+
 ```bash
 # 1. start a feature (from the main checkout)
-git worktree add ../mail-triage-<name> -b <name>
+mkdir -p ../mail-triage-wt
+git worktree add ../mail-triage-wt/mail-triage-<name> -b <name>
 
 # 2. work there; tests need the shared venv, and ragmodels/ is gitignored
-cd ../mail-triage-<name>
+cd ../mail-triage-wt/mail-triage-<name>
 ln -s <main-checkout>/ragmodels ragmodels
 .venv/bin/python tests/mock_e2e.py                            # must be ALL GREEN
 
 # 3. land it (from the main checkout) once the suite is green and work is committed
 git merge <name>
 git push origin master
-rm -f ../mail-triage-<name>/ragmodels    # untracked symlink blocks worktree removal
-git worktree remove ../mail-triage-<name>
+rm -f ../mail-triage-wt/mail-triage-<name>/ragmodels    # untracked symlink blocks worktree removal
+git worktree remove ../mail-triage-wt/mail-triage-<name>
 git branch -d <name>
 ```
 
 - Naming: branches short, lowercase, hyphenated (existing: `mail-intelligence`,
-  `rag-lite-eval`). The worktree dir sits beside the main checkout with a SHORT dir
-  name that may abbreviate the branch (`~/mail-triage-intel` runs `mail-intelligence`,
-  `~/mail-triage-rag` runs `rag-lite-eval`).
+  `rag-lite-eval`). The worktree dir sits under `mail-triage-wt/` with a SHORT dir
+  name that may abbreviate the branch (`~/mail-triage-wt/mail-triage-intel` runs
+  `mail-intelligence`, `~/mail-triage-wt/mail-triage-rag` runs `rag-lite-eval`).
+- CodeGraph: a tracked `githooks/post-checkout` builds a per-worktree index when a
+  worktree is added. Enable it once per clone with `git config core.hooksPath githooks`.
 - If `master` moved while you worked: merge `master` into your branch inside the
   worktree, resolve there, then merge back.
 - Trivial fixes (typo, one-liner) may commit straight to `master`; anything with
