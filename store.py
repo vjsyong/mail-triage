@@ -169,6 +169,25 @@ CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts INTEGER, level TEXT, message TEXT
 );
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    message_id INTEGER DEFAULT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    state TEXT NOT NULL DEFAULT 'queued',
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    not_before INTEGER NOT NULL DEFAULT 0,
+    lease_until INTEGER NOT NULL DEFAULT 0,
+    worker TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0,
+    started_at INTEGER,
+    finished_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(state, kind, priority, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_active ON jobs(kind, message_id)
+    WHERE state IN ('queued', 'running');
 CREATE TABLE IF NOT EXISTS heuristics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL DEFAULT '',
@@ -1505,6 +1524,180 @@ def retry_parked_errors():
     return len(ids)
 
 
+# ---------------------------------------------------------------- stage jobs
+#
+# Durable work queue behind the pipeline stages (docs/pipeline-queue.md). One row
+# per unit of work; stage workers claim under per-kind concurrency limits in a
+# single BEGIN IMMEDIATE, so limits and claims cannot race across threads.
+
+def enqueue_job(kind, message_id=None, payload=None, priority=0, not_before=0,
+                promote=False):
+    """Add a job unless an equivalent one is already queued/running.
+
+    With promote=True an existing *queued* job is upgraded in place (priority,
+    payload, clear backoff) instead of being ignored - that is how a manual
+    retry preempts a scheduled job so the hourly budget cannot starve it.
+    Returns the job id, or None when nothing was added or promoted."""
+    import json as _json
+    if not isinstance(payload, str):
+        payload = _json.dumps(payload or {})
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO jobs (kind, message_id, payload, state, priority, "
+            "not_before, created_at) VALUES (?,?,?,'queued',?,?,?)",
+            (kind, message_id, payload, int(priority or 0), int(not_before or 0),
+             int(time.time())))
+        if cur.rowcount != 0:
+            return cur.lastrowid
+        if promote and message_id is not None:
+            row = conn.execute(
+                "SELECT id FROM jobs WHERE kind=? AND message_id=? AND state='queued'",
+                (kind, message_id)).fetchone()
+            if row is not None:
+                conn.execute("UPDATE jobs SET priority=?, payload=?, not_before=0 "
+                             "WHERE id=?", (int(priority or 0), payload, row["id"]))
+                return row["id"]
+        return None
+
+
+def claim_jobs(kinds, limits, worker="", budget=None, max_batch=64):
+    """Atomically claim up to the free slots of each kind, newest priority first.
+
+    `limits` maps kind -> max concurrently running. `budget`, when not None,
+    caps how many *non-manual* jobs may be claimed (jobs whose payload says
+    `manual` always pass); stage workers use it for the hourly LLM allowance.
+    Returns [{id, kind, message_id, payload}] and marks them running with a lease.
+    """
+    import json as _json
+    kinds = [str(k) for k in kinds]
+    if not kinds:
+        return []
+    now = int(time.time())
+    conn = db()
+    try:
+        conn.isolation_level = None
+        conn.execute("BEGIN IMMEDIATE")
+        running = {r["kind"]: r["n"] for r in conn.execute(
+            "SELECT kind, COUNT(*) AS n FROM jobs WHERE state='running' "
+            "AND kind IN (%s) GROUP BY kind" % ",".join("?" * len(kinds)), kinds)}
+        slots = {k: int(limits.get(k, 0)) - int(running.get(k, 0)) for k in kinds}
+        free = [k for k in kinds if slots.get(k, 0) > 0]
+        if not free:
+            conn.execute("COMMIT")
+            return []
+        ph = ",".join("?" * len(free))
+        rows = conn.execute(
+            "SELECT id, kind, message_id, payload FROM jobs "
+            "WHERE state='queued' AND kind IN (%s) AND not_before<=? "
+            "ORDER BY priority DESC, id LIMIT ?" % ph,
+            free + [now, int(max_batch)]).fetchall()
+        claimed, spent = [], 0
+        for r in rows:
+            if slots.get(r["kind"], 0) <= 0:
+                continue
+            try:
+                payload = _json.loads(r["payload"] or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            manual = bool(payload.get("manual"))
+            if budget is not None and not manual and spent >= int(budget):
+                continue
+            upd = conn.execute(
+                "UPDATE jobs SET state='running', worker=?, started_at=?, lease_until=?, "
+                "attempts=attempts+1 WHERE id=? AND state='queued'",
+                (worker, now, now + 900, r["id"]))
+            if upd.rowcount != 1:
+                continue
+            slots[r["kind"]] -= 1
+            if not manual:
+                spent += 1
+            claimed.append({"id": r["id"], "kind": r["kind"],
+                            "message_id": r["message_id"], "payload": payload})
+        conn.execute("COMMIT")
+        return claimed
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+def _finish_job(job_id, state, error=""):
+    with db() as conn:
+        conn.execute("UPDATE jobs SET state=?, error=?, finished_at=? WHERE id=?",
+                     (state, (error or "")[:400], int(time.time()), job_id))
+
+
+def finish_job(job_id, error=""):
+    _finish_job(job_id, "done", error)
+
+
+def fail_job(job_id, error="", retry_after=0):
+    """Permanent failure, or requeue with a backoff when retry_after > 0."""
+    if retry_after:
+        with db() as conn:
+            conn.execute("UPDATE jobs SET state='queued', error=?, not_before=?, "
+                         "lease_until=0 WHERE id=?",
+                         ((error or "")[:400], int(time.time()) + int(retry_after), job_id))
+        return
+    _finish_job(job_id, "failed", error)
+
+
+def requeue_expired_jobs():
+    """Return lease-expired running jobs to the queue (crash recovery)."""
+    with db() as conn:
+        cur = conn.execute("UPDATE jobs SET state='queued', worker='', lease_until=0 "
+                           "WHERE state='running' AND lease_until < ?", (int(time.time()),))
+        return cur.rowcount
+
+
+def job_stats(kinds=None):
+    """Counts for the dashboard/status: {kind: {queued, running, failed, done}}."""
+    kinds = [str(k) for k in kinds] if kinds else []
+    q = "SELECT kind, state, COUNT(*) AS n FROM jobs"
+    args = []
+    if kinds:
+        q += " WHERE kind IN (%s)" % ",".join("?" * len(kinds))
+        args = kinds
+    q += " GROUP BY kind, state"
+    out = {}
+    with db() as conn:
+        for r in conn.execute(q, args):
+            out.setdefault(r["kind"], {"queued": 0, "running": 0, "failed": 0, "done": 0})
+            out[r["kind"]][r["state"]] = r["n"]
+    return out
+
+
+def active_job_ids(kind):
+    with db() as conn:
+        return {r["message_id"] for r in conn.execute(
+            "SELECT message_id FROM jobs WHERE kind=? AND state IN ('queued','running')",
+            (kind,)) if r["message_id"] is not None}
+
+
+def cancel_queued_manual_jobs(kind):
+    """Drop queued jobs a user explicitly stopped (manual batch only)."""
+    import json as _json
+    n = 0
+    with db() as conn:
+        rows = conn.execute("SELECT id, payload FROM jobs WHERE kind=? AND state='queued'",
+                            (kind,)).fetchall()
+        for r in rows:
+            try:
+                payload = _json.loads(r["payload"] or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            if not payload.get("manual"):
+                continue
+            conn.execute("UPDATE jobs SET state='cancelled', finished_at=? WHERE id=?",
+                         (int(time.time()), r["id"]))
+            n += 1
+    return n
+
+
 # ---------------------------------------------------------------- assistant
 
 def add_assistant_message(role, content, proposals="[]", meta="", session_id=0):
@@ -2037,6 +2230,14 @@ def unclassified_next(skip=None):
     with db() as conn:
         row = conn.execute(q, params).fetchone()
     return dict(row) if row else None
+
+
+def unclassified_ids(limit=5000):
+    """Ids of messages still awaiting a verdict (manual batch drains)."""
+    with db() as conn:
+        return [r["id"] for r in conn.execute(
+            "SELECT id FROM messages WHERE status IN ('new','queued') "
+            "AND " + REAL_MSG + " ORDER BY id LIMIT ?", (int(limit),))]
 
 
 # ---------------------------------------------------------------- rule proposals (learned from tags)

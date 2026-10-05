@@ -2503,18 +2503,13 @@ def classify_and_store(msg, settings, mc=None):
             if not flow_matches(fl, m_fields, f_ctx):
                 continue
             try:
-                own = mc is None
-                if own:
-                    mc = MailClient().connect()
-                try:
+                if mc is None:
+                    with_action_mail(lambda cm: _process_flow(
+                        cm, fl, msg, {"subject": msg.get("subject")}, settings,
+                        why="AI category %s %d%%" % (category, round(conf * 100))))
+                else:
                     _process_flow(mc, fl, msg, {"subject": msg.get("subject")}, settings,
                                   why="AI category %s %d%%" % (category, round(conf * 100)))
-                finally:
-                    if own and mc is not None:
-                        try:
-                            mc.close()
-                        except Exception:
-                            pass
                 live = bool(settings.get("flows_apply", True))
                 res["_flow"] = fl.get("name") or ("flow %s" % fl.get("id"))
                 fields["status"] = "flow" if live else "flow-dry"
@@ -2524,14 +2519,13 @@ def classify_and_store(msg, settings, mc=None):
                                 % (fl.get("name"), exc))
             break
     if filing_wanted and not already_filed and not guard and not kept and not res.get("_flow"):
-        own = mc is None
-        try:
-            if own:
-                mc = MailClient().connect()
-            mc.ensure_selected(msg["folder"])
-            mc.ensure_folder(folder)
+        def _do_file(cm):
+            cm.ensure_selected(msg["folder"])
+            cm.ensure_folder(folder)
             store.record_move(msg, folder, "auto-file")
-            new_uid = mc.move(msg["uid"], folder, msgid=msg.get("msgid"))
+            return cm.move(msg["uid"], folder, msgid=msg.get("msgid"))
+        try:
+            new_uid = with_action_mail(_do_file) if mc is None else _do_file(mc)
             fields["status"] = "llm-moved"
             fields["action_taken"] = "move:" + folder
             fields["folder"] = folder
@@ -2542,12 +2536,6 @@ def classify_and_store(msg, settings, mc=None):
                                 "auto-filed to \u201c%s\u201d (LLM suggested)" % folder)
         except Exception as exc:
             store.log_event("error", "LLM move to %s failed: %r" % (folder, exc))
-        finally:
-            if own and mc is not None:
-                try:
-                    mc.close()
-                except Exception:
-                    pass
     store.update_message(msg["id"], **fields)
     learning.observe_classification(msg, fields, res, hres, settings)
     _emit_plugin_event("mail.classified", {
@@ -2555,37 +2543,6 @@ def classify_and_store(msg, settings, mc=None):
         "needs_reply": bool(res.get("needs_reply")),
         "from": msg.get("from_addr") or "", "subject": msg.get("subject") or ""})
     return res
-
-
-def _process_llm_queue(mc, settings, batch):
-    done = 0
-    for msg in store.queued_messages(batch):
-        try:
-            res = classify_and_store(msg, settings, mc=mc)
-            if not res.get("_heuristic_id"):
-                store.add_llm_log(msg["id"], True)
-        except Exception as exc:
-            store.add_llm_log(msg["id"], False, repr(exc))
-            fails = store.llm_fail_count(msg["id"])
-            if fails >= 3:
-                store.update_message(msg["id"], status="error")
-                store.log_event("error", "LLM failed %d times for '%s' - parked "
-                                "(fix the LLM endpoint, then use Retry parked)"
-                                % (fails, (msg.get("subject") or "")[:50]))
-            else:
-                store.log_event("error", "LLM attempt %d failed for '%s' (will retry): %s"
-                                % (fails, (msg.get("subject") or "")[:50], exc))
-            continue
-        note = "(suggestion only)"
-        if res.get("_flow"):
-            note = "flow '%s'" % res["_flow"]
-        elif res.get("_moved_to"):
-            note = "moved to %s" % res["_moved_to"]
-        store.log_event("info", "LLM: '%s' → %s (%.0f%%) %s"
-                        % ((msg.get("subject") or "")[:50], res.get("category"),
-                           (float(res.get("confidence") or 0)) * 100, note))
-        done += 1
-    return done
 
 
 IMAP_RETRIES = 2        # extra attempts when a cycle dies on a connection error
@@ -2654,34 +2611,87 @@ def imap_token_selfheal(exc):
     return False
 
 
+# ------------------------------------------------- single action connection
+#
+# Stage workers (classify, later index/act) never open their own IMAP sessions:
+# mailbox mutations borrow this one shared writer, serialized by a lock. That
+# keeps the app's session count constant no matter how wide a stage runs (the
+# Office365 per-mailbox connection cap incident, docs/pipeline-queue.md).
+
+_ACTION_MAIL_LOCK = threading.RLock()
+_ACTION_MAIL = [None]
+
+
+def reset_action_mail():
+    """Close the shared action connection (proxy restart, tests, recovery)."""
+    with _ACTION_MAIL_LOCK:
+        mc, _ACTION_MAIL[0] = _ACTION_MAIL[0], None
+    if mc is not None:
+        try:
+            mc.close()
+        except Exception:
+            pass
+
+
+def with_action_mail(fn):
+    """Run fn(mc) on the shared writer connection, one action at a time.
+    A dead connection is dropped so the next action reconnects."""
+    with _ACTION_MAIL_LOCK:
+        mc = _ACTION_MAIL[0]
+        try:
+            if mc is None:
+                mc = MailClient().connect()
+                _ACTION_MAIL[0] = mc
+            return fn(mc)
+        except Exception:
+            if mc is not None and _ACTION_MAIL[0] is mc:
+                _ACTION_MAIL[0] = None
+                try:
+                    mc.close()
+                except Exception:
+                    pass
+            raise
+
+
+def enqueue_classify_backlog(limit=5000):
+    """Queue every message awaiting classification as a durable stage job.
+
+    The fetch pass only stores and enqueues; the classify stage drains at its
+    own width and within the hourly LLM budget (claim-time gating), so fetch
+    work and LLM work no longer share a connection or a pipeline."""
+    n = 0
+    for msg in store.queued_messages(limit):
+        if store.enqueue_job("classify", msg["id"]) is not None:
+            n += 1
+    return n
+
+
 def _mail_pass(mc, settings, rules, flows):
     scanned = moved = 0
     for folder in settings.get("watch_folders") or ["INBOX"]:
         s, m = _process_folder(mc, folder, settings, rules, flows)
         scanned += s
         moved += m
-    classified = 0
-    if settings.get("llm_suggest"):
-        budget = int(settings.get("max_llm_per_hour", 40)) - store.llm_count_last_hour()
-        batch = max(0, min(int(settings.get("llm_batch_per_cycle", 5)), budget))
-        if batch:
-            classified = _process_llm_queue(mc, settings, batch)
+    queued = enqueue_classify_backlog() if settings.get("llm_suggest") else 0
     import replies
     try:
         replies.reconcile(mc, settings)
     except Exception as exc:
         store.log_event('warn', 'Sent reply check deferred: %s' % str(exc)[:200])
-    return scanned, moved, classified
+    return scanned, moved, queued
 
 
 def process_mailbox():
-    """One full pass: scan watched folders, apply rules, run the LLM queue.
+    """One fetch pass: scan watched folders, apply rules, enqueue classification.
 
-    A dropped proxy session (EOF, 'User is authenticated but not connected.')
-    is transient on the far side: reconnect and retry the pass before letting
-    the cycle fail, so one blip does not paint the dashboard red. If the far
-    server keeps rejecting the login itself, refresh the OAuth token once
-    (imap_token_selfheal) and retry - retrying alone can never fix that."""
+    Classification/embedding are stage jobs (docs/pipeline-queue.md): this pass
+    stores mail and queues downstream work, then returns - it never calls the
+    LLM. A dropped proxy session (EOF, 'User is authenticated but not
+    connected.') is transient on the far side: reconnect and retry the pass
+    before letting the cycle fail, so one blip does not paint the dashboard
+    red. If the far server keeps rejecting the login itself, refresh the OAuth
+    token once (imap_token_selfheal) and retry - retrying alone can never fix
+    that."""
     settings = store.all_settings()
     rules = [r for r in store.list_rules() if r.get("enabled")]
     flows = [f for f in store.list_flows() if f.get("enabled")]
@@ -2691,7 +2701,7 @@ def process_mailbox():
         mc = None
         try:
             mc = MailClient().connect()
-            scanned, moved, classified = _mail_pass(mc, settings, rules, flows)
+            scanned, moved, queued = _mail_pass(mc, settings, rules, flows)
             break
         except Exception as exc:
             if attempt <= IMAP_RETRIES and _imap_disconnect(exc):
@@ -2711,8 +2721,8 @@ def process_mailbox():
         parts.append("%d new" % scanned)
     if moved:
         parts.append("%d sorted" % moved)
-    if classified:
-        parts.append("%d classified" % classified)
+    if queued:
+        parts.append("%d queued" % queued)
     return ", ".join(parts)
 
 
@@ -2843,165 +2853,176 @@ def save_draft(msg_id, body_text):
 
 # ---------------------------------------------------------------- manual classification job
 
-class ClassifyJob(threading.Thread):
-    """Manual batch classification ("Classify selected" / "Classify all unclassified").
+CLASSIFY_KIND = "classify"
 
-    Runs on demand (explicit user action, so no hourly cap), newest mail first,
-    with progress in `state` for the UI. Failures follow the worker's park rules
-    (3 strikes -> status 'error')."""
+
+class ClassifyJob(threading.Thread):
+    """Classify stage worker: consumes durable `classify` jobs from the stage
+    queue (docs/pipeline-queue.md).
+
+    Producers (the fetch pass, "Classify selected", "Retry parked") only
+    enqueue; this stage claims up to `classify_concurrency` jobs and runs them
+    to a persisted verdict. Classification opens no IMAP sessions - flow and
+    auto-file actions borrow the single shared action connection - so pool
+    width no longer multiplies mailbox connections. The public surface
+    (trigger / _run_job / state / request_stop) is unchanged for the UI."""
 
     def __init__(self):
         super().__init__(daemon=True, name="triage-classifier")
         self.lock = threading.Lock()
         self.force = threading.Event()
         self.stop_flag = threading.Event()
-        self.queue = []
-        self._skip = set()
-        self._tls = threading.local()   # per-pool-thread IMAP connection
-        self._conns = []
+        self.queue = []          # explicit ids from trigger(ids)
+        self.queue_all = False   # trigger() with no ids: drain the whole backlog
+        self._pending_total = 0
         self.state = {"running": False, "done": 0, "failed": 0, "total": 0,
-                      "current": "", "last_error": None, "started": 0}
+                      "current": "", "last_error": None, "started": 0,
+                      "concurrency": 0, "queued": 0}
+
+    # -- producer / control surface
 
     def trigger(self, ids=None):
         with self.lock:
-            self.queue = [int(i) for i in (ids or [])]
+            if ids:
+                self.queue = [int(i) for i in ids]
+                self.queue_all = False
+            else:
+                self.queue_all = True
         self.stop_flag.clear()
         self.force.set()
 
     def request_stop(self):
+        """Stop the current batch: in-flight verdicts finish, queued manual
+        jobs are cancelled (the scheduled fetch loop re-queues them later)."""
         self.stop_flag.set()
+        store.cancel_queued_manual_jobs(CLASSIFY_KIND)
 
     def run(self):
         store.init_db()
+        store.requeue_expired_jobs()
         while True:
-            self.force.wait(1)
-            if not self.force.is_set():
-                continue
+            self.force.wait(2.0)
             self.force.clear()
             try:
-                self._run_job()
-            except Exception as exc:  # keep the thread alive no matter what
+                self._enqueue_manual()
+                self._drain()
+            except Exception as exc:  # keep the stage alive no matter what
                 self.state["last_error"] = repr(exc)
                 self.state["running"] = False
-                store.log_event("error", "classify job crashed: %r" % exc)
+                store.log_event("error", "classify stage crashed: %r" % exc)
+            finally:
+                self.stop_flag.clear()  # a stopped batch must not gate the schedule
 
-    def _mail(self):
-        """One IMAP connection per pool thread (imaplib is not thread-safe)."""
-        mc = getattr(self._tls, "mc", None)
-        if mc is None:
-            mc = MailClient().connect()
-            self._tls.mc = mc
-            with self.lock:
-                self._conns.append(mc)
-        return mc
+    # -- queue plumbing
 
-    def _forget(self, mc):
-        """Drop a connection that died mid-job so the next task reconnects."""
+    def _enqueue_manual(self, backlog_if_empty=False):
+        """Move trigger selections into the durable queue as manual jobs."""
         with self.lock:
-            if mc in self._conns:
-                self._conns.remove(mc)
-        if getattr(self._tls, "mc", None) is mc:
-            self._tls.mc = None
-        try:
-            mc.close()
-        except Exception:
-            pass
-
-    def _classify_one(self, msg, settings):
-        mc = self._mail()
-        try:
-            res = classify_and_store(msg, settings, mc=mc)
-        except Exception as exc:
-            if _imap_disconnect(exc):
-                self._forget(mc)
-            raise
-        if not res.get("_heuristic_id"):
-            store.add_llm_log(msg["id"], True)
-        return res
+            ids, self.queue = list(self.queue), []
+            all_flag, self.queue_all = self.queue_all, False
+        if all_flag:
+            ids = store.unclassified_ids()
+        if not ids and backlog_if_empty:
+            stats = store.job_stats([CLASSIFY_KIND]).get(CLASSIFY_KIND) or {}
+            if not stats.get("queued") and not stats.get("running"):
+                ids = store.unclassified_ids()
+        added = 0
+        for mid in ids:
+            if store.enqueue_job(CLASSIFY_KIND, mid, {"manual": True},
+                                 priority=10, promote=True) is not None:
+                added += 1
+        if added:
+            self._pending_total = added
+        self.state["queued"] = (store.job_stats([CLASSIFY_KIND]).get(CLASSIFY_KIND)
+                                or {}).get("queued", 0)
 
     def _run_job(self):
-        with self.lock:
-            ids = list(self.queue)
-            self.queue = []
-        self._skip = set()
+        """Synchronous drain (tests and non-thread callers): queue the explicit
+        selection, or the whole backlog when nothing was selected."""
+        self._enqueue_manual(backlog_if_empty=True)
+        self._drain()
+
+    def _drain(self):
         settings = store.all_settings()
         concurrency = max(1, min(16, int(settings.get("classify_concurrency") or 8)))
+        max_hour = int(settings.get("max_llm_per_hour", 40))
         done = failed = 0
-        self.state.update({"running": True, "done": 0, "failed": 0, "concurrency": concurrency,
-                           "started": int(time.time()), "last_error": None, "current": ""})
-        self.state["total"] = len(ids) if ids else store.unclassified_count()
-        try:
-            pending = None
-            if ids:
-                pending = [m for m in (store.get_message(i) for i in ids) if m]
-            exhausted = False
-
-            def next_msg():
-                if pending is not None:
-                    return pending.pop(0) if pending else None
-                return store.unclassified_next(skip=self._skip)
-
-            with ThreadPoolExecutor(max_workers=concurrency,
-                                    thread_name_prefix="classify") as pool:
-                inflight = {}
-                while inflight or not exhausted:
-                    while (not exhausted and not self.stop_flag.is_set()
-                           and len(inflight) < concurrency):
-                        msg = next_msg()
-                        if msg is None:
-                            exhausted = True
-                            break
-                        self._skip.add(msg["id"])  # claimed: in flight counts as skip
+        first = True
+        with ThreadPoolExecutor(max_workers=concurrency,
+                                thread_name_prefix="classify") as pool:
+            inflight = {}
+            while True:
+                if not self.stop_flag.is_set() and len(inflight) < concurrency:
+                    room = concurrency - len(inflight)
+                    budget = max(0, max_hour - store.llm_count_last_hour())
+                    claimed = store.claim_jobs([CLASSIFY_KIND], {CLASSIFY_KIND: room},
+                                               worker=self.name, budget=budget)
+                    for job in claimed:
+                        msg = (store.get_message(job["message_id"])
+                               if job["message_id"] else None)
+                        if msg is None or msg.get("status") not in ("new", "queued"):
+                            store.finish_job(job["id"], "stale")
+                            continue
+                        if first:
+                            self.state.update({"running": True, "done": 0, "failed": 0,
+                                               "total": self._pending_total or len(claimed),
+                                               "concurrency": concurrency,
+                                               "started": int(time.time()),
+                                               "last_error": None})
+                            self._pending_total = 0
+                            first = False
                         self.state["current"] = "%s%s" % (
                             (msg.get("subject") or "")[:56],
                             (" (+%d more)" % len(inflight)) if inflight else "")
-                        inflight[pool.submit(self._classify_one, msg, settings)] = msg
-                    if not inflight:
-                        break
-                    done_set, _ = wait(list(inflight), timeout=0.5,
-                                       return_when=FIRST_COMPLETED)
-                    for fut in done_set:
-                        msg = inflight.pop(fut)
-                        try:
-                            res = fut.result()
-                            done += 1
-                            store.log_event("info", "classify: '%s' → %s%s"
-                                            % ((msg.get("subject") or "")[:50], res.get("category"),
-                                               (" (moved to %s)" % res["_moved_to"]) if res.get("_moved_to") else ""))
-                        except Exception as exc:
-                            if _imap_disconnect(exc):
-                                # connection died, not a bad verdict: leave it
-                                # queued and let a later pass retry, no strike
-                                store.log_event("warn", "classify: '%s' hit an IMAP connection "
-                                                "error (%r) — left queued for retry"
-                                                % ((msg.get("subject") or "")[:50], exc))
-                            else:
-                                failed += 1
-                                store.add_llm_log(msg["id"], False, repr(exc))
-                                if store.llm_fail_count(msg["id"]) >= 3:
-                                    store.update_message(msg["id"], status="error")
-                                    store.log_event("error", "classify: '%s' parked after repeated failures"
-                                                    % (msg.get("subject") or "")[:50])
-                                else:
-                                    store.log_event("error", "classify: '%s' failed (retry later): %r"
-                                                    % ((msg.get("subject") or "")[:50], exc))
+                        inflight[pool.submit(self._run_one, job, msg, settings)] = job
+                if not inflight:
+                    break
+                done_set, _ = wait(list(inflight), timeout=0.5,
+                                   return_when=FIRST_COMPLETED)
+                for fut in done_set:
+                    inflight.pop(fut)
+                    if fut.result() == "done":
+                        done += 1
+                    else:
+                        failed += 1
                     self.state["done"] = done
                     self.state["failed"] = failed
-            if self.stop_flag.is_set():
-                store.log_event("info", "classify: stopped after %d message(s)" % done)
+        if first:
+            return
+        self.state["running"] = False
+        self.state["current"] = ""
+        self.state["queued"] = (store.job_stats([CLASSIFY_KIND]).get(CLASSIFY_KIND)
+                                or {}).get("queued", 0)
+        if self.stop_flag.is_set():
+            store.log_event("info", "classify: stopped after %d message(s)" % done)
+        else:
+            store.log_event("info", "classify: finished - %d classified, %d failed"
+                            % (done, failed))
+
+    def _run_one(self, job, msg, settings):
+        """Verdict + persistence + job accounting; never raises."""
+        try:
+            res = classify_and_store(msg, settings)
+        except Exception as exc:
+            store.add_llm_log(msg["id"], False, repr(exc))
+            fails = store.llm_fail_count(msg["id"])
+            if fails >= 3:
+                store.update_message(msg["id"], status="error")
+                store.log_event("error", "classify: '%s' parked after repeated failures"
+                                % (msg.get("subject") or "")[:50])
+                store.finish_job(job["id"], repr(exc))
             else:
-                store.log_event("info", "classify: finished - %d classified, %d failed"
-                                % (done, failed))
-        finally:
-            with self.lock:
-                conns, self._conns = self._conns, []
-            for mc in conns:
-                try:
-                    mc.close()
-                except Exception:
-                    pass
-            self.state["running"] = False
-            self.state["current"] = ""
+                store.log_event("error", "classify: '%s' failed (retry later): %r"
+                                % ((msg.get("subject") or "")[:50], exc))
+                store.fail_job(job["id"], repr(exc))
+            return "failed"
+        if not res.get("_heuristic_id"):
+            store.add_llm_log(msg["id"], True)
+        store.log_event("info", "classify: '%s' → %s%s"
+                        % ((msg.get("subject") or "")[:50], res.get("category"),
+                           (" (moved to %s)" % res["_moved_to"]) if res.get("_moved_to") else ""))
+        store.finish_job(job["id"])
+        return "done"
 
 
 # ---------------------------------------------------------------- learn rules from tags

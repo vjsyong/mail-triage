@@ -1130,6 +1130,13 @@ def main():
     store.set_setting("llm_batch_per_cycle", 10)
     import app as app_mod
     client = app_mod.app.test_client()
+
+    def pump():
+        """Fetch pass + drain queued stage jobs. Production runs the classify
+        stage asynchronously; tests keep the pipeline deterministic."""
+        s = engine.process_mailbox()
+        app_mod.classifier._drain()
+        return s
     check("env: config points at mock IMAP",
           config.IMAP_HOST == "127.0.0.1" and config.IMAP_PORT == imap_port)
     check("env: config points at mock LLM",
@@ -1157,7 +1164,7 @@ def main():
     store.add_rule("Work from boss", "all",
                    [{"field": "from", "op": "contains", "value": "boss@"}],
                    {"move_to": "Work"})
-    summary = engine.process_mailbox()
+    summary = pump()
     print("  cycle summary: %r" % summary)
     inbox = state.get("INBOX")
     check("boss mail moved out of INBOX", 1 not in inbox["uids"])
@@ -1176,10 +1183,68 @@ def main():
     check("nothing filed by LLM yet (suggest only)",
           len(state.get("Newsletters", )["uids"] if state.get("Newsletters") else []) == 0)
 
+    section("T1b stage queue: fetch enqueues, classify drains", "base")
+    _j1 = store.enqueue_job("testkind", 9001, priority=0)
+    _j1b = store.enqueue_job("testkind", 9001, priority=0)
+    _j2 = store.enqueue_job("testkind", 9002, {"manual": True}, priority=10)
+    check("enqueue is idempotent per active (kind, message)",
+          isinstance(_j1, int) and _j1b is None and _j2 is not None)
+    _claimed = store.claim_jobs(["testkind"], {"testkind": 1}, worker="t")
+    check("claim respects per-kind limits and priority",
+          [c["id"] for c in _claimed] == [_j2]
+          and store.claim_jobs(["testkind"], {"testkind": 1}, worker="t") == [])
+    with store.db() as _conn:
+        _conn.execute("UPDATE jobs SET lease_until=1 WHERE id=?", (_j2,))
+    check("expired leases requeue",
+          store.requeue_expired_jobs() >= 1
+          and store.job_stats(["testkind"])["testkind"]["queued"] == 2)
+    _drained = store.claim_jobs(["testkind"], {"testkind": 5}, worker="t", budget=0)
+    check("manual jobs bypass the claim budget", [c["id"] for c in _drained] == [_j2])
+    check("budget-gated jobs stay queued",
+          store.claim_jobs(["testkind"], {"testkind": 5}, worker="t", budget=0) == [])
+    _j3 = store.enqueue_job("testkind", 9003, priority=0)
+    _promoted = store.enqueue_job("testkind", 9003, {"manual": True}, priority=10,
+                                  promote=True)
+    check("manual enqueue promotes a queued scheduled job in place", _promoted == _j3)
+    _d3 = store.claim_jobs(["testkind"], {"testkind": 5}, worker="t", budget=0)
+    check("promoted job bypasses the budget", [c["id"] for c in _d3] == [_j3])
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind='testkind'")
+    # fetch enqueues; classify consumes with zero IMAP sessions
+    _before_calls = len(llm_server.calls)
+    with store.db() as _conn:
+        _cur = _conn.execute(
+            "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, to_addr, "
+            "subject, snippet, status) VALUES ('ProbeBox', 1, 1, 'stage1@x', 'stage@x.com', "
+            "'me@x', 'Stage decoupling probe', 'body', 'queued')")
+        _probe_id = _cur.lastrowid
+    _summary = engine.process_mailbox()
+    _drow = store.get_message(_probe_id)
+    check("fetch pass queues classification and calls no LLM",
+          len(llm_server.calls) == _before_calls
+          and _drow["status"] == "queued" and "queued" in _summary)
+    check("classify job is queued for the message",
+          _drow["id"] in store.active_job_ids("classify"))
+    _saved_conn = engine.MailClient.connect
+
+    def _no_conn(self):
+        raise AssertionError("classification must not open IMAP")
+
+    engine.MailClient.connect = _no_conn
+    try:
+        app_mod.classifier._drain()
+    finally:
+        engine.MailClient.connect = _saved_conn
+    check("classify stage drains it without opening IMAP",
+          store.get_message(_drow["id"])["status"] == "classified"
+          and _drow["id"] not in store.active_job_ids("classify"))
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM messages WHERE id=?", (_probe_id,))
+
     section("T2 LLM auto-filing ON", "base")
     store.set_setting("llm_apply", True)
     add_msg(state, "newsletter@deals.com", "Weekly newsletter: even more deals", "More deals inside.", "n2@x")
-    engine.process_mailbox()
+    pump()
     check("the newsletter left the INBOX", state_uid(state, "INBOX", "n2@x") is None)
     news_uid5 = state_uid(state, "Newsletters", "n2@x")
     check("the newsletter landed in Newsletters", news_uid5 is not None)
@@ -1194,7 +1259,7 @@ def main():
                              {"move_to": "UIDBox"}, enabled=True)
     store.set_setting("rules_apply", True)
     add_msg(state, "uidrecv@x.com", "Recording one", "body one", "uidrecv1@x")
-    engine.process_mailbox()
+    pump()
     rrow = [r for r in store.messages(limit=60) if r["msgid"] == "uidrecv1@x"][0]
     dst1 = state_uid(state, "UIDBox", "uidrecv1@x")
     check("rule move records the destination uid",
@@ -1206,7 +1271,7 @@ def main():
                               [{"field": "from", "op": "contains", "value": "uidrecv"}],
                               {"move_to": "UIDBox"}, enabled=True)
     add_msg(state, "uidrecv@x.com", "Recording two", "body two", "uidrecv2@x")
-    engine.process_mailbox()
+    pump()
     rrow2 = [r for r in store.messages(limit=60) if r["msgid"] == "uidrecv2@x"][0]
     dst2 = state_uid(state, "UIDBox", "uidrecv2@x")
     imap_server.no_copyuid = False
@@ -1253,7 +1318,7 @@ def main():
     section("T3 dry-run mode", "base")
     store.set_setting("rules_apply", False)
     add_msg(state, "boss@work.com", "Second budget note", "Another budget item.", "b2@x")
-    engine.process_mailbox()
+    pump()
     check("second budget note still in INBOX (dry-run)",
           state_uid(state, "INBOX", "b2@x") is not None)
     row6 = [r for r in store.messages(limit=60) if r["msgid"] == "b2@x"][0]
@@ -1282,13 +1347,13 @@ def main():
 
     section("T6 idempotency", "base")
     before = len(store.messages(limit=500))
-    engine.process_mailbox()
+    pump()
     after = len(store.messages(limit=500))
     check("no duplicates on re-run", before == after)
 
     section("T7 UIDVALIDITY change triggers re-index", "base")
     state.get("INBOX")["uidvalidity"] = 42
-    engine.process_mailbox()
+    pump()
     rows_in = [r for r in store.messages(limit=500) if r["folder"] == "INBOX"]
     uids_rows = sorted(set(r["uid"] for r in rows_in))
     check("INBOX re-indexed without duplicate rows", len(uids_rows) == len(rows_in))
@@ -1930,14 +1995,14 @@ def main():
     for _ in range(25):
         if not store.queued_messages(999):
             break
-        engine.process_mailbox()
+        pump()
     add_msg(state, "noise@list.com", "permfail item", "please classify me", "pf@x")
-    engine.process_mailbox()
+    pump()
     row = [r for r in store.messages(limit=400) if r["subject"] == "permfail item"][0]
     check("first failure leaves it queued",
           row["status"] == "queued" and store.llm_fail_count(row["id"]) == 1)
-    engine.process_mailbox()
-    engine.process_mailbox()
+    pump()
+    pump()
     row = store.get_message(row["id"])
     check("parked as error after 3 failures",
           row["status"] == "error" and store.llm_fail_count(row["id"]) == 3)
@@ -1959,7 +2024,7 @@ def main():
     state.fail_conns = 1
     add_msg(state, "flaky@x.com", "Reconnect after EOF", "body survives", "rf1@x")
     try:
-        summary = engine.process_mailbox()
+        summary = pump()
     finally:
         engine.IMAP_RETRY_DELAY = saved_delay
         store.set_setting("llm_suggest", saved_suggest)
@@ -1969,31 +2034,38 @@ def main():
     check("reconnect attempt logged", any("reconnecting" in (e.get("message") or "")
                                           for e in store.recent_events(50)))
 
-    section("T11c classifier connection failures neither strike nor park", "base")
+    section("T11c action connection failures neither strike nor park", "base")
     saved_suggest = store.all_settings().get("llm_suggest")
+    saved_apply = store.all_settings().get("llm_apply")
     store.set_setting("llm_suggest", False)  # create the row, do not classify it
-    add_msg(state, "flaky2@x.com", "Classifier connection flake", "body", "cf1@x")
+    add_msg(state, "flaky2@x.com", "Invoice: classifier connection flake",
+            "body", "cf1@x")
     try:
-        engine.process_mailbox()
+        pump()
     finally:
         store.set_setting("llm_suggest", saved_suggest)
     cfrow = [r for r in store.messages(limit=4000) if r["msgid"] == "cf1@x"][0]
     saved_cc = store.all_settings().get("classify_concurrency")
     store.set_setting("classify_concurrency", 1)
-    state.fail_conns = 4
+    store.set_setting("llm_apply", True)  # booking -> Notifications: forces an action
+    engine.reset_action_mail()
+    state.fail_conns = 4                  # drop the action connection attempts
     try:
         job = engine.ClassifyJob()
         job.trigger([cfrow["id"]])
         job._run_job()
     finally:
         store.set_setting("classify_concurrency", saved_cc)
+        store.set_setting("llm_apply", saved_apply)
         state.fail_conns = 0
-    check("connection failure leaves no LLM strike",
+        engine.reset_action_mail()
+    check("action connection failure leaves no LLM strike",
           store.llm_fail_count(cfrow["id"]) == 0)
-    check("message not parked on a connection failure",
+    check("message not parked on an action connection failure",
           store.get_message(cfrow["id"])["status"] != "error")
-    check("connection failure logged, not blamed on the endpoint",
-          any("IMAP connection error" in (e.get("message") or "")
+    check("action connection failure logged, not blamed on the endpoint",
+          any("move to" in (e.get("message") or "")
+              and "failed" in (e.get("message") or "")
               for e in store.recent_events(50)))
     # Retry parked is a manual action: it must run the classifier on exactly the
     # parked ids so the scheduled worker's hourly budget cannot starve it.
@@ -2288,7 +2360,7 @@ def main():
     check("top placement wins the ordering", store.list_rules()[0]["id"] == guard_id)
     jac_uid = add_msg(state, "alex@example.com", "Absence arrangement for AISC1000B",
                       "here is the invoice arrangement", "jac1@x")
-    engine.process_mailbox()
+    pump()
     rowj = [r for r in store.messages(limit=2000) if r["uid"] == jac_uid][0]
     rowj = store.get_message(rowj["id"])
     check("guard keeps matching mail in the inbox",
@@ -2372,7 +2444,7 @@ def main():
                "Content-Transfer-Encoding: base64\r\n\r\n"
                + enc_lines + "\r\n--XXB--\r\n").encode()
     state.add("INBOX", raw_b64)
-    engine.process_mailbox()
+    pump()
     rowb64 = [r for r in store.messages(limit=3000) if r["msgid"] == "b64msg@x"][0]
     check("scan stores the decoded body as the snippet",
           "decoded invoice text for September" in (rowb64["snippet"] or "")
@@ -2413,7 +2485,7 @@ def main():
     # move-tracking: app-initiated auto-filing records the destination on the row
     raw_mv = raw_b64.replace(b"b64msg@x", b"b64moved@x")
     state.add("INBOX", raw_mv)
-    engine.process_mailbox()
+    pump()
     rowmv = [r for r in store.messages(limit=3000) if r["msgid"] == "b64moved@x"][0]
     check("auto-filing records the destination folder on the row",
           rowmv["folder"] == "Receipts" and rowmv["status"] == "llm-moved")
@@ -2433,7 +2505,7 @@ def main():
 
     # bulk snippet heal (maintenance CLI: app.py --heal-snippets)
     add_msg(state, "heal@x.com", "Heal me", "healthy heal body text", "heal@x")
-    engine.process_mailbox()
+    pump()
     healrow = [r for r in store.messages(limit=3000) if r["msgid"] == "heal@x"][0]
     store.update_message(healrow["id"], snippet=junk_text)
     hres = engine.heal_snippets(workers=2)
@@ -2444,7 +2516,7 @@ def main():
 
     # bulk heal phase 2: rescue a stale row via the Message-ID folder index
     add_msg(state, "mover2@x.com", "Heal moved", "moved heal body text", "healmoved@x")
-    engine.process_mailbox()
+    pump()
     mv2row = [r for r in store.messages(limit=3000) if r["msgid"] == "healmoved@x"][0]
     store.update_message(mv2row["id"], snippet=junk_text)
     mv2cur = state_find(state, "healmoved@x")
@@ -2457,7 +2529,7 @@ def main():
 
     # viewer: an undecodable legacy row shows the unavailable state, not garbage
     add_msg(state, "ghost@x.com", "Ghost mail", "ghost body", "ghost@x")
-    engine.process_mailbox()
+    pump()
     ghostrow = [r for r in store.messages(limit=3000) if r["msgid"] == "ghost@x"][0]
     store.update_message(ghostrow["id"], snippet="\x01\x02\x03" * 40,
                          msgid="gone-gone@x", folder="NoSuch", uid=999999)
@@ -2497,7 +2569,7 @@ def main():
         "--REL--\r\n"
     ).encode()
     state.add("INBOX", raw_html_mail)
-    engine.process_mailbox()
+    pump()
     hrow = [r for r in store.messages(limit=3000) if r["msgid"] == "htmlmail@x"][0]
     hrowf = store.get_message(hrow["id"])
     check("scan extracted + sanitized the html body",
@@ -3068,7 +3140,7 @@ def main():
 
     before_appends = len(state.appended)
     add_msg(state, "flowguy@x.com", "Flow target message", "please handle it", "flowt@x")
-    engine.process_mailbox()
+    pump()
     frow = [r for r in store.messages(limit=3000) if r["msgid"] == "flowt@x"][0]
     check("flow moved the message to FlowBox", frow["folder"] == "FlowBox")
     check("flow recorded status + action",
@@ -3090,7 +3162,7 @@ def main():
 
     store.set_setting("flows_apply", False)
     add_msg(state, "flowguy2@x.com", "Flow target dry", "flow target again", "flowd@x")
-    engine.process_mailbox()
+    pump()
     drow = [r for r in store.messages(limit=3000) if r["msgid"] == "flowd@x"][0]
     check("flow dry-run keeps the message in place",
           drow["folder"] == "INBOX" and drow["status"] == "flow-dry"
@@ -3292,7 +3364,7 @@ def main():
           b"Fixed message" in client.get("/flows/new").data)
     before_a = len(state.appended)
     add_msg(state, "personal@example.com", "Hello from hotmail", "hey there", "hm1@x")
-    engine.process_mailbox()
+    pump()
     hrow32 = [r for r in store.messages(limit=3000) if r["msgid"] == "hm1@x"][0]
     check("flow moved the hotmail message to Personal", hrow32["folder"] == "Personal")
     check("flow saved the fixed-text draft",
@@ -3362,7 +3434,7 @@ def main():
             "restaurant booked, see you there", "lunch33@x")
     add_msg(state, "powerco@hkpower.com.hk", "Electricity bill for October",
             "Your invoice is attached; payment due in 7 days.", "elec33@x")
-    engine.process_mailbox()
+    pump()
     lrow = [r for r in store.messages(limit=3000) if r["msgid"] == "lunch33@x"][0]
     erow = [r for r in store.messages(limit=3000) if r["msgid"] == "elec33@x"][0]
     check("topic flow fired by meaning (keyword match at scan)",
@@ -3525,7 +3597,7 @@ def main():
 
     section("T36 undo trail: file -> undo -> kept from re-filing", "core")
     und_uid = add_msg(state, "undo.tester@x.com", "Undo me please", "please undo", "und1@x")
-    engine.process_mailbox()
+    pump()
     urow = [r for r in store.messages(limit=3000) if r["uid"] == und_uid][0]
     urow = store.get_message(urow["id"])
     check("undo fixture landed in INBOX", urow["folder"] == "INBOX")
@@ -3577,7 +3649,7 @@ def main():
     add_msg(state, "queue.a@x.com", "Queue A", "a", "qa@x")
     add_msg(state, "queue.b@x.com", "Queue B", "b", "qb@x")
     add_msg(state, "queue.c@x.com", "Queue C", "c", "qc@x")
-    engine.process_mailbox()
+    pump()
     qrows = {r["subject"]: r for r in store.messages(limit=3000)
              if r["subject"] in ("Queue A", "Queue B", "Queue C")}
     idA, idB, idC = qrows["Queue A"]["id"], qrows["Queue B"]["id"], qrows["Queue C"]["id"]
@@ -3599,7 +3671,7 @@ def main():
 
     section("T38 snooze: hide, resurface, counts, chips", "core", "ui")
     add_msg(state, "snoozee@x.com", "Snooze me", "z", "sz@x")
-    engine.process_mailbox()
+    pump()
     srow = [r for r in store.messages(limit=3000) if r["subject"] == "Snooze me"][0]
     sid_ = srow["id"]
     store.update_message(sid_, llm_needs_reply=1)
@@ -3629,7 +3701,7 @@ def main():
     nrid = add_msg(state, "nr@x.com", "Nr lunch probe", "lunch probe body", "nr1@x")
     nrid2 = add_msg(state, "nr2@x.com", "Nr quiet probe", "no trigger words here", "nr2@x")
     nrid3 = add_msg(state, "nr3@x.com", "Nr lunch again", "lunch again body", "nr3@x")
-    engine.process_mailbox()
+    pump()
     def _nrrow(msgid):
         rows = [r for r in store.messages(limit=4000) if r["msgid"] == msgid]
         return store.get_message(rows[0]["id"]) if rows else None
@@ -3696,7 +3768,7 @@ def main():
 
     section("T40 per-message audit trail", "core")
     add_msg(state, "audit@x.com", "Audit me", "audit body", "au@x")
-    engine.process_mailbox()
+    pump()
     arow = [r for r in store.messages(limit=3000) if r["subject"] == "Audit me"][0]
     aid = arow["id"]
     client.post("/messages/%d/classify" % aid)
@@ -3779,7 +3851,7 @@ def main():
 
     section("T42 assistant page context (this email / this flow)", "assistant", "ui")
     add_msg(state, "ctx@x.com", "Context target email", "ctx body", "cx@x")
-    engine.process_mailbox()
+    pump()
     crow = [r for r in store.messages(limit=3000) if r["subject"] == "Context target email"][0]
     cid = crow["id"]
     kind, desc, block, ckey = engine.assistant_page_context("/messages/%d?f=needs_reply" % cid)
@@ -3928,7 +4000,7 @@ def main():
 
     section("T44 audit backfill sweep (retroactive)", "core")
     add_msg(state, "oldmail@x.com", "Old canvas notice", "old body", "old@x")
-    engine.process_mailbox()
+    pump()
     orow = [r for r in store.messages(limit=3000) if r["subject"] == "Old canvas notice"][0]
     oid = orow["id"]
     with store.db() as conn:
@@ -3993,7 +4065,7 @@ def main():
         add_msg(state, "bulk%d@x.com" % (i + 100), "Monthly summary %d" % (i + 100),
                 "attached is the monthly summary for your records.", "bulkB%d@1" % i)
     for _i in range(4):
-        engine.process_mailbox()
+        pump()
     n_labelled = len([r for r in store.messages(limit=5000)
                       if r.get("llm_category") and r.get("llm_needs_reply") in (0, 1)])
     check("enough weak labels collected for training (>= 40)", n_labelled >= 40)
@@ -4001,7 +4073,7 @@ def main():
     # --- observations + labels from real UI actions ---
     add_msg(state, "learn.vendor@x.com", "Learning invoice request",
             "please confirm the invoice - thanks", "lrn@1")
-    engine.process_mailbox()
+    pump()
     lrow = [r for r in store.messages(limit=5000) if r["subject"] == "Learning invoice request"][0]
     client.post("/messages/%d/tag" % lrow["id"], data={"tag": "Receipt"}, follow_redirects=True)
     check("tag action records an explicit label",
@@ -4041,7 +4113,7 @@ def main():
 
     add_msg(state, "shadow.audit@x.com", "Shadow audit question",
             "could you confirm the numbers? meeting on Friday", "shd@1")
-    engine.process_mailbox()
+    pump()
     ar = [r for r in store.messages(limit=5000) if r["subject"] == "Shadow audit question"][0]
     sdecs = store.list_decisions(msg_id=ar["id"], source_type="specialist")
     sysdecs = [d for d in store.list_decisions(msg_id=ar["id"], task="needs_reply")
@@ -4099,7 +4171,7 @@ def main():
     learning_mod.transition(sid2, "shadow", reason="test")
     add_msg(state, "cat.audit@x.com", "Weekly newsletter: campus updates",
             "top deals and events inside", "cat@1")
-    engine.process_mailbox()
+    pump()
     crow2 = [r for r in store.messages(limit=5000)
              if r["subject"] == "Weekly newsletter: campus updates"][0]
     cdecs = store.list_decisions(msg_id=crow2["id"], task="category", source_type="specialist")

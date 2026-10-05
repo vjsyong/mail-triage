@@ -65,6 +65,8 @@ How this folder is organised: by what you need, not by when it was written.
   log tools
 - [reply-resolution.md](reply-resolution.md) - sent-reply reconciliation: matching,
   sufficiency assessment, and when the needs-reply flag clears
+- [pipeline-queue.md](pipeline-queue.md) - stage queue decoupling fetch from
+  classify/index/act (durable jobs, per-stage limits, one writer connection)
 - [dashboard-recent-mail.md](dashboard-recent-mail.md) - the dashboard recent-mail
   stacked feed (why the 5-col table became a list; activity-row flow fix)
 - [spa-turbo.md](spa-turbo.md) - SPA navigation layer (Turbo Drive), and why not a
