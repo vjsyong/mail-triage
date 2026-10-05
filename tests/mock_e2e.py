@@ -1797,6 +1797,11 @@ def main():
         check("active turn marks the page for re-attach and hides retry",
               b'class="live-run" data-run="' in _fpage.data
               and (b'data-mid="%d"' % _fuid) not in _fpage.data)
+        _fsj = json.loads(client.get("/assistant/sessions.json").data.decode())
+        _frow = [s for s in _fsj["sessions"] if s["id"] == _fsid]
+        check("running chat is flagged active in sessions.json and shows a spinner",
+              _frow and _frow[0]["active"] is True
+              and b'class="chat-spin"' in _fpage.data)
         _fit = iter(_fresp.response)
         next(_fit)                       # consume the first SSE frame, then drop
         _fresp.close()                   # the tab closes mid-turn
@@ -1811,6 +1816,12 @@ def main():
         check("disconnected turn finished and persisted its reply",
               [m["role"] for m in _frows] == ["user", "assistant"]
               and "continued after the tab closed" in _frows[-1]["content"])
+        _fsj2 = json.loads(client.get("/assistant/sessions.json").data.decode())
+        _frow2 = [s for s in _fsj2["sessions"] if s["id"] == _fsid]
+        _fdone_page = client.get("/assistant/s/%d" % _fsid)
+        check("spinner clears once the run is done",
+              _frow2 and _frow2[0]["active"] is False
+              and b'class="chat-spin"' not in _fdone_page.data)
         _flive = client.get("/assistant/live?sid=%d" % _fsid)
         _flive_body = _flive.data.decode()
         check("a reloaded page can replay the finished run via /assistant/live",

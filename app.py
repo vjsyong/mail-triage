@@ -765,6 +765,8 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
 .assistant-rail .arow .t{flex:1;min-width:0;font-size:.84rem;font-weight:500;color:var(--fg);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .assistant-rail .arow .t:hover{text-decoration:underline}
 .assistant-rail .arow .when{font-size:.7rem;color:var(--dim);white-space:nowrap}
+.chat-spin{width:11px;height:11px;flex:0 0 auto;border:2px solid var(--line);border-top-color:#000;border-radius:50%;animation:chatspin .8s linear infinite}
+@keyframes chatspin{to{transform:rotate(360deg)}}
 .rail-h{padding:8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2}
 .rail-h input{width:100%;padding:6px 9px;border:1px solid var(--line);font:inherit;font-size:.82rem;background:var(--bg)}
 .rgroup{font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);padding:9px 11px 3px}
@@ -1441,6 +1443,36 @@ window.assistantChat = function(opts){
   var activeRunId=0;      /* server-side run id of the stream being tailed */
   var stopRequested=false;
   var reconnectTries=0;
+  /* a chat with a running turn shows a spinner next to its title in the history
+     rail (assistant page) and drawer; while any spinner is visible we poll
+     sessions.json so a run finishing elsewhere clears it. */
+  function setRowWorking(sid, on){
+    if(!sid) return;
+    [].slice.call(document.querySelectorAll('.arow[data-sid="'+sid+'"], .dhist-item[data-sid="'+sid+'"]')).forEach(function(row){
+      var sp=row.querySelector('.chat-spin');
+      if(on && !sp){
+        sp=document.createElement('span'); sp.className='chat-spin';
+        sp.setAttribute('role','status');
+        sp.setAttribute('aria-label','Assistant is working in this chat');
+        sp.title='Assistant is working in this chat';
+        var t=row.querySelector('.t');
+        if(t && t.parentNode===row) row.insertBefore(sp, t); else row.appendChild(sp);
+      } else if(!on && sp){ sp.remove(); }
+    });
+  }
+  var spinTimer=null;
+  function scheduleSpin(){
+    var any=!!document.querySelector('.chat-spin') || !!currentAbort;
+    if(any && !spinTimer){ spinTimer=setInterval(refreshRuns, 5000); }
+    else if(!any && spinTimer){ clearInterval(spinTimer); spinTimer=null; }
+  }
+  function refreshRuns(){
+    fetch('/assistant/sessions.json').then(function(r){ return r.json(); }).then(function(d){
+      (d.sessions||[]).forEach(function(s){ setRowWorking(s.id, !!s.active); });
+      scheduleSpin();
+    }).catch(function(){});
+  }
+  scheduleSpin();
   if(stopBtn){ stopBtn.addEventListener('click', function(){
     if(!currentAbort) return;
     stopRequested=true;
@@ -1479,6 +1511,7 @@ window.assistantChat = function(opts){
     if(currentAbort) currentAbort.abort();
     currentAbort=new AbortController();
     activeRunId=0; stopRequested=false;
+    setRowWorking(sid, true); scheduleSpin();
     var ce=root.querySelector('.chat-empty'); if(ce) ce.remove();
     if(btn) btn.disabled=true;
     if(stopBtn){ stopBtn.style.display=''; stopBtn.disabled=false; }
@@ -1661,6 +1694,7 @@ window.assistantChat = function(opts){
       status.textContent='stopped';
       if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none';
       currentAbort=null; activeRunId=0;
+      setRowWorking(sid, false); scheduleSpin();
       var lm=root.querySelector('.live-run'); if(lm) lm.remove();
       var mrow=mk('div','meta'); addRetryButton(mrow, userMsgId); box.appendChild(mrow);
       scrollBottom();
@@ -1681,6 +1715,7 @@ window.assistantChat = function(opts){
       if(pendingActions.length) pendingActions.forEach(function(a){ addPendingAction(a); });
       var lm=root.querySelector('.live-run'); if(lm) lm.remove();
       if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null; activeRunId=0;
+      setRowWorking(sid, false); scheduleSpin();
       scrollBottom();
     }
     function fail(msg){
@@ -1692,6 +1727,7 @@ window.assistantChat = function(opts){
       var mrow=mk('div','meta'); addRetryButton(mrow, userMsgId); box.appendChild(mrow);
       var lm=root.querySelector('.live-run'); if(lm) lm.remove();
       if(btn) btn.disabled=false; if(stopBtn) stopBtn.style.display='none'; currentAbort=null; activeRunId=0;
+      setRowWorking(sid, false); scheduleSpin();
       scrollBottom();
     }
     /* transport loss is not failure: the run lives server-side, so quietly
@@ -1723,7 +1759,7 @@ window.assistantChat = function(opts){
       if(!ev) return;
       var d={};
       if(data){ try{ d=JSON.parse(data); }catch(err){ return; } }
-      if(ev==='session'){ sid=d.sid; activeRunId=d.run||0; reconnectTries=0; if(onSession) onSession(sid); }
+      if(ev==='session'){ sid=d.sid; activeRunId=d.run||0; reconnectTries=0; setRowWorking(sid, true); scheduleSpin(); if(onSession) onSession(sid); }
       else if(ev==='user_saved'){ userMsgId=d.message_id||0; }
       else if(ev==='reasoning'){ det.style.display=''; detSum.textContent='Thinking\u2026'; pre.textContent+=(d.text||''); label('thinking\u2026'); }
       else if(ev==='content'){ content.textContent+=(d.text||''); rawText+=(d.text||''); label('writing\u2026'); }
@@ -1891,6 +1927,14 @@ window.guardApply = function(f){
       histList.innerHTML = '';
       (d.sessions||[]).forEach(function(s){
         var row = document.createElement('div'); row.className = 'dhist-item' + (String(s.id) === String(curSid) ? ' cur' : '');
+        row.dataset.sid = s.id;
+        if(s.active){
+          var sp = document.createElement('span'); sp.className = 'chat-spin';
+          sp.setAttribute('role', 'status');
+          sp.setAttribute('aria-label', 'Assistant is working in this chat');
+          sp.title = 'Assistant is working in this chat';
+          row.appendChild(sp);
+        }
         var t1 = document.createElement('span'); t1.className = 't'; t1.textContent = s.title || 'Untitled chat'; row.appendChild(t1);
         var w = document.createElement('span'); w.className = 'when'; w.textContent = s.when || ''; row.appendChild(w);
         var del = document.createElement('button'); del.type = 'button'; del.className = 'btn small chat-del'; del.textContent = '✕';
@@ -7368,7 +7412,8 @@ ASSISTANT_TMPL = r"""
     {% set ns = namespace(g='') %}
     {% for s in sessions %}
     {% if s.group != ns.g %}<div class="rgroup">{{ s.group }}</div>{% set ns.g = s.group %}{% endif %}
-    <div class="arow{{ ' cur' if s.id == sid else '' }}">
+    <div class="arow{{ ' cur' if s.id == sid else '' }}" data-sid="{{ s.id }}">
+      {% if s.active %}<span class="chat-spin" role="status" aria-label="Assistant is working in this chat" title="Assistant is working in this chat"></span>{% endif %}
       <a class="t" href="{{ url_for('assistant_session', sid=s.id) }}" title="{{ s.title or 'Untitled chat' }}">{{ s.title or 'Untitled chat' }}</a>
       <span class="when">{{ s.when }}</span>
       <form class="inline" method="post" action="{{ url_for('assistant_session_delete', sid=s.id) }}"><button class="btn small chat-del" type="submit" aria-label="Delete chat: {{ s.title or 'Untitled chat' }}">✕</button></form>
@@ -7714,6 +7759,7 @@ def _assistant_page(sid):
         d = int((ts + off) // 86400) if ts else -1
         s["group"] = "Today" if d == today else ("Yesterday" if d == today - 1 else "Earlier")
         s["when"] = time.strftime("%H:%M" if d == today else "%m-%d", time.gmtime(ts + off)) if ts else ""
+        s["active"] = _assistant_active_run(s["id"]) is not None
     convo, convo_html = _assistant_fragment(sid, "/assistant",
                                             url_for("assistant_session", sid=sid))
     pending = store.pending_agent_actions()
@@ -7771,7 +7817,8 @@ def assistant_sessions_json():
     out = []
     for s in store.list_sessions():
         out.append({"id": s["id"], "title": s["title"] or "Untitled chat",
-                    "when": fmt_ts(s["last_ts"] or s["created"]), "n": s["n"]})
+                    "when": fmt_ts(s["last_ts"] or s["created"]), "n": s["n"],
+                    "active": _assistant_active_run(s["id"]) is not None})
     return Response(json.dumps({"sessions": out}), mimetype="application/json")
 
 

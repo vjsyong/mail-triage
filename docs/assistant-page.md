@@ -195,6 +195,12 @@ resume it.
   duplicate user row). `user_saved` events tell the client the persisted user
   message id so a retry targets the right row. While a run is active the server
   suppresses the retry control - the live view is the affordance then.
+- **Running-chat spinner.** A chat with an active run shows a small spinner
+  immediately before its title in the assistant rail and the drawer history
+  (`.chat-spin`, styled in `BASE_TMPL` for both). `_assistant_page` and
+  `/assistant/sessions.json` carry an `active` flag; the client polls
+  `sessions.json` every 5 s only while a spinner is visible (or this tab is
+  streaming), so a turn finishing in another tab clears it without a reload.
 
 Tests: T9c2 covers trailing-user retry and no-duplicate booking; T9c3 starts a
 gated turn, disconnects mid-stream, and proves the reply still lands plus
