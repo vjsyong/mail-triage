@@ -83,8 +83,19 @@ _CLOSING = re.compile(r"^\s*(regards|best|thanks|thank you|sincerely|cheers|"
 _CLAIM = re.compile(r"(attached|attachment|enclosed|i'?ve cc'?d|\bcc'?d\b|"
                     r"copied the wider team|other workstream|earlier exchange|"
                     r"as we discussed earlier|followed this thread)", re.I)
-_DATE_DMY = re.compile(r"\b\d{1,2}\s+[A-Z][a-z]+\s+\d{4}\b")
-_DATE_MDY = re.compile(r"\b[A-Z][a-z]+\s+\d{1,2},?\s+\d{4}\b")
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
+    "december": 12, "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+# Date shapes recognised: ISO, day-month-year, month-day-year and month-year.
+# Month names are validated against ``_MONTHS`` so ordinary capitalised words
+# (and times/amounts/IDs/bare numbers) are never treated as dates.
+_DATE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_DATE_DMY = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,})\.?\s+(\d{4})\b", re.I)
+_DATE_MDY = re.compile(r"\b([A-Za-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b", re.I)
+_DATE_MY = re.compile(r"\b([A-Za-z]{3,})\.?\s+(\d{4})\b", re.I)
 # Real mbox envelope line (ctime-ish date); a body line merely starting with
 # "From " does not match and is therefore not treated as a separator.
 _MBOX_FROM = re.compile(rb"^From \S+ +\w{3} \w{3} +\d+ \d\d:\d\d:\d\d \d{4}")
@@ -515,14 +526,80 @@ def copy_stats(ref_body, gen_body):
             "threshold": COPY_8GRAM_MAX}
 
 
+def _month_num(name):
+    return _MONTHS.get(name.lower().strip("."))
+
+
+def _valid_ymd(y, m, d):
+    try:
+        y, m, d = int(y), int(m), int(d)
+    except (TypeError, ValueError):
+        return None
+    if 1900 <= y <= 2200 and 1 <= m <= 12 and 1 <= d <= 31:
+        return (y, m, d)
+    return None
+
+
+def _date_tokens(text):
+    """Return (full_dates, month_years) as sets of (y,m,d) and (y,m).
+
+    Only recognised month names / ISO shapes count; a month+year match that
+    falls inside a full date is not double-counted.
+    """
+    full, months, spans = set(), set(), []
+    for m in _DATE_ISO.finditer(text):
+        t = _valid_ymd(m.group(1), m.group(2), m.group(3))
+        if t:
+            full.add(t)
+            spans.append(m.span())
+    for m in _DATE_DMY.finditer(text):
+        mon = _month_num(m.group(2))
+        if mon is None:
+            continue
+        t = _valid_ymd(m.group(3), mon, m.group(1))
+        if t:
+            full.add(t)
+            spans.append(m.span())
+    for m in _DATE_MDY.finditer(text):
+        mon = _month_num(m.group(1))
+        if mon is None:
+            continue
+        t = _valid_ymd(m.group(3), mon, m.group(2))
+        if t:
+            full.add(t)
+            spans.append(m.span())
+    for m in _DATE_MY.finditer(text):
+        mon = _month_num(m.group(1))
+        if mon is None:
+            continue
+        if any(s <= m.start() and m.end() <= e for s, e in spans):
+            continue
+        y = int(m.group(2))
+        if 1900 <= y <= 2200:
+            months.add((y, mon))
+    return full, months
+
+
 def _dates_consistent(text, allowed):
+    """Format-insensitive date check: "1 June 2026", "June 1, 2026", "June 1
+    2026", "01 June 2026" and "2026-06-01" compare equal.  A month+year-only
+    mention is consistent iff an allowed date shares that month+year.  Any other
+    full date is rejected (strict)."""
+    allowed_full, allowed_months = set(), set()
+    for a in allowed:
+        af, am = _date_tokens(str(a))
+        allowed_full |= af
+        allowed_months |= am
+    for (y, mo, _d) in allowed_full:
+        allowed_months.add((y, mo))
+    found_full, found_months = _date_tokens(text)
     problems = []
-    full = _DATE_DMY.findall(text) + _DATE_MDY.findall(text)
-    for d in full:
-        norm = re.sub(r"\s+", " ", d.replace(",", " ")).strip().lower()
-        if not any(norm == re.sub(r"\s+", " ", a.replace(",", " ")).strip().lower()
-                   for a in allowed):
-            problems.append("date %r does not match the provided dates" % d)
+    for t in sorted(found_full):
+        if t not in allowed_full:
+            problems.append("date %04d-%02d-%02d does not match the provided dates" % t)
+    for (y, mo) in sorted(found_months):
+        if (y, mo) not in allowed_months:
+            problems.append("date %04d-%02d does not match the provided dates" % (y, mo))
     return problems
 
 

@@ -17,6 +17,7 @@ for _p in (ROOT, V3):
         sys.path.insert(0, _p)
 
 from benchmarks.v3.build import style_slice as es  # noqa: E402
+from benchmarks.v3.build import plausibility as pl  # noqa: E402
 from benchmarks.v3.build.world import World  # noqa: E402
 
 
@@ -390,6 +391,64 @@ class TestNewsletter(unittest.TestCase):
         s = es.pick_newsletter_sender(w, stream(1, "nl"))
         self.assertIn(s["email"].split("@")[0], es.NEWS_ROLES)
         self.assertIn(s["domain"], w.domains)
+
+
+class TestDateNormalization(unittest.TestCase):
+    def test_us_format_equals_eu_allowed(self):
+        for text in ("Meet on June 1, 2026 please.",
+                     "Meet on June 1 2026 please.",
+                     "Meet on 01 June 2026 please.",
+                     "Meet on 1st June 2026 please.",
+                     "Meet on 2026-06-01 please.",
+                     "Meet on 1 June 2026 please."):
+            self.assertEqual(es._dates_consistent(text, ["1 June 2026"]), [], text)
+
+    def test_wrong_full_date_rejected(self):
+        allowed = ["1 June 2026", "6 June 2026"]
+        self.assertTrue(es._dates_consistent("See you on 5 June 2026.", allowed))
+        self.assertTrue(es._dates_consistent("See you on June 7, 2026.", allowed))
+        self.assertTrue(es._dates_consistent("See you on 1 July 2026.", allowed))
+        self.assertTrue(es._dates_consistent("See you on 1 June 2027.", allowed))
+
+    def test_month_year_consistency(self):
+        allowed = ["1 June 2026", "10 June 2026"]
+        self.assertEqual(es._dates_consistent("Sometime in June 2026.", allowed), [])
+        self.assertTrue(es._dates_consistent("Sometime in July 2026.", allowed))
+        self.assertTrue(es._dates_consistent("Sometime in June 2027.", allowed))
+
+    def test_times_amounts_ids_numbers_not_dates(self):
+        allowed = ["1 June 2026"]
+        for text in ("Login at 13:47 today.", "Total $310.75 due.",
+                     "Reference INV-23F5GNW.", "Account 12345.",
+                     "Send 2500 units.", "The number 2026 alone."):
+            self.assertEqual(es._dates_consistent(text, allowed), [], text)
+
+    def test_guard_accepts_us_date(self):
+        w, p, q = _world_ref_emails()
+        ref = _ref()
+        body = ("Join us on June 1, 2026 for the monthly session. " + " ".join(
+            ["alpha bravo charlie delta echo foxtrot golf hotel india juliet"] * 4))
+        gen = {"subject": "Digest", "body": body, "from_email": p["email"],
+               "to_email": q["email"]}
+        probs, _ = es.guard(ref, gen, w, ["1 June 2026"], register="newsletter")
+        self.assertFalse(any("match the provided dates" in x for x in probs))
+
+
+class TestHygieneFalsePositive(unittest.TestCase):
+    def test_email_local_part_is_not_a_duplicated_word(self):
+        footer = ("Quanta Telecom Updates\nupdates@quanta-telecom.com\n"
+                  "To manage your subscription visit our portal.")
+        self.assertFalse(pl._DUPLICATE_WORD.search(footer))
+
+    def test_real_doubled_word_still_detected(self):
+        self.assertTrue(pl._DUPLICATE_WORD.search("Please the the attached form."))
+        self.assertTrue(pl._DUPLICATE_WORD.search("we should and and then go"))
+
+    def test_newsletter_footer_passes_guard_hygiene(self):
+        from benchmarks.v3.build.verify import _check_hygiene
+        footer = ("Quanta Telecom Updates\nupdates@quanta-telecom.com\n"
+                  "Unsubscribe at http://updates.quanta-telecom.com")
+        self.assertEqual([p for p in _check_hygiene(footer) if "duplicated" in p], [])
 
 
 if __name__ == "__main__":
