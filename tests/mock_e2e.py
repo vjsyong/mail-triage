@@ -347,7 +347,8 @@ class IMAPHandler(socketserver.StreamRequestHandler):
                 if ":" in val:
                     a, b = val.split(":", 1)
                     lo = int(a)
-                    hi = max(f["uids"]) if b == "*" else int(b)
+                    # an empty mailbox has no highest UID: UID n:* matches nothing
+                    hi = (max(f["uids"]) if f["uids"] else 0) if b == "*" else int(b)
                     uids = [u for u in uids if lo <= u <= hi]
                 elif val.isdigit():
                     uids = [u for u in uids if u == int(val)]
