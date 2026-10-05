@@ -4,7 +4,6 @@
       "persona": "employee_project_coordinator",
       "owner_name": "Priya Raman",
       "first_name": "Priya",
-      "domain": "acme.example",
       "policy_id": "employee_coordinator",
       "tone": "collegial",
       "signature": "Priya Raman\nProject Coordination, Acme Ltd"
@@ -13,7 +12,6 @@
       "persona": "freelancer",
       "owner_name": "Daniel Ferreira",
       "first_name": "Daniel",
-      "domain": "ferreira.studio",
       "policy_id": "freelancer",
       "tone": "brisk",
       "signature": "Daniel Ferreira\nIndependent design contractor"
@@ -22,7 +20,6 @@
       "persona": "developer_oncall",
       "owner_name": "Kenji Sato",
       "first_name": "Kenji",
-      "domain": "dev.example",
       "policy_id": "developer_oncall",
       "tone": "technical",
       "signature": "Kenji Sato\nPlatform Engineering"
@@ -31,7 +28,6 @@
       "persona": "student",
       "owner_name": "Marta Kowalska",
       "first_name": "Marta",
-      "domain": "student.example",
       "policy_id": "student",
       "tone": "casual",
       "signature": "Marta Kowalska\nMSc Data Science"
@@ -40,7 +36,6 @@
       "persona": "household_organizer",
       "owner_name": "Aisha Bello",
       "first_name": "Aisha",
-      "domain": "home.example",
       "policy_id": "household",
       "tone": "warm",
       "signature": "Aisha Bello"
@@ -49,7 +44,6 @@
       "persona": "small_business_owner",
       "owner_name": "Rosa Alvarez",
       "first_name": "Rosa",
-      "domain": "alvarezbakery.example",
       "policy_id": "business_owner",
       "tone": "direct",
       "signature": "Rosa Alvarez\nAlvarez Bakery"
@@ -58,7 +52,6 @@
       "persona": "community_organizer",
       "owner_name": "Liam O'Connor",
       "first_name": "Liam",
-      "domain": "riverside-community.example",
       "policy_id": "community_organizer",
       "tone": "friendly",
       "signature": "Liam O'Connor\nRiverside Community Trust"
@@ -67,7 +60,6 @@
       "persona": "job_seeker",
       "owner_name": "Noah Fischer",
       "first_name": "Noah",
-      "domain": "fischer.example",
       "policy_id": "job_seeker",
       "tone": "formal",
       "signature": "Noah Fischer"

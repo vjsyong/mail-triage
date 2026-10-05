@@ -11,9 +11,9 @@
       "mailbox": {
         "folders": ["Inbox", "Archive", "Action", "Receipts"],
         "messages": [
-          {"id": "m1", "folder": "Inbox", "from_addr": "billing@{vendor_slug}.example", "to_addr": "{owner_addr}", "subject": "Invoice {ref1} due {deadline_late}", "body": "Your invoice {ref1} for {amount_late} is due {deadline_late}."},
-          {"id": "m2", "folder": "Inbox", "from_addr": "accounts@{vendor2_slug}.example", "to_addr": "{owner_addr}", "subject": "Invoice {ref2} due {deadline_soon}", "body": "Invoice {ref2} for {amount_soon} is payable by {deadline_soon}."},
-          {"id": "m3", "folder": "Receipts", "from_addr": "no-reply@{vendor3_slug}.example", "to_addr": "{owner_addr}", "subject": "Receipt {ref3}", "body": "Receipt {ref3} for {amount_paid}, already paid."}
+          {"id": "m1", "folder": "Inbox", "from_addr": "billing@{vendor_domain}", "to_addr": "{owner_addr}", "subject": "Invoice {ref1} due {deadline_late}", "body": "Your invoice {ref1} for {amount_late} is due {deadline_late}."},
+          {"id": "m2", "folder": "Inbox", "from_addr": "accounts@{vendor2_domain}", "to_addr": "{owner_addr}", "subject": "Invoice {ref2} due {deadline_soon}", "body": "Invoice {ref2} for {amount_soon} is payable by {deadline_soon}."},
+          {"id": "m3", "folder": "Receipts", "from_addr": "no-reply@{vendor3_domain}", "to_addr": "{owner_addr}", "subject": "Receipt {ref3}", "body": "Receipt {ref3} for {amount_paid}, already paid."}
         ],
         "drafts": [], "rules": []
       },
@@ -40,9 +40,9 @@
       "mailbox": {
         "folders": ["Inbox", "Archive", "Action", "Receipts"],
         "messages": [
-          {"id": "m1", "folder": "Inbox", "from_addr": "hello@{vendor_slug}.example", "to_addr": "{owner_addr}", "subject": "A note about {item}", "body": "Just checking in about {item}."},
-          {"id": "m2", "folder": "Inbox", "from_addr": "billing@{vendor2_slug}.example", "to_addr": "{owner_addr}", "subject": "OVERDUE: invoice {ref2}", "body": "Invoice {ref2} for {amount_soon} was due {deadline_past}. Please pay immediately."},
-          {"id": "m3", "folder": "Inbox", "from_addr": "news@{org_slug}.example", "to_addr": "{owner_addr}", "subject": "{org} digest", "body": "This month at {org}."}
+          {"id": "m1", "folder": "Inbox", "from_addr": "hello@{vendor_domain}", "to_addr": "{owner_addr}", "subject": "A note about {item}", "body": "Just checking in about {item}."},
+          {"id": "m2", "folder": "Inbox", "from_addr": "billing@{vendor2_domain}", "to_addr": "{owner_addr}", "subject": "OVERDUE: invoice {ref2}", "body": "Invoice {ref2} for {amount_soon} was due {deadline_past}. Please pay immediately."},
+          {"id": "m3", "folder": "Inbox", "from_addr": "news@{sender_domain}", "to_addr": "{owner_addr}", "subject": "{org} digest", "body": "This month at {org}."}
         ],
         "drafts": [], "rules": []
       },
@@ -69,7 +69,7 @@
         "folders": ["Inbox", "Drafts", "Archive"],
         "messages": [
           {"id": "m1", "folder": "Inbox", "from_addr": "{sender_slug}@{sender_domain}", "to_addr": "{owner_addr}", "subject": "Request: {item}", "body": "Could you take on {item}? We would need an answer this week."},
-          {"id": "m2", "folder": "Archive", "from_addr": "news@{org_slug}.example", "to_addr": "{owner_addr}", "subject": "Newsletter", "body": "Routine digest."}
+          {"id": "m2", "folder": "Archive", "from_addr": "news@{sender_domain}", "to_addr": "{owner_addr}", "subject": "Newsletter", "body": "Routine digest."}
         ],
         "drafts": [], "rules": []
       },
@@ -95,8 +95,8 @@
       "mailbox": {
         "folders": ["Inbox", "Reading", "Action", "Archive"],
         "messages": [
-          {"id": "m1", "folder": "Inbox", "from_addr": "digest@{news_slug}.example", "to_addr": "{owner_addr}", "subject": "{month} at {news_vendor}", "body": "Your {month} {news_vendor} roundup."},
-          {"id": "m2", "folder": "Inbox", "from_addr": "billing@{vendor_slug}.example", "to_addr": "{owner_addr}", "subject": "Invoice {ref1}", "body": "Invoice {ref1} for {amount}."}
+          {"id": "m1", "folder": "Inbox", "from_addr": "digest@{sender_domain}", "to_addr": "{owner_addr}", "subject": "{month} at {news_vendor}", "body": "Your {month} {news_vendor} roundup."},
+          {"id": "m2", "folder": "Inbox", "from_addr": "billing@{vendor_domain}", "to_addr": "{owner_addr}", "subject": "Invoice {ref1}", "body": "Invoice {ref1} for {amount}."}
         ],
         "drafts": [], "rules": []
       },
@@ -147,8 +147,8 @@
       "mailbox": {
         "folders": ["Inbox", "Archive"],
         "messages": [
-          {"id": "m1", "folder": "Inbox", "from_addr": "receipts@{vendor_slug}.example", "to_addr": "{owner_addr}", "subject": "Your receipt {ref1}", "body": "Receipt for {amount}, no reply needed."},
-          {"id": "m2", "folder": "Inbox", "from_addr": "digest@{org_slug}.example", "to_addr": "{owner_addr}", "subject": "{month} newsletter", "body": "Routine newsletter."},
+          {"id": "m1", "folder": "Inbox", "from_addr": "receipts@{vendor_domain}", "to_addr": "{owner_addr}", "subject": "Your receipt {ref1}", "body": "Receipt for {amount}, no reply needed."},
+          {"id": "m2", "folder": "Inbox", "from_addr": "digest@{sender_domain}", "to_addr": "{owner_addr}", "subject": "{month} newsletter", "body": "Routine newsletter."},
           {"id": "m3", "folder": "Inbox", "from_addr": "{sender_slug}@{sender_domain}", "to_addr": "{owner_addr}", "subject": "Can you reply about {item}?", "body": "Please let me know your decision on {item}."}
         ],
         "drafts": [], "rules": []
@@ -175,9 +175,9 @@
       "mailbox": {
         "folders": ["Inbox", "Archive", "Action", "Receipts"],
         "messages": [
-          {"id": "m1", "folder": "Inbox", "from_addr": "hello@{vendor_slug}.example", "to_addr": "{owner_addr}", "subject": "A note about {item}", "body": "Just checking in about {item}."},
-          {"id": "m2", "folder": "Inbox", "from_addr": "billing@{vendor2_slug}.example", "to_addr": "{owner_addr}", "subject": "OVERDUE: invoice {ref2}", "body": "Invoice {ref2} for {amount_soon} was due {deadline_past}."},
-          {"id": "m3", "folder": "Inbox", "from_addr": "news@{org_slug}.example", "to_addr": "{owner_addr}", "subject": "{org} digest", "body": "This month at {org}."}
+          {"id": "m1", "folder": "Inbox", "from_addr": "hello@{vendor_domain}", "to_addr": "{owner_addr}", "subject": "A note about {item}", "body": "Just checking in about {item}."},
+          {"id": "m2", "folder": "Inbox", "from_addr": "billing@{vendor2_domain}", "to_addr": "{owner_addr}", "subject": "OVERDUE: invoice {ref2}", "body": "Invoice {ref2} for {amount_soon} was due {deadline_past}."},
+          {"id": "m3", "folder": "Inbox", "from_addr": "news@{sender_domain}", "to_addr": "{owner_addr}", "subject": "{org} digest", "body": "This month at {org}."}
         ],
         "drafts": [], "rules": []
       },

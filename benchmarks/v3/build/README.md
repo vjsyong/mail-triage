@@ -246,13 +246,146 @@ as independent samples.
   `authorization.authorized == False`. Any scenario that references an
   unauthorized public-corpus provenance fails lint (fail closed).
 
+## World model (A), scenarios (B), style (C), plausibility lint (D)
+
+The pilot was rejected for implausible content (mixed identities, clustered
+dates, hardcoded dates, borrowed domains, host/signer mismatch). Generation is
+now bottom-up from a coherent synthetic world rather than flat slot filling.
+
+**A. World** (`world.py`, `identity.py`, `fixtures/world/*.json`). Authored
+organizations (name, slug, derived domain, industry, region, address,
+departments, role mailboxes, and a **catalog** of the goods/services/documents/
+projects/courses it can reference), people per org, the eight account owners and
+their **real colleagues**, venues, events and a calendar. `identity.org_slug`
+strips legal suffixes and connectors (``"Cedar & Co."`` -> ``cedar``);
+`identity.org_domain` builds ``<slug>.<tld>``; role mailboxes (`billing@`,
+`support@`, `orders@`, `no-reply@`, `accounts@`, ...) live on that org's domain.
+**TLD policy** is centralized in `fixtures/world/config.json`: the owner
+approved realistic commercial-looking domains, so `tld_profile: "commercial"`
+maps to `.com`. Every organization, person and address is **fictional** and
+generated only; no mail is sent and no real domain is contacted. The `reserved`
+profile (`.example`) remains as a switch, and the domain/person lint derives its
+checks from the configured suffix. Sender, recipient, signature person, host and
+reply-to all
+resolve to world entities.
+
+**Selection fails closed** (`World.eligible_orgs`): a sender must match one of
+the family's declared industries **and** hold one of its declared roles, or the
+build raises. There is no "matching or any org" fallback and no silent role
+substitution, so marketing uses offers/newsletter roles, invoices and reminders
+use billing/accounts, security uses security/no-reply. A `meeting_request`
+colleague is a genuine member of the owner's org/domain (constructed, not a
+vendor person with a rewritten domain), and every scenario records an explicit
+relationship (customer/tenant/client/student/parent/colleague/friend).
+
+**B. Bottom-up scenarios** (`world.World.build_scenario`, `generate.py`). Each
+family maps to a sender kind and to a temporal window (`temporal.WINDOWS`). The
+scenario's object (item/service/document/project/course) is drawn from the
+**sender org's declared catalog** and bound to the family's purpose and the
+recipient relationship, so a lettings document request asks for a tenancy/lease
+document and a software vendor references its licence/plan -- never a telecom
+data plan from a retailer or a software licence from a landlord. A world event
+(purchase->receipt, invoice->reminder, order->confirmation, shipping->update,
+event->invitation/registration, meeting->request, ...) drives the message.
+
+**Temporal engine** (`temporal.py`). No date string lives in any fixture. Every
+message has an absolute ISO datetime; named weekdays and deadlines are derived
+from it; deadlines are `send +` a bounded business-day window (1-14 for routine
+requests, bounded family exceptions up to 60); receipts carry a transaction date
+before send; a payment reminder may carry a past due date. **Event seasons come
+from the actual held date**, not the send date (a fair announced in autumn is
+held in autumn), and social events (fairs, parties) may fall on a weekend while
+business deadlines stay on business days; RSVP/registration dates precede the
+event they answer for. Locale date/currency formats come from the world region.
+
+**C. Corpus-guided style** (`style.py`, `fixtures/style.json`,
+`tools/mine_corpora.py`). The offline miner samples a bounded number of messages
+from `/home/xrim/datasets/email-corpora` (Enron maildir, IETF/Nazario mboxes,
+SpamAssassin dirs) and derives **aggregate** shapes only -- greeting/sign-off
+shapes, subject prefixes, body-length bands, quoting rate -- with checksums and
+license provenance in the fixture. No body, name, address or domain is copied.
+Runtime and tests never read the corpora; `style.restyle_greeting` uses the
+derived greeting pool, and the `source_style_shift` axis reserves a disjoint
+style profile and a disjoint authored org cohort (`pinnacle`, `beacon`).
+
+**D. Plausibility lint** (`plausibility.py`, enforced by `lint.validate_dataset`
+and before render in `generate._build_triage_root`). Two layers:
+
+*Structured facts + source message* (`check_scenario`):
+
+| check | rejects |
+|---|---|
+| day-of-month spread (no day > 25%) | clustered dates |
+| `due/event/...` after send, 1..60 business days, txn before send, rsvp/registration before the event | temporal contradictions |
+| event season equals the season of the **held** date | wrong-season event names |
+| sender mailbox domain is its own org's domain; membership; no cross-org sender/recipient domain for non-personal families | identity + domain defects |
+| sender role is a role the org actually holds; catalog object is in the org's catalog | role/industry/object defects |
+| host person == signer identity | host/signer mismatch |
+
+*Rendered model input per case* (`check_case`): the header date must equal the
+send datetime; `From` must equal the declared sender and `To` the declared
+recipient (or its team alias); every printed calendar date must match a declared
+fact and a printed weekday must match that date; the signer and the bound
+catalog object must appear. Clip/quote variants declare a per-message
+**projection** (`case.audit` plus `clip_quoted_weekdays`) so authored quoted
+boilerplate is not falsely rejected -- the lint is never disabled. Lint failures
+name the offending scenario/case and field. `test_build.py` reproduces each
+defect first and then asserts the lint rejects it, including rendered-only
+mutations while the metadata stays correct.
+
+**Semantic gold (AR-1)** (`fixtures/semantics.json`, `recipes.resolve_semantics`).
+Gold is no longer resolved by "first category whose role intersects a generic
+action role" (which produced Incident for a developer's social invite, Coursework
+for an ISP support email, Appointment for a tenancy document). Each family has an
+authored semantic intent; each policy category has authored `covers`/`by_name`
+grounded in its own description. Resolution:
+
+- exactly one covering category, and (the policy card is visible **or** the
+  category name is self-evident) -> `visible` with that category;
+- several categories fit, or the family is inherently ambiguous, or a native run
+  cannot see the description that would disambiguate -> `ambiguous` with an
+  acceptable set and `answer.category = null`;
+- no category covers the intent -> `unavailable` with `reason = taxonomy_gap`
+  and `answer.resolution_reason = taxonomy_gap` (never an invented first label).
+
+A category's explicit `roles` (e.g. the marketing-merge twin) takes precedence
+over the name map, so policy twins honor only their declared mapping change.
+`covers` is a **strict subset of `description_intents`**, an independent map
+authored from each category's own name and description (checked by a
+non-circular test), so no category claims coverage its definition does not
+support. Coverage and the number of taxonomy gaps are recorded in
+`metadata.coverage.taxonomy` by profile and persona (a diagnostic, not a quality
+claim). No production category contract is modified.
+
+**Context claims + reply intent (AR-2)** (`fixtures/situations.json`,
+`world.build_scenario`). Context clauses are purpose-scoped
+(request/billing/news/notice/social) and split into `eliciting` (invite a reply)
+and `neutral` pools; a `needs_reply=false`, resolved or automated message draws
+only a neutral clause. Clauses are inserted as their own capitalized sentence
+with a single terminal punctuation and never assert an unbacked
+copy/CC/team/workstream/prior-exchange fact; the lint rejects such a phrase
+unless the scenario declares the corresponding fact, and also rejects doubled
+punctuation, a lowercase word after a sentence terminator, and a clause opener
+injected mid-sentence. A template may declare its own `needs_reply` (e.g. the
+payment family ships both an automated pay-only reminder, needs_reply false, and
+a variant that explicitly asks for a reply, needs_reply true); gold derives the
+reply intent from the rendered template, so a payment/action message is never
+scored as a reply request unless it actually asks for one.
+
+**Revisions**: `BUILDER_REVISION`/`DATA_REVISION` are `3.7-draft-final2`; the
+content generator changed, so earlier draft datasets and previews (including
+`8a54f7a`) are incompatible and the dataset ids differ.
+
 ## Files
 
-`fixtures/` holds the authored recipes/vocabulary/policies/catalog plus the
-`situations.json` context clauses. They are agent-authored **drafts**: no human
-has reviewed or sealed them, and the "reviewed by hand" label must not be
-applied to this tree. `generate.py`, `render.py`, `lineage.py`, `lint.py`,
-`review.py`, `catalog.py`, `recipes.py`, `rng.py`, `errors.py` hold the logic.
+`fixtures/` holds the authored recipes/vocabulary/policies/catalog, the
+`situations.json` context clauses, the corpus-guided `style.json`, and
+`fixtures/world/` (orgs, owners, names, places, family mapping, config).
+`world.py`, `identity.py`, `temporal.py`, `style.py`, `plausibility.py` implement
+the world model; `generate.py`, `render.py`, `lineage.py`, `lint.py`,
+`review.py`, `catalog.py`, `recipes.py`, `rng.py`, `errors.py` hold the rest;
+`tools/mine_corpora.py` is the offline style miner (not runtime). They are
+agent-authored **drafts**: no human has reviewed or sealed them.
 
 (The directory is named `fixtures/`, not `data/`, because the repository
 `.gitignore` ignores any directory named `data`; authoring content must be

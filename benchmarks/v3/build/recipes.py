@@ -22,6 +22,22 @@ def _load(name):
     return _CACHE[name]
 
 
+WORLD_DIR = os.path.join(DATA_DIR, "world")
+
+
+def load_world(name):
+    """Load an authored world fixture (``fixtures/world/*.json``)."""
+    key = "world/" + name
+    if key not in _CACHE:
+        with open(os.path.join(WORLD_DIR, name), encoding="utf-8") as f:
+            _CACHE[key] = json.load(f)
+    return _CACHE[key]
+
+
+def style():
+    return _load("style.json")
+
+
 def personas():
     return _load("personas.json")["personas"]
 
@@ -32,11 +48,6 @@ def families():
 
 def regions():
     return _load("regions.json")["regions"]
-
-
-def shift_regions():
-    """Regional forms reserved for the source/style shift axis (never dev/cal)."""
-    return _load("regions.json").get("shift_regions", [])
 
 
 def policies():
@@ -63,6 +74,63 @@ def private_situations(domain):
 
 def category_roles():
     return _load("roles.json")["category_roles"]
+
+
+def category_covers():
+    """Authored semantic covers/by_name per policy category name."""
+    return _load("semantics.json")["category_covers"]
+
+
+def description_intents():
+    """Intents each category's own name+description supports (independent map)."""
+    return _load("semantics.json")["description_intents"]
+
+
+def family_intent():
+    """The semantic intent(s) of each family (multiple => genuinely ambiguous)."""
+    return _load("semantics.json")["family_intent"]
+
+
+def resolve_semantics(policy, family_id, profile):
+    """Resolve a family to a policy category grounded in the policy's definitions.
+
+    Uses the category's explicit ``roles`` (a declared mapping override, e.g.
+    the marketing merge) when present, else the authored semantic covers. Returns
+    a dict ``{category, acceptable, observable, reason}``:
+
+    * ``visible`` with a concrete category when exactly one category covers it
+      and (the policy card is visible OR the category name is self-evident);
+    * ``ambiguous`` with an acceptable set when several categories fit or the
+      family is inherently ambiguous, or when a native run cannot see the
+      description that would disambiguate it;
+    * ``unavailable`` with reason ``taxonomy_gap`` when no category covers it.
+    """
+    intents = list(family_intent().get(family_id) or [])
+    if not intents:
+        return {"category": None, "acceptable": [],
+                "observable": "unavailable", "reason": "unknown_family"}
+    cats = policy.get("categories") or []
+    explicit = [c for c in cats if set(c.get("roles") or []) & set(intents)]
+    if explicit:
+        matches = explicit
+    else:
+        matches = [c for c in cats
+                   if set(category_covers().get(c.get("name"), {}).get("covers", []))
+                   & set(intents)]
+    if not matches:
+        return {"category": None, "acceptable": [],
+                "observable": "unavailable", "reason": "taxonomy_gap"}
+    names = [c["name"] for c in matches]
+    if len(matches) > 1 or len(intents) > 1:
+        return {"category": None, "acceptable": names,
+                "observable": "ambiguous", "reason": "multiple_fitting_categories"}
+    cat = matches[0]
+    by_name = category_covers().get(cat.get("name"), {}).get("by_name", False)
+    if profile == "policy_conditioned" or by_name:
+        return {"category": cat["name"], "acceptable": [cat["name"]],
+                "observable": "visible", "reason": "mapped"}
+    return {"category": None, "acceptable": [cat["name"]],
+            "observable": "ambiguous", "reason": "requires_policy_description"}
 
 
 def corpora():
@@ -159,6 +227,13 @@ def validate_recipes():
     return True
 
 
+def _clauses(entry):
+    """Flatten an eliciting/neutral clause entry to a list."""
+    if isinstance(entry, dict):
+        return list(entry.get("eliciting") or []) + list(entry.get("neutral") or [])
+    return list(entry or [])
+
+
 def _situation_disjointness_problems():
     """The public and each private clause pool must be pairwise disjoint.
 
@@ -171,15 +246,15 @@ def _situation_disjointness_problems():
     groups = raw.get("groups") or {}
     private = raw.get("private_groups") or {}
     for domain, pools in private.items():
-        for group, clauses in pools.items():
+        for group, entry in pools.items():
             if group not in groups:
                 problems.append("private situations %r has unknown group %r"
                                 % (domain, group))
                 continue
-            public_set = set(groups[group])
+            clauses = _clauses(entry)
             if not clauses:
                 problems.append("private situations %r/%r is empty" % (domain, group))
-            if public_set & set(clauses):
+            if set(_clauses(groups[group])) & set(clauses):
                 problems.append("private situations %r/%r overlap the public pool"
                                 % (domain, group))
     domains = list(private)
@@ -187,7 +262,7 @@ def _situation_disjointness_problems():
         for j in range(i + 1, len(domains)):
             a, b = domains[i], domains[j]
             for group in set(private[a]) & set(private[b]):
-                if set(private[a][group]) & set(private[b][group]):
+                if set(_clauses(private[a][group])) & set(_clauses(private[b][group])):
                     problems.append("private situations %r and %r overlap on %r"
                                     % (a, b, group))
     return problems
