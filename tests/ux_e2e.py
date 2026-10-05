@@ -279,6 +279,17 @@ class WorkbenchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ux.category_rows({'categories': [], 'category_folders': []}, [], [])
 
+    def test_non_text_vocabulary_raises_actionable(self):
+        with self.assertRaises(ValueError) as c1:
+            ux.category_rows({'categories': ['Ok', 3], 'category_folders': {}}, [], [])
+        self.assertIn('non-text', str(c1.exception))
+        with self.assertRaises(ValueError) as c2:
+            ux.category_rows({'categories': ['Ok', ['x']], 'category_folders': {}}, [], [])
+        self.assertIn('non-text', str(c2.exception))
+        with self.assertRaises(ValueError) as c3:
+            ux.category_rows({'categories': [], 'category_folders': {'Ok': 5}}, [], [])
+        self.assertIn('non-text', str(c3.exception))
+
     # ---- WP1: lossless parse and atomic save -----------------------------
 
     def test_category_form_lossless_roundtrip_and_atomic_save(self):
@@ -403,6 +414,45 @@ class WorkbenchTests(unittest.TestCase):
                             ('restore non-legacy', restore_bad), ('remove all', remove_all)):
             with self.assertRaises(ValueError, msg=label):
                 ux.parse_category_rows(form, settings, refs)
+
+    def test_case_variant_categories_remain_editable_and_separate(self):
+        store.set_setting('categories', ['Promo', 'promo'])
+        store.set_setting('category_folders', {'Promo': 'P1', 'promo': 'P2'})
+        settings = store.all_settings()
+        refs = ux.automation_references(settings, [], [])
+        form = self._category_form(refs['rows'])
+        form['folder_0'] = 'P1-edited'
+        cats, mapping = ux.parse_category_rows(form, settings, refs)
+        self.assertEqual(cats, ['Promo', 'promo'])
+        self.assertEqual(mapping, {'Promo': 'P1-edited', 'promo': 'P2'})
+
+    def test_remove_all_vocabulary_allowed_when_legacy_restored(self):
+        store.set_setting('categories', ['Action', 'Receipt'])
+        store.set_setting('category_folders', {'Receipt': 'Receipts', 'Promo': 'Promotions'})
+        settings = store.all_settings()
+        refs = ux.automation_references(settings, [], [])
+        rows = refs['rows']
+        form = self._category_form(rows)
+        form['remove_%d' % self._row_index(rows, 'Action')] = '1'
+        form['remove_%d' % self._row_index(rows, 'Receipt')] = '1'
+        form['restore_%d' % self._row_index(rows, 'Promo')] = '1'
+        cats, mapping = ux.parse_category_rows(form, settings, refs)
+        self.assertEqual(cats, ['Promo'])
+        self.assertEqual(mapping, {'Promo': 'Promotions'})
+
+    def test_removal_message_names_classifier_consumers(self):
+        store.set_setting('categories', ['Action', 'Receipt'])
+        store.set_setting('category_folders', {'Receipt': 'Receipts'})
+        store.add_heuristic('Reply-ish', 'logreg', 'Receipt')
+        settings = store.all_settings()
+        refs = ux.automation_references(settings, store.list_flows(), store.list_heuristics())
+        rows = refs['rows']
+        form = self._category_form(rows)
+        form['remove_%d' % self._row_index(rows, 'Receipt')] = '1'
+        with self.assertRaises(ValueError) as ctx:
+            ux.parse_category_rows(form, settings, refs)
+        self.assertIn('classifier #', str(ctx.exception))
+        self.assertNotIn('flow #', str(ctx.exception))
 
     def test_duplicate_existing_names_roundtrip_but_reject_edits(self):
         store.set_setting('categories', ['Dup', 'Dup', 'Other'])

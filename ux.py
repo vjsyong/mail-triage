@@ -111,6 +111,12 @@ def category_rows(settings, flows, heuristics):
         raise ValueError("Stored 'categories' setting is not a list; repair it before editing categories.")
     if not isinstance(folders, dict):
         raise ValueError("Stored 'category_folders' setting is not a mapping; repair it before editing categories.")
+    for name in cats:
+        if not isinstance(name, str):
+            raise ValueError("Stored 'categories' contains a non-text entry (%r); repair it before editing categories." % (name,))
+    for key, value in folders.items():
+        if not isinstance(value, str):
+            raise ValueError("Stored 'category_folders' has a non-text destination for %r; repair it before editing categories." % (key,))
 
     flow_map = {}
     for flow in flows or []:
@@ -303,9 +309,8 @@ def parse_category_rows(form, current_settings, references):
     counts = {}
     for row in current_rows:
         if row["configured"]:
-            key = _name_key(row["name"])
-            counts[key] = counts.get(key, 0) + 1
-    duplicate_keys = {key for key, n in counts.items() if n > 1}
+            counts[row["name"]] = counts.get(row["name"], 0) + 1
+    duplicate_names = {name for name, n in counts.items() if n > 1}
 
     # Removal safety: any removal checks references first, and malformed flow
     # JSON makes reference checking unreliable, so removals are refused.
@@ -319,10 +324,12 @@ def parse_category_rows(form, current_settings, references):
         if invalid_flows:
             ids = ", ".join("#%s %s" % (f["id"], f["name"]) for f in invalid_flows)
             raise ValueError("Cannot remove %r while flow records are unreadable (%s). Repair them first." % (name, ids))
-        refs = [r for r in row["server"].get("flow_refs", []) + row["server"].get("classifier_refs", [])]
-        if refs:
-            labels = ", ".join("flow #%s “%s”" % (r["id"], r["name"]) for r in refs)
-            raise ValueError("Cannot remove %r: still referenced by %s. Edit those first." % (name, labels))
+        labels = ["flow #%s “%s”" % (r["id"], r["name"])
+                  for r in row["server"].get("flow_refs", [])]
+        labels += ["classifier #%s “%s”" % (r["id"], r["name"])
+                   for r in row["server"].get("classifier_refs", [])]
+        if labels:
+            raise ValueError("Cannot remove %r: still referenced by %s. Edit those first." % (name, ", ".join(labels)))
         removed.add(row["index"])
 
     # Names still held by a surviving current row. Removed names are freed so a
@@ -349,7 +356,7 @@ def parse_category_rows(form, current_settings, references):
             if key in reserved:
                 raise ValueError("Row %d duplicates an existing category name." % row["index"])
             reserved.add(key)
-        matched_duplicate = server is not None and server["configured"] and _name_key(name) in duplicate_keys
+        matched_duplicate = server is not None and server["configured"] and name in duplicate_names
         if matched_duplicate and (row["remove"] or row["folder"] != row["server_folder"]):
             raise ValueError("Row %d is an exact duplicate category; edit it with a separate repair." % row["index"])
         if row["index"] in removed:
@@ -368,9 +375,10 @@ def parse_category_rows(form, current_settings, references):
             if row["folder"] != "":
                 mapping[name] = row["folder"]
 
-    if not categories and any(r["configured"] for r in current_rows):
+    result_categories = categories + restored
+    if not result_categories and any(r["configured"] for r in current_rows):
         raise ValueError("Cannot remove every category; keep at least one.")
-    return categories + restored, mapping
+    return result_categories, mapping
 
 
 EDITOR_PREVIEW_TMPL = """
