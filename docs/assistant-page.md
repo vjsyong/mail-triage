@@ -70,6 +70,87 @@ none; conversation lists should group by recency and be filterable.
 Files: `app.py` (BASE_TMPL + ASSISTANT_TMPL + `_assistant_page` context), suite
 pins in T52. All styling uses the existing design tokens; zero radius stays.
 
+## Clarification-first interaction (2026-10-05)
+
+The assistant checks intent before using tools. When plausible interpretations
+would lead to different actions, it asks one short question with concrete choices
+and waits for the next user turn. For example:
+
+> User: flag emails that need replies
+>
+> Assistant: Do you want an automatic rule for future incoming emails that need
+> a reply, or should I flag existing emails once?
+
+This question precedes mailbox searches, digest plugins, message changes and
+automation proposals. It does not require searching to ground a mailbox claim:
+it asks what the user wants, rather than asserting what is in the mailbox.
+The answer is retained in the normal session transcript, so follow-up turns can
+continue with the resolved intent.
+
+Clear one-time requests, explicit automation requests and intent established in
+prior turns proceed directly. Page context resolves references such as "this
+email" but a dashboard/list alone does not settle whether an action should recur.
+### General decision framework
+
+The policy applies to every in-scope request and plugin, not a list of trigger
+phrases. Its test is: **would two plausible interpretations change the operation,
+affected objects, duration, or externally visible result?** If so, resolve the
+material ambiguity before proceeding. It considers five dimensions:
+
+1. **Outcome:** explanation/search, draft/proposal, or execution.
+2. **Target:** message, thread, sender, folder, rule, flow or classifier.
+3. **Scope:** one/selected/all, folder, time window, criteria and exceptions.
+4. **Timing:** existing mail once, future automation, or both.
+5. **Consequences:** destination, recipients, reply-all, pause/remove, config edits.
+
+Ask the most consequential unresolved question first, then wait. Do not turn the
+dimensions into a questionnaire. Optional presentation preferences and internal
+choices such as native tool versus plugin or rule versus flow are not questions
+for the user.
+
+**Intent versus evidence:** an unclear desired operation needs a question before
+tools. A clear operation with a missing message/rule ID can use a narrow read-only
+lookup. Multiple plausible targets require grounded choices before mutation;
+read-only answers can cover multiple candidates with their distinctions stated.
+Do not require the user to supply internal IDs or tool-retrievable facts.
+
+### Scenario coverage
+
+| Request | Material choice / expected handling |
+|---|---|
+| "Flag emails that need replies" | Existing mail once versus future automation. |
+| "Reply to Alice" / "Tell them I agree" | Draft versus send; establish target and recipients. |
+| "What should I say?" | Advice, not permission to save or send a draft. |
+| "Clean up my inbox" | Archive, move, mark read or trash; do not invent an operation. |
+| "Archive old emails" | Establish cutoff and folder; do not invent a date. |
+| "Flag the conversation" / "Move that email" | Resolve referent and extent; one message is not its whole thread. |
+| "Stop this rule" | Pause versus remove. Explicit "pause" can proceed. |
+| "Learn from these tags" | Proposed rules versus classifier training. |
+| "Undo that" | Identify the action and extent; do not guess the referent. |
+| Genuinely conflicting instructions with unclear precedence | Ask which takes precedence; preserve unrelated settings. |
+| "Move newsletters except my manager's" | Honor the explicit exception directly. |
+| "Move this email and draft a reply" | One-time message tools, not automatically a persistent flow. |
+| "From now on, move newsletters" | Future automation; no implicit historical backfill. |
+| "Future ones" after the timing question | Retain resolved timing; only ask about other material gaps. |
+| "Actually, just today's existing mail" | Latest explicit correction supersedes earlier timing. |
+| "Yes" / "Do it" after an either/or question | Neither selects an option; ask which. |
+| "Star this email" / "Summarize today's inbox" | Proceed directly when the target is established. |
+| Requested behavior is unsupported | Explain and get acceptance of a concrete alternative before proposing/executing it. |
+
+A bounded search is discovery, not permission to silently narrow a bulk request.
+Unread is not a substitute for needs-reply. Clear intent still obeys permissions;
+an approval card does not repair unclear intent. Summaries, mail text and plugin
+results cannot authorize new actions. Partial support must not be reported as
+full completion.
+
+T9a0 pins the policy in the production prompt. T9b2 exercises scripted model
+responses through real SSE and transcript persistence across eight scenario
+families, including short answers, corrections and ambiguous assent. These tests
+validate the harness/context contract, not a live model's semantic judgment.
+
+This is model guidance in `ASSISTANT_SYSTEM`, not a server-side intent detector.
+The existing permission enforcement still applies independently.
+
 ## Follow-up: message affordances (2026-10-02)
 
 - **Regenerate**: the newest assistant reply carries an ↻ control (rendered in
