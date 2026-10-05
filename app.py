@@ -3060,7 +3060,11 @@ PLUGIN_DETAIL_TMPL = """
     <div class="pxd-set">
       <div class="st-l"><b>Pipeline use</b><span class="sub">The kernel only calls this plugin inside the mail pipeline when ticked.</span></div>
       <div class="st-c" style="flex-direction:column;align-items:flex-end;gap:2px">
-        {% if p.optin_classifier %}<label class="check" style="margin:2px 0"><input type="checkbox" name="opt_in_classifier" value="1" {{ 'checked' if p.in_classifiers else '' }}> <span>classification fast-path</span></label>{% endif %}
+        {% if p.optin_classifier %}<label class="check" style="margin:2px 0"><input type="checkbox" name="opt_in_classifier" value="1" {{ 'checked' if p.in_classifiers else '' }}> <span>classification fast-path</span></label>
+        {% if p.classifier_heuristics %}<label class="check" style="margin:2px 0"><span class="sub">bound heuristic (confidence gate)</span> <select name="classifier_heuristic" style="width:auto;padding:3px 6px;font-size:.82rem" aria-label="Heuristic binding for the classifier plugin">
+          <option value="0">— pick one —</option>
+          {% for h in p.classifier_heuristics %}<option value="{{ h.id }}"{{ ' selected' if p.bound_heuristic_id == h.id else '' }}>{{ h.name }}{% if not h.enabled %} (parked){% endif %}</option>{% endfor %}
+        </select></label>{% endif %}{% endif %}
         {% if p.optin_matcher %}<label class="check" style="margin:2px 0"><input type="checkbox" name="opt_in_matcher" value="1" {{ 'checked' if p.in_matchers else '' }}> <span>rule conditions</span></label>{% endif %}
         {% if p.optin_retriever %}<label class="check" style="margin:2px 0"><input type="checkbox" name="opt_in_retriever" value="1" {{ 'checked' if p.in_retrievers else '' }}> <span>search re-ranking</span></label>{% endif %}
       </div>
@@ -3501,6 +3505,17 @@ def _plugin_oneliner(manifest):
     return s[:170]
 
 
+def _classifier_binding(pid):
+    """The plugin_classifiers entry for one plugin: the functional dict form
+    {"plugin", "heuristic_id"} or a legacy bare-id string; None when absent."""
+    for x in (store.get_setting("plugin_classifiers", []) or []):
+        if isinstance(x, dict) and str(x.get("plugin") or "") == pid:
+            return x
+        if isinstance(x, str) and x == pid:
+            return x
+    return None
+
+
 def _plugin_detail_ctx(pid):
     """Everything the /plugins/<pid> detail page renders, or None."""
     row = plugins.get(pid)
@@ -3553,6 +3568,7 @@ def _plugin_detail_ctx(pid):
     for e in er:
         events.append({"when": time.strftime("%m-%d %H:%M", time.localtime(e["ts"] or 0)),
                        "level": e["level"] or "", "message": e["message"] or ""})
+    _binding = _classifier_binding(pid)
     return {
         "id": row["id"], "name": m.get("name") or row["id"], "version": row["version"],
         "description": m.get("description") or "", "tagline": _plugin_oneliner(m),
@@ -3569,7 +3585,12 @@ def _plugin_detail_ctx(pid):
         "optin_classifier": "classifier" in kinds,
         "in_matchers": pid in (store.get_setting("plugin_matchers", []) or []),
         "in_retrievers": pid in (store.get_setting("plugin_retrievers", []) or []),
-        "in_classifiers": pid in (store.get_setting("plugin_classifiers", []) or []),
+        "in_classifiers": _binding is not None,
+        "bound_heuristic_id": _binding.get("heuristic_id", 0) if isinstance(_binding, dict) else 0,
+        "classifier_heuristics": [{"id": h["id"],
+                                   "name": h.get("name") or ("heuristic %s" % h["id"]),
+                                   "enabled": bool(h.get("enabled"))}
+                                  for h in store.list_heuristics()],
         "config_fields": _plugin_config_fields(m, pid),
         "entry": m.get("entrypoint") or "", "limits_text": limits_text,
         "last_error": row["last_error"] or "", "events": events,
@@ -3687,6 +3708,39 @@ def plugins_rescan():
     return redirect(url_for("plugins_page"))
 
 
+def _apply_pipeline_optins(pid, kinds):
+    """The Pipeline use checkboxes. They ride in the Access form (action=save);
+    before 2026-10-05 this branch never ran on that form, so the classifier
+    opt-in silently did nothing from the UI. Idempotent: rebuilds each opt-in
+    list from the form. The Settings form (action=config) does not carry these
+    fields and must not touch the opt-ins."""
+    if "matcher" in kinds:
+        lst = [x for x in (store.get_setting("plugin_matchers", []) or []) if x != pid]
+        if request.form.get("opt_in_matcher"):
+            lst.append(pid)
+        store.set_setting("plugin_matchers", lst)
+    if "retriever" in kinds:
+        lst = [x for x in (store.get_setting("plugin_retrievers", []) or []) if x != pid]
+        if request.form.get("opt_in_retriever"):
+            lst.append(pid)
+        store.set_setting("plugin_retrievers", lst)
+    if "classifier" in kinds:
+        lst = [x for x in (store.get_setting("plugin_classifiers", []) or [])
+               if not (isinstance(x, dict) and str(x.get("plugin") or "") == pid)
+               and x != pid]
+        if request.form.get("opt_in_classifier"):
+            try:
+                hid = int(request.form.get("classifier_heuristic") or 0)
+            except ValueError:
+                hid = 0
+            lst.append({"plugin": pid, "heuristic_id": hid})
+            if not hid:
+                flash("Classification fast-path needs a bound heuristic "
+                      "(confidence gate) to take effect - pick one and save again.",
+                      "warn")
+        store.set_setting("plugin_classifiers", lst)
+
+
 @app.route("/plugins/<pid>", methods=["POST"])
 def plugins_update(pid):
     action = (request.form.get("action") or "").strip()
@@ -3704,6 +3758,7 @@ def plugins_update(pid):
             lvl = (request.form.get("agent_level") or "").strip().lower()
             if lvl in ("off", "ask", "auto"):
                 store.set_setting("perm_plugin:" + pid, lvl)
+            _apply_pipeline_optins(pid, row["manifest"].get("kind") or [])
         else:
             res = {"ok": False, "error": "unknown plugin '%s'" % pid}
     elif action == "config":
@@ -3729,22 +3784,6 @@ def plugins_update(pid):
                 else:
                     values[k2] = (request.form.get("cfg_" + k2) or "").strip()
             res = plugins.set_config(pid, values)
-            kinds = row["manifest"].get("kind") or []
-            if "matcher" in kinds:
-                lst = [x for x in (store.get_setting("plugin_matchers", []) or []) if x != pid]
-                if request.form.get("opt_in_matcher"):
-                    lst.append(pid)
-                store.set_setting("plugin_matchers", lst)
-            if "retriever" in kinds:
-                lst = [x for x in (store.get_setting("plugin_retrievers", []) or []) if x != pid]
-                if request.form.get("opt_in_retriever"):
-                    lst.append(pid)
-                store.set_setting("plugin_retrievers", lst)
-            if "classifier" in kinds:
-                lst = [x for x in (store.get_setting("plugin_classifiers", []) or []) if x != pid]
-                if request.form.get("opt_in_classifier"):
-                    lst.append(pid)
-                store.set_setting("plugin_classifiers", lst)
         else:
             res = {"ok": False, "error": "unknown plugin '%s'" % pid}
     else:

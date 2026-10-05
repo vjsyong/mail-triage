@@ -1,0 +1,78 @@
+{
+  "id": "mt-tinyjev-classifier",
+  "name": "TinyJev classifier",
+  "action": "Classify with TinyJev",
+  "version": "0.1.0",
+  "description": "Local TinyJev-0.6B classifier: the sidecar downloads the model, loads it and answers one-forward-pass category questions; this plugin bridges the classification pipeline to it when native heuristics abstain.",
+  "author": "Mail Triage",
+  "license": "MIT",
+  "engines": { "sdk": ">=0.2 <1.0" },
+  "runtime": "quickjs",
+  "entrypoint": "dist/plugin.js",
+  "kind": ["classifier", "tool"],
+  "classifier": {
+    "outputs": [
+      "Action",
+      "Notification",
+      "Newsletter",
+      "Receipt",
+      "Personal",
+      "Promo"
+    ]
+  },
+  "permissions": ["net.http"],
+  "net": {
+    "hosts": ["tinyjev", "127.0.0.1", "localhost"],
+    "allow_config_hosts": true,
+    "max_requests_per_day": 10000
+  },
+  "limits": { "memory_mb": 32, "timeout_ms": 20000, "kv_bytes": 4096 },
+  "config": {
+    "tinyjev_url": { "type": "string", "title": "TinyJev service URL",
+      "description": "Base URL of the TinyJev sidecar (see tinyjev/docker-compose.yml)",
+      "default": "http://tinyjev:8099" },
+    "categories": { "type": "string", "title": "Categories",
+      "description": "Comma-separated categories TinyJev chooses from",
+      "default": "Action,Notification,Newsletter,Receipt,Personal,Promo" },
+    "state_chars": { "type": "integer", "title": "Body characters in state",
+      "description": "How much of the message body goes into the model state",
+      "default": 1500 },
+    "classify_timeout_ms": { "type": "integer", "title": "Classify HTTP timeout (ms)",
+      "description": "Per-request timeout for the sidecar call on the classify path",
+      "default": 8000 }
+  },
+  "tools": [
+    {
+      "name": "tinyjev_status",
+      "description": "Report the TinyJev sidecar lifecycle: model download progress, load state, readiness and call count.",
+      "parameters": { "type": "object", "properties": {} },
+      "side_effects": "none",
+      "surface": "assistant"
+    },
+    {
+      "name": "tinyjev_classify",
+      "description": "Classify one text snippet with the local TinyJev model (test drive; does not touch the mailbox).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "the message body to classify" },
+          "subject": { "type": "string", "description": "optional subject line" },
+          "from": { "type": "string", "description": "optional sender address" }
+        },
+        "required": ["text"]
+      },
+      "side_effects": "none",
+      "surface": "assistant"
+    },
+    {
+      "name": "tinyjev_load",
+      "description": "Ask the sidecar to start (or retry) the model download and load; no-op when already ready.",
+      "parameters": { "type": "object", "properties": {} },
+      "side_effects": "local_write",
+      "surface": "assistant"
+    }
+  ],
+  "assistant": {
+    "when_to_use": "checking TinyJev model status or download progress, test-classifying a snippet, or nudging the sidecar to (re)load the model"
+  }
+}
