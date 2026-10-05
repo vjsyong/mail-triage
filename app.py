@@ -5220,6 +5220,7 @@ FLOW_EDIT_TMPL = """
     <div class="page-desc">A new message arrives, the filters decide, the steps run in order. Deterministic filters are exact and free; AI filters run only after they pass.</div>
   </div>
 </div>
+{% if seed_note %}<div class="note" role="status" style="margin-bottom:12px">{{ seed_note }}</div>{% endif %}
 <form method="post" id="flowform">
 <input type="hidden" name="steps_json" id="steps_json">
 
@@ -5341,10 +5342,10 @@ var stepsEl = document.getElementById('steps');
 var stepsInput = document.getElementById('steps_json');
 var sumEl = document.getElementById('fl-sum-text');
 var TYPES = [['move','Move to folder','⇥'],['draft','Create a draft','✎'],['tag','Tag','#'],['mark_read','Mark as read','✓'],['flag','Star / flag','★']];
-var TEMPLATES = {{ templates_json|safe }};
-var PLUGINS = {{ plugins_json|safe }};
-var CATS = {{ categories_json|safe }};
-var steps = {{ steps_json|safe }};
+var TEMPLATES = {{ templates_meta|tojson }};
+var PLUGINS = {{ plugins_meta|tojson }};
+var CATS = {{ categories|tojson }};
+var steps = {{ steps|tojson }};
 steps.forEach(function(s){ s._open = false; });
 function el(tag, cls, txt){ var e = document.createElement(tag); if(cls) e.className = cls; if(txt != null) e.textContent = txt; return e; }
 function typeInfo(t){ for (var i = 0; i < TYPES.length; i++){ if(TYPES[i][0] === t) return TYPES[i]; } return [t || 'step', 'Step', '·']; }
@@ -5490,6 +5491,13 @@ function fieldsFor(st){
         f.appendChild(ta2);
       }
     }
+    var dlink = el('div', 'sub', 'Saved to the shared draft destination: ');
+    var dl = document.createElement('a');
+    dl.href = '{{ url_for("templates") }}#draft-destination';
+    dl.textContent = 'Draft destination';
+    dlink.appendChild(dl);
+    dlink.style.gridColumn = '1 / -1';
+    f.appendChild(dlink);
   } else if(st.type === 'tag'){
     f.appendChild(el('label', null, 'Tag'));
     var tin = el('input'); tin.type = 'text'; tin.value = st.tag || ''; tin.placeholder = 'e.g. Follow up';
@@ -5823,26 +5831,25 @@ def _flow_from_form():
     return name, match_mode, conditions, steps, enabled
 
 
-def _flow_edit_context(error, name, mode, conds, steps, enabled, is_new=False):
+def _flow_edit_context(error, name, mode, conds, steps, enabled, is_new=False, seed_note=""):
     flow = {"name": name, "match_mode": mode, "enabled": enabled}
     settings = store.all_settings()
     when = engine._flow_when_text({"conditions": json.dumps(conds or []),
                                    "match_mode": mode}) if conds else ""
     acts = engine._flow_steps_text(steps or []) if steps else ""
-    return {"flow": flow, "conditions": conds, "steps_json": json.dumps(steps or []),
-            "error": error, "is_new": is_new,
-            "categories_json": json.dumps(settings.get("categories") or []),
+    return {"flow": flow, "conditions": conds, "steps": steps or [],
+            "error": error, "is_new": is_new, "seed_note": seed_note,
+            "categories": settings.get("categories") or [],
             "watch_text": ", ".join(settings.get("watch_folders") or ["INBOX"]),
             "poll_interval": int(settings.get("poll_interval", 90) or 90),
             "summary_text": "new mail · %s → %s"
                             % (when or "no filters (every message)",
                                acts or "no steps yet"),
             "templates": store.list_templates(),
-            "templates_json": json.dumps([{"id": x["id"], "name": x["name"]}
-                                          for x in store.list_templates()]),
-            "plugins_json": json.dumps([{"id": r["id"],
-                                         "name": r["manifest"].get("name") or r["id"]}
-                                        for r in plugins.enabled_of_kind("draft-provider")])}
+            "templates_meta": [{"id": x["id"], "name": x["name"]}
+                               for x in store.list_templates()],
+            "plugins_meta": [{"id": r["id"], "name": r["manifest"].get("name") or r["id"]}
+                             for r in plugins.enabled_of_kind("draft-provider")]}
 
 
 @app.route("/flows")
@@ -5857,6 +5864,39 @@ def flows():
                               test_id=request.args.get("test", type=int) or 0))
 
 
+_SEED_FLOW_NOTE = (
+    "This draft was seeded from a category. A category flow that processes a message takes "
+    "precedence over default filing — including preview-mode flows and flows without a move "
+    "step. Leaving this flow disabled preserves your present routing, and the global flow "
+    "processing switch is independent of this flow's Enabled state. Review the filters and "
+    "steps, then enable it and press Save flow.")
+
+
+def _resolve_seed_category(query, settings):
+    """Exact configured category, or an unambiguous case-insensitive match; else None."""
+    cats = settings.get("categories")
+    if not isinstance(cats, list):
+        return None
+    q = (query or "").strip()
+    if not q:
+        return None
+    if q in cats:
+        return q
+    matches = [c for c in cats if isinstance(c, str) and c.lower() == q.lower()]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _seed_flow(category, settings):
+    """Server-derived (name, conditions, steps) for a category; disabled by default."""
+    folders = settings.get("category_folders")
+    folder = folders.get(category) if isinstance(folders, dict) else None
+    mapped = bool(isinstance(folder, str) and folder.strip())
+    name = ("File %s" % category) if mapped else ("%s automation" % category)
+    conds = [{"kind": "category", "value": category, "min_confidence": 0.0}]
+    steps = [{"type": "move", "folder": folder.strip()}] if mapped else []
+    return name, conds, steps
+
+
 @app.route("/flows/new", methods=["GET", "POST"])
 def flow_new():
     if request.method == "POST":
@@ -5869,6 +5909,17 @@ def flow_new():
         store.log_event("info", "flow '%s' added (%d step(s))" % (name, len(steps)))
         flash("Flow added.", "ok")
         return redirect(url_for("flows", test=nid))
+    seed = (request.args.get("category") or "").strip()
+    if seed:
+        settings = store.all_settings()
+        canonical = _resolve_seed_category(seed, settings)
+        if not canonical:
+            flash("Pick a configured category to build a flow for.", "err")
+            return redirect(url_for("automation_categories"), code=303)
+        name, conds, steps = _seed_flow(canonical, settings)
+        note = _SEED_FLOW_NOTE if steps else _SEED_FLOW_NOTE + " Add a step before saving."
+        return render(_render_src(FLOW_EDIT_TMPL, **_flow_edit_context(
+            None, name, "all", conds, steps, False, is_new=True, seed_note=note)))
     return render(_render_src(FLOW_EDIT_TMPL,
                               **_flow_edit_context(None, "", "all", [], [], True, is_new=True)))
 
@@ -10970,13 +11021,14 @@ AUTOMATION_CATEGORIES_TMPL = """
         <input type="text" name="folder_{{ i }}" value="{{ r.folder }}" placeholder="Keep in current folder" aria-label="Destination folder"{{ ' readonly'|safe if (r.duplicate or r.readonly or conflict) else '' }}>
       </div>
       <div class="cat-actions">
+        {% if r.configured and r.existing and not r.duplicate and not conflict %}<a class="btn small" href="{{ url_for('flow_new', category=r.name) }}">Create flow</a>{% endif %}
         {% if r.legacy %}<label class="check"><input type="checkbox" name="restore_{{ i }}" value="1"{{ ' checked' if r.restore else '' }}{{ ' disabled'|safe if (r.readonly or conflict) else '' }}> <span>Restore to vocabulary</span></label>{% endif %}
         {% if r.existing and not r.duplicate %}<label class="check"><input type="checkbox" name="remove_{{ i }}" value="1"{{ ' checked' if r.remove else '' }}{{ ' disabled'|safe if (r.readonly or conflict) else '' }}> <span>Remove on save</span></label>{% endif %}
       </div>
       {% if r.flow_refs or r.classifier_refs %}
       <div class="cat-refs">
         {% for f in r.flow_refs %}<a class="chip" href="{{ url_for('flow_edit', flow_id=f.id) }}">flow #{{ f.id }} · {{ f.name }}{{ ' · disabled' if not f.enabled else '' }}</a>{% endfor %}
-        {% for c in r.classifier_refs %}<a class="chip" href="{{ url_for('classifiers') }}">classifier #{{ c.id }} · {{ c.name }}{{ ' · disabled' if not c.enabled else '' }}</a>{% endfor %}
+        {% for c in r.classifier_refs %}<a class="chip" href="{{ url_for('classifier_dataset', hid=c.id) }}">classifier #{{ c.id }} · {{ c.name }}{{ ' · disabled' if not c.enabled else '' }}</a>{% endfor %}
       </div>
       {% endif %}
     </div>

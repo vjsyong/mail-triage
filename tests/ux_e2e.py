@@ -847,6 +847,108 @@ class WorkbenchTests(unittest.TestCase):
         self.assertNotIn(b'low-confidence', page.lower())
         self.assertIn(b'Kept, guarded and already-filed', page)
 
+    # ---- WP3: category seeds, draft links and assistant contexts ---------
+
+    def test_seed_flow_get_is_readonly_and_disabled(self):
+        store.set_setting('categories', ['Action', 'Receipt', 'Personal'])
+        store.set_setting('category_folders', {'Receipt': 'Receipts'})
+        before = (store.all_settings(), store.list_flows(), store.messages())
+        # mapped category -> one move step, disabled, server-derived banner
+        page = self.client.get('/flows/new?category=Receipt')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'>Disabled<', page.data)
+        self.assertIn(b'"type": "move"', page.data)
+        self.assertIn(b'"folder": "Receipts"', page.data)
+        self.assertIn(b'value="category" selected', page.data)
+        self.assertIn(b'name="cond_value_0" value="Receipt"', page.data)
+        self.assertIn(b'seeded from a category', page.data)
+        self.assertNotIn(b'Add a step before saving', page.data)
+        # unmapped configured category -> no step + visible instruction
+        page = self.client.get('/flows/new?category=Personal')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'var steps = [];', page.data)
+        self.assertIn(b'Add a step before saving', page.data)
+        # case-insensitive resolves to the canonical stored name
+        page = self.client.get('/flows/new?category=receipt')
+        self.assertIn(b'name="cond_value_0" value="Receipt"', page.data)
+        # unknown and map-only categories redirect without writes
+        self.assertEqual(self.client.get('/flows/new?category=Nope').status_code, 303)
+        self.assertEqual(self.client.get('/flows/new?category=MapOnly').status_code, 303)
+        after = (store.all_settings(), store.list_flows(), store.messages())
+        self.assertEqual(before, after)
+
+    def test_seed_flow_ambiguous_category_redirects(self):
+        store.set_setting('categories', ['Promo', 'promo'])
+        store.set_setting('category_folders', {'Promo': 'P1', 'promo': 'P2'})
+        self.assertEqual(self.client.get('/flows/new?category=PROMO').status_code, 303)
+        # exact match still resolves despite the case variant
+        page = self.client.get('/flows/new?category=Promo')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'name="cond_value_0" value="Promo"', page.data)
+
+    def test_seed_flow_escapes_untrusted_values(self):
+        store.set_setting('categories', ['Evil', 'Quote"Name'])
+        store.set_setting('category_folders',
+                          {'Evil': '</script><script>alert(1)</script>',
+                           'Quote"Name': 'Back\\slash & <b>'})
+        page = self.client.get('/flows/new?category=Evil').data
+        self.assertNotIn(b'</script><script>alert(1)', page)
+        self.assertIn(b'\\u003c/script', page)
+        page = self.client.get('/flows/new?category=Quote%22Name').data
+        self.assertNotIn(b'<script>alert(1)', page)
+        self.assertIn(b'\\u003cb\\u003e', page)
+        self.assertIn(b'name="cond_value_0" value="Quote&#34;Name"', page)
+
+    def test_seed_flow_save_enables_without_global_or_map_change(self):
+        store.set_setting('categories', ['Receipt'])
+        store.set_setting('category_folders', {'Receipt': 'Receipts'})
+        store.set_setting('flows_apply', False)
+        store.set_setting('llm_apply', False)
+        self.assertEqual(self.client.get('/flows/new?category=Receipt').status_code, 200)
+        response = self.client.post('/flows/new', data={
+            'name': 'File Receipt', 'match_mode': 'all', 'enabled': '1',
+            'cond_kind_0': 'category', 'cond_value_0': 'Receipt', 'cond_score_0': '',
+            'steps_json': json.dumps([{'type': 'move', 'folder': 'Receipts'}])},
+            follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        flows = [f for f in store.list_flows() if f['name'] == 'File Receipt']
+        self.assertEqual(len(flows), 1)
+        self.assertTrue(flows[0]['enabled'])
+        self.assertIn('"kind": "category"', flows[0]['conditions'])
+        self.assertIn('"type": "move"', flows[0]['actions'])
+        # global modes and the destination map are untouched
+        self.assertFalse(store.get_setting('flows_apply'))
+        self.assertFalse(store.get_setting('llm_apply'))
+        self.assertEqual(store.get_setting('category_folders'), {'Receipt': 'Receipts'})
+
+    def test_category_page_links_seed_and_classifier_dataset(self):
+        store.set_setting('categories', ['Receipt'])
+        store.set_setting('category_folders', {'Receipt': 'Receipts'})
+        hid = store.add_heuristic('Rec clf', 'logreg', 'Receipt')
+        page = self.client.get('/automation/categories').data
+        self.assertIn(b'href="/flows/new?category=Receipt"', page)
+        self.assertIn(('href="/classifiers/%d/dataset"' % hid).encode(), page)
+
+    def test_flow_editor_draft_modes_link_shared_destination(self):
+        page = self.client.get('/flows/new').data
+        self.assertIn(b'Saved to the shared draft destination', page)
+        self.assertIn(b'#draft-destination', page)
+
+    def test_assistant_context_new_automation_pages(self):
+        self.assertEqual(engine.assistant_page_context('/automation')[3], 'page:automation')
+        self.assertEqual(engine.assistant_page_context('/automation/categories')[3],
+                         'page:automation/categories')
+        self.assertEqual(engine.assistant_page_context('/automation/controls')[3],
+                         'page:automation/controls')
+        draft = engine.assistant_page_context('/templates')[2]
+        self.assertIn('DRAFTING', draft)
+        self.assertIn('draft destination', draft)
+        settings = engine.assistant_page_context('/settings')[2]
+        self.assertIn('Automation workspace', settings)
+        # existing editor keys are preserved
+        self.assertEqual(engine.assistant_page_context('/flows/new')[3], 'flow:new')
+        self.assertEqual(engine.assistant_page_context('/automation')[0], 'page')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
