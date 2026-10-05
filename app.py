@@ -9757,7 +9757,7 @@ ACCOUNT_NEW_TMPL = """
     <div class="note" id="note-{{ key }}" style="margin-top:8px;display:none">{{ pr.register_notes }}</div>
     {% endfor %}
     <div class="grid2" style="margin-top:4px">
-      <div><label for="email">Email address</label><input type="text" id="email" name="email" placeholder="you@example.com" required></div>
+      <div><label for="email">Email address</label><input type="text" id="email" name="email" placeholder="you@example.com" required oninput="autoProvider()"></div>
       <div><label for="password">Local password <span class="sub">(between the app and the proxy)</span></label>
         <div class="row" style="flex-wrap:nowrap"><input type="text" id="password" name="password" value="{{ default_password }}">
         <span class="copy" onclick="document.getElementById('password').value='{{ default_password }}'">reset</span></div></div>
@@ -9845,6 +9845,37 @@ function toggleProvider(){
     if(reuseBox.checked){ reuseBox.checked = false; applyReuse(false); }
   }
   if(reuseBox.checked){ applyReuse(true); }
+}
+var PROVIDER_EMAIL_DOMAINS = {
+  gmail: ["gmail.com", "googlemail.com", "google.com"],
+  outlook: ["outlook.com", "hotmail.com", "hotmail.co.uk", "live.com", "live.co.uk", "msn.com", "outlook.co.uk", "outlook.de", "office365.com"],
+  fastmail: ["fastmail.com", "fastmail.fm", "fastmail.net", "fastmail.us"],
+  yahoo: ["yahoo.com", "yahoo.co.uk", "yahoo.ca", "yahoo.com.au", "ymail.com", "rocketmail.com"]
+};
+function providerFromEmail(value){
+  var at = value.indexOf('@');
+  if(at < 0) return null;
+  var domain = value.slice(at + 1).trim().toLowerCase();
+  if(!domain) return null;
+  var match = null;
+  for(var key in PROVIDER_EMAIL_DOMAINS){
+    var domains = PROVIDER_EMAIL_DOMAINS[key];
+    for(var i = 0; i < domains.length; i++){
+      var d = domains[i];
+      if(d === domain || (domain.length >= 3 && d.indexOf(domain) === 0)){
+        if(match && match !== key) return null;
+        match = key;
+        break;
+      }
+    }
+  }
+  return match;
+}
+function autoProvider(){
+  var key = providerFromEmail(document.getElementById('email').value);
+  if(!key) return;
+  var sel = document.getElementById('provider');
+  if(sel.value !== key){ sel.value = key; toggleProvider(); }
 }
 toggleProvider();
 </script>
