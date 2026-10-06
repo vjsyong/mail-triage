@@ -1,0 +1,99 @@
+{
+ "ac6_teacher": {
+  "batches": [
+   {
+    "accepted": 3,
+    "rejected": 3,
+    "seed": 11
+   },
+   {
+    "accepted": 3,
+    "rejected": 3,
+    "seed": 22
+   },
+   {
+    "accepted": 3,
+    "rejected": 3,
+    "seed": 33
+   }
+  ],
+  "generated": 18,
+  "role": "generation_teacher",
+  "totals": {
+   "accepted": 9,
+   "generated": 18,
+   "rejected": 9
+  }
+ },
+ "ac7_eval": {
+  "adapter": {
+   "decision_accuracy": 0.833,
+   "decision_n": 6,
+   "tool_accuracy": 0.5,
+   "tool_n": 2
+  },
+  "base": {
+   "decision_accuracy": 1.0,
+   "decision_n": 6,
+   "n": 8,
+   "tool_accuracy": 0.5,
+   "tool_n": 2
+  },
+  "config": {
+   "do_sample": false,
+   "max_new_tokens": 256,
+   "temperature": 0.0
+  },
+  "honest_note": "adapter regressed on the 6-case decision probe; tool accuracy 0.5 both. Tiny smoke only, not a quality claim."
+ },
+ "ac7_train": {
+  "all_losses_finite": true,
+  "base_weight_max_delta": 0.0,
+  "lora_weight_norm": 28.243676495829646,
+  "loss_after": 0.181096,
+  "loss_before": 3.071715,
+  "loss_first": 3.071715,
+  "loss_last": 0.38836,
+  "loss_reload": 0.181096,
+  "optimizer_steps_performed": 20,
+  "parameters": {
+   "total": 2529314816,
+   "trainable": 12558336,
+   "trainable_fraction": 0.004965
+  },
+  "reload_matches": true,
+  "steps": 20,
+  "weights_changed": true
+ },
+ "committed_samples": [
+  "benchmarks/v3/training/samples/sft_case_r0000_native_training.json",
+  "benchmarks/v3/training/samples/sft_wf_sort_ambiguous_training.json",
+  "benchmarks/v3/training/samples/teacher/teacher_generations.json"
+ ],
+ "gpu": {
+  "device": "cuda:0",
+  "name": "NVIDIA GeForce RTX 3090",
+  "peak_mem_mib": 13344
+ },
+ "head_at_run": "fb3f929c1cbfe7e4cc4ef9a65ea46d911a314a31",
+ "human_seal": false,
+ "kind": "mail-sft-gpu-evidence",
+ "model": {
+  "id": "openbmb/MiniCPM5-2B",
+  "params_B": 2.517,
+  "revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+  "weights_sha256": "3beb537afa07e13bc02c63ab265c03289c2dbf23bcfadfe42244f0ca219202e8"
+ },
+ "notes": "Weights, env overlay and verbose artifacts are outside Git; only compact public synthetic samples and this summary are committed.",
+ "review_status": "draft",
+ "run_dir": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-1",
+ "test_qualified": false,
+ "train_env": {
+  "accelerate": "1.15.0",
+  "base_venv": "/home/xrim/jev-sweep/venv-cuda",
+  "overlay": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/train-env",
+  "peft": "0.21.2",
+  "torch": "2.14.0+cu130",
+  "transformers": "5.17.0"
+ }
+}

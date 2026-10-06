@@ -1,0 +1,195 @@
+{
+ "batches": [
+  {
+   "accepted": 3,
+   "generations": [
+    {
+     "accepted": true,
+     "body": "Dear Customer,\n\nPlease be advised that invoice INV-4471 for 120 is overdue.",
+     "brief": "invoice_due",
+     "problems": [],
+     "seed": 11,
+     "subject": "Overdue Invoice Reminder"
+    },
+    {
+     "accepted": true,
+     "body": "Thank you for your purchase. Your receipt details are as follows:\n\nPO-88213\n54.20",
+     "brief": "receipt",
+     "problems": [],
+     "seed": 11,
+     "subject": "Purchase Receipt Confirmation"
+    },
+    {
+     "accepted": false,
+     "body": "Subject: Monthly Shop Newsletter\n\n[body that includes AUTUMN25]\n\nWe need to make sure the body includes the exact phrase \"AUTUMN25\". We can make up the rest of the email content, but we must keep it realistic and short. The user says \"Write a monthly",
+     "brief": "newsletter",
+     "problems": [
+      "subject_length",
+      "subject_echo",
+      "refusal_or_leak:blank line"
+     ],
+     "seed": 11,
+     "subject": "' followed by a blank line and the email body. We need to invent no other text. So we need to write an email that includes \"AUTUMN25\" verbatim. The subject line should be something like \"Subject: Monthly Shop Newsletter\" or similar? But the user didn't specify the subject line content, just that it must begin with 'Subject:' and then a blank line and the email body. We need to make sure we only output that. We need to be careful not to add any other text. So we'll produce:"
+    },
+    {
+     "accepted": false,
+     "body": "Lisbon, 03:14.",
+     "brief": "login_alert",
+     "problems": [
+      "body_too_short"
+     ],
+     "seed": 11,
+     "subject": "Account Security Sign-In Alert"
+    },
+    {
+     "accepted": false,
+     "body": "Let's craft a simple email. Subject: Request for Project Review Meeting. Then body: Something like \"I would like to request a 30-minute project review meeting for Q4.\" That includes the facts verbatim. But we need to ensure that we only include those facts and no extra. The instruction says \"Include exactly these facts verbatim: 30, Q4.\" So we must include the numbers \"30\" and \"Q4\" exactly as they are. We can also include other text",
+     "brief": "meeting_request",
+     "problems": [
+      "subject_length",
+      "subject_echo",
+      "refusal_or_leak:blank line"
+     ],
+     "seed": 11,
+     "subject": "' followed by a blank line and the email body. We need to include the facts \"30\" and \"Q4\" exactly as given. We must not invent other text. So we need to make sure that the words \"30\" and \"Q4\" appear exactly."
+    },
+    {
+     "accepted": true,
+     "body": "You're welcome. Let's have dinner on Saturday.",
+     "brief": "personal_invitation",
+     "problems": [],
+     "seed": 11,
+     "subject": "Dinner Invitation"
+    }
+   ],
+   "rejected": 3,
+   "seed": 11
+  },
+  {
+   "accepted": 3,
+   "generations": [
+    {
+     "accepted": true,
+     "body": "Please be advised that INV-4471 is overdue and the amount is 120.",
+     "brief": "invoice_due",
+     "problems": [],
+     "seed": 22,
+     "subject": "Overdue Invoice Reminder"
+    },
+    {
+     "accepted": false,
+     "body": "PO-88213, 54.20",
+     "brief": "receipt",
+     "problems": [
+      "body_too_short"
+     ],
+     "seed": 22,
+     "subject": "Purchase Receipt Confirmation"
+    },
+    {
+     "accepted": true,
+     "body": "Hello,\n\nThis month we are excited to announce AUTUMN25. Stay tuned for more updates.",
+     "brief": "newsletter",
+     "problems": [],
+     "seed": 22,
+     "subject": "Monthly Shop Newsletter"
+    },
+    {
+     "accepted": true,
+     "body": "This is a security alert for your account. The following information has been recorded: Lisbon, 03:14. Please review your account settings promptly.",
+     "brief": "login_alert",
+     "problems": [],
+     "seed": 22,
+     "subject": "Account Security Sign-In Alert"
+    },
+    {
+     "accepted": false,
+     "body": "Please let me know about the 30, Q4.",
+     "brief": "meeting_request",
+     "problems": [
+      "body_too_short"
+     ],
+     "seed": 22,
+     "subject": "Request for Project Review Meeting"
+    },
+    {
+     "accepted": false,
+     "body": "You are invited to dinner on Saturday.",
+     "brief": "personal_invitation",
+     "problems": [
+      "body_too_short"
+     ],
+     "seed": 22,
+     "subject": "Invitation to Dinner"
+    }
+   ],
+   "rejected": 3,
+   "seed": 22
+  },
+  {
+   "accepted": 3,
+   "generations": [
+    {
+     "accepted": true,
+     "body": "Dear Customer,\n\nThis is a reminder regarding invoice INV-4471 for an amount of 120. Please ensure payment is made by the due date.",
+     "brief": "invoice_due",
+     "problems": [],
+     "seed": 33,
+     "subject": "Overdue Invoice Reminder"
+    },
+    {
+     "accepted": false,
+     "body": "PO-88213, 54.20",
+     "brief": "receipt",
+     "problems": [
+      "body_too_short"
+     ],
+     "seed": 33,
+     "subject": "Purchase Receipt Confirmation"
+    },
+    {
+     "accepted": true,
+     "body": "Hello, our autumn season is here. We're excited to announce AUTUMN25 as our new highlight. Stay tuned for more updates.",
+     "brief": "newsletter",
+     "problems": [],
+     "seed": 33,
+     "subject": "Monthly Newsletter"
+    },
+    {
+     "accepted": false,
+     "body": "Lisbon, 03:14.",
+     "brief": "login_alert",
+     "problems": [
+      "body_too_short"
+     ],
+     "seed": 33,
+     "subject": "Account Security Sign-in Alert"
+    },
+    {
+     "accepted": true,
+     "body": "Please let me know if you are available for a 30-minute project review meeting in Q4.",
+     "brief": "meeting_request",
+     "problems": [],
+     "seed": 33,
+     "subject": "Request for 30-minute project review meeting in Q4"
+    },
+    {
+     "accepted": false,
+     "body": "You are invited to dinner on Saturday.",
+     "brief": "personal_invitation",
+     "problems": [
+      "body_too_short"
+     ],
+     "seed": 33,
+     "subject": "Invitation to Dinner"
+    }
+   ],
+   "rejected": 3,
+   "seed": 33
+  }
+ ],
+ "model": "openbmb/MiniCPM5-2B",
+ "model_revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+ "system_prompt": "You write short, realistic business and personal emails for a mail triage dataset. Output exactly a subject line beginning with 'Subject:' followed by a blank line and the email body. Invent no other text.",
+ "temperature": 0.8
+}

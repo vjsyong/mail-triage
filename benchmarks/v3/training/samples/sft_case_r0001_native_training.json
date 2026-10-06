@@ -1,0 +1,52 @@
+{
+ "decision": {
+  "category": "Invoice",
+  "needs_reply": false,
+  "reason": "Payment confirmation ORD-0101 fits the Invoice category: its category definition",
+  "summary": "Payment confirmation ORD-0101"
+ },
+ "example_id": "sft_case_r0001_native_training",
+ "generation_domain": "training",
+ "identities": {
+  "model": "openbmb/MiniCPM5-2B",
+  "model_revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+  "prompt_revision": "mail-sft-prompt1",
+  "schema_revision": "mail-sft-0.1",
+  "taxonomy_revision": "mail-sft-tax1",
+  "template_revision": "minicpm5-native-v1"
+ },
+ "lineage_id": "lin_r0001",
+ "mask": [
+  false,
+  false,
+  true
+ ],
+ "messages": [
+  {
+   "content": "You triage incoming email for Daniel Ferreira. Reply with a single JSON object and nothing else. Shape: {\"category\": one of [Client, Invoice, Admin, Personal, Newsletter, Promo], \"needs_reply\": true|false, \"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", \"reason\": \"why that category, max 15 words\"}",
+   "role": "system",
+   "supervised": false
+  },
+  {
+   "content": "From: billing@summit-software.com\nTo: daniel.ferreira@ferreira-studio.com\nSubject: Payment confirmation ORD-0101\nDate: Mon, 21 Jul 2025 13:15:00 +0000\n\nHi Daniel,\n\nWe have received €860.40 for hosting plan (ORD-0101) on 18 July 2025. Keep this email for your records; there is nothing you need to do.\n\nAutomated confirmation from Summit Software.\n\nThank you for your prompt attention.",
+   "role": "user",
+   "supervised": false
+  },
+  {
+   "content": "{\"category\": \"Invoice\", \"needs_reply\": false, \"summary\": \"Payment confirmation ORD-0101\", \"reason\": \"Payment confirmation ORD-0101 fits the Invoice category: its category definition\"}",
+   "role": "assistant",
+   "supervised": true
+  }
+ ],
+ "metadata": {
+  "generation_domain": "training",
+  "human_seal": false,
+  "provenance": "synthetic_authored",
+  "review_status": "draft",
+  "test_qualified": false
+ },
+ "native_render": "<s><|im_start|>system\nYou triage incoming email for Daniel Ferreira. Reply with a single JSON object and nothing else. Shape: {\"category\": one of [Client, Invoice, Admin, Personal, Newsletter, Promo], \"needs_reply\": true|false, \"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", \"reason\": \"why that category, max 15 words\"}<|im_end|>\n<|im_start|>user\nFrom: billing@summit-software.com\nTo: daniel.ferreira@ferreira-studio.com\nSubject: Payment confirmation ORD-0101\nDate: Mon, 21 Jul 2025 13:15:00 +0000\n\nHi Daniel,\n\nWe have received €860.40 for hosting plan (ORD-0101) on 18 July 2025. Keep this email for your records; there is nothing you need to do.\n\nAutomated confirmation from Summit Software.\n\nThank you for your prompt attention.<|im_end|>\n<|im_start|>assistant\n<think>\nMatch the message to the single best authored category.\n</think>\n\n{\"category\": \"Invoice\", \"needs_reply\": false, \"summary\": \"Payment confirmation ORD-0101\", \"reason\": \"Payment confirmation ORD-0101 fits the Invoice category: its category definition\"}<|im_end|>\n",
+ "source_id": "src_f556de0347640308",
+ "task": "decision",
+ "tools": []
+}

@@ -1,0 +1,218 @@
+{
+ "all_exit_zero": true,
+ "committed_samples": {
+  "billing_reply_pair": [
+   "dec_src_39d2404421964920.json",
+   "dec_src_177d465a02111628.json"
+  ],
+  "files": [
+   "dec_src_177d465a02111628.json",
+   "dec_src_39d2404421964920.json",
+   "dec_src_6cc3f33347ec36b6.json",
+   "dlg_dlg_b_invoice_due_11_0.json",
+   "dlg_dlg_b_invoice_due_11_1.json"
+  ],
+  "include_action_no_reply": "dec_src_6cc3f33347ec36b6.json",
+  "round4_dir": "benchmarks/v3/training/samples/round4"
+ },
+ "correction": "S1 attempt2: real Action work-request (review/complete, no email reply) and completed-payment Receipt; visible category-evidence checks added.",
+ "dialogue_rollout": {
+  "dev": {
+   "accepted": 4,
+   "clarification_dialogues": 4,
+   "rejected": 4
+  },
+  "train": {
+   "accepted": 6,
+   "clarification_dialogues": 6,
+   "rejected": 6
+  }
+ },
+ "eval": {
+  "adapter_files_sha256": {
+   "README.md": "7c72c464106496a7913f8d6efbc7b0b0d7d3e27303413cb038114c6a2a04efe5",
+   "adapter_config.json": "e12313899208e07557a0dd128ee9c1c1a6b8c0b19dadb2552debdced81db71df",
+   "adapter_model.safetensors": "49dfb3e1141c24fcdd2c1b04e3efa20adb38212d9a11330433e96769bb849b9d",
+   "chat_template.jinja": "bc1f78ef8a86b6bdf64a056cf89dd0ac506db4f198ab363d85168e2500ab44dd",
+   "tokenizer.json": "3e065a558a034185fe299917b398685c1facd0169a9eea1e629eb30c171fed81",
+   "tokenizer_config.json": "b89503c3e5070c6b6d33daf2e20cb4a5c88537c1670d9b7e0cfb4506a61448a9"
+  },
+  "base": {
+   "category_accuracy": 0.958,
+   "clarification_dialogues": 8,
+   "decision_n": 24,
+   "needs_reply_accuracy": 1.0,
+   "valid_json_rate": 1.0,
+   "workflow_grounded_rate": 0.5,
+   "workflow_n": 8,
+   "workflow_state_match_rate": 0.5
+  },
+  "candidate": {
+   "category_accuracy": 1.0,
+   "clarification_dialogues": 8,
+   "decision_n": 24,
+   "needs_reply_accuracy": 1.0,
+   "valid_json_rate": 1.0,
+   "workflow_grounded_rate": 0.5,
+   "workflow_n": 8,
+   "workflow_state_match_rate": 0.5
+  },
+  "honest_note": "Corrected-data smoke. BASE cat .958/reply 1.0/workflow grounded .5; candidate cat 1.0/reply 1.0/workflow .5. Tiny smoke; no quality claim."
+ },
+ "export": {
+  "contamination": [],
+  "counts": {
+   "development": {
+    "accepted": 24,
+    "rejected": 4,
+    "rejected_reasons": [
+     "no_dialogue"
+    ]
+   },
+   "training": {
+    "accepted": 36,
+    "rejected": 6,
+    "rejected_reasons": [
+     "no_dialogue"
+    ]
+   }
+  },
+  "cross_task_linkage": {
+   "development": [],
+   "training": []
+  },
+  "pairs": {
+   "development": 4,
+   "training": 6
+  }
+ },
+ "frozen_code": {
+  "head": "7074f494178d8dba821a28cd529fe992ab49c0ce",
+  "tree": "c3b83b1fc99a5b4936098950a9a953ef7b0644f1",
+  "worktree_clean": true
+ },
+ "human_seal": false,
+ "kind": "mail-sft-gpu-evidence-round4",
+ "model": {
+  "base_weights_sha256": "636294b1fb9bc81fbe1d80e0f5c99a00ee0e3574debacfe46005576466d257ee",
+  "id": "openbmb/MiniCPM5-2B",
+  "revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52"
+ },
+ "notes": "Synthetic DRAFT. Run8 supersedes run7 (whose task_request/receipt variants were contradictory). Round1/2/3 preserved for audit. Weights/venvs/logs outside Git.",
+ "producer_hashes": {
+  "code_fingerprints": {
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/__init__.py": "edd97e790f17f27db1fb86f8d461af43ef3670a45ffb7619739166315c7add57",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/cli.py": "70b4282a5a4910fa8b94d9ec395446827f0db13ea58912370efc6ed856520a83",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/engine_contract.py": "8d4ffca52fcdfdcd438504997cf43aa0a0a37a9843912b68962c16e4681fb03f",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/export.py": "0bb35056fa077794a357615e1bc83a8576162bc5e5252e391ff347d215a420e8",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/messages.py": "e61226fb830f6fddf7ff831c3dde95bb278f11fc520660b98aec1a6ef4208dd1",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/minicpm.py": "3000fb675c1d5dedd496b7e49285b861b50caa348b56b58edb7b466d99ef1a65",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/native_state.py": "fc89287d07d088d111355f8b80a9932b9d80f8b23f7d216e8f500beeb30d5ae8",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/reply_gold.py": "eedc4b1a8d0c3154f9d0767db20bea8557c42f0b6f58e9e8986b28474d713a20",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/samples.py": "ae20030ec5c8f21f060ef9f3f0494f3957b8fb5acbf68d6f5818adf3e5950b90",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/schema.py": "0cb75fcb8a8aeaf23a1dfa8c025f33fe026f7a46411ef45d2d6023b426da2142",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/taxonomies.py": "79334e1ef6100f61319b54a1033eef52b71b1da8956bd7f64b549c970720ac93",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/benchmarks/v3/training/verify.py": "55f72f332a6b60262a9dc93a2c0ee46670591c74fc4fb23024383fd4482aa578",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/engine.py": "2a938e548dba382f0bf331508148c18cfde1c5a56aa9b2901c3a1960bce449a3",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/briefs.py": "e56e5162001b43f93c158f2772fa4767a0bda5e61161c1841f81c7b5cc01b9a8",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/evaluate.py": "46e5d148812c46005c062e3f68bc5e1b1ccdc01fbe6a9b5aa297be44fb1f68a6",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/generate_teacher.py": "4f2428352ccdae1933d9164d54aecb4c33d1818755213eba4d415a4b96831d99",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/lora_common.py": "7f90651f2068c5b2fc63220f0f3d4da7e7138fb08733ff636f53182454222070",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/rollout_dialogue.py": "89cb809c4c583ea1b12eef16f1e079bf98e1feb76b61082a5d023fd8338aa5dc",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/run_slice.py": "4ec1b0e0878d84499327ddacc2200bb441a527ad883d6f30780ea03ce09ac454",
+   "/home/xrim/mail-triage-wt/mail-triage-sft/training/mail/train_lora.py": "5651dcb7c04d75c631ef7cefe4d529375cb30a757076bcf99f046590818c5199"
+  },
+  "examples_sha256": "4b3368035bcd332ea5707bf54cf65c2d4af540314cd96c81b833b0198d9720dd",
+  "native_template_sha256": "bc1f78ef8a86b6bdf64a056cf89dd0ac506db4f198ab363d85168e2500ab44dd",
+  "reference_template_sha256": "07fcbd94a2e7ca9af3d57427f8794aeb6b4868d1e3fcaa67ad9bf690dae65b1f"
+ },
+ "review_status": "draft",
+ "run_dir": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8",
+ "stages": {
+  "briefs": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/briefs.exit"
+  },
+  "briefs_dev": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/briefs_dev.exit"
+  },
+  "build_slice": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/build_slice.exit"
+  },
+  "dialogues": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/dialogues.exit"
+  },
+  "dialogues_dev": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/dialogues_dev.exit"
+  },
+  "evaluate": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/evaluate.exit"
+  },
+  "teacher": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/teacher.exit"
+  },
+  "teacher_dev": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/teacher_dev.exit"
+  },
+  "train": {
+   "exit": 0,
+   "exit_file": "/home/xrim/datasets/benchmark-v3/mail-sft-slice/run-20261005-8/train.exit"
+  }
+ },
+ "supersedes": [
+  "benchmarks/v3/training/samples/evidence_round3.json",
+  "benchmarks/v3/training/samples/evidence_round2.json",
+  "benchmarks/v3/training/samples/training_evidence.json"
+ ],
+ "teacher": {
+  "dev": {
+   "accepted": 24,
+   "briefs": 24,
+   "counterfactual_pairs_with_both": 6,
+   "reply_false": 18,
+   "reply_true": 6
+  },
+  "train": {
+   "accepted": 36,
+   "briefs": 36,
+   "counterfactual_pairs_with_both": 9,
+   "reply_false": 27,
+   "reply_true": 9
+  }
+ },
+ "test_qualified": false,
+ "train": {
+  "adapter_logits_delta": 38.78125,
+  "all_losses_finite": true,
+  "base_weight_max_delta": 0.0,
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "loss_first": 2.240669,
+  "loss_last": 0.040068,
+  "loss_reload": 0.026741,
+  "optimizer_steps_performed": 20,
+  "parameters": {
+   "total": 2529314816,
+   "trainable": 12558336,
+   "trainable_fraction": 0.004965
+  },
+  "peak_mem_mib": 20678,
+  "reload_matches": true,
+  "steps": 20,
+  "task_counts": {
+   "decision": 30,
+   "workflow": 6
+  },
+  "tasks_in_losses": [
+   "decision",
+   "workflow"
+  ],
+  "weights_changed": true
+ }
+}

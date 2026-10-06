@@ -1,0 +1,153 @@
+{
+ "example": {
+  "example_id": "dec_src_39d2404421964920",
+  "family": "invoice_due",
+  "generation_domain": "training",
+  "generation_domain_sha256": "0672ad7d380ad8841aaae58ee325def707a8c23816e925484c1565e6b55ab3fd",
+  "identities": {
+   "model": "openbmb/MiniCPM5-2B",
+   "model_revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52",
+   "prompt_revision": "mail-sft-prompt2",
+   "schema_revision": "mail-sft-0.1",
+   "taxonomy_revision": "mail-sft-tax1",
+   "template_revision": "minicpm5-native-v1"
+  },
+  "lineage_id": "lin_ev_invoice_due_11",
+  "messages": [
+   {
+    "content": "You triage incoming email for Priya Raman.\nCategories (choose/route by these definitions, independent of display names):\n- Action: Mail that asks the owner to do something or reply.\n- Receipt: A confirmation that a purchase, order or payment completed.\n- Billing: A bill, invoice or amount owed, including overdue reminders.\n- Promo: Bulk marketing, offers and newsletters.\n- Personal: A personal note from a known contact.\n- Security: An account or login security alert.\nReply with a single JSON object: {\"category\": <name>, \"needs_reply\": true|false, \"summary\": \"<one sentence>\", \"reason\": \"<why, max 15 words>\"}.",
+    "role": "system",
+    "supervised": false
+   },
+   {
+    "content": "From: invoice.due@beaconpublishing.com\nTo: priya@acme.example\nSubject: Overdue Invoice Reminder\nDate: Mon, 1 Sep 2025 09:00:00 +0000\n\nPlease reply to confirm. Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0, Please reply to confirm.",
+    "role": "user",
+    "supervised": false
+   },
+   {
+    "content": "{\"category\": \"Billing\", \"needs_reply\": true, \"summary\": \"Please reply to confirm.\", \"reason\": \"Matches Billing: A bill, invoice or amount owed, including overdue reminders.\"}",
+    "role": "assistant",
+    "supervised": true
+   }
+  ],
+  "metadata": {
+   "human_seal": false,
+   "provenance": {
+    "attempt": 0,
+    "finish_reason": "stop",
+    "kind": "teacher_generation",
+    "raw_completion": "Subject: Overdue Invoice Reminder\nPlease reply to confirm. Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0, Please reply to confirm.",
+    "seed": 11,
+    "teacher": {
+     "model": "openbmb/MiniCPM5-2B",
+     "revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52"
+    },
+    "temperature": 0.8,
+    "usage": {
+     "completion_tokens": 44,
+     "prompt_tokens": 126,
+     "total_tokens": 170
+    },
+    "verified": true,
+    "visible_reply_obligation": true
+   },
+   "review_status": "draft",
+   "test_qualified": false
+  },
+  "role": "training",
+  "schema_version": "mail-sft-0.1",
+  "source_email": {
+   "body": "Please reply to confirm. Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0, Please reply to confirm.",
+   "date": "Mon, 1 Sep 2025 09:00:00 +0000",
+   "from_addr": "invoice.due@beaconpublishing.com",
+   "subject": "Overdue Invoice Reminder",
+   "to_addr": "priya@acme.example"
+  },
+  "source_id": "src_39d2404421964920",
+  "source_text": "You triage incoming email for Priya Raman.\nCategories (choose/route by these definitions, independent of display names):\n- Action: Mail that asks the owner to do something or reply.\n- Receipt: A confirmation that a purchase, order or payment completed.\n- Billing: A bill, invoice or amount owed, including overdue reminders.\n- Promo: Bulk marketing, offers and newsletters.\n- Personal: A personal note from a known contact.\n- Security: An account or login security alert.\nReply with a single JSON object: {\"category\": <name>, \"needs_reply\": true|false, \"summary\": \"<one sentence>\", \"reason\": \"<why, max 15 words>\"}.\nFrom: invoice.due@beaconpublishing.com\nTo: priya@acme.example\nSubject: Overdue Invoice Reminder\nDate: Mon, 1 Sep 2025 09:00:00 +0000\n\nPlease reply to confirm. Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0, Please reply to confirm.",
+  "task": "decision",
+  "tools": []
+ },
+ "native_render": "<s><|im_start|>system\nYou triage incoming email for Priya Raman.\nCategories (choose/route by these definitions, independent of display names):\n- Action: Mail that asks the owner to do something or reply.\n- Receipt: A confirmation that a purchase, order or payment completed.\n- Billing: A bill, invoice or amount owed, including overdue reminders.\n- Promo: Bulk marketing, offers and newsletters.\n- Personal: A personal note from a known contact.\n- Security: An account or login security alert.\nReply with a single JSON object: {\"category\": <name>, \"needs_reply\": true|false, \"summary\": \"<one sentence>\", \"reason\": \"<why, max 15 words>\"}.<|im_end|>\n<|im_start|>user\nFrom: invoice.due@beaconpublishing.com\nTo: priya@acme.example\nSubject: Overdue Invoice Reminder\nDate: Mon, 1 Sep 2025 09:00:00 +0000\n\nPlease reply to confirm. Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0, Please reply to confirm.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n{\"category\": \"Billing\", \"needs_reply\": true, \"summary\": \"Please reply to confirm.\", \"reason\": \"Matches Billing: A bill, invoice or amount owed, including overdue reminders.\"}<|im_end|>\n",
+ "schema_version": "mail-sft-0.1",
+ "verification_context": {
+  "gold": null,
+  "public_taxonomy": {
+   "categories": [
+    {
+     "definition": "Mail that asks the owner to do something or reply.",
+     "name": "Action"
+    },
+    {
+     "definition": "A confirmation that a purchase, order or payment completed.",
+     "name": "Receipt"
+    },
+    {
+     "definition": "A bill, invoice or amount owed, including overdue reminders.",
+     "name": "Billing"
+    },
+    {
+     "definition": "Bulk marketing, offers and newsletters.",
+     "name": "Promo"
+    },
+    {
+     "definition": "A personal note from a known contact.",
+     "name": "Personal"
+    },
+    {
+     "definition": "An account or login security alert.",
+     "name": "Security"
+    }
+   ],
+   "revision": "mail-sft-tax1"
+  },
+  "source": {
+   "action": "move",
+   "brief_id": "b_invoice_due_11_0",
+   "domain": "training",
+   "email": {
+    "body": "Please reply to confirm. Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0, Please reply to confirm.",
+    "date": "Mon, 1 Sep 2025 09:00:00 +0000",
+    "from_addr": "invoice.due@beaconpublishing.com",
+    "subject": "Overdue Invoice Reminder",
+    "to_addr": "priya@acme.example"
+   },
+   "family": "invoice_due",
+   "folder": "Billing",
+   "intent": {
+    "category": "Billing",
+    "needs_reply": true,
+    "observable": "visible"
+   },
+   "lineage_id": "lin_ev_invoice_due_11",
+   "no_reply_phrase": null,
+   "owner": "Priya Raman",
+   "pair_id": "ev_invoice_due_11",
+   "provenance": {
+    "attempt": 0,
+    "finish_reason": "stop",
+    "kind": "teacher_generation",
+    "raw_completion": "Subject: Overdue Invoice Reminder\nPlease reply to confirm. Invoice 1187, $299.00, overdue, REF-11-INVOICE_DUE-0, Please reply to confirm.",
+    "seed": 11,
+    "teacher": {
+     "model": "openbmb/MiniCPM5-2B",
+     "revision": "f97400052a43d642bbc6e9975e2397e3ae6a6b52"
+    },
+    "temperature": 0.8,
+    "usage": {
+     "completion_tokens": 44,
+     "prompt_tokens": 126,
+     "total_tokens": 170
+    },
+    "verified": true,
+    "visible_reply_obligation": true
+   },
+   "reply_phrase": "Please reply to confirm",
+   "role": "training",
+   "source_id": "src_39d2404421964920",
+   "variant": 0
+  },
+  "source_id": "src_39d2404421964920",
+  "taxonomy_revision": "mail-sft-tax1"
+ }
+}
