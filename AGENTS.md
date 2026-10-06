@@ -86,7 +86,8 @@ git branch -d <name>
 - `learning.py`, `heuristics.py` - learning loop + fast-path classifiers.
 - `proxy.py` - embedded email-oauth2-proxy manager.
 - `stage_worker.py` - supervised child process running CPU-heavy stages (index,
-  learning) off the web process; `STAGE_CPUS`/`STAGE_NICE`, `STAGE_WORKER=off`.
+  learning) off the web process; the index reads decoded bodies cached by the
+  fetch stage, `STAGE_CPUS`/`STAGE_NICE`, `STAGE_WORKER=off`.
 - `tests/mock_e2e.py` - the suite; `docs/` - design records + research briefs.
 
 ## Conventions that bite

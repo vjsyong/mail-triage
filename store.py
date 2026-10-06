@@ -194,6 +194,12 @@ CREATE TABLE IF NOT EXISTS stage_state (
     state TEXT NOT NULL DEFAULT '{}',
     updated_at INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_bodies (
+    message_id INTEGER PRIMARY KEY,
+    text TEXT NOT NULL DEFAULT '',
+    chars INTEGER NOT NULL DEFAULT 0,
+    fetched_at INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS heuristics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL DEFAULT '',
@@ -2207,6 +2213,17 @@ def index2_overview(folders=None):
     return [have.get(f, {"folder": f, "status": "new", "messages_indexed": 0}) for f in folders]
 
 
+def index2_state_status(folder, status):
+    """Set just the completeness status for a folder (the index stage owns it;
+    the scan cursor stays untouched)."""
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO index2_state (folder, uidvalidity, last_uid, messages_indexed, status, updated) "
+            "VALUES (?,0,0,0,?,?) ON CONFLICT(folder) DO UPDATE SET "
+            "status=excluded.status, updated=excluded.updated",
+            (folder, status, int(time.time())))
+
+
 def meta_get(key, default=None):
     with db() as conn:
         row = conn.execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone()
@@ -2328,6 +2345,81 @@ def unclassified_ids(limit=5000):
         return [r["id"] for r in conn.execute(
             "SELECT id FROM messages WHERE status IN ('new','queued') "
             "AND " + REAL_MSG + " ORDER BY id LIMIT ?", (int(limit),))]
+
+
+def distinct_folders():
+    """Folders that actually hold real messages (DB view of the mailbox)."""
+    with db() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT DISTINCT folder FROM messages WHERE " + REAL_MSG +
+            " AND coalesce(folder,'') != '' ORDER BY folder") if r[0]]
+
+
+# ------------------------------------------------------- body cache (phase 3)
+#
+# The fetch stage stores decoded body text here; the index stage chunks and
+# embeds from this cache and never opens IMAP (docs/pipeline-queue.md).
+
+def set_message_body(message_id, text):
+    """Cache a message's decoded body text (idempotent overwrite)."""
+    text = str(text or "")
+    if not text:
+        return False
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO message_bodies (message_id, text, chars, fetched_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(message_id) DO UPDATE SET text=excluded.text, "
+            "chars=excluded.chars, fetched_at=excluded.fetched_at",
+            (int(message_id), text, len(text), int(time.time())))
+    return True
+
+
+def get_message_body(message_id):
+    """Cached body text, or None when the message has not been fetched yet."""
+    with db() as conn:
+        row = conn.execute("SELECT text FROM message_bodies WHERE message_id=?",
+                           (int(message_id),)).fetchone()
+    return row["text"] if row else None
+
+
+def delete_bodies_for_folder(folder):
+    """Drop cached bodies for a folder (UIDVALIDITY reset)."""
+    with db() as conn:
+        ids = [r[0] for r in conn.execute("SELECT id FROM messages WHERE folder=?",
+                                          (folder,))]
+        if ids:
+            conn.executemany("DELETE FROM message_bodies WHERE message_id=?",
+                             [(i,) for i in ids])
+        return len(ids)
+
+
+def _real_msg(alias="m"):
+    return ("NOT (coalesce(%s.subject,'')='' AND coalesce(%s.from_addr,'')='' "
+            "AND coalesce(%s.msgid,'')='')" % (alias, alias, alias))
+
+
+def messages_missing_chunks(folders, limit=40):
+    """In-scope messages that still need chunking, oldest first."""
+    if not folders:
+        return []
+    with db() as conn:
+        q = ("SELECT m.* FROM messages m WHERE m.folder IN (%s) AND "
+             % ",".join("?" * len(folders)) + _real_msg("m") +
+             " AND NOT EXISTS (SELECT 1 FROM chunks2 c WHERE c.message_id=m.id)"
+             " ORDER BY m.id LIMIT ?")
+        return [dict(r) for r in conn.execute(q, list(folders) + [int(limit)])]
+
+
+def missing_chunks_by_folder(folders):
+    """{folder: n} for in-scope messages lacking chunks (index completeness)."""
+    if not folders:
+        return {}
+    with db() as conn:
+        q = ("SELECT m.folder AS f, COUNT(*) AS n FROM messages m WHERE m.folder IN (%s) AND "
+             % ",".join("?" * len(folders)) + _real_msg("m") +
+             " AND NOT EXISTS (SELECT 1 FROM chunks2 c WHERE c.message_id=m.id) "
+             "GROUP BY m.folder")
+        return {r["f"]: r["n"] for r in conn.execute(q, list(folders))}
 
 
 # ---------------------------------------------------------------- rule proposals (learned from tags)

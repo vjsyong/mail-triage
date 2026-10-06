@@ -76,6 +76,7 @@ app.secret_key = os.environ.get("APP_SECRET", "mail-triage-local")
 
 worker = engine.Worker()
 indexer = rag.Indexer()
+body_fetcher = engine.BodyFetcher()
 classifier = engine.ClassifyJob()
 llm_health = engine.LLMHealthMonitor()
 
@@ -11462,7 +11463,18 @@ if __name__ == "__main__":
         tries, last_remaining, stall = 0, None, 0
         while True:
             try:
+                # CLI mode is its own fetch stage: pull mail + bodies first,
+                # then the (cache-only) index pass can make progress
+                mc = engine.MailClient().connect()
+                try:
+                    scanned = engine.scan_index_folders_batch(mc, limit=200)
+                    fetched = engine.drain_body_jobs(mc, limit=200)
+                finally:
+                    mc.close()
                 res = rag.index_pass_active(limit=40)
+                if scanned or fetched:
+                    print("fetch stage: %d scanned, %d body fetched" % (scanned, fetched),
+                          flush=True)
             except Exception as exc:
                 tries += 1
                 print("index pass error (%d): %r" % (tries, exc), flush=True)
@@ -11486,6 +11498,7 @@ if __name__ == "__main__":
             last_remaining = res["remaining"]
         sys.exit(0)
     worker.start()
+    body_fetcher.start()  # fetch stage: caches bodies the index stage consumes
     if stage_worker.enabled():
         # CPU-heavy stages (index + learning) live in a supervised child process
         # so they never make the web app unresponsive (docs/pipeline-queue.md)
