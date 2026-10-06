@@ -1,6 +1,6 @@
 # Pipeline stage queue: decouple mail fetch from downstream work
 
-Status: phase 2 implemented 2026-10-05 (see "Phases"). Design agreed after the
+Status: phase 3 implemented 2026-10-05 (see "Phases"). Design agreed after the
 Office365 "User is authenticated but not connected." incident: the 16-wide
 classify pool held one IMAP connection per LLM thread, which (plus worker +
 indexer + assistant) exceeded Exchange Online's per-mailbox concurrent-IMAP
@@ -80,6 +80,33 @@ stages so the web process keeps its GIL and CPU time:
 - `stage_worker.Supervisor` keeps the child alive from `app.py` main
   (same container, so the embedded proxy stays reachable on localhost).
 
+## Body cache (phase 3)
+
+The index stage no longer reads mail. The fetch stage owns every mailbox read
+and stores decoded bodies in `message_bodies`:
+
+- The scan (`_process_folder`) already downloaded the full message for its MIME
+  walk; `MailClient.fetch_meta` now keeps the decoded text (20k chars) and the
+  worker caches it, so new mail is indexed without any second fetch.
+- `engine.BodyFetcher` (app process) runs the index-scope walk: it advances each
+  folder's `index2_state` cursor, stores metadata + bodies for new UIDs, and
+  drains `fetch.body` jobs. It releases its connection when idle and owns one
+  read session, separate from the worker's short scan connection.
+- `rag_lite.index_pass` reads only SQLite: messages missing chunks are chunked
+  and embedded from the cached body; a message without a body gets a
+  `fetch.body` job instead, the pass reports "N awaiting body fetch", and
+  `IndexRunner` re-enqueues the pass every ~15 s while fetch jobs are pending.
+  The stage worker therefore has zero IMAP traffic.
+- Rebuilds are cache-first: if bodies are cached the whole index is rebuilt
+  without touching the network; only messages that predate the cache (or were
+  never fetched) trigger `fetch.body` jobs.
+- Classification prefers the cached body over the stored snippet when one
+  exists (still capped at 1500 chars in the prompt), so the verdict never
+  depends on which fetch path produced the row.
+
+`index2_state.last_uid` is the fetch-stage scan cursor; folder completeness is
+recomputed from the DB (`missing_chunks_by_folder`) on every index pass.
+
 ## Phases
 
 1. (done) `jobs` core + `classify` stage. The worker enqueues queued mail and
@@ -91,9 +118,9 @@ stages so the web process keeps its GIL and CPU time:
 2. (done) Stage-worker process: index + learning run in a supervised child
    process with their own GIL/CPU budget; manual triggers and live state cross
    the process boundary through the queue and `stage_state`.
-3. Index stage from the local cache (body cache in the fetch stage): the stage
-   worker stops connecting, and classification can use bodies rather than
-   snippets.
+3. (done) Body cache: the fetch stage scans index folders and caches decoded
+   bodies; `rag_lite.index_pass` chunks and embeds from the cache and never
+   opens IMAP; classification reads cached bodies.
 4. `act` stage drains all mutations; assistant writes and drafts join it.
 
 ## Tests

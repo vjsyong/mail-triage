@@ -7,7 +7,9 @@ supervised child process that owns those stages instead:
 
   * claims durable `index` jobs from the stage queue (docs/pipeline-queue.md),
     runs the pass with the same rag.Indexer code, and schedules the incremental
-    refresh cadence itself;
+    refresh cadence itself. The pass reads the local body cache (the fetch stage
+    fills it by scanning folders and draining `fetch.body` jobs) and never opens
+    IMAP itself;
   * runs the heuristic auto-refine loop;
   * publishes live state to `stage_state` so the dashboard shows progress and
     handles Index now / Rebuild across the process boundary.
@@ -170,6 +172,12 @@ class IndexRunner(threading.Thread):
                 else:
                     store.finish_job(job["id"])
                 store.set_stage_state(INDEX_KIND, dict(self.indexer.state))
+                # a pass that ran out of cached bodies hands work to the fetch
+                # stage; keep following up until it catches up
+                body = store.job_stats(["fetch.body"]).get("fetch.body") or {}
+                if body.get("queued") or body.get("running"):
+                    enqueue_index(rebuild=False, manual=False,
+                                  not_before=int(time.time()) + 15)
             except Exception as exc:
                 store.log_event("error", "stage index runner crashed: %r" % exc)
                 self.stop_flag.wait(3)

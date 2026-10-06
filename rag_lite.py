@@ -250,8 +250,31 @@ def _repair_vectors2(message_id):
     return len(missing)
 
 
+def _index_text(row, folder, raw_text, uid=None):
+    """Chunk + embed + store one message's text. Shared by the IMAP path
+    (index_one, used by tests/demo) and the cache-driven index pass."""
+    import rag
+    text = raw_text or row.get("snippet") or ""
+    body, node = clean_body(text)
+    chunks = rag.chunk_text(rag._header_for(row, folder), body)
+    if not chunks:
+        return 0
+    vecs = rag.embed(chunks, "document")
+    ensure_dim(len(vecs[0]))
+    ids = store.add_chunks2([{"message_id": row["id"], "folder": folder,
+                              "uid": uid or row.get("uid") or 0,
+                              "seq": i, "node": node, "text": c,
+                              "subject": row.get("subject") or "",
+                              "sender": row.get("from_addr") or ""}
+                             for i, c in enumerate(chunks)])
+    store.add_vectors2(list(zip(ids, vecs)))
+    return len(ids)
+
+
 def index_one(mc, folder, uid, uv):
-    """Ensure one message is in the lite index (idempotent)."""
+    """Ensure one message is in the lite index (idempotent). Fetches from IMAP;
+    kept for tests, the demo, and one-off repairs. The background pipeline uses
+    index_pass, which reads the local body cache instead."""
     import rag
     meta = mc.fetch_meta(uid)
     row = store.get_message_by_uid(folder, uid, uv)
@@ -269,81 +292,66 @@ def index_one(mc, folder, uid, uv):
         return 0
     full = mc.fetch_full(uid)
     text = full.get("text") or row.get("snippet") or ""
-    body, node = clean_body(text)
-    chunks = rag.chunk_text(rag._header_for(row, folder), body)
-    if not chunks:
-        return 0
-    vecs = rag.embed(chunks, "document")
-    ensure_dim(len(vecs[0]))
-    ids = store.add_chunks2([{"message_id": row["id"], "folder": folder, "uid": uid,
-                              "seq": i, "node": node, "text": c,
-                              "subject": row.get("subject") or "",
-                              "sender": row.get("from_addr") or ""}
-                             for i, c in enumerate(chunks)])
-    store.add_vectors2(list(zip(ids, vecs)))
-    return len(ids)
+    if text and not store.get_message_body(row["id"]):
+        store.set_message_body(row["id"], text)
+    return _index_text(row, folder, text, uid=uid)
+
+
+# The index stage can queue this many body-fetch jobs per pass; the fetch
+# stage drains them at its own rate.
+BODY_ENQUEUE_BATCH = 400
 
 
 def index_pass(limit=40):
-    """Index up to `limit` not-yet-chunked messages into the lite index, resuming
-    folder by folder (fresh state -> full walk on first run)."""
-    import engine
+    """Index up to `limit` not-yet-chunked messages from the LOCAL BODY CACHE.
+
+    The fetch stage fills the cache (scan + `fetch.body` jobs); this pass never
+    opens IMAP. Messages missing a body are handed to the fetch stage and land
+    in a later pass, so a rebuild stays fully decoupled and resumable."""
+    import rag
     if not store.get_setting("index_enabled", True):
         return {"processed": 0, "folders_done": 0, "folders_total": 0, "remaining": 0,
                 "summary": "indexing disabled"}
-    import rag
-    mc = engine.MailClient().connect()
-    try:
-        all_folders = mc.folders()
-        wanted = store.get_setting("index_folders") or rag.default_folders(sorted(all_folders))
-        wanted = [f for f in wanted if f in all_folders]
-        processed = 0
-        consecutive_errors = 0
-        for folder in wanted:
-            if processed >= limit:
-                break
-            st = store.index2_state_get(folder) or {}
-            uv = mc.select(folder)
-            if st.get("uidvalidity") and int(st["uidvalidity"]) != int(uv):
-                store.delete_chunks2_folder(folder)
-                st = {}
-                store.log_event("info", "indexer(lite): %s UIDVALIDITY changed - re-indexing" % folder)
-            last = int(st.get("last_uid") or 0)
-            if last:
-                uids = [u for u in mc.search("UID", "%d:*" % (last + 1)) if u > last]
-            else:
-                uids = mc.search("ALL")
-            if not uids:
-                store.index2_state_put(folder, uv, last, status="done")
-                continue
-            exhausted = True
-            for uid in uids:
-                if processed >= limit:
-                    exhausted = False
-                    break
-                try:
-                    index_one(mc, folder, uid, uv)
-                    processed += 1
-                    consecutive_errors = 0
-                except Exception as exc:
-                    consecutive_errors += 1
-                    store.log_event("error", "indexer(lite): %s uid %s failed: %r"
-                                    % (folder, uid, exc))
-                    if consecutive_errors >= 5:
-                        raise RuntimeError("5 consecutive indexing failures - pausing this pass")
-                    continue
-                store.index2_state_touch(folder, uv, uid)
-            if exhausted:
-                store.index2_state_put(folder, uv, uids[-1], status="done")
-        done = sum(1 for r in store.index2_overview(wanted) if r.get("status") == "done")
-        summary = ("indexed %d message(s) this pass - %d/%d folders complete"
-                   % (processed, done, len(wanted)))
-        if processed:
-            store.log_event("debug", "indexer(lite): " + summary)
-        return {"processed": processed, "folders_done": done, "folders_total": len(wanted),
-                "remaining": max(0, len(wanted) - done), "summary": summary}
-    finally:
-        mc.close()
+    folders = store.get_setting("index_folders") or rag.default_folders(store.distinct_folders())
+    if not folders:
+        return {"processed": 0, "folders_done": 0, "folders_total": 0, "remaining": 0,
+                "summary": "no messages to index"}
+    rows = store.messages_missing_chunks(folders, limit)
+    processed = awaiting = 0
+    consecutive_errors = 0
+    pending_bodies = [r for r in rows if not store.get_message_body(r["id"])]
+    if pending_bodies:
+        # widen the body batch so the fetch stage can run at full speed
+        for row in store.messages_missing_chunks(folders, BODY_ENQUEUE_BATCH):
+            if not store.get_message_body(row["id"]):
+                store.enqueue_job("fetch.body", row["id"])
+    for row in rows:
+        body = store.get_message_body(row["id"])
+        if not body:
+            awaiting += 1
+            continue
+        try:
+            _index_text(row, row["folder"], body, uid=row.get("uid"))
+            processed += 1
+            consecutive_errors = 0
+        except Exception as exc:
+            consecutive_errors += 1
+            store.log_event("error", "indexer(lite): message %s failed: %r" % (row["id"], exc))
+            if consecutive_errors >= 5:
+                raise RuntimeError("5 consecutive indexing failures - pausing this pass")
+    counts = store.missing_chunks_by_folder(folders)
+    done = sum(1 for f in folders if counts.get(f, 0) == 0)
+    for f in folders:
+        store.index2_state_status(f, "done" if counts.get(f, 0) == 0 else "working")
+    remaining = sum(counts.values())
+    summary = ("indexed %d message(s) this pass - %d/%d folders complete"
+               % (processed, done, len(folders)))
+    if awaiting:
+        summary += " - %d awaiting body fetch" % awaiting
+    if processed:
+        store.log_event("debug", "indexer(lite): " + summary)
+    return {"processed": processed, "folders_done": done, "folders_total": len(folders),
+            "remaining": remaining, "summary": summary}
 
 
 def index_stats():

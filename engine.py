@@ -292,6 +292,8 @@ def image_url_ok(url):
         return False
 
 
+BODY_CACHE_LIMIT = 20000   # decoded body chars cached per message (index input)
+
 def parse_full_message(raw, limit=20000):
     """Parse a full RFC822 message into {"meta": ..., "text": ...} in one pass.
 
@@ -591,11 +593,15 @@ class MailClient:
         # the old BODY[TEXT] prefix stored raw part headers + base64 as "snippet").
         try:
             raw = self._fetch_literal(uid, "(BODY.PEEK[])")
-            parsed = parse_full_message(raw, limit=4000)
+            parsed = parse_full_message(raw, limit=BODY_CACHE_LIMIT)
             meta = parsed.get("meta") or {}
             if meta:
                 meta = dict(meta)
-                meta["snippet"] = parsed.get("text", "")
+                body = parsed.get("text", "") or ""
+                # full decoded text rides along for the body cache; the stored
+                # snippet stays a listing/classify-sized excerpt of it
+                meta["body_text"] = body
+                meta["snippet"] = body[:4000]
                 meta["body_html_at"] = int(time.time())
                 if parsed.get("html"):
                     meta["body_html"] = sanitize_email_html(parsed["html"])
@@ -1439,7 +1445,12 @@ class LLMClient:
                   "Shape: {\"category\": one of [%s], \"needs_reply\": true|false, "
                   "\"confidence\": 0.0-1.0, \"summary\": \"one short sentence saying what the email is\", "
                   "\"reason\": \"why that category, max 15 words\"}" % (my_name or "the account owner", cats))
-        body_text = msg.get("snippet") or ""
+        body_text = ""
+        try:
+            body_text = store.get_message_body(msg.get("id")) or ""
+        except Exception:
+            body_text = ""
+        body_text = body_text or (msg.get("snippet") or "")
         if looks_like_mime_junk(body_text):
             body_text = readable_body(body_text, limit=1500)
         user = ("From: %s\nTo: %s\nSubject: %s\nDate: %s\n\n%s"
@@ -1659,6 +1670,7 @@ def _process_folder(mc, folder, settings, rules, flows=None):
     uv = mc.select(folder)
     last_uid, last_uv = store.last_uid(folder)
     if last_uid is not None and last_uv != uv:
+        store.delete_bodies_for_folder(folder)
         store.reset_folder_index(folder)
         store.log_event("info", "%s: UIDVALIDITY changed — re-indexing folder" % folder)
         last_uid = None
@@ -1680,6 +1692,9 @@ def _process_folder(mc, folder, settings, rules, flows=None):
         row = store.get_message_by_uid(folder, uid, uv)
         if row is None:
             continue
+        body = (meta.get("body_text") or meta.get("snippet") or "").strip()
+        if body:
+            store.set_message_body(row["id"], body)
         scanned += 1
         rule = match_first(rules, _fields_for(meta))
         # category conditions need the classifier verdict; those flows wait for
@@ -2695,6 +2710,202 @@ def enqueue_classify_backlog(limit=5000):
         if store.enqueue_job("classify", msg["id"]) is not None:
             n += 1
     return n
+
+
+# -------------------------------------------------- fetch stage: body cache
+#
+# Phase 3 (docs/pipeline-queue.md): the fetch stage owns every mailbox read.
+# It caches decoded bodies locally, and the index stage chunks/embeds from that
+# cache without ever opening IMAP. Messages the index stage needs but cannot
+# body (e.g. inserted by other paths, or a rebuild of old mail) arrive here as
+# `fetch.body` jobs; index-scope folders are walked here too.
+
+BODY_FETCH_KIND = "fetch.body"
+BODY_FETCH_IDLE_CLOSE = 60  # seconds to keep the reader connection after idle
+
+
+def enqueue_body_job(message_id, priority=0):
+    """Ask the fetch stage for one message's full body."""
+    return store.enqueue_job(BODY_FETCH_KIND, int(message_id), priority=priority)
+
+
+def drain_body_jobs(mc, limit=60):
+    """Cache full bodies for claimed fetch.body jobs. Every claimed job is
+    resolved (done/failed) before returning; returns how many were cached."""
+    claimed = store.claim_jobs([BODY_FETCH_KIND], {BODY_FETCH_KIND: int(limit)},
+                               worker="body-fetch")
+    done = 0
+    by_folder = {}
+    for job in claimed:
+        row = store.get_message(job["message_id"]) if job["message_id"] else None
+        if row is None:
+            store.finish_job(job["id"], "stale")
+            continue
+        by_folder.setdefault(row["folder"], []).append((job, row))
+    for folder, items in by_folder.items():
+        try:
+            mc.select(folder)
+        except Exception as exc:
+            for job, _row in items:
+                store.fail_job(job["id"], "select %s: %r" % (folder, exc))
+            continue
+        for job, row in items:
+            try:
+                full = mc.fetch_full(row["uid"]) or {}
+                text = full.get("text") or ""
+                if not text:
+                    store.fail_job(job["id"], "no body text")
+                    continue
+                store.set_message_body(row["id"], text)
+                store.finish_job(job["id"])
+                done += 1
+            except Exception as exc:
+                store.fail_job(job["id"], repr(exc))
+    return done
+
+
+def scan_index_folders_batch(mc, limit=120):
+    """Walk index-scope folders from their stored cursors, storing metadata and
+    full bodies locally. This is the only IMAP walk for indexing; embedding
+    happens later in the index stage from the cache. Returns messages pulled."""
+    import rag
+    settings = store.all_settings()
+    if not settings.get("index_enabled", True):
+        return 0
+    all_folders = mc.folders()
+    wanted = settings.get("index_folders") or rag.default_folders(sorted(all_folders))
+    wanted = [f for f in wanted if f in all_folders]
+    processed = 0
+    for folder in wanted:
+        if processed >= limit:
+            break
+        st = store.index2_state_get(folder) or {}
+        uv = mc.select(folder)
+        if st.get("uidvalidity") and int(st["uidvalidity"]) != int(uv):
+            store.delete_bodies_for_folder(folder)
+            store.delete_chunks2_folder(folder)
+            store.reset_folder_index(folder)
+            st = {}
+            store.log_event("info", "fetch: %s UIDVALIDITY changed - re-scanning folder" % folder)
+        last = int(st.get("last_uid") or 0)
+        if last:
+            uids = [u for u in mc.search("UID", "%d:*" % (last + 1)) if u > last]
+        else:
+            uids = mc.search("ALL")
+        for uid in uids:
+            if processed >= limit:
+                break
+            known = (store.get_message_by_uid(folder, uid, uv)
+                     or store.find_message_by_uid(folder, uid))
+            if known is not None and store.get_message_body(known["id"]):
+                # cursor reset (e.g. after a rebuild): advance past mail whose
+                # body is already cached without refetching it
+                store.index2_state_touch(folder, uv, uid)
+                processed += 1
+                continue
+            try:
+                meta = mc.fetch_meta(uid)
+            except Exception as exc:
+                store.log_event("error", "fetch failed for %s uid=%s: %r" % (folder, uid, exc))
+                continue
+            row = store.get_message_by_uid(folder, uid, uv)
+            if row is None and (meta.get("msgid") or "").strip():
+                # moved mail keeps its existing row (msgid match), like index_one
+                row = store.find_message_by_msgid(meta["msgid"])
+            if row is None:
+                store.insert_message(folder, uid, uv, meta)
+                row = store.get_message_by_uid(folder, uid, uv)
+            if row is not None:
+                body = (meta.get("body_text") or meta.get("snippet") or "").strip()
+                if body:
+                    store.set_message_body(row["id"], body)
+            store.index2_state_touch(folder, uv, uid)
+            processed += 1
+    return processed
+
+
+class BodyFetcher(threading.Thread):
+    """Fetch stage for indexing: scan index folders into the local store and
+    cache bodies on demand, so the index stage runs entirely from cache. Owns
+    its own IMAP connection and releases it when idle."""
+
+    def __init__(self):
+        super().__init__(daemon=True, name="triage-body-fetch")
+        self.stop_flag = threading.Event()
+        self.state = {"running": False, "last_ok": 0, "last_error": None,
+                      "scanned": 0, "fetched": 0}
+
+    def run(self):
+        store.init_db()
+        self.stop_flag.wait(4)  # let the worker and the proxy come up
+        try:
+            if (store.get_setting("proxy_mode") or "embedded").lower() == "embedded":
+                proxy.wait_ready(20)
+        except Exception:
+            pass
+        mc = None
+        idle_since = time.time()
+        next_scan = 0.0
+        while not self.stop_flag.is_set():
+            jobs = store.job_stats([BODY_FETCH_KIND]).get(BODY_FETCH_KIND) or {}
+            busy = bool(jobs.get("queued") or jobs.get("running"))
+            now = time.time()
+            if not busy and mc is not None and now - idle_since > BODY_FETCH_IDLE_CLOSE:
+                try:
+                    mc.close()
+                except Exception:
+                    pass
+                mc = None
+            if mc is None and (busy or now >= next_scan):
+                try:
+                    mc = MailClient().connect()
+                except Exception as exc:
+                    self.state.update({"running": False, "last_error": repr(exc)})
+                    store.log_event("warn", "body fetch: connect failed (%r) - retrying" % exc)
+                    self.stop_flag.wait(5)
+                    continue
+            try:
+                did = 0
+                if busy:
+                    did = drain_body_jobs(mc, limit=40)
+                    if did:
+                        next_scan = 0.0
+                elif now >= next_scan:
+                    did = scan_index_folders_batch(mc, limit=120)
+                    if did == 0:
+                        try:
+                            idle_min = max(1, int(store.get_setting("index_refresh_minutes") or 10))
+                        except (TypeError, ValueError):
+                            idle_min = 10
+                        next_scan = now + idle_min * 60
+                    else:
+                        next_scan = now + 2
+                if did:
+                    idle_since = time.time()
+                    key = "fetched" if busy else "scanned"
+                    self.state.update({"running": True, "last_ok": int(time.time()),
+                                       "last_error": None,
+                                       key: int(self.state.get(key) or 0) + did})
+                    self.stop_flag.wait(0.2)
+                else:
+                    self.state["running"] = False
+                    self.stop_flag.wait(2)
+            except Exception as exc:
+                self.state.update({"running": False, "last_error": repr(exc)})
+                store.log_event("warn", "body fetch hit a connection error (%r) - reconnecting"
+                                % exc)
+                if mc is not None:
+                    try:
+                        mc.close()
+                    except Exception:
+                        pass
+                mc = None
+                self.stop_flag.wait(3)
+        if mc is not None:
+            try:
+                mc.close()
+            except Exception:
+                pass
 
 
 def _mail_pass(mc, settings, rules, flows):

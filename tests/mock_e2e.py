@@ -1138,6 +1138,16 @@ def main():
         s = engine.process_mailbox()
         app_mod.classifier._drain()
         return s
+
+    def index_now(limit=400):
+        """Fetch-stage scan (production: BodyFetcher thread) + the lite index
+        pass (production: stage_worker). Reads the local body cache."""
+        mc2 = engine.MailClient().connect()
+        try:
+            engine.scan_index_folders_batch(mc2, limit=limit)
+        finally:
+            mc2.close()
+        return rag.index_pass(limit=limit)
     check("env: config points at mock IMAP",
           config.IMAP_HOST == "127.0.0.1" and config.IMAP_PORT == imap_port)
     check("env: config points at mock LLM",
@@ -2176,7 +2186,7 @@ def main():
     uid_long = add_msg(state, "records@example.com", "Attendance report long", long_body, "lr@x")
     add_msg(state, "spam@spam.com", "You won a prize", "claim your money now", "j1@x",
             folder="Junk Email")
-    res = rag.index_pass(limit=200)
+    res = index_now(limit=200)
     check("indexer walks all folders", res["remaining"] == 0 and res["processed"] >= 8)
     total_chunks = store.chunk2_count()
     check("chunks created for indexed mail", total_chunks >= 10)
@@ -2199,13 +2209,89 @@ def main():
         junk_chunks = conn.execute("SELECT COUNT(*) FROM chunks2 WHERE folder='Junk Email'").fetchone()[0]
     check("no chunks for junk mail", junk_chunks == 0)
     drafts_rows = [r for r in store.messages(limit=500) if r["folder"] == "Drafts"]
-    check("unscanned folders got backfilled by the indexer",
+    check("unscanned folders got backfilled by the fetch-stage scan",
           len(drafts_rows) >= 1 and store.message_chunk2_count(drafts_rows[0]["id"]) >= 1)
     with store.db(vec=True) as conn:
         nvec = conn.execute("SELECT COUNT(*) FROM vec_chunks2").fetchone()[0]
     check("vectors stored for every chunk", nvec == total_chunks)
     res2 = rag.index_pass(limit=5)
     check("second pass is a no-op", res2["processed"] == 0 and res2["remaining"] == 0)
+
+    section("T12b body cache: fetch stage feeds the cache-only index", "rag")
+    check("scan cached the probe's full body",
+          "probe body text" in (store.get_message_body(probe_row["id"]) or ""))
+    with store.db() as _conn:
+        _cur = _conn.execute(
+            "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "
+            "snippet, status) VALUES ('P3Box', 1, 1, 'p3nocache@x', 'p3@x.com', "
+            "'P3 no-imap probe', 'cache body', 'new')")
+        _p3id = _cur.lastrowid
+    store.set_message_body(_p3id, "P3 no-imap probe body about budgets and invoices " * 4)
+    _saved_connect = engine.MailClient.connect
+
+    def _no_imap(self):
+        raise AssertionError("the index pass must not open IMAP")
+
+    engine.MailClient.connect = _no_imap
+    try:
+        rag.index_pass(limit=50)
+    finally:
+        engine.MailClient.connect = _saved_connect
+    check("cache-only index pass chunks without opening IMAP",
+          store.message_chunk2_count(_p3id) >= 1)
+    uid_bj = add_msg(state, "bodyjob@x.com", "Body job probe", "cache me from imap", "bj@x")
+    _uv_bj = state.get("INBOX")["uidvalidity"]
+    with store.db() as _conn:
+        _cur = _conn.execute(
+            "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "
+            "snippet, status) VALUES ('INBOX', ?, ?, 'bj@x', 'bodyjob@x.com', "
+            "'Body job probe', 'awaiting body fetch', 'new')", (uid_bj, _uv_bj))
+        _bjid = _cur.lastrowid
+    rag.index_pass(limit=50)
+    check("a cache miss queues a fetch.body job",
+          _bjid in store.active_job_ids("fetch.body"))
+    mc3 = engine.MailClient().connect()
+    try:
+        _fetched = engine.drain_body_jobs(mc3, limit=5)
+    finally:
+        mc3.close()
+    check("fetch stage caches the body and closes the job",
+          _fetched >= 1 and "cache me from imap" in (store.get_message_body(_bjid) or "")
+          and _bjid not in store.active_job_ids("fetch.body"))
+    rag.index_pass(limit=50)
+    check("the fetched body is chunked on the next pass",
+          store.message_chunk2_count(_bjid) >= 1)
+    _saved_meta = engine.MailClient.fetch_meta
+    _meta_fetches = []
+
+    def _count_meta(self, uid):
+        _meta_fetches.append(uid)
+        return _saved_meta(self, uid)
+
+    engine.MailClient.fetch_meta = _count_meta
+    try:
+        with store.db() as _conn:
+            _conn.execute("DELETE FROM index2_state")  # simulate post-rebuild cursors
+        mc4 = engine.MailClient().connect()
+        try:
+            engine.scan_index_folders_batch(mc4, limit=400)
+        finally:
+            mc4.close()
+    finally:
+        engine.MailClient.fetch_meta = _saved_meta
+    check("a cursor reset re-walks cached mail without refetching",
+          not _meta_fetches)
+    with store.db() as _conn:
+        _cur = _conn.execute(
+            "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "
+            "snippet, status) VALUES ('P3Box', 2, 1, 'p3cls@x', 'p3@x.com', "
+            "'P3 classify from cache', 'placeholder excerpt', 'queued')")
+        _p3cid = _cur.lastrowid
+    store.set_message_body(_p3cid, "Please process the invoice INV-999 and the attached receipt.")
+    _verdict = engine.LLMClient().classify(store.get_message(_p3cid),
+                                           ["Action", "Receipt", "Newsletter"], "me")
+    check("classification reads the cached body when the snippet is empty",
+          (_verdict or {}).get("category") == "Receipt")
 
     section("T12c stage worker: an index job indexes and publishes state", "rag")
     uid_sw = add_msg(state, "stageidx@x.com", "Stage index probe",
@@ -2273,15 +2359,20 @@ def main():
     store.set_setting("rag_backend", "lite")
     r = rag.search("payment")
     check("backend=lite dispatches back", r["ok"])
-    store.index2_state_touch("INBOX", 1, 42)
+    _uv_t = int(state.get("INBOX")["uidvalidity"])
+    store.index2_state_touch("INBOX", _uv_t, 42)
     st_t = store.index2_state_get("INBOX") or {}
     check("lite state touch upserts (resumable mid-folder)",
           int(st_t.get("last_uid") or 0) == 42 and st_t.get("status") == "working")
-    store.index2_state_put("INBOX", 1, 42, status="done")
-    store.index2_state_touch("INBOX", 1, 43)
+    store.index2_state_put("INBOX", _uv_t, 42, status="done")
+    store.index2_state_touch("INBOX", _uv_t, 43)
     st_t = store.index2_state_get("INBOX") or {}
     check("state put/touch keep status semantics",
           st_t.get("status") == "working" and int(st_t.get("messages_indexed") or 0) >= 1)
+    # the touch cursor is also the fetch-stage scan cursor: leave it at the real
+    # INBOX high-water mark so later scans still see new mail
+    store.index2_state_put("INBOX", _uv_t,
+                           max(state.get("INBOX")["uids"] or [0]), status="working")
     ov_all = store.index2_overview()
     check("index2 overview with no folder list returns every row",
           isinstance(ov_all, list) and all(isinstance(r, dict) for r in ov_all))
@@ -2319,7 +2410,7 @@ def main():
     _fresh_date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(time.time() + 86400))
     id_new = add_msg(state, "new@x.com", "Fresh message latest", "recent stuff", "new1@x",
                      date=_fresh_date)
-    rag.index_pass(limit=60)
+    index_now(limit=60)
     rows_dated = store.messages(limit=5)
     check("messages ordered by mail date", rows_dated[0]["subject"] == "Fresh message latest")
     row_old = [r for r in store.messages(limit=1000)
@@ -2343,7 +2434,7 @@ def main():
     c1 = add_msg(state, "cafe@x.com", "Lunch with the team", "grabbing lunch friday", "c1@x")
     c2 = add_msg(state, "billing2@vendor.com", "Invoice for September", "invoice attached", "c2@x")
     c3 = add_msg(state, "deals2@shop.com", "Weekly newsletter deals", "deals inside", "c3@x")
-    rag.index_pass(limit=60)
+    index_now(limit=60)
     rowc2 = [r for r in store.messages(limit=2000)
              if r["uid"] == c2 and r["folder"] == "INBOX"][0]
     r = client.post("/messages/%d/classify" % rowc2["id"])
@@ -2471,7 +2562,7 @@ def main():
     store.set_setting("classify_concurrency", 4)
     b_uids = [add_msg(state, "batch%d@x.com" % i, "Batch newsletter item %d" % i,
                       "weekly deals inside", "batch%d@x" % i) for i in range(6)]
-    rag.index_pass(limit=200)
+    index_now(limit=200)
     rows_b = [r for r in store.messages(limit=2000) if r["uid"] in b_uids]
     llm_server.max_inflight = 0
     job = engine.ClassifyJob()
@@ -2487,7 +2578,7 @@ def main():
     check("message page shows classifier thinking",
           b"classifier thinking" in r.data and b"mock thinking about" in r.data)
     c19 = add_msg(state, "t19@x.com", "Invoice for T19", "invoice attached", "t19@x")
-    rag.index_pass(limit=200)
+    index_now(limit=200)
     rowt = [r for r in store.messages(limit=2000) if r["uid"] == c19][0]
     r = client.post("/messages/%d/classify" % rowt["id"])
     rt = store.get_message(rowt["id"])
@@ -2556,7 +2647,7 @@ def main():
     junk_text = ("--XXB\r\nContent-Type: text/plain; charset=utf-8\r\n"
                  "Content-Transfer-Encoding: base64\r\n\r\n" + enc_lines)
     jr = add_msg(state, "junktest@x.com", "Junk snippet repair", "plain body for repair test", "junkrepair@x")
-    rag.index_pass(limit=300)
+    index_now(limit=300)
     rowjr = [r for r in store.messages(limit=3000) if r["uid"] == jr][0]
     store.update_message(rowjr["id"], snippet=junk_text)
     r = client.get("/messages/%d" % rowjr["id"])
@@ -2797,7 +2888,7 @@ def main():
 
     promo_uids = [add_msg(state, "deals@promos.example", "Mega deal blast %d" % i,
                           "limited time promo", "hz%d@x" % i) for i in range(6)]
-    rag.index_pass(limit=300)
+    index_now(limit=300)
     rows_h = [r for r in store.messages(limit=3000) if r["uid"] in promo_uids]
     store.tag_messages([r["id"] for r in rows_h], "Promo")
     model, stats = heuristics_mod.train_heuristic("decision_list", "Promo", source="tags",
@@ -2808,7 +2899,7 @@ def main():
                               model=json.dumps(model), stats=json.dumps(stats))
     check("classifier registered and enabled", bool(hid) and store.get_heuristic(hid)["enabled"] == 1)
     newu = add_msg(state, "deals@promos.example", "Another blowout deal", "promo inside", "hz-new@x")
-    rag.index_pass(limit=300)
+    index_now(limit=300)
     row_new = [r for r in store.messages(limit=3000) if r["uid"] == newu][0]
     calls_before = len(llm_server.calls)
     res = engine.classify_and_store(store.get_message(row_new["id"]), store.all_settings())
@@ -2843,7 +2934,7 @@ def main():
 
     more_uids = [add_msg(state, "deals@promos.example", "Mega deal blast extra %d" % i,
                          "promo again", "hz2-%d@x" % i) for i in range(5)]
-    rag.index_pass(limit=400)
+    index_now(limit=400)
     rows_m = [r for r in store.messages(limit=4000) if r["uid"] in more_uids]
     store.tag_messages([r["id"] for r in rows_m], "Promo")
     refined = heuristics_mod.auto_refine()
