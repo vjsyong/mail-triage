@@ -31,6 +31,7 @@ import plugin_ui
 import plugins
 import proxy
 import rag
+import stage_worker
 import store
 import ux
 import replies
@@ -264,6 +265,15 @@ def stats():
 
 def index_status():
     st = dict(indexer.state)
+    if engine.external_stages():
+        # the index stage runs in the supervised stage-worker process: its live
+        # state is published to stage_state, so the dashboard shows real
+        # progress instead of this process's idle indexer.
+        ext = store.get_stage_state("index")
+        for k, v in ext.items():
+            if k != "_updated_at":
+                st[k] = v
+        st["external"] = True
     st["last_ok_r"] = rel_time(st.get("last_ok"))
     try:
         s = rag.index_stats()
@@ -2788,9 +2798,18 @@ def retry_errors():
     return redirect(url_for("dashboard"))
 
 
+def _trigger_index(rebuild=False):
+    """Start an index pass: queue a job for the stage worker, or wake the
+    in-process indexer when the stages run here (dev and tests)."""
+    if engine.external_stages():
+        stage_worker.enqueue_index(rebuild=rebuild, manual=True)
+    else:
+        indexer.trigger(rebuild=rebuild)
+
+
 @app.route("/index/run", methods=["POST"])
 def index_run():
-    indexer.trigger()
+    _trigger_index(rebuild=False)
     flash("Indexing started — progress shows on the dashboard and the Log page.", "ok")
     nxt = (request.values.get("next") or "").strip()
     if nxt.startswith("/") and not nxt.startswith("//"):
@@ -2800,7 +2819,7 @@ def index_run():
 
 @app.route("/index/rebuild", methods=["POST"])
 def index_rebuild():
-    indexer.trigger(rebuild=True)
+    _trigger_index(rebuild=True)
     flash("Rebuilding the search index from scratch — mail itself is untouched.", "ok")
     nxt = (request.values.get("next") or "").strip()
     if nxt.startswith("/") and not nxt.startswith("//"):
@@ -11059,7 +11078,13 @@ if __name__ == "__main__":
             last_remaining = res["remaining"]
         sys.exit(0)
     worker.start()
-    indexer.start()
+    if stage_worker.enabled():
+        # CPU-heavy stages (index + learning) live in a supervised child process
+        # so they never make the web app unresponsive (docs/pipeline-queue.md)
+        engine.set_external_stages(True)
+        stage_worker.Supervisor().start()
+    else:
+        indexer.start()
     classifier.start()
     llm_health.start()
     proxy.supervisor.start()  # keeps the embedded emailproxy running (embedded mode only)

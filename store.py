@@ -188,6 +188,11 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(state, kind, priority, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_active ON jobs(kind, message_id)
     WHERE state IN ('queued', 'running');
+CREATE TABLE IF NOT EXISTS stage_state (
+    kind TEXT PRIMARY KEY,
+    state TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS heuristics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL DEFAULT '',
@@ -1534,6 +1539,8 @@ def enqueue_job(kind, message_id=None, payload=None, priority=0, not_before=0,
                 promote=False):
     """Add a job unless an equivalent one is already queued/running.
 
+    `message_id=0` marks a per-kind singleton job (e.g. an index refresh) so the
+    partial unique index keeps at most one active; real messages use their id.
     With promote=True an existing *queued* job is upgraded in place (priority,
     payload, clear backoff) instead of being ignored - that is how a manual
     retry preempts a scheduled job so the hourly budget cannot starve it.
@@ -1675,7 +1682,32 @@ def active_job_ids(kind):
     with db() as conn:
         return {r["message_id"] for r in conn.execute(
             "SELECT message_id FROM jobs WHERE kind=? AND state IN ('queued','running')",
-            (kind,)) if r["message_id"] is not None}
+            (kind,)) if r["message_id"] not in (None, 0)}
+
+
+def set_stage_state(kind, state):
+    """Publish a stage worker's live state for the UI (cross-process)."""
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO stage_state (kind, state, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(kind) DO UPDATE SET state=excluded.state, "
+            "updated_at=excluded.updated_at",
+            (kind, json.dumps(state or {}), int(time.time())))
+
+
+def get_stage_state(kind):
+    """Last published state for a stage, or {} when none/never set."""
+    with db() as conn:
+        row = conn.execute("SELECT state, updated_at FROM stage_state WHERE kind=?",
+                           (kind,)).fetchone()
+    if not row:
+        return {}
+    try:
+        st = json.loads(row["state"] or "{}")
+    except (TypeError, ValueError):
+        st = {}
+    st["_updated_at"] = row["updated_at"]
+    return st
 
 
 def cancel_queued_manual_jobs(kind):

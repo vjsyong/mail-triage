@@ -1581,15 +1581,46 @@ class Worker(threading.Thread):
         finally:
             self.state["last_cycle"] = time.time()
             self.state["running"] = False
-        try:
-            if store.get_setting("heuristic_autorefine", True):
-                for _hid, hname, delta in heuristics.auto_refine():
-                    store.log_event("info", "heuristic %r retrained (+%d new label(s))" % (hname, delta))
-        except Exception as exc:
-            store.log_event("error", "heuristic auto-refine failed: %r" % exc)
+        refine_heuristics_once()
 
 
 LLM_HEALTH_INTERVAL = 60  # seconds between LLM reachability probes
+
+
+# --------------------------------------------------- pipeline stage placement
+# CPU-heavy stages (indexing/embeddings, learning) can run in the supervised
+# stage-worker process (stage_worker.py) so they never compete with the web app
+# for the GIL or its CPU time. The flag is set by app.py at startup.
+
+_EXTERNAL_STAGES = threading.Event()
+
+
+def set_external_stages(on=True):
+    """Declare that index/learning stages run in the stage-worker process."""
+    if on:
+        _EXTERNAL_STAGES.set()
+    else:
+        _EXTERNAL_STAGES.clear()
+
+
+def external_stages():
+    return _EXTERNAL_STAGES.is_set()
+
+
+def refine_heuristics_once():
+    """Retrain tag-sourced heuristics if enough new labels arrived. Skipped when
+    the learning stage runs externally (stage_worker owns it then). Returns the
+    [(id, name, new_labels), ...] retrained list."""
+    if external_stages() or not store.get_setting("heuristic_autorefine", True):
+        return []
+    done = []
+    try:
+        for _hid, hname, delta in heuristics.auto_refine():
+            store.log_event("info", "heuristic %r retrained (+%d new label(s))" % (hname, delta))
+            done.append((_hid, hname, delta))
+    except Exception as exc:
+        store.log_event("error", "heuristic auto-refine failed: %r" % exc)
+    return done
 
 
 class LLMHealthMonitor(threading.Thread):
@@ -2916,16 +2947,14 @@ class ClassifyJob(threading.Thread):
     # -- queue plumbing
 
     def _enqueue_manual(self, backlog_if_empty=False):
-        """Move trigger selections into the durable queue as manual jobs."""
+        """Move trigger selections into the durable queue as manual jobs.
+        With backlog_if_empty (the synchronous _run_job drain) an empty
+        selection means "the whole backlog", like the old batch behaviour."""
         with self.lock:
             ids, self.queue = list(self.queue), []
             all_flag, self.queue_all = self.queue_all, False
-        if all_flag:
+        if all_flag or (not ids and backlog_if_empty):
             ids = store.unclassified_ids()
-        if not ids and backlog_if_empty:
-            stats = store.job_stats([CLASSIFY_KIND]).get(CLASSIFY_KIND) or {}
-            if not stats.get("queued") and not stats.get("running"):
-                ids = store.unclassified_ids()
         added = 0
         for mid in ids:
             if store.enqueue_job(CLASSIFY_KIND, mid, {"manual": True},

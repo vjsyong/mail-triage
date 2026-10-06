@@ -1121,6 +1121,7 @@ def main():
     import heuristics as heuristics_mod
     import rag
     import rag_lite
+    import stage_worker
     import learning as learning_mod
     import plugins as plugins_mod
     eng_mod = engine
@@ -1240,6 +1241,55 @@ def main():
           and _drow["id"] not in store.active_job_ids("classify"))
     with store.db() as _conn:
         _conn.execute("DELETE FROM messages WHERE id=?", (_probe_id,))
+
+    section("T1c stage worker plumbing: stage_state + singleton index jobs", "base")
+    store.set_stage_state("index", {"running": True, "progress": "spinning up",
+                                    "last_ok": 4242})
+    _ss = store.get_stage_state("index")
+    check("stage_state round-trips a published state",
+          _ss.get("running") is True and _ss.get("progress") == "spinning up"
+          and _ss.get("last_ok") == 4242 and _ss.get("_updated_at", 0) > 0)
+    engine.set_external_stages(True)
+    try:
+        _ix = app_mod.index_status()
+    finally:
+        engine.set_external_stages(False)
+    check("external index status merges the published stage state",
+          _ix.get("external") is True and _ix.get("progress") == "spinning up"
+          and _ix.get("last_ok") == 4242)
+    _i1 = stage_worker.enqueue_index(rebuild=False, manual=False)
+    _i2 = stage_worker.enqueue_index(rebuild=False, manual=False)
+    check("index jobs are singletons per kind", isinstance(_i1, int) and _i2 is None)
+    _i3 = stage_worker.enqueue_index(rebuild=True, manual=True)
+    check("a manual rebuild promotes the queued pass", _i3 == _i1)
+    with store.db() as _conn:
+        _irow = _conn.execute("SELECT payload, priority FROM jobs WHERE id=?",
+                              (_i1,)).fetchone()
+    _ipay = json.loads(_irow["payload"])
+    check("promoted pass carries rebuild + manual + priority",
+          _ipay.get("rebuild") is True and _ipay.get("manual") is True
+          and _irow["priority"] == 10)
+    _iclaim = store.claim_jobs(["index"], {"index": 1}, worker="t")
+    check("index job claims as a durable singleton",
+          len(_iclaim) == 1 and _iclaim[0]["message_id"] == 0)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind='index'")
+        _conn.execute("DELETE FROM stage_state WHERE kind IN ('index','learn')")
+    _refine_calls = []
+    _saved_refine = heuristics_mod.auto_refine
+    heuristics_mod.auto_refine = lambda: (_refine_calls.append(1), [])[1]
+    try:
+        engine.set_external_stages(True)
+        try:
+            engine.refine_heuristics_once()
+            _refine_skipped = not _refine_calls
+        finally:
+            engine.set_external_stages(False)
+        engine.refine_heuristics_once()
+    finally:
+        heuristics_mod.auto_refine = _saved_refine
+    check("auto-refine runs in-process only when the learning stage is local",
+          _refine_skipped and len(_refine_calls) == 1)
 
     section("T2 LLM auto-filing ON", "base")
     store.set_setting("llm_apply", True)
@@ -2149,6 +2199,28 @@ def main():
     check("vectors stored for every chunk", nvec == total_chunks)
     res2 = rag.index_pass(limit=5)
     check("second pass is a no-op", res2["processed"] == 0 and res2["remaining"] == 0)
+
+    section("T12c stage worker: an index job indexes and publishes state", "rag")
+    uid_sw = add_msg(state, "stageidx@x.com", "Stage index probe",
+                     "embed this body text " * 30, "sw1@x")
+    engine.process_mailbox()
+    sw_row = [r for r in store.messages(limit=4000) if r["msgid"] == "sw1@x"][0]
+    check("stage probe message fetched but not indexed yet",
+          store.message_chunk2_count(sw_row["id"]) == 0)
+    sw_job_id = stage_worker.enqueue_index(rebuild=False, manual=True)
+    sw_claimed = store.claim_jobs(["index"], {"index": 1}, worker="test-stage")
+    check("stage worker can claim the manual index job",
+          len(sw_claimed) == 1 and sw_claimed[0]["id"] == sw_job_id)
+    sw_state = stage_worker.process_index_job(rag.Indexer(), sw_claimed[0])
+    store.finish_job(sw_claimed[0]["id"])
+    check("stage index job indexed the new message",
+          store.message_chunk2_count(sw_row["id"]) > 0)
+    _published = store.get_stage_state("index")
+    check("stage worker published live index state",
+          _published.get("last_ok", 0) > 0
+          and _published.get("running") is False and sw_state.get("last_error") is None)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM stage_state WHERE kind='index'")
 
     section("T13 RAG: hybrid search, rerank, filters", "rag")
     r = rag.search("payment", mode="vector")

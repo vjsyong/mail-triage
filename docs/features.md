@@ -189,7 +189,11 @@ second 3090 (`embed/`, CDI `nvidia.com/gpu=1`): `:8041` Qwen/Qwen3-Embedding-4B
 (embeddings), `:8042` BAAI/bge-reranker-v2-m3 (rerank).
 
 Build/refresh from the dashboard "Index now" (resumable, folder by folder) or
-`docker exec mail-triage python app.py --index`. Quality harness:
+`docker exec mail-triage python app.py --index`. The indexer and the learning
+refine loop run in a supervised stage-worker child process (`stage_worker.py`,
+docs/pipeline-queue.md) so a long backfill never makes the UI unresponsive;
+pin it with `STAGE_CPUS` (e.g. `4-7`) and tune `STAGE_NICE` in `.env`, or set
+`STAGE_WORKER=off` to run the old in-process indexer. Quality harness:
 `tests/retrieval_eval.py` + `tests/eval_queries.json` (recall@1/5/10 and MRR for
 fts / vector / hybrid / hybrid+rerank).
 
