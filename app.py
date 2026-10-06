@@ -11092,7 +11092,7 @@ AUTOMATION_CATEGORIES_TMPL = """
 .cat-add{margin-top:14px}
 .cat-add .btn{width:100%;border-style:dashed;color:var(--dim)}
 .cat-add .btn:hover{color:var(--fg)}
-@media(max-width:767px){.cat-map{grid-template-columns:1fr}.cat-arrow{display:none}}
+@media(max-width:767px){.cat-map{grid-template-columns:1fr}.cat-arrow{height:auto;transform:rotate(90deg)}}
 </style>
 <div class="page-head">
   <div>
