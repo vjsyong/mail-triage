@@ -2752,11 +2752,9 @@ def drain_body_jobs(mc, limit=60):
         for job, row in items:
             try:
                 full = mc.fetch_full(row["uid"]) or {}
-                text = full.get("text") or ""
-                if not text:
-                    store.fail_job(job["id"], "no body text")
-                    continue
-                store.set_message_body(row["id"], text)
+                # an empty text is still cached: the fetch stage looked and the
+                # mail has no decodable body, so the index stage can mark it done
+                store.set_message_body(row["id"], full.get("text") or "")
                 store.finish_job(job["id"])
                 done += 1
             except Exception as exc:
@@ -2797,7 +2795,7 @@ def scan_index_folders_batch(mc, limit=120):
                 break
             known = (store.get_message_by_uid(folder, uid, uv)
                      or store.find_message_by_uid(folder, uid))
-            if known is not None and store.get_message_body(known["id"]):
+            if known is not None and store.has_message_body(known["id"]):
                 # cursor reset (e.g. after a rebuild): advance past mail whose
                 # body is already cached without refetching it
                 store.index2_state_touch(folder, uv, uid)

@@ -319,19 +319,20 @@ def index_pass(limit=40):
     rows = store.messages_missing_chunks(folders, limit)
     processed = awaiting = 0
     consecutive_errors = 0
-    pending_bodies = [r for r in rows if not store.get_message_body(r["id"])]
+    pending_bodies = [r for r in rows if not store.has_message_body(r["id"])]
     if pending_bodies:
         # widen the body batch so the fetch stage can run at full speed
         for row in store.messages_missing_chunks(folders, BODY_ENQUEUE_BATCH):
-            if not store.get_message_body(row["id"]):
+            if not store.has_message_body(row["id"]):
                 store.enqueue_job("fetch.body", row["id"])
     for row in rows:
-        body = store.get_message_body(row["id"])
-        if not body:
+        if not store.has_message_body(row["id"]):
             awaiting += 1
             continue
+        body = store.get_message_body(row["id"]) or ""
         try:
             _index_text(row, row["folder"], body, uid=row.get("uid"))
+            store.mark_indexed(row["id"])  # even 0 chunks (empty body) is handled
             processed += 1
             consecutive_errors = 0
         except Exception as exc:

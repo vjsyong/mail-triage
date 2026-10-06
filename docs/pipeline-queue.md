@@ -105,7 +105,10 @@ and stores decoded bodies in `message_bodies`:
   depends on which fetch path produced the row.
 
 `index2_state.last_uid` is the fetch-stage scan cursor; folder completeness is
-recomputed from the DB (`missing_chunks_by_folder`) on every index pass.
+recomputed from the DB (`missing_chunks_by_folder`) on every index pass. A
+message that parses to no text is still marked handled (`messages.indexed_at`)
+so it cannot stall folder completion; `clear_rag2` resets the marker so rebuilds
+reindex everything.
 
 ## Phases
 

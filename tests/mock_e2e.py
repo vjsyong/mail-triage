@@ -2284,6 +2284,19 @@ def main():
     with store.db() as _conn:
         _cur = _conn.execute(
             "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "
+            "snippet, status) VALUES ('P3Box', 3, 1, 'p3empty@x', 'p3@x.com', "
+            "'P3 empty body', 'placeholder', 'queued')")
+        _p3eid = _cur.lastrowid
+    store.set_message_body(_p3eid, "")
+    check("an empty cached body counts as fetched",
+          store.has_message_body(_p3eid) and store.get_message_body(_p3eid) == "")
+    rag.index_pass(limit=50)
+    check("an empty body is marked indexed instead of stalling the folder",
+          store.get_message(_p3eid)["indexed_at"] > 0
+          and store.missing_chunks_by_folder(["P3Box"]).get("P3Box", 0) == 0)
+    with store.db() as _conn:
+        _cur = _conn.execute(
+            "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "
             "snippet, status) VALUES ('P3Box', 2, 1, 'p3cls@x', 'p3@x.com', "
             "'P3 classify from cache', 'placeholder excerpt', 'queued')")
         _p3cid = _cur.lastrowid
