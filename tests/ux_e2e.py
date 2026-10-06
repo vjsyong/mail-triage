@@ -505,12 +505,6 @@ class WorkbenchTests(unittest.TestCase):
 
     # ---- WP2: workspace chrome, routes and scoped forms ------------------
 
-    def _ws_nav(self, response):
-        html = response.data.decode('utf-8')
-        i = html.find('<nav class="ws-nav"')
-        j = html.find('</nav>', i)
-        return html[i:j]
-
     def _side_nav(self, response):
         html = response.data.decode('utf-8')
         i = html.find('<nav class="nav">')
@@ -552,22 +546,32 @@ class WorkbenchTests(unittest.TestCase):
         return s, display, store.settings_version(s)
 
     def test_automation_workspace_chrome_and_single_nav(self):
-        for path, active in (('/automation', 'overview'), ('/automation/categories', 'categories'),
-                             ('/automation/controls', 'controls'), ('/rules', 'rules'),
-                             ('/flows', 'flows'), ('/templates', 'drafting')):
+        sub_hrefs = ('/automation"', '/rules"', '/flows"', '/automation/categories"',
+                     '/templates"', '/automation/controls"')
+        for path in ('/automation', '/automation/categories', '/automation/controls',
+                     '/rules', '/flows', '/templates'):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200, path)
-            nav = self._ws_nav(response)
-            self.assertIn('aria-label="Automation sections"', nav, path)
-            self.assertEqual(nav.count('aria-current="page"'), 1, path)
+            side = self._side_nav(response)
+            self.assertIn('class="nav-sub"', side, path)
+            for href in sub_hrefs:
+                self.assertIn('href="%s' % href, side, path)
+            # exactly one aria-current in the sidebar: the active submenu item,
+            # never both the Automation parent and its child
+            self.assertEqual(side.count('aria-current="page"'), 1, path)
         for path, needle in (('/rules', 'href="/rules" aria-current="page"'),
                              ('/flows', 'href="/flows" aria-current="page"'),
                              ('/templates', 'href="/templates" aria-current="page"'),
+                             ('/automation', 'href="/automation" aria-current="page"'),
                              ('/automation/categories', 'href="/automation/categories" aria-current="page"'),
                              ('/automation/controls', 'href="/automation/controls" aria-current="page"')):
-            self.assertIn(needle, self._ws_nav(self.client.get(path)), path)
-        # Settings is off-workspace
-        self.assertNotIn('<nav class="ws-nav"', self.client.get('/settings').data.decode())
+            self.assertIn(needle, self._side_nav(self.client.get(path)), path)
+        # Off-workspace pages carry no submenu, and the old horizontal nav is gone
+        for path in ('/', '/settings'):
+            side = self._side_nav(self.client.get(path))
+            self.assertNotIn('class="nav-sub"', side, path)
+            self.assertNotIn('href="/rules"', side, path)
+            self.assertNotIn('<nav class="ws-nav"', self.client.get(path).data.decode())
         # More carries one Automation hub row instead of separate Rules/Flows/Templates rows
         more = self.client.get('/more').data
         self.assertIn(b'href="/automation"', more)
@@ -599,16 +603,26 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         page = response.data
         self.assertIn(b'name="settings_version"', page)
-        self.assertIn(b'name="row_count" value="6"', page)  # 3 rows + 3 spares
+        self.assertIn(b'name="row_count" value="4"', page)  # 3 rows + 1 spare
+        self.assertIn(b'Mapping #1', page)
+        self.assertIn(b'Mapping #2', page)
+        self.assertIn(b'Mapping #3', page)
+        self.assertIn(b'New mapping', page)
+        self.assertIn(b'class="cat-arrow"', page)
+        self.assertIn(b'data-row-remove', page)
+        self.assertIn(b'data-remove-input', page)
         self.assertIn(b'Legacy mapping', page)
         self.assertIn(b'Keep in current folder', page)
         self.assertIn(b'id="cat-blank-row"', page)
         self.assertIn(b'name="restore_2"', page)   # Promo is map-only
         self.assertIn(b'id="filing-form"', page)
         self.assertIn(b'data-stored="0"', page)
+        # the filing card rides the shared settings-row primitive
+        self.assertIn(b'class="setrow"', page)
         ux_js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                   'static', 'ux.js'), encoding='utf-8').read()
         self.assertIn('Enable automatic default filing? Future classifications may move mail', ux_js)
+        self.assertIn('data-row-remove', ux_js)
 
     def test_category_post_valid_303_and_lossless(self):
         s, rows, version = self._current_cat_fields()
@@ -719,7 +733,9 @@ class WorkbenchTests(unittest.TestCase):
         self.assertIn(b'name="drafts_folder"', page)
         self.assertIn(b'Drafter', page)
         self.assertNotIn(b'Mover', page)
-        self.assertIn(b'/automation/controls', self._ws_nav(response).encode() + response.data)
+        side = self._side_nav(response)
+        self.assertIn('href="/templates" aria-current="page"', side)
+        self.assertIn('href="/automation/controls"', side)
 
     def test_settings_landmarks_and_reply_detection(self):
         page = self.client.get('/settings').data
@@ -841,6 +857,25 @@ class WorkbenchTests(unittest.TestCase):
         self.assertNotIn(b'classifiers live', page)
         self.assertIn(b'Preview only', page)
         self.assertIn(b'Dry-run', page)
+
+    def test_overview_status_links_and_progressive_disclosure(self):
+        page = self.client.get('/automation').data.decode()
+        # the old decorative tiles are gone
+        self.assertNotIn('<span class="stat">', page)
+        # each status item links to the exact control that changes it
+        for anchor in ('#ctl-rules', '#ctl-flows', '#ctl-classify', '#filing-switch'):
+            self.assertIn(anchor, page)
+        # cross-cutting mode caveats sit behind one visible disclosure
+        self.assertIn('<details class="know">', page)
+        self.assertIn('Mode interactions', page)
+        self.assertIn('A preview (dry-run) category flow can still suppress default filing.', page)
+        self.assertIn('Default filing being off does not prevent a live flow from moving mail.', page)
+
+    def test_controls_rows_use_shared_primitive_and_preview_copy(self):
+        page = self.client.get('/automation/controls').data.decode()
+        self.assertIn('class="setrow"', page)
+        self.assertIn('not the same as a disabled rule', page)
+        self.assertIn('a matching dry-run can still suppress default filing', page)
 
     def test_filing_copy_has_no_confidence_gate_claim(self):
         page = self.client.get('/automation/categories').data

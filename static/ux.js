@@ -165,6 +165,18 @@
           if (first) first.focus();
         });
       }
+      Array.prototype.forEach.call(form.querySelectorAll('[data-row-remove]'), function (btn) {
+        btn.addEventListener('click', function () {
+          var row = btn.closest('.cat-row');
+          var input = row.querySelector('[data-remove-input]');
+          var name = row.querySelector('input[name^="name_"]');
+          var removed = input.value !== '1';
+          input.value = removed ? '1' : '0';
+          row.classList.toggle('removed', removed);
+          btn.textContent = removed ? 'Undo' : 'Remove';
+          btn.setAttribute('aria-label', (removed ? 'Undo removal of' : 'Remove') + ' mapping ' + (name && name.value ? name.value : ''));
+        });
+      });
     }
     var filing = document.getElementById('filing-form');
     if (filing && !filing.dataset.uxReady) {

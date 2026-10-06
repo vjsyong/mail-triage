@@ -455,6 +455,9 @@ font-weight:500;border-left:2px solid transparent}
 .nav-item.active{background:var(--active);border-left-color:var(--acc);color:#000;font-weight:600}
 .nav-item svg{width:16px;height:16px;flex:none;opacity:.72}
 .nav-item.active svg{opacity:1}
+.nav-sub{margin:0 0 4px 20px;border-left:1px solid var(--line);padding-left:2px}
+.nav-sub .nav-item{padding:5px 8px;margin:0;font-size:.84rem;gap:8px}
+.nav-sub .nav-item svg{width:14px;height:14px}
 .side-foot{border-top:1px solid var(--line);padding:12px 16px;font-size:.78rem;color:var(--dim)}
 .side-foot .sf-row{display:flex;align-items:center;gap:7px;margin:3px 0}
 .main{flex:1;margin-left:236px;min-width:0;display:flex;flex-direction:column}
@@ -562,6 +565,16 @@ margin:0 8px 8px 0;min-width:104px}
 .stat span{color:var(--panel-dim);font-size:.74rem}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:.9rem;margin:10px 0}
 .kv .k{color:var(--dim);white-space:nowrap}
+/* Shared settings row: used by Settings, Controls and the filing card. */
+.setrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,300px);gap:8px 18px;padding:11px 0;border-top:1px solid var(--line);align-items:start}
+.setrow:first-of-type{border-top:0;padding-top:2px}
+.setrow .st-l b{display:block;font-size:.87rem;font-weight:600}
+.setrow .st-l .sub{display:block;margin-top:2px;font-size:.78rem}
+.setrow .st-c input[type=text],.setrow .st-c input[type=password],.setrow .st-c input[type=number],.setrow .st-c select{width:100%}
+.setrow .st-c textarea{width:100%}
+.setrow .st-c .check{margin:2px 0 0}
+.setrow .st-c input:disabled,.setrow .st-c select:disabled{background:var(--hover);color:var(--dim);opacity:.7;cursor:not-allowed}
+@media(max-width:900px){.setrow{grid-template-columns:1fr}}
 .note{background:var(--tint-acc);border:1px solid var(--acc);padding:10px 12px;font-size:.86rem;color:#003a8c}
 .msg{padding:10px 12px;margin:10px 0;font-size:.9rem;border:1px solid var(--line);background:#fff}
 .msg.ok{background:var(--tint-ok);border-color:var(--ok)}
@@ -1043,30 +1056,19 @@ form.px-swf{display:flex;align-items:center}
 .ux-context{display:flex;align-items:center;gap:8px}.ux-context button{margin-left:auto;min-width:32px;min-height:32px;background:none;border:0;cursor:pointer}
 .ux-advanced{margin:12px 0}.ux-advanced>summary{cursor:pointer;font-weight:600;padding:8px 0}
 .ux-demo{padding:10px 14px;border:1px solid var(--acc);background:var(--hover);margin-bottom:14px;font-size:.85rem}
-/* ---- automation workspace chrome ---- */
-.ws-nav{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line);margin:0 0 18px;scrollbar-width:none}
-.ws-nav::-webkit-scrollbar{display:none}
-.ws-nav a{padding:8px 12px;color:var(--dim);font-size:.86rem;font-weight:500;white-space:nowrap;border-bottom:2px solid transparent}
-.ws-nav a:hover{color:var(--ink);background:var(--hover);text-decoration:none}
-.ws-nav a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--acc)}
-.cat-row{display:grid;grid-template-columns:minmax(160px,1.1fr) minmax(150px,1fr) auto;gap:10px 14px;align-items:start;padding:12px 0;border-top:1px solid var(--line)}
-.cat-row:first-of-type{border-top:0}
-.cat-row .cat-name{font-weight:600;overflow-wrap:anywhere}
-.cat-row .cat-meta{grid-column:1 / -1;font-size:.78rem;color:var(--dim)}
-.cat-row .cat-meta .mono{font-size:.74rem}
-.cat-row .cat-refs{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px}
-.cat-row .cat-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
-.cat-row.locked{background:var(--card2)}
-@media(max-width:767px){.cat-row{grid-template-columns:1fr}}
 @media(min-width:1024px) and (max-width:1599px){html.asb-open body.with-asb .main{margin-right:46px}html.asb-open .asb{box-shadow:-10px 0 30px #0002}}
 </style>
 <script>try{var v=localStorage.getItem('asb_open');if(v==='1')document.documentElement.classList.add('asb-open');var w=parseInt(localStorage.getItem('asb_w')||'',10);if(w>=280)document.documentElement.style.setProperty('--asb-w',Math.min(720,w)+'px');}catch(e){}</script>
 </head><body{% if setup or show_asb %} class="{{ (('setup ' if setup else '') + ('with-asb' if show_asb else ''))|trim }}"{% endif %}>
 <a class="skip" href="#main">Skip to content</a>
 {% set p = request.path %}
-{% macro navitem(href, label, active, icon, badge=0) -%}
-<a class="nav-item{{ ' active' if active else '' }}" href="{{ href }}"{{ ' aria-current="page"'|safe if active else '' }}>
+{% macro navitem(href, label, active, icon, badge=0, current=True) -%}
+<a class="nav-item{{ ' active' if active else '' }}" href="{{ href }}"{{ ' aria-current="page"'|safe if (active and current) else '' }}>
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon|safe }}</svg>{{ label }}{% if badge %}<span class="badge warn" style="margin-left:auto">{{ badge }}</span>{% endif %}</a>
+{%- endmacro %}
+{% macro navsub(href, label, active, icon) -%}
+<a class="nav-item nav-sub-item{{ ' active' if active else '' }}" href="{{ href }}"{{ ' aria-current="page"'|safe if active else '' }}>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon|safe }}</svg>{{ label }}</a>
 {%- endmacro %}
 <div class="app">
   <div class="scrim hidden" id="scrim"></div>
@@ -1086,7 +1088,23 @@ form.px-swf{display:flex;align-items:center}
       {% for it in ext_nav if it.group == 'mail' %}{{ navitem(it.url, it.label, p.startswith(it.base), it.icon) }}{% endfor %}
       <div class="nav-label">Automation</div>
       {{ navitem(url_for('automation'), 'Automation', ws_section is not none, '
-        <path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/>') }}
+        <path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/>', current=False) }}
+      {% if ws_section %}
+      <div class="nav-sub">
+        {{ navsub(url_for('automation'), 'Overview', ws_section == 'overview', '
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>') }}
+        {{ navsub(url_for('rules'), 'Rules', ws_section == 'rules', '
+          <path d="M4 5h16M7 12h10M10 19h4"/>') }}
+        {{ navsub(url_for('flows'), 'Flows', ws_section == 'flows', '
+          <path d="M5 5h6a4 4 0 0 1 4 4v6a4 4 0 0 0 4 4h1"/><circle cx="4" cy="5" r="2"/><circle cx="20" cy="19" r="2"/>') }}
+        {{ navsub(url_for('automation_categories'), 'Categories & filing', ws_section == 'categories', '
+          <path d="M3 7h7l2 2h9v10H3z"/>') }}
+        {{ navsub(url_for('templates'), 'Drafting', ws_section == 'drafting', '
+          <path d="M12 20h9"/><path d="M16.5 3.5 20.5 7.5 8 20H4v-4z"/>') }}
+        {{ navsub(url_for('automation_controls'), 'Controls', ws_section == 'controls', '
+          <rect x="3" y="7" width="18" height="10" rx="5"/><circle cx="15" cy="12" r="2.5"/>') }}
+      </div>
+      {% endif %}
       {{ navitem(url_for('simulate'), 'Simulator', p.startswith('/simulate'), '
         <path d="M9 3v6l-5 8a2 2 0 0 0 1.7 3h12.6a2 2 0 0 0 1.7-3l-5-8V3"/><path d="M7 3h10"/>') }}
       {{ navitem(url_for('learning_page'), 'Learning', p.startswith('/learning'), '
@@ -2191,18 +2209,6 @@ def _render_src(src, **ctx):
     return tpl.render(**ctx)
 
 
-WORKSPACE_TMPL = """
-<nav class="ws-nav" aria-label="Automation sections">
-  <a href="{{ url_for('automation') }}"{{ ' aria-current="page"'|safe if section == 'overview' else '' }}>Overview</a>
-  <a href="{{ url_for('rules') }}"{{ ' aria-current="page"'|safe if section == 'rules' else '' }}>Rules</a>
-  <a href="{{ url_for('flows') }}"{{ ' aria-current="page"'|safe if section == 'flows' else '' }}>Flows</a>
-  <a href="{{ url_for('automation_categories') }}"{{ ' aria-current="page"'|safe if section == 'categories' else '' }}>Categories &amp; filing</a>
-  <a href="{{ url_for('templates') }}"{{ ' aria-current="page"'|safe if section == 'drafting' else '' }}>Drafting</a>
-  <a href="{{ url_for('automation_controls') }}"{{ ' aria-current="page"'|safe if section == 'controls' else '' }}>Controls</a>
-</nav>
-"""
-
-
 def render(body, setup=False):
     ws = dict(worker.state)
     info = dict(_header_info())
@@ -2212,8 +2218,6 @@ def render(body, setup=False):
     except Exception:
         ext_nav = []
     ws_section = ux.automation_section(request.path) if not setup else None
-    if ws_section:
-        body = _render_src(WORKSPACE_TMPL, section=ws_section) + body
     return _render_src(BASE_TMPL, body=body, cfg=config, tz=tz_label(),
                                   info=info,
                                   ws_section=ws_section,
@@ -8858,18 +8862,10 @@ SETTINGS_TMPL = """
 .setbody{min-width:0}
 .setbody section{margin-bottom:28px;scroll-margin-top:14px}
 .setbody section:last-child{margin-bottom:0}
-.setrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,300px);gap:8px 18px;padding:11px 0;border-top:1px solid var(--line);align-items:start}
-.setrow:first-of-type{border-top:0;padding-top:2px}
-.setrow .st-l b{display:block;font-size:.87rem;font-weight:600}
-.setrow .st-l .sub{display:block;margin-top:2px;font-size:.78rem}
-.setrow .st-c input[type=text],.setrow .st-c input[type=password],.setrow .st-c input[type=number],.setrow .st-c select{width:100%}
-.setrow .st-c textarea{width:100%}
-.setrow .st-c .check{margin:2px 0 0}
 .model-picker{display:flex;flex-direction:column;gap:5px}
 .model-picker .model-custom[hidden]{display:none}
 .model-picker .model-status{font-size:.74rem;color:var(--dim)}
-.setrow .st-c input:disabled,.setrow .st-c select:disabled{background:var(--hover);color:var(--dim);opacity:.7;cursor:not-allowed}
-@media(max-width:900px){.settings-grid{grid-template-columns:1fr}.setnav{flex-direction:row;flex-wrap:wrap;position:static;gap:4px;margin-bottom:6px}.setnav .sn-h{display:none}.setrow{grid-template-columns:1fr}}
+@media(max-width:900px){.settings-grid{grid-template-columns:1fr}.setnav{flex-direction:row;flex-wrap:wrap;position:static;gap:4px;margin-bottom:6px}.setnav .sn-h{display:none}}
 @media(max-width:767px){.setnav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}.setnav::-webkit-scrollbar{display:none}.setnav a{flex:none;border:1px solid var(--line);white-space:nowrap;padding:5px 10px}}
 </style>
 <div class="page-head">
@@ -11014,49 +11010,90 @@ def message_preview(mid):
 # ---------------------------------------------------------------- automation workspace
 
 AUTOMATION_OVERVIEW_TMPL = """
+<style>
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 28px}
+.status-item{padding:10px 0;border-top:1px solid var(--line)}
+.status-item .st-row{display:flex;align-items:center;gap:8px}
+.status-item .st-row b{font-size:.9rem}
+.status-item .st-sub{font-size:.78rem;color:var(--dim);margin-top:3px}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:16px;counter-reset:step}
+.steps li{position:relative;padding-left:34px;font-size:.86rem;color:var(--dim);line-height:1.6}
+.steps li b{display:block;color:var(--fg);font-size:.9rem;margin-bottom:2px}
+.steps li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:0;width:22px;height:22px;
+ border:1px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:center;
+ font-size:.72rem;font-weight:600;color:var(--fg);font-variant-numeric:tabular-nums}
+.know{margin:14px 0 0;background:var(--card);border:1px solid var(--line)}
+.know summary{cursor:pointer;padding:12px 18px;font-size:.9rem;font-weight:600;display:flex;align-items:center;gap:8px;list-style:none}
+.know summary::-webkit-details-marker{display:none}
+.know summary::after{content:'+';margin-left:auto;color:var(--dim);font-size:1rem}
+.know[open] summary::after{content:'−'}
+.know ul{margin:0;padding:2px 18px 14px 36px;font-size:.82rem;color:var(--dim);line-height:1.7}
+@media(max-width:767px){.status-grid,.steps{grid-template-columns:1fr}.know ul{padding-left:32px}}
+</style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Automation</h1>
     <div class="page-desc">What happens to your mail, why, and where to change it.</div>
   </div>
-  <div class="row"><a class="btn" href="{{ url_for('simulate') }}">Test on a message</a><a class="btn" href="{{ url_for('automation_controls') }}">Controls</a></div>
+  <div class="row"><a class="btn primary" href="{{ url_for('simulate') }}">Test on a message</a></div>
 </div>
 <div class="card">
-  <div class="card-h"><h3>At a glance</h3><span class="sub">enabled entities, independent of live/dry-run modes — no mailbox or model probe</span></div>
-  <div class="row">
-    <span class="stat"><b>{{ rules_on }}/{{ rules_total }}</b><span>rules enabled</span></span>
-    <span class="stat"><b>{{ flows_on }}/{{ flows_total }}</b><span>flows enabled</span></span>
-    <span class="stat"><b>{{ heur_on }}/{{ heur_total }}</b><span>classifiers enabled</span></span>
+  <div class="card-h"><h3>Status</h3><span class="sub">enabled entities and live modes — change any switch on Controls</span></div>
+  <div class="status-grid">
+    <div class="status-item">
+      <div class="st-row"><b>Rules</b>{% if s.rules_apply %}<span class="badge ok">On</span>{% else %}<span class="badge warn">Preview only</span>{% endif %}</div>
+      <div class="st-sub">{{ rules_on }} of {{ rules_total }} rules enabled · <a href="{{ url_for('automation_controls') }}#ctl-rules">Change</a></div>
+    </div>
+    <div class="status-item">
+      <div class="st-row"><b>Flows</b>{% if s.flows_apply %}<span class="badge ok">On</span>{% else %}<span class="badge warn">Dry-run</span>{% endif %}</div>
+      <div class="st-sub">{{ flows_on }} of {{ flows_total }} flows enabled · <a href="{{ url_for('automation_controls') }}#ctl-flows">Change</a></div>
+    </div>
+    <div class="status-item">
+      <div class="st-row"><b>Classification</b>{% if s.llm_suggest %}<span class="badge ok">On</span>{% else %}<span class="badge">Off</span>{% endif %}</div>
+      <div class="st-sub">{{ heur_on }} of {{ heur_total }} classifiers enabled · <a href="{{ url_for('automation_controls') }}#ctl-classify">Change</a> · <a href="{{ url_for('learning_page') }}">Review classifiers</a></div>
+    </div>
+    <div class="status-item">
+      <div class="st-row"><b>Default filing</b>{% if s.llm_apply %}<span class="badge ok">On</span>{% else %}<span class="badge">Off</span>{% endif %}</div>
+      <div class="st-sub">Moves classified mail to its category destination · <a href="{{ url_for('automation_categories') }}#filing-switch">Change</a></div>
+    </div>
   </div>
-  <div class="kv">
-    <div class="k">Rule live processing</div><div>{% if s.rules_apply %}<span class="badge ok">On</span>{% else %}<span class="badge warn">Preview only</span>{% endif %}</div>
-    <div class="k">Flow live processing</div><div>{% if s.flows_apply %}<span class="badge ok">On</span>{% else %}<span class="badge warn">Dry-run</span>{% endif %}</div>
-    <div class="k">Automatic classification</div><div>{% if s.llm_suggest %}<span class="badge ok">On</span>{% else %}<span class="badge">Off</span>{% endif %}</div>
-    <div class="k">Default filing</div><div>{% if s.llm_apply %}<span class="badge ok">On</span>{% else %}<span class="badge">Off</span>{% endif %} <a href="{{ url_for('automation_categories') }}">change</a></div>
-  </div>
-  <div class="row"><a class="btn primary" href="{{ url_for('simulate') }}">Test on a message</a><a class="btn" href="{{ url_for('learning_page') }}">Review classifiers</a><a class="btn" href="{{ url_for('automation_categories') }}">Categories &amp; filing</a></div>
 </div>
 <div class="card">
   <div class="card-h"><h3>How mail is handled</h3><span class="sub">two stages</span></div>
-  <p><b>1. Mailbox scan.</b> Rules run first. Remaining eligible mail may match non-category flows (text or topic). Matching guard rules protect mail; topic filters use embeddings.</p>
-  <p><b>2. After classification.</b> A user correction, a fast-path classifier or the LLM supplies a verdict; eligible category-bearing flows are evaluated in order. Default filing is the fallback when it is enabled and no flow has been recorded as handling the message. Kept, already-filed and guarded mail is protected by the existing checks.</p>
+  <ol class="steps">
+    <li><b>Mailbox scan</b>Rules run first. Remaining eligible mail may match non-category flows (text or topic). Matching guard rules protect mail; topic filters use embeddings.</li>
+    <li><b>After classification</b>A user correction, a fast-path classifier or the LLM supplies a verdict; eligible category-bearing flows are evaluated in order. Default filing is the fallback when it is enabled and no flow has been recorded as handling the message. Kept, already-filed and guarded mail is protected by the existing checks.</li>
+  </ol>
 </div>
-<div class="card">
-  <div class="card-h"><h3>Things to know</h3></div>
-  <ul class="sub" style="margin:0;padding-left:18px;line-height:1.8">
-    <li>Preview is not the same as Disabled.</li>
+<details class="know">
+  <summary>Mode interactions — what Preview and Off change</summary>
+  <ul>
     <li>A preview (dry-run) category flow can still suppress default filing.</li>
     <li>A flow action failure may leave fallback filing eligible.</li>
-    <li>A blank default destination means no fallback move, not a global guard.</li>
     <li>Default filing being off does not prevent a live flow from moving mail.</li>
-    <li>Category suggestion maps exist even when default filing is off.</li>
-    <li>Not every category verdict is an LLM result — corrections and classifiers also produce verdicts.</li>
   </ul>
-</div>
+</details>
 """
 
 
 AUTOMATION_CATEGORIES_TMPL = """
+<style>
+.cat-row{padding:12px 0;border-top:1px solid var(--line)}
+.cat-row:first-of-type{border-top:0}
+.cat-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.cat-num{font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.cat-map{display:grid;grid-template-columns:minmax(160px,1.1fr) auto minmax(150px,1fr) auto;gap:10px 12px;align-items:start}
+.cat-map>div{min-width:0}
+.cat-arrow{display:flex;align-items:center;justify-content:center;height:34px;color:var(--dim);font-size:1rem}
+.cat-row .cat-actions{display:flex;flex-direction:row;align-items:center;gap:8px;flex-wrap:wrap}
+.cat-row .cat-actions .check{margin:0}
+.cat-row.locked,.cat-row.removed{background:var(--card2)}
+.cat-row.removed .cat-map{opacity:.5}
+.cat-add{margin-top:14px}
+.cat-add .btn{width:100%;border-style:dashed;color:var(--dim)}
+.cat-add .btn:hover{color:var(--fg)}
+@media(max-width:767px){.cat-map{grid-template-columns:1fr}.cat-arrow{display:none}}
+</style>
 <div class="page-head">
   <div>
     <h1 class="page-title">Categories &amp; filing</h1>
@@ -11074,60 +11111,73 @@ AUTOMATION_CATEGORIES_TMPL = """
   <input type="hidden" name="row_count" value="{{ rows|length }}">
   <div class="card">
     <div class="card-h"><h3>Classification vocabulary &amp; destinations</h3><span class="sub">names are read-only; add or remove whole categories</span></div>
-    <p class="sub" style="margin-top:0">Removing a category never rewrites historical labels, trained classifiers or plugin settings. Categories already used by a flow or fast-path classifier must be edited there first.</p>
+    <p class="sub" style="margin-top:0">Removing a category never rewrites historical labels, trained classifiers or plugin settings. Categories already used by a flow or fast-path classifier must be edited there first. Suggestion maps still apply when automatic default filing is off.</p>
     {% for r in rows %}
     {% set i = loop.index0 %}
-    <div class="cat-row{{ ' locked' if r.duplicate or r.readonly else '' }}" data-row-index="{{ i }}">
+    <div class="cat-row{{ ' locked' if r.duplicate or r.readonly else '' }}{{ ' removed' if r.remove else '' }}" data-row-index="{{ i }}">
       <input type="hidden" name="original_{{ i }}" value="{{ r.original }}">
       <input type="hidden" name="configured_{{ i }}" value="{{ '1' if r.configured else '0' }}">
       <input type="hidden" name="mapping_present_{{ i }}" value="{{ '1' if r.mapping_present else '0' }}">
-      <div>
-        <input type="text" name="name_{{ i }}" value="{{ r.name }}" placeholder="New category" aria-label="Category name"{{ ' readonly'|safe if (r.existing or r.readonly or conflict) else '' }}>
-        {% if r.legacy %}<span class="sub">Legacy mapping · not offered for classification</span>{% endif %}
-        {% if r.duplicate %}<span class="sub">Exact duplicate — cleanup needs a separate repair; this row is read-only.</span>{% endif %}
+      <div class="cat-head">
+        <span class="cat-num">{% if r.existing %}Mapping #{{ i + 1 }}{% else %}New mapping{% endif %}</span>
+        {% if r.flow_refs or r.classifier_refs %}
+        <span class="cat-refs">
+          {% for f in r.flow_refs %}<a class="chip" href="{{ url_for('flow_edit', flow_id=f.id) }}">flow #{{ f.id }} · {{ f.name }}{{ ' · disabled' if not f.enabled else '' }}</a>{% endfor %}
+          {% for c in r.classifier_refs %}<a class="chip" href="{{ url_for('classifier_dataset', hid=c.id) }}">classifier #{{ c.id }} · {{ c.name }}{{ ' · disabled' if not c.enabled else '' }}</a>{% endfor %}
+        </span>
+        {% endif %}
       </div>
-      <div>
-        <input type="text" name="folder_{{ i }}" value="{{ r.folder }}" placeholder="Keep in current folder" aria-label="Destination folder"{{ ' readonly'|safe if (r.duplicate or r.readonly or conflict) else '' }}>
+      <div class="cat-map">
+        <div>
+          <input type="text" name="name_{{ i }}" value="{{ r.name }}" placeholder="New category" aria-label="Category name"{{ ' readonly'|safe if (r.existing or r.readonly or conflict) else '' }}>
+          {% if r.legacy %}<span class="sub">Legacy mapping · not offered for classification</span>{% endif %}
+          {% if r.duplicate %}<span class="sub">Exact duplicate — cleanup needs a separate repair; this row is read-only.</span>{% endif %}
+        </div>
+        <span class="cat-arrow" aria-hidden="true">&#8594;</span>
+        <div>
+          <input type="text" name="folder_{{ i }}" value="{{ r.folder }}" placeholder="Keep in current folder" aria-label="Destination folder"{{ ' readonly'|safe if (r.duplicate or r.readonly or conflict) else '' }}>
+        </div>
+        <div class="cat-actions">
+          {% if r.configured and r.existing and not r.duplicate and not conflict %}<a class="btn small" href="{{ url_for('flow_new', category=r.name) }}">Create flow</a>{% endif %}
+          {% if r.legacy %}<label class="check"><input type="checkbox" name="restore_{{ i }}" value="1"{{ ' checked' if r.restore else '' }}{{ ' disabled'|safe if (r.readonly or conflict) else '' }}> <span>Restore to vocabulary</span></label>{% endif %}
+          {% if r.existing and not r.duplicate and not conflict %}
+          <input type="hidden" name="remove_{{ i }}" value="{{ '1' if r.remove else '0' }}" data-remove-input>
+          <button type="button" class="btn small" data-row-remove aria-label="{{ 'Undo removal of' if r.remove else 'Remove' }} mapping {{ r.name }}">{{ 'Undo' if r.remove else 'Remove' }}</button>
+          {% endif %}
+        </div>
       </div>
-      <div class="cat-actions">
-        {% if r.configured and r.existing and not r.duplicate and not conflict %}<a class="btn small" href="{{ url_for('flow_new', category=r.name) }}">Create flow</a>{% endif %}
-        {% if r.legacy %}<label class="check"><input type="checkbox" name="restore_{{ i }}" value="1"{{ ' checked' if r.restore else '' }}{{ ' disabled'|safe if (r.readonly or conflict) else '' }}> <span>Restore to vocabulary</span></label>{% endif %}
-        {% if r.existing and not r.duplicate %}<label class="check"><input type="checkbox" name="remove_{{ i }}" value="1"{{ ' checked' if r.remove else '' }}{{ ' disabled'|safe if (r.readonly or conflict) else '' }}> <span>Remove on save</span></label>{% endif %}
-      </div>
-      {% if r.flow_refs or r.classifier_refs %}
-      <div class="cat-refs">
-        {% for f in r.flow_refs %}<a class="chip" href="{{ url_for('flow_edit', flow_id=f.id) }}">flow #{{ f.id }} · {{ f.name }}{{ ' · disabled' if not f.enabled else '' }}</a>{% endfor %}
-        {% for c in r.classifier_refs %}<a class="chip" href="{{ url_for('classifier_dataset', hid=c.id) }}">classifier #{{ c.id }} · {{ c.name }}{{ ' · disabled' if not c.enabled else '' }}</a>{% endfor %}
-      </div>
-      {% endif %}
     </div>
     {% endfor %}
     <div class="cat-row" id="cat-blank-row" hidden>
       <input type="hidden" data-tpl="original" value="">
       <input type="hidden" data-tpl="configured" value="1">
       <input type="hidden" data-tpl="mapping_present" value="0">
-      <div><input type="text" data-tpl="name" value="" placeholder="New category" aria-label="Category name"></div>
-      <div><input type="text" data-tpl="folder" value="" placeholder="Keep in current folder" aria-label="Destination folder"></div>
+      <div class="cat-head"><span class="cat-num">New mapping</span></div>
+      <div class="cat-map">
+        <div><input type="text" data-tpl="name" value="" placeholder="New category" aria-label="Category name"></div>
+        <span class="cat-arrow" aria-hidden="true">&#8594;</span>
+        <div><input type="text" data-tpl="folder" value="" placeholder="Keep in current folder" aria-label="Destination folder"></div>
+      </div>
     </div>
     {% if not conflict %}
-    <div class="cat-add"><button type="button" class="btn" data-add-category-row>Add category</button></div>
+    <div class="cat-add"><button type="button" class="btn" data-add-category-row>+ Add mapping</button></div>
     <div class="savebar"><button class="btn primary" type="submit">Save categories</button><span class="sub">All changes save together.</span></div>
     {% endif %}
   </div>
 </form>
 <div class="card" id="filing-switch">
-  <div class="card-h"><h3>Automatic default filing</h3><span class="sub">{{ 'On' if s.llm_apply else 'Off' }}</span></div>
+  <div class="card-h"><h3>Automatic default filing</h3>{% if s.llm_apply %}<span class="badge ok">On</span>{% else %}<span class="badge">Off</span>{% endif %}</div>
   <p class="sub" style="margin-top:0">When on, a classified message with no category flow recorded as handling it is moved to its category destination. Kept, guarded and already-filed mail is protected by the existing checks. Off = suggestions only.</p>
   <form method="post" action="{{ url_for('settings') }}" id="filing-form" data-stored="{{ '1' if s.llm_apply else '0' }}">
     <input type="hidden" name="section" value="behavior">
     <input type="hidden" name="scope" value="Filing &amp; drafts">
     <input type="hidden" name="next" value="{{ url_for('automation_categories') }}">
-    <div class="setrow"><div class="st-l"><b>Enable automatic default filing</b><span class="sub">Rules and flows still apply first.</span></div>
+    <div class="setrow"><div class="st-l"><b>Enable automatic default filing</b><span class="sub">Rules and flows still apply first. A blank destination means no fallback move — not a guard.</span></div>
       <div class="st-c"><label class="px-sw" title="Enable automatic default filing"><input type="checkbox" name="llm_apply" value="1" {{ 'checked' if s.llm_apply else '' }} aria-label="Enable automatic default filing"><span class="px-tr"></span></label><input type="hidden" name="llm_apply" value="0"></div></div>
     <div class="savebar"><button class="btn primary" type="submit">Save filing switch</button></div>
   </form>
 </div>
-<noscript><div class="msg warn">JavaScript is off. Use each form's Save button; the category add-row button needs JavaScript, but existing rows can still be edited and saved.</div></noscript>
+<noscript><div class="msg warn">JavaScript is off. Use each form's Save button; the add-row button needs JavaScript, but existing rows can still be edited and saved.</div></noscript>
 {% if error or conflict %}<script>(function(){var e=document.getElementById('form-err');if(e)e.focus();})();</script>{% endif %}
 """
 
@@ -11146,7 +11196,7 @@ AUTOMATION_CONTROLS_TMPL = """
     <input type="hidden" name="section" value="behavior">
     <input type="hidden" name="scope" value="Rules live">
     <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
-    <div class="setrow"><div class="st-l"><b>Apply rule actions for real</b><span class="sub">Off = preview only (suggest, never move).</span></div>
+    <div class="setrow"><div class="st-l"><b>Apply rule actions for real</b><span class="sub">Off = preview only (suggest, never move) — not the same as a disabled rule.</span></div>
       <div class="st-c"><label class="px-sw" title="Apply rule actions for real"><input type="checkbox" name="rules_apply" value="1" {{ 'checked' if s.rules_apply else '' }} aria-label="Apply rule actions for real"><span class="px-tr"></span></label><input type="hidden" name="rules_apply" value="0"></div></div>
     <div class="savebar"><button class="btn primary" type="submit">Save rule mode</button><span class="sub">{{ 'Live' if s.rules_apply else 'Preview only' }}</span></div>
   </form>
@@ -11158,7 +11208,7 @@ AUTOMATION_CONTROLS_TMPL = """
     <input type="hidden" name="section" value="behavior">
     <input type="hidden" name="scope" value="Flows live">
     <input type="hidden" name="next" value="{{ url_for('automation_controls') }}">
-    <div class="setrow"><div class="st-l"><b>Apply flow actions for real</b><span class="sub">Off = dry-run. Independent of each flow's Enabled state.</span></div>
+    <div class="setrow"><div class="st-l"><b>Apply flow actions for real</b><span class="sub">Off = dry-run. Independent of each flow's Enabled state; a matching dry-run can still suppress default filing.</span></div>
       <div class="st-c"><label class="px-sw" title="Apply flow actions for real"><input type="checkbox" name="flows_apply" value="1" {{ 'checked' if s.flows_apply else '' }} aria-label="Apply flow actions for real"><span class="px-tr"></span></label><input type="hidden" name="flows_apply" value="0"></div></div>
     <div class="savebar"><button class="btn primary" type="submit">Save flow mode</button><span class="sub">{{ 'Live' if s.flows_apply else 'Dry-run' }}</span></div>
   </form>
@@ -11220,7 +11270,7 @@ def _category_display_rows(settings, flows, heuristics):
             "flow_refs": r["flow_refs"], "classifier_refs": r["classifier_refs"],
             "readonly": False,
         })
-    for _ in range(3):
+    for _ in range(1):
         out.append({"original": "", "existing": False, "name": "", "folder": "",
                     "configured": True, "mapping_present": False, "legacy": False,
                     "duplicate": False, "remove": False, "restore": False,
