@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS messages (
     llm_suggested_folder TEXT DEFAULT '',
     classified_by TEXT DEFAULT '',
     processed_at INTEGER,
+    indexed_at INTEGER NOT NULL DEFAULT 0,
     UNIQUE (folder, uid, uidvalidity)
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -347,6 +348,8 @@ def _migrate(conn):
     if "sort_ts" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN sort_ts INTEGER DEFAULT 0")
         conn.execute("UPDATE messages SET sort_ts = COALESCE(NULLIF(date_ts,0), processed_at, 0)")
+    if "indexed_at" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN indexed_at INTEGER NOT NULL DEFAULT 0")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_sort ON messages(sort_ts DESC, id DESC)")
     hcols = [r[1] for r in conn.execute("PRAGMA table_info(heuristics)")]
     if hcols and "excluded" not in hcols:
@@ -2165,6 +2168,7 @@ def clear_rag2():
         conn.execute("DELETE FROM chunks2")
         conn.execute("DELETE FROM chunks2_fts")
         conn.execute("DELETE FROM index2_state")
+        conn.execute("UPDATE messages SET indexed_at=0")  # full re-index next pass
         conn.execute("DELETE FROM meta WHERE k IN ('lite_embed_dim','lite_embed_model')")
     try:
         with db(vec=True) as conn:
@@ -2361,10 +2365,9 @@ def distinct_folders():
 # embeds from this cache and never opens IMAP (docs/pipeline-queue.md).
 
 def set_message_body(message_id, text):
-    """Cache a message's decoded body text (idempotent overwrite)."""
+    """Cache a message's decoded body text (idempotent overwrite). An empty
+    text is a valid marker: the fetch stage looked and the mail has no body."""
     text = str(text or "")
-    if not text:
-        return False
     with db() as conn:
         conn.execute(
             "INSERT INTO message_bodies (message_id, text, chars, fetched_at) VALUES (?,?,?,?) "
@@ -2372,6 +2375,20 @@ def set_message_body(message_id, text):
             "chars=excluded.chars, fetched_at=excluded.fetched_at",
             (int(message_id), text, len(text), int(time.time())))
     return True
+
+
+def has_message_body(message_id):
+    """True when the fetch stage has cached this message (even an empty body)."""
+    with db() as conn:
+        return conn.execute("SELECT 1 FROM message_bodies WHERE message_id=?",
+                            (int(message_id),)).fetchone() is not None
+
+
+def mark_indexed(message_id):
+    """Record that the index stage handled this message (incl. zero chunks)."""
+    with db() as conn:
+        conn.execute("UPDATE messages SET indexed_at=? WHERE id=?",
+                     (int(time.time()), int(message_id)))
 
 
 def get_message_body(message_id):
@@ -2405,6 +2422,7 @@ def messages_missing_chunks(folders, limit=40):
     with db() as conn:
         q = ("SELECT m.* FROM messages m WHERE m.folder IN (%s) AND "
              % ",".join("?" * len(folders)) + _real_msg("m") +
+             " AND coalesce(m.indexed_at,0)=0"
              " AND NOT EXISTS (SELECT 1 FROM chunks2 c WHERE c.message_id=m.id)"
              " ORDER BY m.id LIMIT ?")
         return [dict(r) for r in conn.execute(q, list(folders) + [int(limit)])]
@@ -2417,6 +2435,7 @@ def missing_chunks_by_folder(folders):
     with db() as conn:
         q = ("SELECT m.folder AS f, COUNT(*) AS n FROM messages m WHERE m.folder IN (%s) AND "
              % ",".join("?" * len(folders)) + _real_msg("m") +
+             " AND coalesce(m.indexed_at,0)=0"
              " AND NOT EXISTS (SELECT 1 FROM chunks2 c WHERE c.message_id=m.id) "
              "GROUP BY m.folder")
         return {r["f"]: r["n"] for r in conn.execute(q, list(folders))}
