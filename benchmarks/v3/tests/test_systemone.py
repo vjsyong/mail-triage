@@ -207,6 +207,41 @@ class DecisionOnlyTests(unittest.TestCase):
                          systemone.DEFAULT_DESCRIPTIONS["Personal"])
 
 
+class NanoJevRagVariantTests(unittest.TestCase):
+    """The v0.1 row is an explicit, distinct variant; v1.0 stays the default.
+
+    Both checkpoints are genuinely different (v1.0 MiniLM-L12-H384 33.4M vs
+    v0.1 MS-MARCO MiniLM-L6 22.7M), so the variant must be selectable by id and
+    carry its own fingerprint -- never silently labelled as the other.
+    """
+
+    def test_default_rag_head_is_v1(self):
+        head = systemone.build_head("nanojev-rag")
+        self.assertEqual(head.version, "v1.0")
+
+    def test_rag01_head_is_v01(self):
+        head = systemone.build_head("nanojev-rag01")
+        self.assertEqual(head.version, "v0.1")
+
+    def test_variant_identity_is_distinct(self):
+        v1 = get_adapter("systemone:nanojev-rag")
+        v01 = get_adapter("systemone:nanojev-rag01")
+        self.assertEqual(v1.adapter_id, "systemone:nanojev-rag")
+        self.assertEqual(v01.adapter_id, "systemone:nanojev-rag01")
+        self.assertEqual(v1.model_key, "nano-jev-rag")
+        self.assertEqual(v01.model_key, "nano-jev-rag01")
+        self.assertIn("v1.0", v1.model_revision)
+        self.assertIn("v0.1", v01.model_revision)
+        # both remain decision-only, non-mock, eligible baselines
+        for a in (v1, v01):
+            self.assertTrue(a.capabilities["decision"])
+            self.assertFalse(a.capabilities["prose"])
+            self.assertFalse(a.mock)
+            self.assertTrue(a.qualifies_as_baseline)
+        # the variant is part of the adapter fingerprint, not just metadata
+        self.assertNotEqual(v1.fingerprint(), v01.fingerprint())
+
+
 class CliWiringTests(unittest.TestCase):
     def _run(self, argv, patch_head=None):
         out, err = io.StringIO(), io.StringIO()

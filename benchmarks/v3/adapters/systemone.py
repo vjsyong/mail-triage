@@ -8,6 +8,7 @@ v2 sweep ran (``benchmarks/v2/harness/jev_sweep.py`` backends):
     kev           jaredpalmer/kev-0.8b 800M       kev server /v1/systemone
     nanojev       C-Tianyu/NanoJev unified-games-v1 (CUDA)  DecisionPredictor
     nanojev-rag   sdmlai/nano-jev v1.0 33.4M      pip nano-jev decider.decide
+    nanojev-rag01 sdmlai/nano-jev v0.1 22.7M      pip nano-jev decider.decide
 
 Every head answers the production classification task as two typed questions
 over the case's rendered email -- a six-label category choice (with the declared
@@ -73,7 +74,8 @@ CONFIDENCE_MEANING = {
                          "a calibrated probability",
 }
 
-ADAPTER_KEYS = ("gliner", "laya", "kev", "nanojev", "nanojev-rag")
+ADAPTER_KEYS = ("gliner", "laya", "kev", "nanojev", "nanojev-rag",
+                "nanojev-rag01")
 
 # The upstream NanoJev inference entry point (unified-games-v1 checkpoint).
 NANOJEV_CHECKPOINT = os.path.expanduser(
@@ -372,13 +374,17 @@ class NanoJevHead(_Head):
 
 
 class NanoJevRagHead(_Head):
-    """Nano-Jev RAG v1.0 via ``decider.decide`` custom options (CPU).
+    """Nano-Jev RAG via ``decider.decide`` custom options (CPU).
 
     This is the RAG relevance model used off-label for classification, exactly
     as in the v2 sweep; the two questions use the model's custom-option path.
+    The default is v1.0 (MiniLM-L12-H384, 33.4M); ``V0_1`` is the genuinely
+    different v0.1 checkpoint (MS MARCO MiniLM-L6, 22.7M, 6 encoder layers),
+    selected through the ``systemone:nanojev-rag01`` variant.
     """
 
     VERSION = "v1.0"
+    V0_1 = "v0.1"
 
     def __init__(self, device="cpu", version=None, **kwargs):
         self.device = device
@@ -421,7 +427,11 @@ def build_head(key, *, device="cpu", endpoint=None, precision=None, **kwargs):
     if key == "nanojev":
         return NanoJevHead(device=device, precision=precision, **kwargs)
     if key == "nanojev-rag":
-        return NanoJevRagHead(device=device, **kwargs)
+        return NanoJevRagHead(device=device, version=NanoJevRagHead.VERSION,
+                              **kwargs)
+    if key == "nanojev-rag01":
+        return NanoJevRagHead(device=device, version=NanoJevRagHead.V0_1,
+                              **kwargs)
     raise B.AdapterError("unknown systemone head %r" % key)
 
 
@@ -632,6 +642,22 @@ class SystemOneNanoJevRagAdapter(SystemOneAdapter):
     backend_runtime = "pip nano-jev, decider.decide (custom options; RAG-only model)"
 
 
+class SystemOneNanoJevRag01Adapter(SystemOneNanoJevRagAdapter):
+    """Nano-Jev RAG v0.1 variant (explicit version id, same off-label protocol).
+
+    Separate ``adapter_id``/``model_key``/``model_revision`` so the v0.1 run is
+    a distinct fingerprint, never confused with the v1.0 row.  The head is built
+    for v0.1 by :func:`build_head`; the default ``systemone:nanojev-rag`` stays
+    on v1.0.
+    """
+
+    key = "nanojev-rag01"
+    adapter_id = "systemone:nanojev-rag01"
+    backend_model_key = "nano-jev-rag01"
+    backend_revision = "sdmlai/nano-jev v0.1 (MS MARCO MiniLM-L6, 22.7M)"
+    backend_runtime = "pip nano-jev, decider.decide (custom options; RAG-only model)"
+
+
 ADAPTER_CLASSES = {
     "systemone:%s" % key: cls for key, cls in {
         "gliner": SystemOneGlinerAdapter,
@@ -639,6 +665,7 @@ ADAPTER_CLASSES = {
         "kev": SystemOneKevAdapter,
         "nanojev": SystemOneNanoJevAdapter,
         "nanojev-rag": SystemOneNanoJevRagAdapter,
+        "nanojev-rag01": SystemOneNanoJevRag01Adapter,
     }.items()
 }
 
