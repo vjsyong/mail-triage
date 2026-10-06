@@ -1274,6 +1274,13 @@ def main():
           len(_iclaim) == 1 and _iclaim[0]["message_id"] == 0)
     with store.db() as _conn:
         _conn.execute("DELETE FROM jobs WHERE kind='index'")
+    _sched = stage_worker.IndexRunner()
+    _sched.indexer.state.update({"started": int(time.time()), "last_ok": 0})
+    _sched._schedule()
+    check("scheduled refresh backs off after a recent attempt",
+          (store.job_stats(["index"]).get("index") or {}).get("queued", 0) == 0)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind='index'")
         _conn.execute("DELETE FROM stage_state WHERE kind IN ('index','learn')")
     _refine_calls = []
     _saved_refine = heuristics_mod.auto_refine

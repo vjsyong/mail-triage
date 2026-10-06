@@ -125,7 +125,10 @@ class IndexRunner(threading.Thread):
         self.indexer = indexer or rag.Indexer()
 
     def _schedule(self):
-        """Queue an incremental refresh when the configured cadence is due."""
+        """Queue an incremental refresh when the configured cadence is due.
+
+        The cadence counts from the last *attempt* (success or failure), not
+        just the last success, so a broken pass cannot re-enqueue every poll."""
         if not store.get_setting("index_enabled", True):
             return
         try:
@@ -135,8 +138,11 @@ class IndexRunner(threading.Thread):
         stats = store.job_stats([INDEX_KIND]).get(INDEX_KIND) or {}
         if stats.get("queued") or stats.get("running"):
             return
+        published = store.get_stage_state(INDEX_KIND)
         last = max(int(self.indexer.state.get("last_ok") or 0),
-                   int(store.get_stage_state(INDEX_KIND).get("last_ok") or 0))
+                   int(self.indexer.state.get("started") or 0),
+                   int(published.get("last_ok") or 0),
+                   int(published.get("started") or 0))
         if time.time() - last >= idle_min * 60:
             enqueue_index(rebuild=False, manual=False)
 
@@ -251,6 +257,15 @@ class Supervisor(threading.Thread):
 def main():
     store.init_db()
     _apply_cpu_budget()
+    # embedded proxy may still be booting in the app process; wait for its
+    # listener so the first pass does not race it after a container restart
+    try:
+        if (store.get_setting("proxy_mode") or "embedded").lower() == "embedded":
+            import proxy as _proxy
+            if _proxy.list_accounts():
+                _proxy.wait_ready(20)
+    except Exception:
+        pass
     stop = threading.Event()
 
     def _on_signal(_signum, _frame):
