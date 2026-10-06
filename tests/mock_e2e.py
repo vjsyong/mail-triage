@@ -1221,6 +1221,22 @@ def main():
     check("promoted job bypasses the budget", [c["id"] for c in _d3] == [_j3])
     with store.db() as _conn:
         _conn.execute("DELETE FROM jobs WHERE kind='testkind'")
+    store.enqueue_job("testkind", 9004, priority=0)
+    store.enqueue_job("testkind", 9005, priority=0)
+    _b1 = store.claim_jobs(["testkind"], {"testkind": 5}, worker="t", budget=1)
+    _b2 = store.claim_jobs(["testkind"], {"testkind": 5}, worker="t", budget=1)
+    check("running non-manual jobs count against the claim budget",
+          len(_b1) == 1 and _b2 == [])
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind IN ('testkind','kindA','kindB')")
+    for _i in range(70):
+        store.enqueue_job("kindA", 10000 + _i, priority=0)
+    store.enqueue_job("kindB", 20000, priority=0)
+    _both = store.claim_jobs(["kindA", "kindB"], {"kindA": 1, "kindB": 1}, worker="t")
+    check("per-kind claim does not starve a second kind",
+          {c["kind"] for c in _both} == {"kindA", "kindB"})
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind IN ('kindA','kindB')")
     # fetch enqueues; classify consumes with zero IMAP sessions
     _before_calls = len(llm_server.calls)
     with store.db() as _conn:
@@ -1336,10 +1352,44 @@ def main():
     check("the act job is done with a persisted result",
           _act_row is not None and _act_row["state"] == "done"
           and json.loads(_act_row["result"] or "{}").get("created") is True)
+    _dup1 = engine.enqueue_act("create_folder", params={"name": "DupBox"})
+    _dup2 = engine.enqueue_act("create_folder", params={"name": "DupBox"})
+    check("identical queued act ops dedupe to one job", _dup1 == _dup2)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind='act' AND state='queued'")
+    with store.db() as _conn:
+        _conn.execute("INSERT INTO jobs (kind, message_id, payload, state, priority, "
+                      "created_at) VALUES ('classify', 1, '{}', 'running', 0, ?)",
+                      (int(time.time()),))
+        _conn.execute("INSERT INTO jobs (kind, message_id, payload, state, priority, "
+                      "created_at) VALUES ('act', NULL, '{\"op\":\"noop\"}', 'running', 0, ?)",
+                      (int(time.time()),))
+    store.requeue_running_jobs(["act"])
+    with store.db() as _conn:
+        _cst = _conn.execute("SELECT state FROM jobs WHERE kind='classify' "
+                             "ORDER BY id DESC LIMIT 1").fetchone()[0]
+        _ast = _conn.execute("SELECT state FROM jobs WHERE kind='act' "
+                             "ORDER BY id DESC LIMIT 1").fetchone()[0]
+    check("scoped crash requeue leaves other stages' running jobs alone",
+          _cst == "running" and _ast == "queued")
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind IN ('classify','act')")
     _act_runner.stop_flag.set()
     engine._ACT_WAKE.set()
     _act_runner.join(timeout=5)
     check("act runner stops cleanly", not engine.act_runner_alive())
+    engine._ACT_REMOTE.set()  # simulate the stage worker (no local runner)
+    try:
+        _t_id = engine.enqueue_act("create_folder", params={"name": "NeverRun"})
+        _t_res = engine.run_act("create_folder", params={"name": "NeverRun"}, timeout=0.3)
+    finally:
+        engine._ACT_REMOTE.clear()
+    check("a timed-out queued op is cancelled and reported as not applied",
+          _t_res.get("ok") is False and _t_res.get("cancelled") is True
+          and (store.get_job(_t_id) or {}).get("state") == "cancelled"
+          and state.get("NeverRun") is None)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind='act' AND state='cancelled'")
 
     section("T2 LLM auto-filing ON", "base")
     store.set_setting("llm_apply", True)
@@ -2110,6 +2160,11 @@ def main():
     row = store.get_message(row["id"])
     check("parked as error after 3 failures",
           row["status"] == "error" and store.llm_fail_count(row["id"]) == 3)
+    with store.db() as _conn:
+        _pj = _conn.execute("SELECT state FROM jobs WHERE kind='classify' AND message_id=? "
+                            "ORDER BY id DESC LIMIT 1", (row["id"],)).fetchone()
+    check("a parked message's classify job is recorded failed",
+          _pj is not None and _pj["state"] == "failed")
     n = store.retry_parked_errors()
     row = store.get_message(row["id"])
     check("retry requeues and clears failures",
@@ -2312,8 +2367,9 @@ def main():
             mc4.close()
     finally:
         engine.MailClient.fetch_meta = _saved_meta
-    check("a cursor reset re-walks cached mail without refetching",
-          not _meta_fetches)
+    check("a cursor reset re-walks cached mail without refetching unmoved rows",
+          uid_probe not in _meta_fetches and uid_long not in _meta_fetches
+          and len(_meta_fetches) <= 5)  # only rows moved across folders re-fetch
     with store.db() as _conn:
         _cur = _conn.execute(
             "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "
@@ -2327,6 +2383,53 @@ def main():
     check("an empty body is marked indexed instead of stalling the folder",
           store.get_message(_p3eid)["indexed_at"] > 0
           and store.missing_chunks_by_folder(["P3Box"]).get("P3Box", 0) == 0)
+    with store.db() as _conn:
+        _cur = _conn.execute(
+            "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "
+            "snippet, status) VALUES ('P3Box', 4, 1, 'p3fail@x', 'p3@x.com', "
+            "'P3 always-failing body', 'placeholder', 'new')")
+        _p3fid = _cur.lastrowid
+        for _i in range(3):
+            _conn.execute("INSERT INTO jobs (kind, message_id, payload, state, priority, "
+                          "created_at, error) VALUES ('fetch.body', ?, '{}', 'failed', 0, ?, 'x')",
+                          (_p3fid, int(time.time())))
+    rag.index_pass(limit=50)
+    check("three failed body fetches stop the re-enqueue storm",
+          store.failed_job_count("fetch.body", _p3fid) == 3
+          and not store.has_queued("fetch.body")
+          and store.get_message(_p3fid)["indexed_at"] == 0)  # still honestly unindexed
+    store.set_message_body(_p3eid, "a real body arrived later " * 5)
+    check("a late real body resets the indexed marker",
+          store.get_message(_p3eid)["indexed_at"] == 0)
+    rag.index_pass(limit=50)
+    check("a late real body is chunked on the next pass",
+          store.message_chunk2_count(_p3eid) > 0)
+    # UIDVALIDITY change with an unknown (0) cursor must reset stale rows
+    _uid_uv = add_msg(state, "uvprobe@x.com", "UV probe", "uv fresh body", "uv@x",
+                      folder="UvBox") if state.get("UvBox") else None
+    if _uid_uv is None:
+        state.ensure("UvBox", "\HasNoChildren")
+        _uid_uv = add_msg(state, "uvprobe@x.com", "UV probe", "uv fresh body", "uv@x",
+                          folder="UvBox")
+    with store.db() as _conn:
+        _cur = _conn.execute(
+            "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "
+            "snippet, status) VALUES ('UvBox', ?, 1, 'uv@x', 'uv@x', 'UV old', 'OLD', 'new')",
+            (_uid_uv,))
+        _uvmid = _cur.lastrowid
+    store.set_message_body(_uvmid, "OLD CONTENT that must not survive")
+    store.index2_state_status("UvBox", "working")  # cursor uidvalidity = 0
+    state.get("UvBox")["uidvalidity"] = 2
+    _uvmc = engine.MailClient().connect()
+    try:
+        engine.scan_index_folders_batch(_uvmc, limit=600)
+    finally:
+        _uvmc.close()
+    _uvrows = [r for r in store.messages(limit=5000)
+               if r["folder"] == "UvBox" and r["msgid"] == "uv@x"]
+    check("uidvalidity change with an unknown cursor resets stale rows",
+          len(_uvrows) == 1 and _uvrows[0]["uidvalidity"] == 2
+          and "uv fresh body" in (store.get_message_body(_uvrows[0]["id"]) or ""))
     with store.db() as _conn:
         _cur = _conn.execute(
             "INSERT INTO messages (folder, uid, uidvalidity, msgid, from_addr, subject, "

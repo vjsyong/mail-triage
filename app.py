@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import sys
 import threading
 import time
@@ -276,6 +277,13 @@ def index_status():
             if k != "_updated_at":
                 st[k] = v
         st["external"] = True
+        age = int(time.time()) - int(ext.get("_updated_at") or 0)
+        if age > 30:
+            # the child publishes every second; silence means it died/stopped
+            st["running"] = False
+            st["remaining"] = None
+            st["last_error"] = ("stage worker is not reporting (last state %s ago)"
+                                % rel_time(ext.get("_updated_at")))
     st["last_ok_r"] = rel_time(st.get("last_ok"))
     try:
         s = rag.index_stats()
@@ -2832,15 +2840,22 @@ def _trigger_index(rebuild=False):
     """Start an index pass: queue a job for the stage worker, or wake the
     in-process indexer when the stages run here (dev and tests)."""
     if engine.external_stages():
-        stage_worker.enqueue_index(rebuild=rebuild, manual=True)
-    else:
-        indexer.trigger(rebuild=rebuild)
+        jid = stage_worker.enqueue_index(rebuild=rebuild, manual=True)
+        if jid is None:
+            # a singleton pass is already active (running or queued)
+            return {"started": False, "note": "an index pass is already in flight"}
+        return {"started": True, "job": jid}
+    indexer.trigger(rebuild=rebuild)
+    return {"started": True}
 
 
 @app.route("/index/run", methods=["POST"])
 def index_run():
-    _trigger_index(rebuild=False)
-    flash("Indexing started — progress shows on the dashboard and the Log page.", "ok")
+    res = _trigger_index(rebuild=False)
+    if res.get("started"):
+        flash("Indexing started — progress shows on the dashboard and the Log page.", "ok")
+    else:
+        flash("An index pass is already in flight.", "warn")
     nxt = (request.values.get("next") or "").strip()
     if nxt.startswith("/") and not nxt.startswith("//"):
         return redirect(nxt)
@@ -2849,8 +2864,11 @@ def index_run():
 
 @app.route("/index/rebuild", methods=["POST"])
 def index_rebuild():
-    _trigger_index(rebuild=True)
-    flash("Rebuilding the search index from scratch — mail itself is untouched.", "ok")
+    res = _trigger_index(rebuild=True)
+    if res.get("started"):
+        flash("Rebuilding the search index from scratch — mail itself is untouched.", "ok")
+    else:
+        flash("An index pass is already in flight; rebuild queued with it.", "warn")
     nxt = (request.values.get("next") or "").strip()
     if nxt.startswith("/") and not nxt.startswith("//"):
         return redirect(nxt)
@@ -7435,6 +7453,8 @@ def message_save(mid):
     try:
         folder = engine.save_draft(mid, request.form.get("body") or "")
         flash("Draft saved to '%s' — review it in your mail client." % folder, "ok")
+    except engine.ActPending as exc:
+        flash("Draft is taking longer than expected — check Drafts before retrying.", "warn")
     except Exception as exc:
         flash("Could not save the draft: %r" % exc, "err")
     return redirect(url_for("message_detail", mid=mid))
@@ -11494,7 +11514,17 @@ if __name__ == "__main__":
         # CPU-heavy stages (index + learning) live in a supervised child process
         # so they never make the web app unresponsive (docs/pipeline-queue.md)
         engine.set_external_stages(True)
-        stage_worker.Supervisor().start()
+        _stage_sup = stage_worker.Supervisor()
+        _stage_sup.start()
+        if hasattr(signal, "SIGTERM"):
+            def _term(_signum, _frame):
+                try:
+                    _stage_sup.stop()
+                except Exception:
+                    pass
+                signal.signal(signal.SIGTERM, signal.SIG_DFL)
+                os.kill(os.getpid(), signal.SIGTERM)
+            signal.signal(signal.SIGTERM, _term)
     else:
         indexer.start()
     classifier.start()

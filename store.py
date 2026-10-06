@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     worker TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
     result TEXT NOT NULL DEFAULT '',
+    dedupe_key TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT 0,
     started_at INTEGER,
     finished_at INTEGER
@@ -354,6 +355,10 @@ def _migrate(conn):
     jcols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
     if jcols and "result" not in jcols:
         conn.execute("ALTER TABLE jobs ADD COLUMN result TEXT NOT NULL DEFAULT ''")
+    if jcols and "dedupe_key" not in jcols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN dedupe_key TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_dedupe ON jobs(kind, dedupe_key) "
+                 "WHERE state IN ('queued', 'running') AND dedupe_key != ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_sort ON messages(sort_ts DESC, id DESC)")
     hcols = [r[1] for r in conn.execute("PRAGMA table_info(heuristics)")]
     if hcols and "excluded" not in hcols:
@@ -1607,7 +1612,7 @@ def retry_parked_errors():
 # single BEGIN IMMEDIATE, so limits and claims cannot race across threads.
 
 def enqueue_job(kind, message_id=None, payload=None, priority=0, not_before=0,
-                promote=False):
+                promote=False, dedupe_key=""):
     """Add a job unless an equivalent one is already queued/running.
 
     `message_id=0` marks a per-kind singleton job (e.g. an index refresh) so the
@@ -1622,11 +1627,19 @@ def enqueue_job(kind, message_id=None, payload=None, priority=0, not_before=0,
     with db() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO jobs (kind, message_id, payload, state, priority, "
-            "not_before, created_at) VALUES (?,?,?,'queued',?,?,?)",
+            "not_before, created_at, dedupe_key) VALUES (?,?,?,'queued',?,?,?,?)",
             (kind, message_id, payload, int(priority or 0), int(not_before or 0),
-             int(time.time())))
+             int(time.time()), dedupe_key or ""))
         if cur.rowcount != 0:
             return cur.lastrowid
+        if dedupe_key:
+            # an identical op is already active: return it so callers can wait
+            row = conn.execute(
+                "SELECT id FROM jobs WHERE kind=? AND dedupe_key=? "
+                "AND state IN ('queued','running') ORDER BY id LIMIT 1",
+                (kind, dedupe_key)).fetchone()
+            if row is not None:
+                return row["id"]
         if promote and message_id is not None:
             row = conn.execute(
                 "SELECT id FROM jobs WHERE kind=? AND message_id=? AND state='queued'",
@@ -1639,12 +1652,14 @@ def enqueue_job(kind, message_id=None, payload=None, priority=0, not_before=0,
 
 
 def claim_jobs(kinds, limits, worker="", budget=None, max_batch=64):
-    """Atomically claim up to the free slots of each kind, newest priority first.
+    """Atomically claim up to the free slots of each kind, priority first.
 
     `limits` maps kind -> max concurrently running. `budget`, when not None,
-    caps how many *non-manual* jobs may be claimed (jobs whose payload says
-    `manual` always pass); stage workers use it for the hourly LLM allowance.
-    Returns [{id, kind, message_id, payload}] and marks them running with a lease.
+    caps *additional* non-manual claims: already-running non-manual jobs count
+    against it, so a stage cannot overshoot its allowance by its width (jobs
+    whose payload says `manual` always pass). Selection runs per kind so one
+    kind's backlog cannot starve another's free slot. Returns
+    [{id, kind, message_id, payload}] and marks them running with a lease.
     """
     import json as _json
     kinds = [str(k) for k in kinds]
@@ -1655,42 +1670,54 @@ def claim_jobs(kinds, limits, worker="", budget=None, max_batch=64):
     try:
         conn.isolation_level = None
         conn.execute("BEGIN IMMEDIATE")
-        running = {r["kind"]: r["n"] for r in conn.execute(
-            "SELECT kind, COUNT(*) AS n FROM jobs WHERE state='running' "
-            "AND kind IN (%s) GROUP BY kind" % ",".join("?" * len(kinds)), kinds)}
-        slots = {k: int(limits.get(k, 0)) - int(running.get(k, 0)) for k in kinds}
-        free = [k for k in kinds if slots.get(k, 0) > 0]
-        if not free:
+        running_counts = {}
+        running_nonmanual = 0
+        for r in conn.execute(
+                "SELECT kind, payload FROM jobs WHERE state='running' "
+                "AND kind IN (%s)" % ",".join("?" * len(kinds)), kinds):
+            running_counts[r["kind"]] = running_counts.get(r["kind"], 0) + 1
+            try:
+                if not (_json.loads(r["payload"] or "{}").get("manual")):
+                    running_nonmanual += 1
+            except (TypeError, ValueError):
+                running_nonmanual += 1
+        slots = {k: int(limits.get(k, 0)) - int(running_counts.get(k, 0)) for k in kinds}
+        if all(s <= 0 for s in slots.values()):
             conn.execute("COMMIT")
             return []
-        ph = ",".join("?" * len(free))
-        rows = conn.execute(
-            "SELECT id, kind, message_id, payload FROM jobs "
-            "WHERE state='queued' AND kind IN (%s) AND not_before<=? "
-            "ORDER BY priority DESC, id LIMIT ?" % ph,
-            free + [now, int(max_batch)]).fetchall()
+        room = int(budget) if budget is not None else None
+        if room is not None:
+            room = max(0, room - running_nonmanual)
         claimed, spent = [], 0
-        for r in rows:
-            if slots.get(r["kind"], 0) <= 0:
+        for kind in kinds:
+            if slots.get(kind, 0) <= 0 or len(claimed) >= int(max_batch):
                 continue
-            try:
-                payload = _json.loads(r["payload"] or "{}")
-            except (TypeError, ValueError):
-                payload = {}
-            manual = bool(payload.get("manual"))
-            if budget is not None and not manual and spent >= int(budget):
-                continue
-            upd = conn.execute(
-                "UPDATE jobs SET state='running', worker=?, started_at=?, lease_until=?, "
-                "attempts=attempts+1 WHERE id=? AND state='queued'",
-                (worker, now, now + 900, r["id"]))
-            if upd.rowcount != 1:
-                continue
-            slots[r["kind"]] -= 1
-            if not manual:
-                spent += 1
-            claimed.append({"id": r["id"], "kind": r["kind"],
-                            "message_id": r["message_id"], "payload": payload})
+            want = min(slots[kind], int(max_batch) - len(claimed))
+            rows = conn.execute(
+                "SELECT id, kind, message_id, payload FROM jobs "
+                "WHERE state='queued' AND kind=? AND not_before<=? "
+                "ORDER BY priority DESC, id LIMIT ?", (kind, now, want)).fetchall()
+            for r in rows:
+                if slots.get(r["kind"], 0) <= 0:
+                    break
+                try:
+                    payload = _json.loads(r["payload"] or "{}")
+                except (TypeError, ValueError):
+                    payload = {}
+                manual = bool(payload.get("manual"))
+                if room is not None and not manual and spent >= room:
+                    continue
+                upd = conn.execute(
+                    "UPDATE jobs SET state='running', worker=?, started_at=?, lease_until=?, "
+                    "attempts=attempts+1 WHERE id=? AND state='queued'",
+                    (worker, now, now + 900, r["id"]))
+                if upd.rowcount != 1:
+                    continue
+                slots[r["kind"]] -= 1
+                if not manual:
+                    spent += 1
+                claimed.append({"id": r["id"], "kind": r["kind"],
+                                "message_id": r["message_id"], "payload": payload})
         conn.execute("COMMIT")
         return claimed
     except Exception:
@@ -1732,12 +1759,20 @@ def wait_job(job_id, timeout=60.0, poll=0.05):
         time.sleep(poll)
 
 
-def requeue_running_jobs():
-    """Startup crash recovery: no job can be legitimately running in a process
-    that just booted, so every `running` row is an orphan left by a crash."""
+def requeue_running_jobs(kinds=None):
+    """Crash recovery: no job can be legitimately running in a process that
+    just booted, so running rows are orphans. Scope with `kinds` when only one
+    stage's jobs belong to the caller (e.g. the stage worker's index jobs)."""
+    kinds = [str(k) for k in kinds] if kinds else []
     with db() as conn:
-        cur = conn.execute("UPDATE jobs SET state='queued', worker='', lease_until=0 "
-                           "WHERE state='running'")
+        if kinds:
+            cur = conn.execute(
+                "UPDATE jobs SET state='queued', worker='', lease_until=0 "
+                "WHERE state='running' AND kind IN (%s)" % ",".join("?" * len(kinds)),
+                kinds)
+        else:
+            cur = conn.execute("UPDATE jobs SET state='queued', worker='', lease_until=0 "
+                               "WHERE state='running'")
         return cur.rowcount
 
 
@@ -1752,12 +1787,73 @@ def fail_job(job_id, error="", retry_after=0):
     _finish_job(job_id, "failed", error)
 
 
-def requeue_expired_jobs():
-    """Return lease-expired running jobs to the queue (crash recovery)."""
+def requeue_expired_jobs(kinds=None):
+    """Return lease-expired running jobs to the queue (runtime crash recovery)."""
+    kinds = [str(k) for k in kinds] if kinds else []
     with db() as conn:
-        cur = conn.execute("UPDATE jobs SET state='queued', worker='', lease_until=0 "
-                           "WHERE state='running' AND lease_until < ?", (int(time.time()),))
+        if kinds:
+            cur = conn.execute(
+                "UPDATE jobs SET state='queued', worker='', lease_until=0 "
+                "WHERE state='running' AND lease_until < ? AND kind IN (%s)"
+                % ",".join("?" * len(kinds)), [int(time.time())] + kinds)
+        else:
+            cur = conn.execute("UPDATE jobs SET state='queued', worker='', lease_until=0 "
+                               "WHERE state='running' AND lease_until < ?", (int(time.time()),))
         return cur.rowcount
+
+
+def has_queued(kind):
+    """Cheap read: is there at least one queued job of this kind?"""
+    with db() as conn:
+        return conn.execute("SELECT 1 FROM jobs WHERE kind=? AND state='queued' LIMIT 1",
+                            (str(kind),)).fetchone() is not None
+
+
+def get_job(job_id):
+    with db() as conn:
+        row = conn.execute("SELECT id, kind, state, error, result FROM jobs WHERE id=?",
+                           (int(job_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def cancel_job(job_id, reason="cancelled"):
+    """Cancel a job that has not started yet. Returns True when cancelled."""
+    with db() as conn:
+        cur = conn.execute("UPDATE jobs SET state='cancelled', error=?, finished_at=? "
+                           "WHERE id=? AND state='queued'",
+                           ((reason or "")[:400], int(time.time()), int(job_id)))
+        return cur.rowcount == 1
+
+
+def failed_job_count(kind, message_id):
+    """How many times this message's job of a kind has terminally failed."""
+    with db() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS n FROM jobs WHERE kind=? AND message_id=? AND state='failed'",
+            (str(kind), int(message_id))).fetchone()["n"]
+
+
+def prune_jobs(days=7, per_kind_keep=2000):
+    """Retention for the jobs ledger: drop terminal rows older than `days`,
+    then cap each kind to the newest `per_kind_keep` terminal rows.
+    Returns the number of rows deleted."""
+    cutoff = int(time.time()) - int(days) * 86400
+    deleted = 0
+    with db() as conn:
+        cur = conn.execute(
+            "DELETE FROM jobs WHERE state IN ('done','failed','cancelled') "
+            "AND finished_at > 0 AND finished_at < ?", (cutoff,))
+        deleted += cur.rowcount
+        kinds = [r["kind"] for r in conn.execute(
+            "SELECT DISTINCT kind FROM jobs WHERE state IN ('done','failed','cancelled')")]
+        for kind in kinds:
+            cur = conn.execute(
+                "DELETE FROM jobs WHERE kind=? AND state IN ('done','failed','cancelled') "
+                "AND id NOT IN (SELECT id FROM jobs WHERE kind=? AND state IN "
+                "('done','failed','cancelled') ORDER BY id DESC LIMIT ?)",
+                (kind, kind, int(per_kind_keep)))
+            deleted += cur.rowcount
+    return deleted
 
 
 def job_stats(kinds=None):
@@ -2397,15 +2493,23 @@ def distinct_folders():
 # embeds from this cache and never opens IMAP (docs/pipeline-queue.md).
 
 def set_message_body(message_id, text):
-    """Cache a message's decoded body text (idempotent overwrite). An empty
-    text is a valid marker: the fetch stage looked and the mail has no body."""
+    """Cache a message's decoded body text. An empty text is a valid marker:
+    the fetch stage looked and the mail has no body. When the text changes the
+    message is marked unindexed again, so a body that arrives after a zero-chunk
+    pass gets chunked on the next one."""
     text = str(text or "")
+    mid = int(message_id)
     with db() as conn:
+        old = conn.execute("SELECT text FROM message_bodies WHERE message_id=?",
+                           (mid,)).fetchone()
+        changed = old is None or (old["text"] or "") != text
         conn.execute(
             "INSERT INTO message_bodies (message_id, text, chars, fetched_at) VALUES (?,?,?,?) "
             "ON CONFLICT(message_id) DO UPDATE SET text=excluded.text, "
             "chars=excluded.chars, fetched_at=excluded.fetched_at",
-            (int(message_id), text, len(text), int(time.time())))
+            (mid, text, len(text), int(time.time())))
+        if changed and text:
+            conn.execute("UPDATE messages SET indexed_at=0 WHERE id=?", (mid,))
     return True
 
 
@@ -2440,6 +2544,16 @@ def delete_bodies_for_folder(folder):
             conn.executemany("DELETE FROM message_bodies WHERE message_id=?",
                              [(i,) for i in ids])
         return len(ids)
+
+
+def folder_uidvalidity_mismatch(folder, uidvalidity):
+    """True when stored rows for a folder carry a different UIDVALIDITY than the
+    live server's - the trigger for a full folder reset even when the scan
+    cursor has no recorded uidvalidity yet (0)."""
+    with db() as conn:
+        return conn.execute(
+            "SELECT 1 FROM messages WHERE folder=? AND uidvalidity != ? LIMIT 1",
+            (folder, int(uidvalidity))).fetchone() is not None
 
 
 def _real_msg(alias="m"):

@@ -160,3 +160,41 @@ drains decoupling check, a "classification opens no IMAP" check (MailClient
 patched to raise), and keeps the existing classify/failure/UI contracts. The
 mock suite replaces `engine.process_mailbox()` with a `pump()` helper
 (fetch + drain) so tests remain synchronous while production stays decoupled.
+
+## Adversarial review fixes (2026-10-06)
+
+Four independent adversarial reviews (one per phase) produced findings that are
+now fixed:
+
+- **Budget is hard**: `claim_jobs` counts already-running non-manual jobs
+  against the hourly LLM budget, so a stage cannot overshoot by its width; the
+  classify drain passes absolute concurrency (no double subtraction) and takes
+  `budget=0` when `llm_suggest` is off, so disabling classification also stops
+  draining the queue.
+- **Claim fairness**: selection runs per kind, so one kind's backlog cannot
+  starve another's free slot.
+- **Runtime crash recovery**: the act runner runs a periodic lease reaper and
+  job-retention prune; the index and fetch stages reaper their own kinds; a
+  restarted stage worker requeues its orphaned running index jobs immediately.
+  `requeue_running_jobs`/`requeue_expired_jobs` are kind-scopable, and the act
+  runner no longer blanket-requeues other stages' genuinely running jobs.
+- **Act contract**: `run_act` cancels a job that never started and reports
+  `{"pending": true}` for one still running; classify never auto-files when a
+  flow is pending; assistant tools report "still running" instead of a false
+  failure; drafts raise `ActPending` and the UI warns instead of inviting a
+  duplicate APPEND. Identical active act ops dedupe via `jobs.dedupe_key`.
+  `record_move` happens only after a successful move; the shared writer keeps
+  its connection on application errors (only IMAP failures drop it).
+- **Stage worker**: supervisor restarts use exponential backoff with a reset
+  after a stable run, a SIGTERM handler stops the child with the app, the learn
+  runner no longer records `last_ok` on failure, and the dashboard treats a
+  silent child (`stage_state` older than 30 s) as not running instead of
+  showing a stale "indexing" and reloading forever.
+- **Body cache**: UIDVALIDITY resets also trigger when the cursor is unknown
+  (0) but stored rows disagree, the skip path only trusts an exact
+  (folder, uid, uidvalidity) row, `_process_folder` resets orphan chunks too,
+  `index_pass` never queues bodies for folders resolved off the live mailbox,
+  three terminal `fetch.body` failures stop retrying, and a late real body
+  resets `messages.indexed_at` so it gets chunked.
+- **Classify**: a parked (3-strike) message's job is recorded `failed`, not
+  `done`; idle ticks check for queued work before opening a write transaction.

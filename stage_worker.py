@@ -150,12 +150,19 @@ class IndexRunner(threading.Thread):
 
     def run(self):
         store.init_db()
+        # this process is the only index consumer: any running index job is an
+        # orphan from a previous child, requeue it so a crash mid-rebuild resumes
+        store.requeue_running_jobs([INDEX_KIND])
         store.set_stage_state(INDEX_KIND, dict(self.indexer.state))
         publisher = StatePublisher(INDEX_KIND, lambda: dict(self.indexer.state))
         publisher.start()
         store.log_event("info", "stage worker: index runner ready")
+        ticks = 0
         while not self.stop_flag.is_set():
+            ticks += 1
             try:
+                if ticks % 30 == 0:
+                    store.requeue_expired_jobs([INDEX_KIND])
                 self._schedule()
                 claimed = store.claim_jobs([INDEX_KIND], {INDEX_KIND: 1},
                                            worker=self.name)
@@ -208,8 +215,7 @@ class LearnRunner(threading.Thread):
                 self.state.update({"running": False, "last_ok": int(time.time()),
                                    "last_error": None})
             except Exception as exc:
-                self.state.update({"running": False, "last_ok": int(time.time()),
-                                   "last_error": repr(exc)})
+                self.state.update({"running": False, "last_error": repr(exc)})
                 store.log_event("error", "heuristic auto-refine failed: %r" % exc)
             store.set_stage_state("learn", dict(self.state))
             self.stop_flag.wait(self.interval)
@@ -230,22 +236,44 @@ class Supervisor(threading.Thread):
     def run(self):
         store.init_db()
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stage_worker.py")
+        backoff = 0
+        started_at = 0.0
         while not self.stop_flag.is_set():
-            if not self.is_running():
-                if self.proc is not None:
-                    self.state["restarts"] += 1
-                    store.log_event("warn", "stage worker exited (code %s) - restarting"
-                                    % self.proc.returncode)
+            if self.is_running():
+                if time.time() - started_at > 30:
+                    backoff = 0
+                    self.state["restarts"] = 0  # stable run: forget the crash streak
+                self.stop_flag.wait(5)
+                continue
+            if self.proc is not None:
+                self.state["restarts"] += 1
+                backoff = min(5 * (2 ** min(self.state["restarts"], 6)), 300)
                 try:
-                    self.proc = subprocess.Popen([sys.executable, path, CHILD_ARG],
-                                                 cwd=os.path.dirname(path),
-                                                 env=os.environ.copy())
-                    self.state.update({"running": True, "pid": self.proc.pid,
-                                       "last_error": None})
-                    store.log_event("info", "stage worker started (pid %d)" % self.proc.pid)
-                except Exception as exc:
-                    self.state.update({"running": False, "last_error": repr(exc)})
+                    store.log_event("warn", "stage worker exited (code %s) - restarting in %ds"
+                                    % (self.proc.returncode, backoff))
+                except Exception:
+                    pass
+            if backoff:
+                self.stop_flag.wait(backoff)
+                if self.stop_flag.is_set():
+                    break
+            try:
+                self.proc = subprocess.Popen([sys.executable, path, CHILD_ARG],
+                                             cwd=os.path.dirname(path),
+                                             env=os.environ.copy())
+                started_at = time.time()
+                self.state.update({"running": True, "pid": self.proc.pid,
+                                   "last_error": None})
+                store.log_event("info", "stage worker started (pid %d)" % self.proc.pid)
+            except Exception as exc:
+                self.state.update({"running": False, "last_error": repr(exc)})
+                backoff = min(max(backoff, 5) * 2, 300)
+                try:
                     store.log_event("error", "stage worker failed to start: %r" % exc)
+                except Exception:
+                    pass
+                self.stop_flag.wait(backoff)
+                continue
             self.stop_flag.wait(5)
         if self.proc is not None and self.proc.poll() is None:
             try:

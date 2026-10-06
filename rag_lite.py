@@ -316,14 +316,24 @@ def index_pass(limit=40):
     if not folders:
         return {"processed": 0, "folders_done": 0, "folders_total": 0, "remaining": 0,
                 "summary": "no messages to index"}
+    scope = store.meta_get("index_scope")
+    scope_set = set(scope) if scope else None
     rows = store.messages_missing_chunks(folders, limit)
     processed = awaiting = 0
     consecutive_errors = 0
-    pending_bodies = [r for r in rows if not store.has_message_body(r["id"])]
+
+    def _need_body(row):
+        # only the fetch stage can supply bodies, and only for folders it could
+        # resolve on the live mailbox; three terminal failures stop the retries
+        return (not store.has_message_body(row["id"])
+                and (scope_set is None or row["folder"] in scope_set)
+                and store.failed_job_count("fetch.body", row["id"]) < 3)
+
+    pending_bodies = [r for r in rows if _need_body(r)]
     if pending_bodies:
         # widen the body batch so the fetch stage can run at full speed
         for row in store.messages_missing_chunks(folders, BODY_ENQUEUE_BATCH):
-            if not store.has_message_body(row["id"]):
+            if _need_body(row):
                 store.enqueue_job("fetch.body", row["id"])
     for row in rows:
         if not store.has_message_body(row["id"]):

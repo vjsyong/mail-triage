@@ -10,6 +10,7 @@ import email.header
 import email.parser
 import email.policy
 import email.utils
+import hashlib
 import html
 import imaplib
 import json
@@ -1673,6 +1674,7 @@ def _process_folder(mc, folder, settings, rules, flows=None):
     last_uid, last_uv = store.last_uid(folder)
     if last_uid is not None and last_uv != uv:
         store.delete_bodies_for_folder(folder)
+        store.delete_chunks2_folder(folder)
         store.reset_folder_index(folder)
         store.log_event("info", "%s: UIDVALIDITY changed — re-indexing folder" % folder)
         last_uid = None
@@ -2554,7 +2556,15 @@ def classify_and_store(msg, settings, mc=None):
             try:
                 out = run_act("flow", msg["id"], {
                     "flow_id": fl["id"],
-                    "why": "AI category %s %d%%" % (category, round(conf * 100))})
+                    "why": "AI category %s %d%%" % (category, round(conf * 100))},
+                    timeout=300.0)  # flows may orchestrate slow steps (LLM drafts)
+                if out.get("pending"):
+                    # the flow is still running server-side; do NOT let auto-file
+                    # compensate with a second move
+                    store.log_event("warn", "flow '%s' still running for '%s' - not filing"
+                                    % (fl.get("name"), (msg.get("subject") or "")[:50]))
+                    filing_wanted = False
+                    break
                 if not out.get("ok"):
                     raise RuntimeError(out.get("error") or "flow failed")
                 live = bool(settings.get("flows_apply", True))
@@ -2576,6 +2586,9 @@ def classify_and_store(msg, settings, mc=None):
             res["_moved_to"] = folder
             store.log_msg_event(msg.get("id"), "file",
                                 "auto-filed to \u201c%s\u201d (LLM suggested)" % folder)
+        elif out.get("pending"):
+            store.log_event("warn", "auto-file move for '%s' still running - not retrying"
+                            % (msg.get("subject") or "")[:50])
         else:
             store.log_event("error", "LLM move to %s failed: %s" % (folder, out.get("error")))
     store.update_message(msg["id"], **fields)
@@ -2677,7 +2690,8 @@ def reset_action_mail():
 
 def with_action_mail(fn):
     """Run fn(mc) on the shared writer connection, one action at a time.
-    A dead connection is dropped so the next action reconnects."""
+    A dead connection is dropped so the next action reconnects; application
+    errors keep it (only IMAP/socket failures mean the session is gone)."""
     with _ACTION_MAIL_LOCK:
         mc = _ACTION_MAIL[0]
         try:
@@ -2685,8 +2699,9 @@ def with_action_mail(fn):
                 mc = MailClient().connect()
                 _ACTION_MAIL[0] = mc
             return fn(mc)
-        except Exception:
-            if mc is not None and _ACTION_MAIL[0] is mc:
+        except Exception as exc:
+            if (_imap_disconnect(exc) and mc is not None
+                    and _ACTION_MAIL[0] is mc):
                 _ACTION_MAIL[0] = None
                 try:
                     mc.close()
@@ -2769,13 +2784,21 @@ def scan_index_folders_batch(mc, limit=120):
     all_folders = mc.folders()
     wanted = settings.get("index_folders") or rag.default_folders(sorted(all_folders))
     wanted = [f for f in wanted if f in all_folders]
+    try:
+        store.meta_set("index_scope", sorted(wanted))
+    except Exception:
+        pass
     processed = 0
     for folder in wanted:
         if processed >= limit:
             break
         st = store.index2_state_get(folder) or {}
         uv = mc.select(folder)
-        if st.get("uidvalidity") and int(st["uidvalidity"]) != int(uv):
+        st_uv = int(st.get("uidvalidity") or 0)
+        reset = bool(st) and (
+            (st_uv and st_uv != int(uv))
+            or (not st_uv and store.folder_uidvalidity_mismatch(folder, uv)))
+        if reset:
             store.delete_bodies_for_folder(folder)
             store.delete_chunks2_folder(folder)
             store.reset_folder_index(folder)
@@ -2789,11 +2812,11 @@ def scan_index_folders_batch(mc, limit=120):
         for uid in uids:
             if processed >= limit:
                 break
-            known = (store.get_message_by_uid(folder, uid, uv)
-                     or store.find_message_by_uid(folder, uid))
+            known = store.get_message_by_uid(folder, uid, uv)  # exact uv only:
             if known is not None and store.has_message_body(known["id"]):
-                # cursor reset (e.g. after a rebuild): advance past mail whose
-                # body is already cached without refetching it
+                # a cursor reset (e.g. after a rebuild) advances past cached mail
+                # without refetching; a moved/re-delivered message is fetched and
+                # deduped by Message-ID below instead
                 store.index2_state_touch(folder, uv, uid)
                 processed += 1
                 continue
@@ -2840,7 +2863,14 @@ class BodyFetcher(threading.Thread):
         mc = None
         idle_since = time.time()
         next_scan = 0.0
+        ticks = 0
         while not self.stop_flag.is_set():
+            ticks += 1
+            if ticks % 30 == 0:
+                try:
+                    store.requeue_expired_jobs([BODY_FETCH_KIND])
+                except Exception:
+                    pass
             jobs = store.job_stats([BODY_FETCH_KIND]).get(BODY_FETCH_KIND) or {}
             busy = bool(jobs.get("queued") or jobs.get("running"))
             now = time.time()
@@ -2937,13 +2967,26 @@ def _act_payload(op, message_id, params):
     return payload
 
 
+def _act_dedupe_key(op, message_id, params):
+    """Stable key so an identical retry/double-click dedupes while active."""
+    try:
+        blob = json.dumps(params or {}, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        blob = repr(params)
+    raw = "%s|%s|%s" % (op, message_id or 0, blob)
+    return "%s:%s" % (op, hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16])
+
+
 def enqueue_act(op, message_id=None, params=None, priority=0):
-    """Queue one mutation; wake the runner. Returns the job id."""
+    """Queue one mutation; wake the runner. Returns the job id (an identical
+    active op dedupes to the one already queued/running)."""
     # act jobs keep message_id=NULL in the jobs table: its (kind, message_id)
     # uniqueness means "one job per message", while a message may legitimately
-    # have several queued mutations (move + flags). The id rides in the payload.
+    # have several queued mutations (move + flags). The id rides in the payload;
+    # an exact-duplicate guard lives in dedupe_key.
     jid = store.enqueue_job(ACT_KIND, None, _act_payload(op, message_id, params),
-                            priority=priority)
+                            priority=priority,
+                            dedupe_key=_act_dedupe_key(op, message_id, params))
     _ACT_WAKE.set()
     return jid
 
@@ -2951,7 +2994,10 @@ def enqueue_act(op, message_id=None, params=None, priority=0):
 def run_act(op, message_id=None, params=None, timeout=60.0, priority=0):
     """Run one mutation, waiting for its outcome. Inline when this process has
     no runner and is not the stage worker; otherwise durable via the runner.
-    Returns the op result (always includes `ok`)."""
+
+    A wait timeout is not a lie: a job that never started is cancelled (safe
+    hard failure), while one still running returns {"pending": True} so callers
+    never compensate by re-applying the mutation."""
     payload = _act_payload(op, message_id, params)
     if not act_runner_alive() and not _ACT_REMOTE.is_set():
         try:
@@ -2963,7 +3009,13 @@ def run_act(op, message_id=None, params=None, timeout=60.0, priority=0):
         return {"ok": False, "error": "could not queue action"}
     row = store.wait_job(job_id, timeout=timeout)
     if row is None:
-        return {"ok": False, "error": "action timed out"}
+        row = store.get_job(job_id) or {}
+        if row.get("state") == "queued":
+            store.cancel_job(job_id, "timed out before it ran")
+            return {"ok": False, "cancelled": True,
+                    "error": "action timed out before it ran"}
+        return {"ok": False, "pending": True, "job_id": job_id,
+                "error": "action is still running; it may complete server-side"}
     if row["state"] != "done":
         return {"ok": False, "error": row.get("error") or "action failed"}
     try:
@@ -2984,9 +3036,10 @@ def _act_move(mc, mid, p):
         return {"ok": True, "moved": False, "folder": folder, "uid": row.get("uid")}
     mc.ensure_selected(row["folder"])
     mc.ensure_folder(folder)
-    if p.get("record", True):
-        store.record_move(row, folder, source)
     new_uid = mc.move(row["uid"], folder, msgid=row.get("msgid"))
+    if p.get("record", True):
+        # record only after the move really happened (no phantom undo/audit entry)
+        store.record_move(row, folder, source)
     fields = {"folder": folder}
     if new_uid:
         fields["uid"] = new_uid
@@ -3074,9 +3127,9 @@ class ActRunner(threading.Thread):
 
     def run(self):
         store.init_db()
-        store.requeue_running_jobs()  # orphaned act/classify/index jobs after a crash
         _ACT_RUNNER_ALIVE.set()
         store.log_event("info", "act runner ready (single mailbox writer)")
+        idle_ticks = 0
         try:
             while not self.stop_flag.is_set():
                 stats = store.job_stats([ACT_KIND]).get(ACT_KIND) or {}
@@ -3085,9 +3138,17 @@ class ActRunner(threading.Thread):
                                            worker=self.name, max_batch=1)
                 if not claimed:
                     self.state["running"] = False
+                    idle_ticks += 1
+                    if idle_ticks % 60 == 0:  # ~1 min: reaper + ledger retention
+                        try:
+                            store.requeue_expired_jobs()
+                            store.prune_jobs()
+                        except Exception as exc:
+                            store.log_event("warn", "jobs maintenance failed: %r" % exc)
                     _ACT_WAKE.wait(1.0)
                     _ACT_WAKE.clear()
                     continue
+                idle_ticks = 0
                 job = claimed[0]
                 self.state["running"] = True
                 try:
@@ -3278,7 +3339,9 @@ def save_draft(msg_id, body_text, mc=None):
     """Save a reply draft to the account's Drafts folder. With `mc` the caller
     is already the act stage (flows); otherwise the save is queued as an act."""
     if mc is None:
-        out = run_act("draft", msg_id, {"body": body_text})
+        out = run_act("draft", msg_id, {"body": body_text}, timeout=120.0)
+        if out.get("pending"):
+            raise ActPending("draft is still being written; check Drafts before retrying")
         if not out.get("ok"):
             raise RuntimeError(out.get("error") or "draft save failed")
         return out.get("folder") or ""
@@ -3295,6 +3358,11 @@ def save_draft(msg_id, body_text, mc=None):
 # ---------------------------------------------------------------- manual classification job
 
 CLASSIFY_KIND = "classify"
+
+
+class ActPending(RuntimeError):
+    """Raised when a durable action is still running after its wait timeout:
+    the mutation may yet complete, so callers must not compensate/retry blind."""
 
 
 class ClassifyJob(threading.Thread):
@@ -3340,13 +3408,22 @@ class ClassifyJob(threading.Thread):
 
     def run(self):
         store.init_db()
-        store.requeue_expired_jobs()
+        store.requeue_expired_jobs([CLASSIFY_KIND])
+        ticks = 0
         while True:
             self.force.wait(2.0)
             self.force.clear()
+            ticks += 1
             try:
-                self._enqueue_manual()
-                self._drain()
+                with self.lock:
+                    has_manual = bool(self.queue) or self.queue_all
+                # cheap read before the write transaction: idle ticks should not
+                # open BEGIN IMMEDIATE every two seconds
+                if has_manual or store.has_queued(CLASSIFY_KIND):
+                    self._enqueue_manual()
+                    self._drain()
+                if ticks % 30 == 0:  # periodic runtime crash recovery
+                    store.requeue_expired_jobs([CLASSIFY_KIND])
             except Exception as exc:  # keep the stage alive no matter what
                 self.state["last_error"] = repr(exc)
                 self.state["running"] = False
@@ -3392,10 +3469,12 @@ class ClassifyJob(threading.Thread):
             inflight = {}
             while True:
                 if not self.stop_flag.is_set() and len(inflight) < concurrency:
-                    room = concurrency - len(inflight)
-                    budget = max(0, max_hour - store.llm_count_last_hour())
-                    claimed = store.claim_jobs([CLASSIFY_KIND], {CLASSIFY_KIND: room},
-                                               worker=self.name, budget=budget)
+                    budget = (max(0, max_hour - store.llm_count_last_hour())
+                              if settings.get("llm_suggest", True) else 0)
+                    claimed = store.claim_jobs([CLASSIFY_KIND],
+                                               {CLASSIFY_KIND: concurrency},
+                                               worker=self.name, budget=budget,
+                                               max_batch=concurrency)
                     for job in claimed:
                         msg = (store.get_message(job["message_id"])
                                if job["message_id"] else None)
@@ -3449,7 +3528,7 @@ class ClassifyJob(threading.Thread):
                 store.update_message(msg["id"], status="error")
                 store.log_event("error", "classify: '%s' parked after repeated failures"
                                 % (msg.get("subject") or "")[:50])
-                store.finish_job(job["id"], repr(exc))
+                store.fail_job(job["id"], repr(exc))
             else:
                 store.log_event("error", "classify: '%s' failed (retry later): %r"
                                 % ((msg.get("subject") or "")[:50], exc))
@@ -5296,6 +5375,9 @@ class AssistantAgent:
             return {"ok": False, "summary": err, "result": {"error": err}}
         if row:
             out = run_act("move", row["id"], {"folder": target, "source": "assistant"})
+            if out.get("pending"):
+                return {"ok": True, "summary": "move is still running in the background; "
+                        "verify the folder shortly", "result": {"pending": True}}
             if not out.get("ok"):
                 return {"ok": False, "summary": "move failed: %s" % out.get("error"),
                         "result": {"error": out.get("error")}}
@@ -5332,6 +5414,9 @@ class AssistantAgent:
             (add if flagged else remove).append(r"\Flagged")
         if row:
             out = run_act("flags", row["id"], {"add": add, "remove": remove})
+            if out.get("pending"):
+                return {"ok": True, "summary": "flag update is still running in the "
+                        "background; verify shortly", "result": {"pending": True}}
             if not out.get("ok"):
                 return {"ok": False, "summary": "flag update failed: %s" % out.get("error"),
                         "result": {"error": out.get("error")}}
@@ -5357,6 +5442,9 @@ class AssistantAgent:
         if not name:
             return {"ok": False, "summary": "name is required", "result": {"error": "name required"}}
         out = run_act("create_folder", params={"name": name})
+        if out.get("pending"):
+            return {"ok": True, "summary": "folder creation is still running in the "
+                    "background; verify shortly", "result": {"pending": True}}
         if not out.get("ok"):
             return {"ok": False, "summary": "create folder failed: %s" % out.get("error"),
                     "result": {"error": out.get("error")}}
@@ -5940,6 +6028,8 @@ class AssistantAgent:
             if not body.strip():
                 raise RuntimeError("the model returned an empty draft")
             saved_to = save_draft(row["id"], body)
+        except ActPending as exc:
+            return {"ok": True, "summary": str(exc), "result": {"pending": True}}
         except Exception as exc:
             return {"ok": False, "summary": "draft failed: %r" % exc, "result": {"error": repr(exc)}}
         store.log_event("info", "assistant drafted a reply to msg %s ('%s') -> %s"
@@ -5960,6 +6050,9 @@ class AssistantAgent:
                     "result": {"error": "no_trash_folder"}}
         if row:
             out = run_act("move", row["id"], {"folder": trash, "source": "trash"})
+            if out.get("pending"):
+                return {"ok": True, "summary": "move to Trash is still running in the "
+                        "background; verify shortly", "result": {"pending": True}}
             if not out.get("ok"):
                 return {"ok": False, "summary": "move to Trash failed: %s" % out.get("error"),
                         "result": {"error": out.get("error")}}
