@@ -1,6 +1,6 @@
 # Pipeline stage queue: decouple mail fetch from downstream work
 
-Status: phase 3 implemented 2026-10-05 (see "Phases"). Design agreed after the
+Status: phase 4 implemented 2026-10-05 (see "Phases"). Design agreed after the
 Office365 "User is authenticated but not connected." incident: the 16-wide
 classify pool held one IMAP connection per LLM thread, which (plus worker +
 indexer + assistant) exceeded Exchange Online's per-mailbox concurrent-IMAP
@@ -110,6 +110,30 @@ message that parses to no text is still marked handled (`messages.indexed_at`)
 so it cannot stall folder completion; `clear_rag2` resets the marker so rebuilds
 reindex everything.
 
+## Act stage (phase 4)
+
+Every mailbox mutation for indexed mail is a durable `act` job executed by
+`engine.ActRunner` on the shared single-writer connection:
+
+- Ops: `move` (rules, flows, auto-file, assistant, UI file, trash, undo),
+  `flags` (read/star, assistant), `create_folder`, `flow` (the whole flow runs
+  atomically on the writer), `draft` (save_draft).
+- Producers that need the outcome call `engine.run_act(op, message_id, params)`:
+  it enqueues the job and waits for its `result` (jobs carry a JSON result
+  column). Rules during scan, classify flow/auto-file, assistant tools, the
+  message-file route and undo all go through it, so mutations are serialized in
+  one place regardless of producer.
+- When no runner is alive in the process (tests, CLI) `run_act` executes inline
+  on the same writer connection, keeping behaviour identical without threads.
+  `stage_worker` sets `engine.set_act_remote(True)`: it only enqueues and waits,
+  the app process owns the runner.
+- Crash recovery: on startup `store.requeue_running_jobs()` returns every
+  orphaned `running` job (act/classify/index) to the queue; leases still protect
+  against a hung worker at runtime.
+- Not through the act queue (deliberately): SMTP send (its own channel; only the
+  best-effort Sent append touches IMAP), `heal_locations` repairs, and the
+  assistant's folder+uid fallback when a message has no local row yet.
+
 ## Phases
 
 1. (done) `jobs` core + `classify` stage. The worker enqueues queued mail and
@@ -124,7 +148,9 @@ reindex everything.
 3. (done) Body cache: the fetch stage scans index folders and caches decoded
    bodies; `rag_lite.index_pass` chunks and embeds from the cache and never
    opens IMAP; classification reads cached bodies.
-4. `act` stage drains all mutations; assistant writes and drafts join it.
+4. (done) `act` stage: all mutations of indexed mail drain through one writer
+   connection via durable jobs; rules, flows, auto-file, assistant writes,
+   drafts, file/undo all call `run_act`.
 
 ## Tests
 

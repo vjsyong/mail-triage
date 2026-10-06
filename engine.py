@@ -1094,7 +1094,7 @@ def _apply_flow(mc, flow, row, settings, live):
                         if tpl:
                             body = render_template_text(tpl.get("body") or "", row_now)
                     if body:
-                        saved_to = save_draft(row_now["id"], body)
+                        saved_to = save_draft(row_now["id"], body, mc=mc)
                         taken.append("draft\u2192" + saved_to)
                     else:
                         taken.append("draft skipped (no template)")
@@ -1136,6 +1136,8 @@ def _process_flow(mc, flow, row, meta, settings, why=""):
     store.log_msg_event(row["id"], "flow", "flow \u201c%s\u201d%s \u2192 %s%s"
                         % (flow.get("name") or flow.get("id"), "" if live else " (dry-run)",
                            ", ".join(taken) or "no steps", (" [%s]" % why) if why else ""))
+    return {"name": flow.get("name") or ("flow %s" % flow.get("id")),
+            "taken": taken, "live": live}
 
 
 # ---------------------------------------------------------------- LLM
@@ -1724,9 +1726,10 @@ def _process_folder(mc, folder, settings, rules, flows=None):
             if apply:
                 try:
                     if actions.get("move_to"):
-                        store.record_move(row, actions["move_to"], "rule")
-                        mc.ensure_folder(actions["move_to"])
-                        new_uid = mc.move(uid, actions["move_to"], msgid=row.get("msgid"))
+                        out = run_act("move", row["id"],
+                                      {"folder": actions["move_to"], "source": "rule"})
+                        if not out.get("ok"):
+                            raise RuntimeError(out.get("error") or "move failed")
                         taken.append("move:" + actions["move_to"])
                         _emit_plugin_event("mail.filed", {
                             "id": row.get("id"), "msgid": row.get("msgid") or "",
@@ -1736,13 +1739,17 @@ def _process_folder(mc, folder, settings, rules, flows=None):
                             "subject": row.get("subject") or "",
                             "by": "rule \"%s\"" % (rule.get("name") or "")})
                         mv_fields = {"folder": actions["move_to"]}
-                        if new_uid:
-                            mv_fields["uid"] = new_uid
+                        if out.get("uid"):
+                            mv_fields["uid"] = out["uid"]
                     if actions.get("mark_read"):
-                        mc.set_flags(uid, "+FLAGS", r"(\Seen)")
+                        out = run_act("flags", row["id"], {"add": [r"\Seen"]})
+                        if not out.get("ok"):
+                            raise RuntimeError(out.get("error") or "mark read failed")
                         taken.append("read")
                     if actions.get("flag"):
-                        mc.set_flags(uid, "+FLAGS", r"(\Flagged)")
+                        out = run_act("flags", row["id"], {"add": [r"\Flagged"]})
+                        if not out.get("ok"):
+                            raise RuntimeError(out.get("error") or "flag failed")
                         taken.append("flag")
                     status = "matched"
                     if taken:
@@ -1762,7 +1769,10 @@ def _process_folder(mc, folder, settings, rules, flows=None):
                                    ", ".join(taken) or ("kept (guard)" if is_guard_rule(rule) else "suggest")))
         elif flow and not kept:
             why = ("topic match %.2f" % f_ctx["last_topic_score"]) if "last_topic_score" in f_ctx else ""
-            _process_flow(mc, flow, row, meta, settings, why=why)
+            out = run_act("flow", row["id"], {"flow_id": flow["id"], "why": why})
+            if not out.get("ok"):
+                store.log_event("error", "flow '%s' failed for uid=%s: %s"
+                                % (flow.get("name"), uid, out.get("error")))
         else:
             store.update_message(row["id"], status="queued")
     if uids:
@@ -1785,18 +1795,11 @@ def undo_filing(log_id):
         return False, "This message has moved since — undoing would clobber newer state."
     if not entry.get("from_folder"):
         return False, "I do not know where this came from."
-    mc = MailClient().connect()
-    try:
-        mc.ensure_selected(msg.get("folder") or "")
-        mc.ensure_folder(entry["from_folder"])
-        new_uid = mc.move(msg["uid"], entry["from_folder"], msgid=msg.get("msgid"))
-    except Exception as exc:
-        return False, "Move back failed: %r" % exc
-    finally:
-        try:
-            mc.close()
-        except Exception:
-            pass
+    out = run_act("move", msg["id"], {"folder": entry["from_folder"], "source": "undo",
+                                      "record": False})
+    if not out.get("ok"):
+        return False, "Move back failed: %s" % out.get("error")
+    new_uid = out.get("uid")
     fields = {"folder": entry["from_folder"], "status": entry["prev_status"] or "classified",
               "action_taken": entry["prev_action_taken"] or ""}
     if new_uid:
@@ -2549,15 +2552,13 @@ def classify_and_store(msg, settings, mc=None):
             if not flow_matches(fl, m_fields, f_ctx):
                 continue
             try:
-                if mc is None:
-                    with_action_mail(lambda cm: _process_flow(
-                        cm, fl, msg, {"subject": msg.get("subject")}, settings,
-                        why="AI category %s %d%%" % (category, round(conf * 100))))
-                else:
-                    _process_flow(mc, fl, msg, {"subject": msg.get("subject")}, settings,
-                                  why="AI category %s %d%%" % (category, round(conf * 100)))
+                out = run_act("flow", msg["id"], {
+                    "flow_id": fl["id"],
+                    "why": "AI category %s %d%%" % (category, round(conf * 100))})
+                if not out.get("ok"):
+                    raise RuntimeError(out.get("error") or "flow failed")
                 live = bool(settings.get("flows_apply", True))
-                res["_flow"] = fl.get("name") or ("flow %s" % fl.get("id"))
+                res["_flow"] = out.get("flow") or fl.get("name") or ("flow %s" % fl.get("id"))
                 fields["status"] = "flow" if live else "flow-dry"
                 fields["action_taken"] = "flow:%s" % (fl.get("name") or fl.get("id"))
             except Exception as exc:
@@ -2565,23 +2566,18 @@ def classify_and_store(msg, settings, mc=None):
                                 % (fl.get("name"), exc))
             break
     if filing_wanted and not already_filed and not guard and not kept and not res.get("_flow"):
-        def _do_file(cm):
-            cm.ensure_selected(msg["folder"])
-            cm.ensure_folder(folder)
-            store.record_move(msg, folder, "auto-file")
-            return cm.move(msg["uid"], folder, msgid=msg.get("msgid"))
-        try:
-            new_uid = with_action_mail(_do_file) if mc is None else _do_file(mc)
+        out = run_act("move", msg["id"], {"folder": folder, "source": "auto-file"})
+        if out.get("ok"):
             fields["status"] = "llm-moved"
             fields["action_taken"] = "move:" + folder
             fields["folder"] = folder
-            if new_uid:
-                fields["uid"] = new_uid
+            if out.get("uid"):
+                fields["uid"] = out["uid"]
             res["_moved_to"] = folder
             store.log_msg_event(msg.get("id"), "file",
                                 "auto-filed to \u201c%s\u201d (LLM suggested)" % folder)
-        except Exception as exc:
-            store.log_event("error", "LLM move to %s failed: %r" % (folder, exc))
+        else:
+            store.log_event("error", "LLM move to %s failed: %s" % (folder, out.get("error")))
     store.update_message(msg["id"], **fields)
     learning.observe_classification(msg, fields, res, hres, settings)
     _emit_plugin_event("mail.classified", {
@@ -2906,6 +2902,208 @@ class BodyFetcher(threading.Thread):
                 pass
 
 
+# ------------------------------------------------- single writer act stage
+#
+# Phase 4 (docs/pipeline-queue.md): every mailbox mutation is a durable `act`
+# job executed by ActRunner on ONE connection (with_action_mail). Producers
+# that need the outcome (file/flag/flow/draft/send) call run_act(), which
+# enqueues and waits; when no runner is alive in this process (tests, CLI)
+# run_act executes inline on the same shared writer. The stage worker only
+# enqueues and waits - the app process owns the runner.
+
+ACT_KIND = "act"
+_ACT_RUNNER_ALIVE = threading.Event()
+_ACT_REMOTE = threading.Event()   # stage worker: app process drains the acts
+_ACT_WAKE = threading.Event()
+
+
+def set_act_remote(on=True):
+    """Declare that another process (the app) runs the ActRunner."""
+    if on:
+        _ACT_REMOTE.set()
+    else:
+        _ACT_REMOTE.clear()
+
+
+def act_runner_alive():
+    return _ACT_RUNNER_ALIVE.is_set()
+
+
+def _act_payload(op, message_id, params):
+    payload = {"op": op}
+    payload.update(params or {})
+    if message_id is not None:
+        payload["message_id"] = int(message_id)
+    return payload
+
+
+def enqueue_act(op, message_id=None, params=None, priority=0):
+    """Queue one mutation; wake the runner. Returns the job id."""
+    # act jobs keep message_id=NULL in the jobs table: its (kind, message_id)
+    # uniqueness means "one job per message", while a message may legitimately
+    # have several queued mutations (move + flags). The id rides in the payload.
+    jid = store.enqueue_job(ACT_KIND, None, _act_payload(op, message_id, params),
+                            priority=priority)
+    _ACT_WAKE.set()
+    return jid
+
+
+def run_act(op, message_id=None, params=None, timeout=60.0, priority=0):
+    """Run one mutation, waiting for its outcome. Inline when this process has
+    no runner and is not the stage worker; otherwise durable via the runner.
+    Returns the op result (always includes `ok`)."""
+    payload = _act_payload(op, message_id, params)
+    if not act_runner_alive() and not _ACT_REMOTE.is_set():
+        try:
+            return _act_execute(None, {"id": 0, "payload": payload})
+        except Exception as exc:
+            return {"ok": False, "error": repr(exc)}
+    job_id = enqueue_act(op, message_id=message_id, params=params, priority=priority)
+    if job_id is None:
+        return {"ok": False, "error": "could not queue action"}
+    row = store.wait_job(job_id, timeout=timeout)
+    if row is None:
+        return {"ok": False, "error": "action timed out"}
+    if row["state"] != "done":
+        return {"ok": False, "error": row.get("error") or "action failed"}
+    try:
+        out = json.loads(row.get("result") or "{}")
+    except (TypeError, ValueError):
+        out = {}
+    out.setdefault("ok", True)
+    return out
+
+
+def _act_move(mc, mid, p):
+    folder = (p.get("folder") or "").strip()
+    source = p.get("source") or "manual"
+    row = store.get_message(int(mid)) if mid else None
+    if row is None or not folder:
+        raise RuntimeError("move needs a message and a folder")
+    if row.get("folder") == folder:
+        return {"ok": True, "moved": False, "folder": folder, "uid": row.get("uid")}
+    mc.ensure_selected(row["folder"])
+    mc.ensure_folder(folder)
+    if p.get("record", True):
+        store.record_move(row, folder, source)
+    new_uid = mc.move(row["uid"], folder, msgid=row.get("msgid"))
+    fields = {"folder": folder}
+    if new_uid:
+        fields["uid"] = new_uid
+    store.update_message(row["id"], **fields)
+    store.log_event("info", "filed message %d ('%s') \u2192 %s"
+                    % (row["id"], (row.get("subject") or "")[:50], folder))
+    return {"ok": True, "moved": True, "folder": folder,
+            "uid": new_uid or row.get("uid")}
+
+
+def _act_flags(mc, mid, p):
+    row = store.get_message(int(mid)) if mid else None
+    if row is None:
+        raise RuntimeError("no such message")
+    add = [str(f) for f in (p.get("add") or [])]
+    remove = [str(f) for f in (p.get("remove") or [])]
+    if not add and not remove:
+        return {"ok": True, "changed": False}
+    mc.ensure_selected(row["folder"])
+    if add:
+        mc.set_flags(row["uid"], "+FLAGS", "(%s)" % " ".join(add))
+    if remove:
+        mc.set_flags(row["uid"], "-FLAGS", "(%s)" % " ".join(remove))
+    return {"ok": True, "changed": True, "uid": row["uid"]}
+
+
+def _act_create_folder(mc, p):
+    name = (p.get("name") or "").strip()
+    if not name:
+        raise RuntimeError("folder name is required")
+    existed = name in mc.folders()
+    if not existed:
+        mc.ensure_folder(name)
+    return {"ok": True, "folder": name, "created": not existed}
+
+
+def _act_flow(mc, mid, p):
+    flow = store.get_flow(int(p.get("flow_id") or 0))
+    row = store.get_message(int(mid)) if mid else None
+    if not flow or row is None:
+        raise RuntimeError("flow %r needs a valid flow and message" % p.get("flow_id"))
+    meta = {"subject": row.get("subject") or ""}
+    out = _process_flow(mc, flow, row, meta, store.all_settings(),
+                        why=p.get("why") or "")
+    return {"ok": True, "flow": flow.get("name") or ("flow %s" % flow.get("id")),
+            "taken": (out or {}).get("taken") or []}
+
+
+def _act_draft(mc, mid, p):
+    row = store.get_message(int(mid)) if mid else None
+    if row is None:
+        raise RuntimeError("draft needs a message")
+    folder = save_draft(row["id"], p.get("body") or "", mc=mc)
+    return {"ok": True, "folder": folder}
+
+
+def _act_execute(mc, job):
+    p = job.get("payload") or {}
+    op = p.get("op")
+    mid = p.get("message_id")
+    if mc is None:
+        # inline path: borrow the shared writer connection around the action
+        return with_action_mail(lambda m: _act_execute(m, job))
+    if op == "move":
+        return _act_move(mc, mid, p)
+    if op == "flags":
+        return _act_flags(mc, mid, p)
+    if op == "create_folder":
+        return _act_create_folder(mc, p)
+    if op == "flow":
+        return _act_flow(mc, mid, p)
+    if op == "draft":
+        return _act_draft(mc, mid, p)
+    raise RuntimeError("unknown act op %r" % op)
+
+
+class ActRunner(threading.Thread):
+    """Single writer stage: drains `act` jobs on one mailbox connection."""
+
+    def __init__(self):
+        super().__init__(daemon=True, name="triage-act")
+        self.stop_flag = threading.Event()
+        self.state = {"running": False, "queued": 0, "done": 0, "failed": 0,
+                      "last_ok": 0, "last_error": None}
+
+    def run(self):
+        store.init_db()
+        store.requeue_running_jobs()  # orphaned act/classify/index jobs after a crash
+        _ACT_RUNNER_ALIVE.set()
+        store.log_event("info", "act runner ready (single mailbox writer)")
+        try:
+            while not self.stop_flag.is_set():
+                stats = store.job_stats([ACT_KIND]).get(ACT_KIND) or {}
+                self.state["queued"] = stats.get("queued", 0)
+                claimed = store.claim_jobs([ACT_KIND], {ACT_KIND: 1},
+                                           worker=self.name, max_batch=1)
+                if not claimed:
+                    self.state["running"] = False
+                    _ACT_WAKE.wait(1.0)
+                    _ACT_WAKE.clear()
+                    continue
+                job = claimed[0]
+                self.state["running"] = True
+                try:
+                    result = with_action_mail(lambda mc: _act_execute(mc, job))
+                    store.finish_job(job["id"], result=json.dumps(result or {"ok": True}))
+                    self.state["done"] += 1
+                except Exception as exc:
+                    store.fail_job(job["id"], repr(exc))
+                    self.state["failed"] += 1
+                    self.state["last_error"] = repr(exc)
+                    store.log_event("error", "act failed (%s): %r" % (job["payload"], exc))
+                self.state["last_ok"] = int(time.time())
+        finally:
+            _ACT_RUNNER_ALIVE.clear()
+
+
 def _mail_pass(mc, settings, rules, flows):
     scanned = moved = 0
     for folder in settings.get("watch_folders") or ["INBOX"]:
@@ -3076,17 +3274,20 @@ def generate_draft(msg_id, template_id=None, instructions=""):
                                    instructions=str(instructions or ""))
 
 
-def save_draft(msg_id, body_text):
+def save_draft(msg_id, body_text, mc=None):
+    """Save a reply draft to the account's Drafts folder. With `mc` the caller
+    is already the act stage (flows); otherwise the save is queued as an act."""
+    if mc is None:
+        out = run_act("draft", msg_id, {"body": body_text})
+        if not out.get("ok"):
+            raise RuntimeError(out.get("error") or "draft save failed")
+        return out.get("folder") or ""
     msg = store.get_message(msg_id)
     if not msg:
         raise RuntimeError("message %s not found" % msg_id)
     raw = build_draft_message(msg, body_text, imap_config()["user"])
-    mc = MailClient().connect()
-    try:
-        folder = store.get_setting("drafts_folder") or mc.find_special_use("\\Drafts") or "Drafts"
-        mc.append_draft(folder, raw)
-    finally:
-        mc.close()
+    folder = store.get_setting("drafts_folder") or mc.find_special_use("\\Drafts") or "Drafts"
+    mc.append_draft(folder, raw)
     store.log_event("info", "draft saved for '%s'" % (msg.get("subject") or "")[:60])
     return folder
 
@@ -5093,22 +5294,25 @@ class AssistantAgent:
         row, folder, uid, err = self._resolve_message(a)
         if err:
             return {"ok": False, "summary": err, "result": {"error": err}}
+        if row:
+            out = run_act("move", row["id"], {"folder": target, "source": "assistant"})
+            if not out.get("ok"):
+                return {"ok": False, "summary": "move failed: %s" % out.get("error"),
+                        "result": {"error": out.get("error")}}
+            mv = {"status": "assistant-moved", "action_taken": "move:" + target}
+            store.update_message(row["id"], **mv)
+            store.log_event("info", "assistant moved %s uid %s ('%s') → %s"
+                            % (folder, uid, _truncate(row.get("subject") or "", 50), target))
+            return {"ok": True, "summary": "moved to %s" % target,
+                    "result": {"moved": {"folder": folder, "uid": uid, "to": target}}}
         mc = self._mail()
         try:
             mc.ensure_folder(target)
             mc.ensure_selected(folder)
-            if row:
-                store.record_move(row, target, "assistant", from_folder=folder)
-            new_uid = mc.move(uid, target, msgid=(row or {}).get("msgid"))
+            mc.move(uid, target)
         except Exception as exc:
             return {"ok": False, "summary": "move failed: %r" % exc, "result": {"error": repr(exc)}}
-        if row:
-            mv = {"status": "assistant-moved", "action_taken": "move:" + target, "folder": target}
-            if new_uid:
-                mv["uid"] = new_uid
-            store.update_message(row["id"], **mv)
-        store.log_event("info", "assistant moved %s uid %s ('%s') → %s"
-                        % (folder, uid, _truncate((row or {}).get("subject") or "", 50), target))
+        store.log_event("info", "assistant moved %s uid %s → %s" % (folder, uid, target))
         return {"ok": True, "summary": "moved to %s" % target,
                 "result": {"moved": {"folder": folder, "uid": uid, "to": target}}}
 
@@ -5121,35 +5325,46 @@ class AssistantAgent:
         row, folder, uid, err = self._resolve_message(a)
         if err:
             return {"ok": False, "summary": err, "result": {"error": err}}
-        ops = []
+        add, remove = [], []
         if seen is not None:
-            ops.append(("+FLAGS" if seen else "-FLAGS", r"(\Seen)"))
+            (add if seen else remove).append(r"\Seen")
         if flagged is not None:
-            ops.append(("+FLAGS" if flagged else "-FLAGS", r"(\Flagged)"))
-        mc = self._mail()
-        try:
-            mc.ensure_selected(folder)
-            for op, fl in ops:
-                mc.set_flags(uid, op, fl)
-        except Exception as exc:
-            return {"ok": False, "summary": "flag update failed: %r" % exc,
-                    "result": {"error": repr(exc)}}
-        store.log_event("info", "assistant set flags on %s uid %s (%s)" % (folder, uid, ops))
+            (add if flagged else remove).append(r"\Flagged")
+        if row:
+            out = run_act("flags", row["id"], {"add": add, "remove": remove})
+            if not out.get("ok"):
+                return {"ok": False, "summary": "flag update failed: %s" % out.get("error"),
+                        "result": {"error": out.get("error")}}
+        else:
+            mc = self._mail()
+            try:
+                mc.ensure_selected(folder)
+                if add:
+                    mc.set_flags(uid, "+FLAGS", "(%s)" % " ".join(add))
+                if remove:
+                    mc.set_flags(uid, "-FLAGS", "(%s)" % " ".join(remove))
+            except Exception as exc:
+                return {"ok": False, "summary": "flag update failed: %r" % exc,
+                        "result": {"error": repr(exc)}}
+        store.log_event("info", "assistant set flags on %s uid %s (+%s -%s)"
+                        % (folder, uid, " ".join(add), " ".join(remove)))
         return {"ok": True, "summary": "flags updated",
-                "result": {"folder": folder, "uid": uid, "changes": [str(o) for o in ops]}}
+                "result": {"folder": folder, "uid": uid,
+                           "changes": ["+%s" % f for f in add] + ["-%s" % f for f in remove]}}
 
     def _tool_create_folder(self, a):
         name = (a.get("name") or "").strip()
         if not name:
             return {"ok": False, "summary": "name is required", "result": {"error": "name required"}}
-        mc = self._mail()
-        existed = name in mc.folders()
-        if not existed:
-            mc.ensure_folder(name)
+        out = run_act("create_folder", params={"name": name})
+        if not out.get("ok"):
+            return {"ok": False, "summary": "create folder failed: %s" % out.get("error"),
+                    "result": {"error": out.get("error")}}
+        if out.get("created"):
             store.log_event("info", "assistant created folder '%s'" % name)
         return {"ok": True,
-                "summary": ("folder existed: " if existed else "folder created: ") + name,
-                "result": {"folder": name, "created": not existed}}
+                "summary": ("folder existed: " if not out.get("created") else "folder created: ") + name,
+                "result": {"folder": name, "created": bool(out.get("created"))}}
 
     def _tool_list_folders(self, a):
         folders = self._folders_with_counts()
@@ -5743,20 +5958,23 @@ class AssistantAgent:
         if not trash:
             return {"ok": False, "summary": "no Trash folder on this account - delete is unavailable",
                     "result": {"error": "no_trash_folder"}}
+        if row:
+            out = run_act("move", row["id"], {"folder": trash, "source": "trash"})
+            if not out.get("ok"):
+                return {"ok": False, "summary": "move to Trash failed: %s" % out.get("error"),
+                        "result": {"error": out.get("error")}}
+            store.update_message(row["id"], status="assistant-deleted",
+                                 action_taken="trash", folder=trash)
+            store.log_event("info", "assistant moved %s uid %s ('%s') to Trash"
+                            % (folder, uid, _truncate(row.get("subject") or "", 50)))
+            return {"ok": True, "summary": "moved to Trash (recoverable until the server purges)",
+                    "result": {"moved": {"folder": folder, "uid": uid, "to": trash}}}
         try:
             mc.ensure_selected(folder)
-            if row:
-                store.record_move(row, trash, "trash", from_folder=folder)
-            new_uid = mc.move(uid, trash, msgid=(row or {}).get("msgid"))
+            mc.move(uid, trash)
         except Exception as exc:
             return {"ok": False, "summary": "move to Trash failed: %r" % exc, "result": {"error": repr(exc)}}
-        if row:
-            mv = {"status": "assistant-deleted", "action_taken": "trash", "folder": trash}
-            if new_uid:
-                mv["uid"] = new_uid
-            store.update_message(row["id"], **mv)
-        store.log_event("info", "assistant moved %s uid %s ('%s') to Trash"
-                        % (folder, uid, _truncate((row or {}).get("subject") or "", 50)))
+        store.log_event("info", "assistant moved %s uid %s to Trash" % (folder, uid))
         return {"ok": True, "summary": "moved to Trash (%s)" % trash,
                 "result": {"trashed": {"folder": folder, "uid": uid, "to": trash}}}
 

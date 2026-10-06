@@ -264,6 +264,8 @@ class Supervisor(threading.Thread):
 
 def main():
     store.init_db()
+    import engine
+    engine.set_act_remote(True)  # mutations run in the app's ActRunner
     _apply_cpu_budget()
     # embedded proxy may still be booting in the app process; wait for its
     # listener so the first pass does not race it after a container restart

@@ -1307,6 +1307,39 @@ def main():
         heuristics_mod.auto_refine = _saved_refine
     check("auto-refine runs in-process only when the learning stage is local",
           _refine_skipped and len(_refine_calls) == 1)
+    with store.db() as _conn:
+        _conn.execute(
+            "INSERT INTO jobs (kind, message_id, payload, state, priority, created_at) "
+            "VALUES ('act', NULL, '{\"op\":\"create_folder\",\"name\":\"OrphanBox\"}', "
+            "'running', 0, ?)", (int(time.time()),))
+    check("startup requeue recovers orphaned running jobs",
+          store.requeue_running_jobs() >= 1)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind='act'")
+    check("run_act falls back to inline when no act runner is alive",
+          not engine.act_runner_alive())
+
+    section("T1e act stage: queued mutation through the single writer", "base")
+    _act_runner = engine.ActRunner()
+    _act_runner.start()
+    _alive_deadline = time.time() + 5
+    while time.time() < _alive_deadline and not engine.act_runner_alive():
+        time.sleep(0.05)
+    check("act runner comes up and reports alive", engine.act_runner_alive())
+    _act_res = engine.run_act("create_folder", params={"name": "ActBox"})
+    check("queued act op reports its result to the waiter",
+          _act_res.get("ok") is True and _act_res.get("created") is True)
+    check("the folder exists after the act job ran", state.get("ActBox") is not None)
+    with store.db() as _conn:
+        _act_row = _conn.execute(
+            "SELECT state, result FROM jobs WHERE kind='act' ORDER BY id DESC LIMIT 1").fetchone()
+    check("the act job is done with a persisted result",
+          _act_row is not None and _act_row["state"] == "done"
+          and json.loads(_act_row["result"] or "{}").get("created") is True)
+    _act_runner.stop_flag.set()
+    engine._ACT_WAKE.set()
+    _act_runner.join(timeout=5)
+    check("act runner stops cleanly", not engine.act_runner_alive())
 
     section("T2 LLM auto-filing ON", "base")
     store.set_setting("llm_apply", True)

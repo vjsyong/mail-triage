@@ -183,6 +183,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     lease_until INTEGER NOT NULL DEFAULT 0,
     worker TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL DEFAULT 0,
     started_at INTEGER,
     finished_at INTEGER
@@ -350,6 +351,9 @@ def _migrate(conn):
         conn.execute("UPDATE messages SET sort_ts = COALESCE(NULLIF(date_ts,0), processed_at, 0)")
     if "indexed_at" not in mcols:
         conn.execute("ALTER TABLE messages ADD COLUMN indexed_at INTEGER NOT NULL DEFAULT 0")
+    jcols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
+    if jcols and "result" not in jcols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN result TEXT NOT NULL DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_sort ON messages(sort_ts DESC, id DESC)")
     hcols = [r[1] for r in conn.execute("PRAGMA table_info(heuristics)")]
     if hcols and "excluded" not in hcols:
@@ -1699,14 +1703,42 @@ def claim_jobs(kinds, limits, worker="", budget=None, max_batch=64):
         conn.close()
 
 
-def _finish_job(job_id, state, error=""):
+def _finish_job(job_id, state, error="", result=""):
     with db() as conn:
-        conn.execute("UPDATE jobs SET state=?, error=?, finished_at=? WHERE id=?",
-                     (state, (error or "")[:400], int(time.time()), job_id))
+        conn.execute("UPDATE jobs SET state=?, error=?, result=?, finished_at=? WHERE id=?",
+                     (state, (error or "")[:400], (result or "")[:4000],
+                      int(time.time()), job_id))
 
 
-def finish_job(job_id, error=""):
-    _finish_job(job_id, "done", error)
+def finish_job(job_id, error="", result=""):
+    """Mark a job done; `result` carries JSON a synchronous caller can read."""
+    _finish_job(job_id, "done", error, result)
+
+
+def wait_job(job_id, timeout=60.0, poll=0.05):
+    """Block until a job leaves queued/running (any process may run it).
+    Returns the job row dict, or None when it is still pending after timeout."""
+    deadline = time.time() + float(timeout)
+    while True:
+        with db() as conn:
+            row = conn.execute("SELECT id, kind, state, error, result FROM jobs WHERE id=?",
+                               (int(job_id),)).fetchone()
+        if row is None:
+            return None
+        if row["state"] not in ("queued", "running"):
+            return dict(row)
+        if time.time() >= deadline:
+            return None
+        time.sleep(poll)
+
+
+def requeue_running_jobs():
+    """Startup crash recovery: no job can be legitimately running in a process
+    that just booted, so every `running` row is an orphan left by a crash."""
+    with db() as conn:
+        cur = conn.execute("UPDATE jobs SET state='queued', worker='', lease_until=0 "
+                           "WHERE state='running'")
+        return cur.rowcount
 
 
 def fail_job(job_id, error="", retry_after=0):

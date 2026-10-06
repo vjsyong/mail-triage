@@ -77,6 +77,7 @@ app.secret_key = os.environ.get("APP_SECRET", "mail-triage-local")
 worker = engine.Worker()
 indexer = rag.Indexer()
 body_fetcher = engine.BodyFetcher()
+act_runner = engine.ActRunner()
 classifier = engine.ClassifyJob()
 llm_health = engine.LLMHealthMonitor()
 
@@ -7396,26 +7397,14 @@ def message_file(mid):
     if not m or not target:
         flash("No suggested folder for this message — classify it first.", "err")
     else:
-        try:
-            mc = engine.MailClient().connect()
-            try:
-                mc.ensure_selected(m["folder"])
-                mc.ensure_folder(target)
-                new_uid = mc.move(m["uid"], target, msgid=m.get("msgid"))
-            finally:
-                mc.close()
-            mv = {"status": "llm-moved", "action_taken": "move:" + target, "folder": target}
-            if new_uid:
-                mv["uid"] = new_uid
-            store.record_move(m, target, "manual")
+        out = engine.run_act("move", mid, {"folder": target, "source": "manual"})
+        if not out.get("ok"):
+            flash("File failed: %s" % out.get("error"), "err")
+        else:
             learning.observe(mid, "move", target, source="ui")
-            store.update_message(mid, **mv)
+            store.update_message(mid, status="llm-moved", action_taken="move:" + target)
             store.clear_keep(m.get("msgid"))
-            store.log_event("info", "filed message %d ('%s') → %s"
-                            % (mid, (m.get("subject") or "")[:50], target))
             flash("Filed to '%s'%s" % (target, " — next up." if want_next else "."), "ok")
-        except Exception as exc:
-            flash("File failed: %r" % exc, "err")
     if want_next and next_id and next_id != mid:
         return redirect(url_for("message_detail", mid=next_id, f=filt))
     if want_next:
@@ -11497,8 +11486,10 @@ if __name__ == "__main__":
                 stall = 0
             last_remaining = res["remaining"]
         sys.exit(0)
+    store.requeue_running_jobs()  # orphaned act/classify/index jobs after a crash
     worker.start()
     body_fetcher.start()  # fetch stage: caches bodies the index stage consumes
+    act_runner.start()  # the single mailbox writer every mutation goes through
     if stage_worker.enabled():
         # CPU-heavy stages (index + learning) live in a supervised child process
         # so they never make the web app unresponsive (docs/pipeline-queue.md)

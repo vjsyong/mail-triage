@@ -80,7 +80,8 @@ git branch -d <name>
 
 - `app.py` - Flask routes + ALL page templates as string constants (`BASE_TMPL` is the
   shared shell; page templates like `DASH_TMPL` carry their own CSS).
-- `engine.py` - scanning, rules, flows, classification, assistant agent.
+- `engine.py` - scanning, rules, flows, classification, assistant agent, and
+  the single-writer `act` stage every mutation drains through.
 - `store.py` - SQLite layer (`data/triage.db` is live state; never delete it).
 - `rag.py` / `rag_lite.py` - search backends (lite = CPU ONNX, default).
 - `learning.py`, `heuristics.py` - learning loop + fast-path classifiers.
