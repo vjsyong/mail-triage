@@ -7,7 +7,8 @@ Public surface:
 ``OpenAICompatAdapter``    production native params, greedy parse + retry
 ``TinyJevAdapter``         typed decision-only head (lazy ``tinyjev`` import)
 ``FusionAdapter``          composed decision + prose, labelled components
-``systemone:<key>``        five decision-only v2 sweep heads (lazy imports)
+``systemone:<key>``        decision-only v2 sweep heads (lazy imports; includes
+                          the explicit ``systemone:nanojev-rag01`` v0.1 variant)
 
 ``get_adapter(name, **kwargs)`` builds a registered adapter by id; a missing
 optional dependency (e.g. TinyJev) surfaces as an explicit error, never a silent
@@ -41,6 +42,7 @@ from .systemone import (
     SystemOneKevAdapter,
     SystemOneNanoJevAdapter,
     SystemOneNanoJevRagAdapter,
+    SystemOneNanoJevRag01Adapter,
     build_systemone_adapter,
 )
 
@@ -54,6 +56,7 @@ ADAPTERS = {
     "systemone:kev": SystemOneKevAdapter,
     "systemone:nanojev": SystemOneNanoJevAdapter,
     "systemone:nanojev-rag": SystemOneNanoJevRagAdapter,
+    "systemone:nanojev-rag01": SystemOneNanoJevRag01Adapter,
 }
 
 
@@ -75,7 +78,8 @@ __all__ = [
     "provenance_for", "FakeAdapter", "OpenAICompatAdapter", "TinyJevAdapter",
     "FusionAdapter", "SystemOneGlinerAdapter", "SystemOneLayaAdapter",
     "SystemOneKevAdapter", "SystemOneNanoJevAdapter",
-    "SystemOneNanoJevRagAdapter", "build_systemone_adapter",
+    "SystemOneNanoJevRagAdapter", "SystemOneNanoJevRag01Adapter",
+    "build_systemone_adapter",
     "SYSTEMONE_ADAPTERS", "get_adapter", "list_adapters", "ADAPTERS",
     "STATUS_OK", "STATUS_ERROR", "STATUS_TIMEOUT", "STATUS_MISSING",
     "STATUS_SKIPPED", "FAIL_MODEL", "FAIL_INFRASTRUCTURE", "FAIL_BUDGET",
