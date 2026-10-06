@@ -1,5 +1,6 @@
 """SQLite storage for Mail Triage: settings, rules, templates, messages, events."""
 import email.utils
+import hashlib
 import json
 import os
 import sqlite3
@@ -188,6 +189,11 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(state, kind, priority, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_active ON jobs(kind, message_id)
     WHERE state IN ('queued', 'running');
+CREATE TABLE IF NOT EXISTS stage_state (
+    kind TEXT PRIMARY KEY,
+    state TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS heuristics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL DEFAULT '',
@@ -560,6 +566,63 @@ def all_settings():
             except (TypeError, ValueError):
                 out[row["k"]] = row["v"]
     return out
+
+
+_CATEGORY_VERSION_KEYS = ("categories", "category_folders")
+
+
+def settings_version(values):
+    """Deterministic digest of just the category vocabulary and destination map.
+
+    Missing keys use the effective defaults; dictionary key order is canonical
+    while list order is significant. Used for optimistic concurrency without a
+    schema change and without touching any other setting or secret.
+    """
+    snapshot = []
+    for key in _CATEGORY_VERSION_KEYS:
+        value = values.get(key)
+        if value is None:
+            value = DEFAULT_SETTINGS[key]
+        snapshot.append(value)
+    payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def save_category_settings(categories, mapping, expected_version):
+    """Atomically save category vocabulary + destination map if the version matches.
+
+    Opens a connection, takes ``BEGIN IMMEDIATE``, reads the two effective keys,
+    compares ``settings_version`` and returns False without writing on mismatch.
+    On match both JSON values are upserted and committed together. Any exception
+    rolls back and propagates; no schema or default changes are made.
+    """
+    conn = db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        current = {}
+        for key in _CATEGORY_VERSION_KEYS:
+            row = conn.execute("SELECT v FROM settings WHERE k=?", (key,)).fetchone()
+            if row is None:
+                current[key] = DEFAULT_SETTINGS[key]
+                continue
+            try:
+                current[key] = json.loads(row["v"])
+            except (TypeError, ValueError):
+                current[key] = row["v"]
+        if expected_version is None or settings_version(current) != expected_version:
+            conn.rollback()
+            return False
+        for key, value in ((_CATEGORY_VERSION_KEYS[0], categories),
+                           (_CATEGORY_VERSION_KEYS[1], mapping)):
+            conn.execute("INSERT INTO settings (k, v) VALUES (?, ?) "
+                         "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (key, json.dumps(value)))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------- rules
@@ -1534,6 +1597,8 @@ def enqueue_job(kind, message_id=None, payload=None, priority=0, not_before=0,
                 promote=False):
     """Add a job unless an equivalent one is already queued/running.
 
+    `message_id=0` marks a per-kind singleton job (e.g. an index refresh) so the
+    partial unique index keeps at most one active; real messages use their id.
     With promote=True an existing *queued* job is upgraded in place (priority,
     payload, clear backoff) instead of being ignored - that is how a manual
     retry preempts a scheduled job so the hourly budget cannot starve it.
@@ -1675,7 +1740,32 @@ def active_job_ids(kind):
     with db() as conn:
         return {r["message_id"] for r in conn.execute(
             "SELECT message_id FROM jobs WHERE kind=? AND state IN ('queued','running')",
-            (kind,)) if r["message_id"] is not None}
+            (kind,)) if r["message_id"] not in (None, 0)}
+
+
+def set_stage_state(kind, state):
+    """Publish a stage worker's live state for the UI (cross-process)."""
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO stage_state (kind, state, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(kind) DO UPDATE SET state=excluded.state, "
+            "updated_at=excluded.updated_at",
+            (kind, json.dumps(state or {}), int(time.time())))
+
+
+def get_stage_state(kind):
+    """Last published state for a stage, or {} when none/never set."""
+    with db() as conn:
+        row = conn.execute("SELECT state, updated_at FROM stage_state WHERE kind=?",
+                           (kind,)).fetchone()
+    if not row:
+        return {}
+    try:
+        st = json.loads(row["state"] or "{}")
+    except (TypeError, ValueError):
+        st = {}
+    st["_updated_at"] = row["updated_at"]
+    return st
 
 
 def cancel_queued_manual_jobs(kind):

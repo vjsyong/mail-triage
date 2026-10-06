@@ -1121,6 +1121,7 @@ def main():
     import heuristics as heuristics_mod
     import rag
     import rag_lite
+    import stage_worker
     import learning as learning_mod
     import plugins as plugins_mod
     eng_mod = engine
@@ -1240,6 +1241,62 @@ def main():
           and _drow["id"] not in store.active_job_ids("classify"))
     with store.db() as _conn:
         _conn.execute("DELETE FROM messages WHERE id=?", (_probe_id,))
+
+    section("T1c stage worker plumbing: stage_state + singleton index jobs", "base")
+    store.set_stage_state("index", {"running": True, "progress": "spinning up",
+                                    "last_ok": 4242})
+    _ss = store.get_stage_state("index")
+    check("stage_state round-trips a published state",
+          _ss.get("running") is True and _ss.get("progress") == "spinning up"
+          and _ss.get("last_ok") == 4242 and _ss.get("_updated_at", 0) > 0)
+    engine.set_external_stages(True)
+    try:
+        _ix = app_mod.index_status()
+    finally:
+        engine.set_external_stages(False)
+    check("external index status merges the published stage state",
+          _ix.get("external") is True and _ix.get("progress") == "spinning up"
+          and _ix.get("last_ok") == 4242)
+    _i1 = stage_worker.enqueue_index(rebuild=False, manual=False)
+    _i2 = stage_worker.enqueue_index(rebuild=False, manual=False)
+    check("index jobs are singletons per kind", isinstance(_i1, int) and _i2 is None)
+    _i3 = stage_worker.enqueue_index(rebuild=True, manual=True)
+    check("a manual rebuild promotes the queued pass", _i3 == _i1)
+    with store.db() as _conn:
+        _irow = _conn.execute("SELECT payload, priority FROM jobs WHERE id=?",
+                              (_i1,)).fetchone()
+    _ipay = json.loads(_irow["payload"])
+    check("promoted pass carries rebuild + manual + priority",
+          _ipay.get("rebuild") is True and _ipay.get("manual") is True
+          and _irow["priority"] == 10)
+    _iclaim = store.claim_jobs(["index"], {"index": 1}, worker="t")
+    check("index job claims as a durable singleton",
+          len(_iclaim) == 1 and _iclaim[0]["message_id"] == 0)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind='index'")
+    _sched = stage_worker.IndexRunner()
+    _sched.indexer.state.update({"started": int(time.time()), "last_ok": 0})
+    _sched._schedule()
+    check("scheduled refresh backs off after a recent attempt",
+          (store.job_stats(["index"]).get("index") or {}).get("queued", 0) == 0)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM jobs WHERE kind='index'")
+        _conn.execute("DELETE FROM stage_state WHERE kind IN ('index','learn')")
+    _refine_calls = []
+    _saved_refine = heuristics_mod.auto_refine
+    heuristics_mod.auto_refine = lambda: (_refine_calls.append(1), [])[1]
+    try:
+        engine.set_external_stages(True)
+        try:
+            engine.refine_heuristics_once()
+            _refine_skipped = not _refine_calls
+        finally:
+            engine.set_external_stages(False)
+        engine.refine_heuristics_once()
+    finally:
+        heuristics_mod.auto_refine = _saved_refine
+    check("auto-refine runs in-process only when the learning stage is local",
+          _refine_skipped and len(_refine_calls) == 1)
 
     section("T2 LLM auto-filing ON", "base")
     store.set_setting("llm_apply", True)
@@ -2149,6 +2206,28 @@ def main():
     check("vectors stored for every chunk", nvec == total_chunks)
     res2 = rag.index_pass(limit=5)
     check("second pass is a no-op", res2["processed"] == 0 and res2["remaining"] == 0)
+
+    section("T12c stage worker: an index job indexes and publishes state", "rag")
+    uid_sw = add_msg(state, "stageidx@x.com", "Stage index probe",
+                     "embed this body text " * 30, "sw1@x")
+    engine.process_mailbox()
+    sw_row = [r for r in store.messages(limit=4000) if r["msgid"] == "sw1@x"][0]
+    check("stage probe message fetched but not indexed yet",
+          store.message_chunk2_count(sw_row["id"]) == 0)
+    sw_job_id = stage_worker.enqueue_index(rebuild=False, manual=True)
+    sw_claimed = store.claim_jobs(["index"], {"index": 1}, worker="test-stage")
+    check("stage worker can claim the manual index job",
+          len(sw_claimed) == 1 and sw_claimed[0]["id"] == sw_job_id)
+    sw_state = stage_worker.process_index_job(rag.Indexer(), sw_claimed[0])
+    store.finish_job(sw_claimed[0]["id"])
+    check("stage index job indexed the new message",
+          store.message_chunk2_count(sw_row["id"]) > 0)
+    _published = store.get_stage_state("index")
+    check("stage worker published live index state",
+          _published.get("last_ok", 0) > 0
+          and _published.get("running") is False and sw_state.get("last_error") is None)
+    with store.db() as _conn:
+        _conn.execute("DELETE FROM stage_state WHERE kind='index'")
 
     section("T13 RAG: hybrid search, rerank, filters", "rag")
     r = rag.search("payment", mode="vector")
@@ -3529,8 +3608,11 @@ def main():
     rp = client.get("/more")
     check("More page renders", rp.status_code == 200 and b"more-row" in rp.data)
     check("More lists every section",
-          all(x in rp.data for x in (b"Rules", b"Flows", b"Learning", b"Templates",
-                                     b"Accounts", b"Log", b"Settings")))
+          b'href="/automation"' in rp.data and b'<b>Automation</b>' in rp.data
+          and all(x in rp.data for x in (b"Simulator", b"Learning",
+                                         b"Accounts", b"Log", b"Settings"))
+          and not any(x in rp.data for x in (b'href="/rules"', b'href="/flows"',
+                                             b'href="/templates"', b'href="/classifiers"')))
     rp = client.get("/manifest.webmanifest")
     check("manifest served with the right type",
           rp.status_code == 200 and "application/manifest+json" in rp.mimetype
@@ -4889,10 +4971,11 @@ def main():
           r.status_code in (301, 302, 303) and _loc.endswith("/plugins/mt-webhook-notify"))
     _pc_before = list(store.get_setting("plugin_classifiers", []) or [])
     client.post("/plugins/mt-promo-fastpath",
-                data={"action": "config", "opt_in_classifier": "1", "next": "detail"},
+                data={"action": "save", "opt_in_classifier": "1", "next": "detail"},
                 follow_redirects=True)
-    check("classifier pipeline opt-in saves plugin_classifiers",
-          "mt-promo-fastpath" in (store.get_setting("plugin_classifiers", []) or []))
+    _pc = store.get_setting("plugin_classifiers", []) or []
+    check("classifier pipeline opt-in saves the heuristic binding",
+          any(isinstance(x, dict) and x.get("plugin") == "mt-promo-fastpath" for x in _pc))
     store.set_setting("plugin_classifiers", _pc_before)
     r = client.get("/plugins/mt-cjk-matcher")
     check("matcher detail explains its rule-condition role",
@@ -5954,6 +6037,209 @@ def main():
           _fresp["object"] == "chat.completion"
           and _fresp["choices"][0]["message"]["content"] == json.dumps(_fv)
           and _fresp["usage"]["total_tokens"] == 3)
+
+    section("T66 tinyjev classifier: lifecycle sidecar + plugin classify path",
+            "plugins", "core")
+    import tinyjev.server as tjs
+    check("sidecar helpers: repo resolution + Noul decision",
+          tjs.hub_repo("TinyJev-0.6B")[0] == "AnkitAI/TinyJev-0.6B"
+          and tjs.hub_repo("TinyJev-4B-v1") == ("AnkitAI/TinyJev-4B", "v1")
+          and tjs.noul_decision(0.80, 0.40) == (True, 0.8)
+          and tjs.noul_decision(0.20, 0.40) == (False, 0.8))
+    _lc = tjs.lifecycle()
+    check("sidecar lifecycle reports phase/model/device before ready",
+          _lc.get("phase") in ("boot", "download", "load", "ready", "error")
+          and _lc.get("model") == "TinyJev-0.6B" and _lc.get("device") == "cpu"
+          and "uptime_s" in _lc and "hf_home" in _lc)
+
+    shutil.copytree(os.path.join(PROJECT, "plugins", "mt-tinyjev-classifier"),
+                    os.path.join(broot, "mt-tinyjev-classifier"), dirs_exist_ok=True)
+    plugins_mod.scan()
+    _row = plugins_mod.get("mt-tinyjev-classifier")
+    check("tinyjev plugin registers as classifier + tool",
+          bool(_row) and _row["root"] == "builtin"
+          and _row["manifest"]["kind"] == ["classifier", "tool"]
+          and _row["manifest"]["classifier"]["outputs"][0] == "Action")
+    check("tinyjev plugin allowlists its sidecar hosts",
+          "tinyjev" in (_row["manifest"]["net"]["hosts"] or [])
+          and "127.0.0.1" in (_row["manifest"]["net"]["hosts"] or []))
+    plugins_mod.set_enabled("mt-tinyjev-classifier", True)
+    check("enabling grants only net.http (no LLM, no mailbox)",
+          set(plugins_mod.get("mt-tinyjev-classifier")["grants"]) == {"net.http"})
+
+    class _TinyJevHTTP(BaseHTTPRequestHandler):
+        def _reply(self, code, obj):
+            _b = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(_b)))
+            self.end_headers()
+            self.wfile.write(_b)
+
+        def do_GET(self):
+            if self.path.split("?")[0] == "/status":
+                self._reply(200, {"phase": _tj["phase"], "progress": _tj.get("progress"),
+                                  "model": "TinyJev-0.6B", "device": "cpu",
+                                  "cached_bytes": 1258291200, "total_bytes": 1258291200,
+                                  "calls": _tj["calls"], "ready": _tj["phase"] == "ready"})
+            else:
+                self._reply(404, {"error": "not found"})
+
+        def do_POST(self):
+            path = self.path.split("?")[0]
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}")
+            if path == "/load":
+                self._reply(202, {"ok": True, "phase": _tj["phase"],
+                                  "already": _tj["phase"] == "ready"})
+                return
+            _tj["last_categories"] = body.get("categories") or []
+            _tj["last_state"] = str(body.get("state") or "")
+            if _tj["phase"] != "ready":
+                self._reply(503, {"error": "tinyjev not ready (phase %s)" % _tj["phase"],
+                                  "phase": _tj["phase"]})
+                return
+            _tj["calls"] += 1
+            self._reply(200, {"model": "TinyJev-0.6B", "category": _tj["category"],
+                              "category_confidence": _tj["confidence"],
+                              "category_probabilities": {_tj["category"]: _tj["confidence"],
+                                                         "Notification": round(1.0 - _tj["confidence"], 3)},
+                              "needs_reply": True, "needs_reply_confidence": 0.7,
+                              "components": {"tinyjev_ms": 12.5, "nr_mode": "noul"},
+                              "latency_ms": 20.0, "error": None})
+
+        def log_message(self, *a):
+            pass
+
+    _tj = {"phase": "ready", "category": "Action", "confidence": 0.91, "calls": 0}
+    _tjsrv = ThreadingHTTPServer(("127.0.0.1", 0), _TinyJevHTTP)
+    threading.Thread(target=_tjsrv.serve_forever, daemon=True).start()
+    plugins_mod.set_config("mt-tinyjev-classifier", {
+        "tinyjev_url": "http://127.0.0.1:%d" % _tjsrv.server_address[1],
+        "categories": "Action,Notification", "state_chars": 1500,
+        "classify_timeout_ms": 8000})
+
+    _out = rt_mod.runtime.invoke("mt-tinyjev-classifier", "tinyjev_status", {})
+    check("status tool reports the ready sidecar",
+          _out.get("ok") and "ready" in (_out.get("summary") or "")
+          and (_out.get("result") or {}).get("phase") == "ready")
+
+    _out = rt_mod.runtime.invoke("mt-tinyjev-classifier", "tinyjev_classify",
+                                 {"text": "Please approve the invoice by Friday.",
+                                  "subject": "Invoice approval", "from": "b@vendor.example"})
+    check("classify tool returns the sidecar verdict",
+          _out.get("ok") and (_out.get("summary") or "").startswith("Action (91%")
+          and (_out.get("result") or {}).get("category") == "Action")
+
+    _out = rt_mod.runtime.invoke("mt-tinyjev-classifier", "tinyjev_load", {})
+    check("load tool answers already-ready idempotently",
+          _out.get("ok") and "already" in (_out.get("summary") or ""))
+    _tj["phase"] = "download"
+    _out = rt_mod.runtime.invoke("mt-tinyjev-classifier", "tinyjev_load", {})
+    check("load tool kicks a download when not ready",
+          _out.get("ok") and "started" in (_out.get("summary") or ""))
+    _tj["phase"] = "ready"
+
+    _feats = heuristics_mod.featurize({"from_addr": "alerts@bank.example",
+                                       "subject": "Your statement is ready",
+                                       "snippet": "monthly statement"})
+    _out = rt_mod.runtime.classify("mt-tinyjev-classifier",
+                                   {"kind": "decision_list", "model": {}, "feats": _feats})
+    check("classify path maps the sidecar verdict to label/confidence",
+          bool(_out) and _out.get("label") == "Action" and abs(_out["confidence"] - 0.91) < 1e-9
+          and "tinyjev" in (_out.get("detail") or ""))
+    check("classify path sends the configured categories",
+          _tj.get("last_categories") == ["Action", "Notification"])
+    check("classify path builds a From/Subject/body state",
+          "From: alerts@bank.example" in _tj.get("last_state", "")
+          and "Subject: your statement is ready" in _tj.get("last_state", ""))
+    _out = rt_mod.runtime.classify("mt-tinyjev-classifier",
+                                   {"kind": "decision_list",
+                                    "model": {"categories": ["Receipt", "Other"]},
+                                    "feats": _feats})
+    check("a bound heuristic's category list overrides the config",
+          bool(_out) and _tj.get("last_categories") == ["Receipt", "Other"])
+    _tj["category"] = "Bogus"
+    _out = rt_mod.runtime.classify("mt-tinyjev-classifier",
+                                   {"kind": "decision_list", "model": {}, "feats": _feats})
+    check("an off-enum category abstains",
+          _out is None or not _out.get("label"))
+    _tj["category"] = "Action"
+    _tj["phase"] = "download"
+    _out = rt_mod.runtime.classify("mt-tinyjev-classifier",
+                                   {"kind": "decision_list", "model": {}, "feats": _feats})
+    check("the classify path abstains quietly while the sidecar is busy",
+          not _out or not _out.get("label"))
+    _calls_before = _tj["calls"]
+    _out = rt_mod.runtime.classify("mt-tinyjev-classifier",
+                                   {"kind": "decision_list", "model": {},
+                                    "feats": {"tokens": {}, "from": "", "domain": "",
+                                              "subject": "", "body": ""}})
+    check("an empty message abstains without touching the sidecar",
+          not _out or not _out.get("label"))
+    check("the empty abstain answered locally (no sidecar call)",
+          _tj["calls"] == _calls_before)
+    _tj["phase"] = "ready"
+
+    _tj_hid = store.add_heuristic("TinyJev binding", "decision_list", "Action",
+                                  model=json.dumps({"categories": ["Action", "Notification"]}),
+                                  stats="{}", min_confidence=0.8, enabled=False)
+    _pc_before = list(store.get_setting("plugin_classifiers", []) or [])
+    store.set_setting("plugin_classifiers",
+                      [{"plugin": "mt-tinyjev-classifier", "heuristic_id": _tj_hid}])
+    probe_msg = {"from_addr": "zjtj-sender@zjtj.invalid",
+                 "subject": "zjtj-probe please review the doc",
+                 "snippet": "zjtj-probe review this before the meeting"}
+    # natives must not answer the probe: park every enabled heuristic briefly
+    _hx_enabled = [(h["id"], bool(h.get("enabled"))) for h in store.list_heuristics()]
+    with store.db() as conn:
+        conn.execute("UPDATE heuristics SET enabled=0")
+    try:
+        _hres = heuristics_mod.classify(probe_msg)
+        check("the pipeline classifies through the tinyjev plugin when natives abstain",
+              bool(_hres) and _hres.get("category") == "Action"
+              and _hres.get("plugin") == "mt-tinyjev-classifier"
+              and "tinyjev" in (_hres.get("detail") or ""))
+        _tj["confidence"] = 0.5
+        check("the bound heuristic's confidence gate still applies",
+              heuristics_mod.classify(probe_msg) is None)
+        _tj["confidence"] = 0.91
+    finally:
+        with store.db() as conn:
+            for _hid, _was in _hx_enabled:
+                if _was:
+                    conn.execute("UPDATE heuristics SET enabled=1 WHERE id=?", (_hid,))
+
+    client.post("/plugins/mt-tinyjev-classifier",
+                data={"action": "save", "grant_net.http": "1", "agent_level": "auto",
+                      "opt_in_classifier": "1", "classifier_heuristic": str(_tj_hid),
+                      "next": "detail"}, follow_redirects=True)
+    _pc = store.get_setting("plugin_classifiers", []) or []
+    check("plugins-page opt-in (Access form) stores the heuristic binding",
+          any(isinstance(x, dict) and x.get("plugin") == "mt-tinyjev-classifier"
+              and x.get("heuristic_id") == _tj_hid for x in _pc))
+    check("the save path kept the net.http grant",
+          set(plugins_mod.get("mt-tinyjev-classifier")["grants"]) == {"net.http"})
+    _pg = client.get("/plugins/mt-tinyjev-classifier")
+    check("detail page renders the binding select with the bound heuristic",
+          _pg.status_code == 200 and b'classifier_heuristic' in _pg.data
+          and (b'value="%d" selected' % _tj_hid) in _pg.data)
+    # a Settings save (action=config, no opt-in fields) must not touch opt-ins
+    client.post("/plugins/mt-tinyjev-classifier",
+                data={"action": "config", "cfg_tinyjev_url": "http://127.0.0.1:1",
+                      "next": "detail"}, follow_redirects=True)
+    check("a settings save leaves the pipeline opt-in alone",
+          any(isinstance(x, dict) and x.get("plugin") == "mt-tinyjev-classifier"
+              for x in (store.get_setting("plugin_classifiers", []) or [])))
+    client.post("/plugins/mt-tinyjev-classifier",
+                data={"action": "save", "grant_net.http": "1", "agent_level": "auto",
+                      "next": "detail"}, follow_redirects=True)
+    check("unticking the opt-in removes the binding",
+          not any(isinstance(x, dict) and x.get("plugin") == "mt-tinyjev-classifier"
+                  for x in (store.get_setting("plugin_classifiers", []) or [])))
+    store.set_setting("plugin_classifiers", _pc_before)
+    plugins_mod.set_enabled("mt-tinyjev-classifier", False)
+    _tjsrv.shutdown()
 
     section("T62 LLM health: reachability probe + dashboard polling", "core", "ui")
     _lh = eng_mod.llm_health()

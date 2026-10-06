@@ -1,6 +1,6 @@
 # Pipeline stage queue: decouple mail fetch from downstream work
 
-Status: phase 1 implemented 2026-10-05 (see "Phases"). Design agreed after the
+Status: phase 2 implemented 2026-10-05 (see "Phases"). Design agreed after the
 Office365 "User is authenticated but not connected." incident: the 16-wide
 classify pool held one IMAP connection per LLM thread, which (plus worker +
 indexer + assistant) exceeded Exchange Online's per-mailbox concurrent-IMAP
@@ -61,6 +61,25 @@ All action execution shares `engine.with_action_mail(fn)`: a module-level
 opens IMAP; if a stage action needs mail access it borrows this one session.
 The worker's scan connection is separate and short-lived.
 
+## Stage-worker process (phase 2)
+
+`stage_worker.py` is the supervised child process that owns the CPU-heavy
+stages so the web process keeps its GIL and CPU time:
+
+- Claims singleton `index` jobs (`message_id=0`) from the queue, runs the same
+  `rag.Indexer` pass, and schedules the incremental refresh cadence itself.
+- Runs the heuristic auto-refine loop (the web Worker skips it via
+  `engine.external_stages()`).
+- Publishes live state to the `stage_state` table; `app.index_status()` merges
+  it so the dashboard shows progress, errors and "last run" seamlessly.
+- Manual Index now / Rebuild enqueue jobs (`stage_worker.enqueue_index`), which
+  promote an already queued scheduled pass rather than duplicating.
+- CPU placement: `STAGE_CPUS` (e.g. `4-7`) pins the child with
+  `sched_setaffinity` and `STAGE_NICE` (default 5) lowers its priority;
+  `STAGE_WORKER=off` falls back to the old in-process indexer (dev/tests).
+- `stage_worker.Supervisor` keeps the child alive from `app.py` main
+  (same container, so the embedded proxy stays reachable on localhost).
+
 ## Phases
 
 1. (done) `jobs` core + `classify` stage. The worker enqueues queued mail and
@@ -69,11 +88,12 @@ The worker's scan connection is separate and short-lived.
    `request_stop` keep their contracts). Actions from classification route
    through `with_action_mail`, so batch classification uses 0-1 IMAP sessions
    instead of one per thread.
-2. Index stage from the local cache; indexer stops connecting. Requires the
-   body cache below.
-3. Fetch stage stores full bodies (`message_bodies`) and only enqueues;
-   triage/replies move downstream; classification can then use bodies rather
-   than snippets.
+2. (done) Stage-worker process: index + learning run in a supervised child
+   process with their own GIL/CPU budget; manual triggers and live state cross
+   the process boundary through the queue and `stage_state`.
+3. Index stage from the local cache (body cache in the fetch stage): the stage
+   worker stops connecting, and classification can use bodies rather than
+   snippets.
 4. `act` stage drains all mutations; assistant writes and drafts join it.
 
 ## Tests

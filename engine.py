@@ -1581,15 +1581,46 @@ class Worker(threading.Thread):
         finally:
             self.state["last_cycle"] = time.time()
             self.state["running"] = False
-        try:
-            if store.get_setting("heuristic_autorefine", True):
-                for _hid, hname, delta in heuristics.auto_refine():
-                    store.log_event("info", "heuristic %r retrained (+%d new label(s))" % (hname, delta))
-        except Exception as exc:
-            store.log_event("error", "heuristic auto-refine failed: %r" % exc)
+        refine_heuristics_once()
 
 
 LLM_HEALTH_INTERVAL = 60  # seconds between LLM reachability probes
+
+
+# --------------------------------------------------- pipeline stage placement
+# CPU-heavy stages (indexing/embeddings, learning) can run in the supervised
+# stage-worker process (stage_worker.py) so they never compete with the web app
+# for the GIL or its CPU time. The flag is set by app.py at startup.
+
+_EXTERNAL_STAGES = threading.Event()
+
+
+def set_external_stages(on=True):
+    """Declare that index/learning stages run in the stage-worker process."""
+    if on:
+        _EXTERNAL_STAGES.set()
+    else:
+        _EXTERNAL_STAGES.clear()
+
+
+def external_stages():
+    return _EXTERNAL_STAGES.is_set()
+
+
+def refine_heuristics_once():
+    """Retrain tag-sourced heuristics if enough new labels arrived. Skipped when
+    the learning stage runs externally (stage_worker owns it then). Returns the
+    [(id, name, new_labels), ...] retrained list."""
+    if external_stages() or not store.get_setting("heuristic_autorefine", True):
+        return []
+    done = []
+    try:
+        for _hid, hname, delta in heuristics.auto_refine():
+            store.log_event("info", "heuristic %r retrained (+%d new label(s))" % (hname, delta))
+            done.append((_hid, hname, delta))
+    except Exception as exc:
+        store.log_event("error", "heuristic auto-refine failed: %r" % exc)
+    return done
 
 
 class LLMHealthMonitor(threading.Thread):
@@ -2916,16 +2947,14 @@ class ClassifyJob(threading.Thread):
     # -- queue plumbing
 
     def _enqueue_manual(self, backlog_if_empty=False):
-        """Move trigger selections into the durable queue as manual jobs."""
+        """Move trigger selections into the durable queue as manual jobs.
+        With backlog_if_empty (the synchronous _run_job drain) an empty
+        selection means "the whole backlog", like the old batch behaviour."""
         with self.lock:
             ids, self.queue = list(self.queue), []
             all_flag, self.queue_all = self.queue_all, False
-        if all_flag:
+        if all_flag or (not ids and backlog_if_empty):
             ids = store.unclassified_ids()
-        if not ids and backlog_if_empty:
-            stats = store.job_stats([CLASSIFY_KIND]).get(CLASSIFY_KIND) or {}
-            if not stats.get("queued") and not stats.get("running"):
-                ids = store.unclassified_ids()
         added = 0
         for mid in ids:
             if store.enqueue_job(CLASSIFY_KIND, mid, {"manual": True},
@@ -4187,11 +4216,12 @@ def assistant_page_context(path, live_state=""):
                 "review, delete. The Learning page is the friendlier overview of the same "
                 "models.", "page:classifiers")
     if p == "/templates":
-        return ("page", "templates list",
-                "CURRENT PAGE: the user is on the TEMPLATES page - reusable reply templates "
-                "(name + body; placeholders allowed) used by flows' draft steps and the message "
-                "viewer's draft button. Row actions: edit, delete; New template opens the "
-                "editor.", "page:templates")
+        return ("page", "drafting",
+                "CURRENT PAGE: the user is on DRAFTING (the templates page) - the reply template "
+                "list plus the shared draft destination (blank = auto-detect) and the flows that "
+                "contain a draft step (fixed, template, LLM or plugin). Row actions: edit, "
+                "delete; New template opens the editor. Every draft step saves to this shared "
+                "destination.", "page:templates")
     if p == "/settings":
         try:
             _modes = "rules %s / LLM %s / auto-filing %s" % (
@@ -4201,13 +4231,49 @@ def assistant_page_context(path, live_state=""):
         except Exception:
             _modes = ""
         return ("page", "settings",
-                "CURRENT PAGE: the user is on SETTINGS - task-grouped cards (Mailbox; Sorting & "
-                "classification; Filing & drafts; Search; General; Status), each saved on its "
-                "own. Here live the LLM endpoint + thinking mode, categories and the category-to-"
-                "folder map, watch folders and poll interval, auto-filing (llm_apply), the "
-                "search backend, display timezone and the AGENT PERMISSIONS. The Status card has "
-                "Test buttons (LLM / embeddings / rerank). Currently %s." % _modes,
+                "CURRENT PAGE: the user is on SETTINGS - the retained system configuration "
+                "(General, AI endpoints and model, Embeddings & reranker, Search index, Mail "
+                "source and checking, Agent permissions and Reply detection). The rule/flow live "
+                "switches, classification switches, fast-path classifier switches, the category "
+                "vocabulary and destination map, the automatic-filing switch and the draft "
+                "destination now live in the Automation workspace; Settings keeps landmark links "
+                "to them. Currently %s." % _modes,
                 "page:settings")
+    if p == "/automation":
+        try:
+            _ra = "live" if store.get_setting("rules_apply", True) else "preview only"
+            _fa = "live" if store.get_setting("flows_apply", True) else "dry-run"
+            _af = "ON" if store.get_setting("llm_apply") else "off"
+            _nrules = len(store.list_rules())
+            _nflows = len(store.list_flows())
+        except Exception:
+            _ra = _fa = _af = "?"
+            _nrules = _nflows = 0
+        return ("page", "automation overview",
+                "CURRENT PAGE: the user is on AUTOMATION - the workspace overview. Local tabs: "
+                "Overview, Rules, Flows, Categories & filing, Drafting, Controls. It explains the "
+                "two stages - mailbox scan (rules first, then non-category flows, guarded mail "
+                "protected) and after classification (eligible category flows in order, default "
+                "filing as fallback) - and links to the editors and the Simulator. Rule mode %s, "
+                "flow mode %s, default filing %s; %d rule(s), %d flow(s)."
+                % (_ra, _fa, _af, _nrules, _nflows), "page:automation")
+    if p == "/automation/categories":
+        return ("page", "categories & filing",
+                "CURRENT PAGE: the user is on AUTOMATION - CATEGORIES & FILING. It edits the "
+                "classification vocabulary and the category-to-folder map (blank destination = "
+                "keep in current folder), plus the sole automatic-default-filing switch. Existing "
+                "category names are read-only; removing a category never rewrites historical "
+                "labels or classifiers, and removal is blocked while a stored flow category "
+                "condition or fast-path classifier references it.",
+                "page:automation/categories")
+    if p == "/automation/controls":
+        return ("page", "automation controls",
+                "CURRENT PAGE: the user is on AUTOMATION - CONTROLS. Scoped switches: rule live "
+                "mode, flow live mode (independent of each flow's Enabled state), classification "
+                "switches (LLM suggestions, hourly cap, batch size, concurrency), fast-path "
+                "classifier switches, and a read-only default-filing state. Saving preferences "
+                "does not process mail immediately; the worker reads them on its next check.",
+                "page:automation/controls")
     if p == "/accounts" or p.startswith("/accounts/"):
         return ("page", "accounts",
                 "CURRENT PAGE: the user is on ACCOUNTS - the mail connection page: a proxy "
@@ -4264,9 +4330,9 @@ def assistant_page_context(path, live_state=""):
     if p == "/more":
         return ("page", "more",
                 "CURRENT PAGE: the user is on the MORE page - the directory of all sections "
-                "(Rules, Simulator, Flows, Learning, Templates, Accounts, Log, Settings) with a "
-                "one-line description of each; the user lands here to find a page by name.",
-                "page:more")
+                "(Automation, Simulator, Learning, Accounts, Log, Settings, and installed "
+                "plugins/extensions) with a one-line description of each; the user lands here to "
+                "find a page by name.", "page:more")
     if p == "/learning":
         try:
             _rep = learning.status_report()
