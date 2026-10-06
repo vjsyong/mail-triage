@@ -84,3 +84,18 @@ Design rules taken from the research:
   topic = "related to / about X" fuzziness; deterministic first).
 - Builder UI: per-condition `kind` selector + `min score` column; the steps editor
   grows a "Reply instructions" textarea for LLM drafts.
+
+## Follow-up: Automation workspace (2026-10)
+
+The flow list, flow editor and this builder now render under the shared Automation
+workspace (Overview · Rules · Flows · Categories & filing · Drafting · Controls);
+the canonical `/flows` and `/flows/<id>/edit` URLs are unchanged. The **flow live
+mode** switch (this record's `flows_apply` dry-run toggle) and the classification
+switches moved from Settings to **Automation → Controls**; Settings keeps landmark
+links. Categories & filing still owns the vocabulary and the category→folder map,
+and each configured category offers **Create flow**, which opens a disabled,
+server-derived category-triggered draft in the builder (see
+`docs/features.md` and `qa/unified-automation.md`). The precedence statement above
+still holds: a matching category flow runs and suppresses the plain category→folder
+filing, including a preview-mode flow and a flow without a move step; guard rules
+still block, and global dry-run is independent of a flow's own Enabled state.

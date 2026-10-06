@@ -3608,8 +3608,11 @@ def main():
     rp = client.get("/more")
     check("More page renders", rp.status_code == 200 and b"more-row" in rp.data)
     check("More lists every section",
-          all(x in rp.data for x in (b"Rules", b"Flows", b"Learning", b"Templates",
-                                     b"Accounts", b"Log", b"Settings")))
+          b'href="/automation"' in rp.data and b'<b>Automation</b>' in rp.data
+          and all(x in rp.data for x in (b"Simulator", b"Learning",
+                                         b"Accounts", b"Log", b"Settings"))
+          and not any(x in rp.data for x in (b'href="/rules"', b'href="/flows"',
+                                             b'href="/templates"', b'href="/classifiers"')))
     rp = client.get("/manifest.webmanifest")
     check("manifest served with the right type",
           rp.status_code == 200 and "application/manifest+json" in rp.mimetype
