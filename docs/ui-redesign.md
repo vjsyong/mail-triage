@@ -275,3 +275,22 @@ and the body in a scrollable mono block. Template placeholders ({subject}, {send
 {my_name}...) are rendered with the simulated fields. LLM-mode drafts only run when
 "Ask the classifier" is ticked; otherwise the block says the model would write it and
 shows the step's instructions, so the default simulation stays instant and offline.
+
+## Contrast pass (2026-10-06)
+The light theme read as washed out at small sizes. Measured WCAG ratios drove a
+token-level fix in `BASE_TMPL`, so every page inherits it:
+
+| Token / rule | Before | After | Ratio on white |
+|---|---|---|---|
+| `--dim` (secondary text) | #666666 | #525252 | 5.5 -> 7.8 |
+| placeholders | #9d9d9d | #767676 | 2.7 -> 4.5 |
+| `.nav-label` | #999999 | #5f5f5f | 2.9 -> 6.4 |
+| `--line2` (control borders: inputs, `.btn`, `.chip`, `.iconbtn`, `.px-sw`, `.copy`, `.regen`) | #d4d4d4 | #8f8f8f | 1.5 -> 3.2 (WCAG 1.4.11 non-text) |
+| `--line` (card/row separators) | #e5e5e5 | #dcdcdc | 1.26 -> 1.37 |
+| neutral `.dot` | #a3a3a3 | #8a8a8a | 2.5 -> 3.5 |
+| `--hover`/`--active` | #f7f7f7/#f2f2f2 | #f4f4f4/#ececec | clearer hover/current |
+| `--focus` ring | blue @ 35% | blue @ 50% | stronger focus appearance |
+
+Table header fill moved to #f7f7f7 and row hover uses `--hover`. Brand colors
+(`--acc` links 4.55:1, status colors >= 4.6:1) were already compliant and are
+unchanged.
