@@ -59,6 +59,9 @@ DEFAULT_DESCRIPTIONS = {
 CATEGORY_INSTRUCTIONS = "Which category does this email belong to?"
 REPLY_INSTRUCTIONS = ("Does this email need a reply from the account owner? "
                       "Answer for {owner}.")
+# Fallback description for a category the adapter cannot describe (native cases
+# hide the policy); the NanoJev predictor requires a non-empty description.
+CATEGORY_FALLBACK = "Email that belongs to the '%s' category"
 
 # The category answer and the reply answer are two separate signals.  The native
 # ``confidence`` field is a declared combination of them, NOT a calibrated pair.
@@ -499,7 +502,12 @@ class SystemOneAdapter(B.Adapter):
                 desc[str(entry["name"])] = str(
                     entry.get("description")
                     or desc.get(str(entry["name"]), ""))
-        descriptions = {c: desc.get(c, "") for c in cats}
+        # Every candidate needs a non-empty description: native cases
+        # intentionally hide the policy card, so policy-specific categories
+        # (e.g. Client/Invoice/Admin) have no curated text.  Fall back to a
+        # generic non-empty description rather than passing "" (which the
+        # NanoJev predictor rejects outright).
+        descriptions = {c: (desc.get(c) or CATEGORY_FALLBACK % c) for c in cats}
         owner = rendered.get("owner") or policy.get("owner") or ""
         return cats, descriptions, owner
 

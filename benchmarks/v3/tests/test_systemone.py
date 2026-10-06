@@ -191,6 +191,21 @@ class DecisionOnlyTests(unittest.TestCase):
         self.assertEqual(call["descriptions"]["Action"], "POLICY-DESC")
         self.assertEqual(call["owner"], "owner@example.com")  # rendered wins
 
+    def test_native_categories_get_nonempty_fallback_description(self):
+        # Native cases hide the policy, so policy-specific categories have no
+        # curated text; the head must still receive a non-empty description
+        # (the NanoJev predictor rejects empty ones).
+        head = FakeHead()
+        adapter = self._adapter(head)
+        v = view(profile="native")
+        v["rendered_input"]["categories"] = ["Client", "Invoice", "Admin", "Personal"]
+        adapter.run_case(v)
+        desc = head.calls[0]["descriptions"]
+        for c in ("Client", "Invoice", "Admin"):
+            self.assertTrue(desc[c], "empty fallback description for %r" % c)
+        self.assertEqual(desc["Personal"],
+                         systemone.DEFAULT_DESCRIPTIONS["Personal"])
+
 
 class CliWiringTests(unittest.TestCase):
     def _run(self, argv, patch_head=None):
