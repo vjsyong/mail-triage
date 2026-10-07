@@ -743,6 +743,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .row.chiprow{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px;max-width:100%;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}
   .row.chiprow::-webkit-scrollbar{display:none}
   .row.chiprow>*{flex:none}
+  .row.chiprow .chip{height:44px}
   .dsx .tbl.mcards tr{display:flex;flex-wrap:wrap;gap:2px 8px}
   .dsx .tbl.mcards td{display:block;padding:1px 0}
   .dsx .tbl.mcards td:nth-child(1){order:1;flex:1 1 100%;min-width:0}
@@ -768,7 +769,7 @@ white-space:pre-wrap;font-family:var(--mono);font-size:.85rem}
   .toolbar{display:block;padding:10px 0 10px 12px}
   .tchips{display:flex;gap:6px;overflow-x:auto;padding-right:12px;scrollbar-width:none;-webkit-overflow-scrolling:touch;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}
   .tchips::-webkit-scrollbar{display:none}
-  .tchips .chip{flex:none;height:34px}
+  .tchips .chip{flex:none;height:44px}
   .tactions{display:flex;gap:8px;margin:10px 12px 0 0}
   .tactions .btn{flex:1;min-height:44px}
   .mhide{display:none}
@@ -2482,9 +2483,9 @@ DASH_TMPL = """
 {% endif %}
 <div class="dash-workbench" id="dash-workbench">
 <section class="card" data-order="1"><div class="card-h"><h3>Needs your attention</h3></div><div class="dash-attention">
-<a href="{{ url_for('messages', f='needs_reply') }}"><b>{{ st.needs_reply }}</b> need a reply</a>
-<a href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> errors</a>
-<a href="{{ url_for('assistant') }}"><b>{{ pending_approvals }}</b> pending approvals</a>
+<a href="{{ url_for('messages', f='needs_reply') }}"><b>{{ st.needs_reply }}</b> need{{ 's' if st.needs_reply == 1 else '' }} a reply</a>
+<a href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> error{{ 's' if st.errors != 1 else '' }}</a>
+<a href="{{ url_for('assistant') }}"><b>{{ pending_approvals }}</b> pending approval{{ 's' if pending_approvals != 1 else '' }}</a>
 </div>{% if not st.needs_reply and not st.errors and not pending_approvals %}<p class="sub">You're caught up — browse recent mail below.</p>{% endif %}
   <div class="dsc" role="group" aria-label="Automation status">
     <span class="dschip{{ ' off' if not settings.rules_apply else '' }}" title="{{ 'Rules act live' if settings.rules_apply else 'Rules act in dry-run (suggest only)' }}">Rules {{ 'live' if settings.rules_apply else 'dry-run' }}</span>
@@ -3480,9 +3481,9 @@ CLASSIFIERS_TMPL = """
       <td><b>{{ h.name }}</b>{% if not h.enabled %} <span class="badge">disabled</span>{% endif %}<div class="sub" style="font-size:.75rem">min conf {{ '%.2f' % (h.min_confidence or 0.8) }} · by {{ h.created_by }}</div></td>
       <td class="mono" style="font-size:.79rem">{{ h.kind }}</td>
       <td>{{ h.category }}</td>
-      <td class="sub">{{ h.samples }}{% if h.excluded %} <span class="badge">-{{ h.excluded }} removed</span>{% endif %}</td>
+      <td class="sub">{{ h.samples }}{% if h.excluded %} <span class="badge">{{ h.excluded }} removed</span>{% endif %}</td>
       <td class="sub">{{ h.label_source }}{% if h.weak_labels %} <span class="badge warn">weak</span>{% endif %}</td>
-      <td class="sub" style="max-width:340px">{{ h.description[:170] }}</td>
+      <td class="sub" style="max-width:340px" title="{{ h.description }}">{{ h.description[:170] }}</td>
       <td class="sub">{{ h.when }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
         <a class="btn small" href="{{ url_for('classifier_dataset', hid=h.id) }}">Dataset</a>
@@ -6293,7 +6294,7 @@ MESSAGES_TMPL = """
 <form method="get" class="card" aria-label="Search and filter mail">
   <input type="hidden" name="f" value="{{ filt }}">
   <input type="hidden" name="per" value="{{ per }}">
-  <div class="ux-search"><label for="mail-q">Search mail<input id="mail-q" type="search" name="q" value="{{ search_form.q }}" placeholder="Sender, subject or message text…"></label><button class="btn primary" type="submit">Search</button>{% if search_active %}<a class="btn" href="{{ url_for('messages', f=filt) }}">Clear filters</a>{% endif %}</div>
+  <div class="ux-search"><label for="mail-q">Search mail<input id="mail-q" type="search" name="q" value="{{ search_form.q }}" placeholder="Sender, subject, text…"></label><button class="btn primary" type="submit">Search</button>{% if search_active %}<a class="btn" href="{{ url_for('messages', f=filt) }}">Clear filters</a>{% endif %}</div>
   <details class="ux-filters" {{ 'open' if search_advanced else '' }}><summary>More filters{% if search_active %} · applied{% endif %}</summary>
     <div class="grid3">
       <div><label for="mail-sender">Sender</label><input id="mail-sender" name="sender" value="{{ search_form.sender }}" placeholder="name@example.com"></div>
@@ -6662,7 +6663,9 @@ MESSAGE_TMPL = """
 .reply-panel{margin:0 0 14px}.reply-panel>summary{font-weight:600;cursor:pointer}.reply-panel form{margin-top:12px}
 .msg-disclosure>summary{cursor:pointer;font-weight:600;padding-bottom:8px}
 .category-correction{margin:10px 0}.category-correction label{margin:0}.category-correction select{width:auto;min-width:140px}
-@media(max-width:767px){.message-workbench{top:0}.message-workbench .btn{min-height:44px}.message-workbench details>div{left:0;right:auto}.message-workbench{gap:6px}.msgrid{gap:10px}}
+@media(max-width:767px){.message-workbench .btn{min-height:44px}.message-workbench details>div{left:0;right:auto}.message-workbench{gap:6px}.msgrid{gap:10px}}
+@media(max-width:767px){.message-workbench{top:calc(env(safe-area-inset-top) + 45px)}}
+@media(min-width:768px) and (max-width:1023px){.message-workbench{top:calc(env(safe-area-inset-top) + 56px)}}
 </style>
 <div class="page-head">
   <div style="min-width:0">
@@ -7655,7 +7658,7 @@ ASSISTANT_TMPL = r"""
         </div>
         <div class="aspecline">
           <details class="aspec">
-            <summary><span class="chip sm">{{ llm.model or 'no model' }}</span> <span class="sub">assistant details</span></summary>
+            <summary><span class="chip sm">Model: {{ llm.model or 'none' }}</span> <span class="sub">assistant details</span></summary>
             <div class="aspec-body">
               <div class="aspec-grp"><b>Can do directly</b><span class="aspec-chips">{% for c in spec.auto %}<span class="chip sm{{ ' plug' if c.plug else '' }}">{{ c.label }}</span>{% else %}<span class="sub">nothing yet</span>{% endfor %}</span></div>
               <div class="aspec-grp"><b>Asks first</b><span class="aspec-chips">{% for c in spec.ask %}<span class="chip sm{{ ' plug' if c.plug else '' }}">{{ c.label }}</span>{% else %}<span class="sub">nothing yet</span>{% endfor %}</span></div>

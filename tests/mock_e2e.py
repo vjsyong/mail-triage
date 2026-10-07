@@ -3880,6 +3880,13 @@ def main():
           b'class="metric primary"' in d and b"need a reply" in d
           and b'class="dstat"' in d and b"Filed messages" in d
           and b"Needs your attention" in d and b"counts overlap" in d)
+    import app as _appm
+    _s = _appm.stats()
+    _pa = store.count_pending_agent_actions()
+    check("attention counts pluralize correctly (1 error, 0 errors, needs a reply at 1)",
+          ("<b>%d</b> error%s</a>" % (_s["errors"], "" if _s["errors"] == 1 else "s")).encode() in d
+          and ("<b>%d</b> need%s a reply</a>" % (_s["needs_reply"], "s" if _s["needs_reply"] == 1 else "")).encode() in d
+          and ("<b>%d</b> pending approval%s</a>" % (_pa, "" if _pa == 1 else "s")).encode() in d)
     check("automation status renders as chips with a settings link",
           b'class="dsc"' in d and b"Auto-filing" in d and b"Settings" in d)
     check("hero counts flows + classifiers, drops parked errors",
