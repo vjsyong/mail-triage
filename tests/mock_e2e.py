@@ -2742,6 +2742,22 @@ def main():
           store.count_messages("all") == len(store.messages(limit=100000)))
     check("count_messages respects filters",
           store.count_messages("tagged") == len(store.messages(limit=1000, filt="tagged")))
+    with store.db() as _qc:
+        _qr = _qc.execute("SELECT id FROM messages WHERE status='classified' "
+                          "AND coalesce(snoozed_until,0)=0 AND coalesce(subject,'')!='' "
+                          "ORDER BY id DESC LIMIT 1").fetchone()
+    _qid = _qr[0]
+    _qb = store.count_messages("queued")
+    _u4 = store.unclassified_count()
+    with store.db() as _qc:
+        _qc.execute("UPDATE messages SET status='new' WHERE id=?", (_qid,))
+    _qn = store.count_messages("queued")
+    _qu = store.unclassified_count()
+    with store.db() as _qc:
+        _qc.execute("UPDATE messages SET status='classified' WHERE id=?", (_qid,))
+    _qa = store.count_messages("queued")
+    check("'Awaiting LLM' counts fresh 'new' rows too (same intake as classify-all)",
+          _qn == _qb + 1 and _qu == _u4 + 1 and _qa == _qb)
     p1 = store.messages(limit=5, offset=0)
     p2 = store.messages(limit=5, offset=5)
     check("offset paginates without overlap",
@@ -3889,6 +3905,10 @@ def main():
           and ("<b>%d</b> pending approval%s</a>" % (_pa, "" if _pa == 1 else "s")).encode() in d)
     check("automation status renders as chips with a settings link",
           b'class="dsc"' in d and b"Auto-filing" in d and b"Settings" in d)
+    check("status chips deep-link to their controls",
+          b'href="/automation/controls#ctl-rules"' in d
+          and b'href="/automation/controls#ctl-classify"' in d
+          and b'href="/automation/categories#filing-switch"' in d)
     check("hero counts flows + classifiers, drops parked errors",
           b"Flows active" in d and b"Classifiers active" in d and b"parked errors" not in d
           and b"flows active" in d and b"classifiers active" in d)
@@ -4115,6 +4135,9 @@ def main():
     r = client.get("/messages/%d" % aid)
     check("viewer renders the audit trail card",
           b"Audit trail" in r.data and b"classify" in r.data and b"full reasoning" in r.data)
+    _nev = len([e for e in store.get_msg_events(aid) if e["kind"] != "thread_headers"])
+    check("audit summary pluralizes its event count",
+          ("Audit trail · %d event%s</summary>" % (_nev, "" if _nev == 1 else "s")).encode() in r.data)
     store.update_message(aid, llm_suggested_folder="Archive")
     client.post("/messages/%d/file" % aid)
     kinds2 = [e["kind"] for e in store.get_msg_events(aid)]

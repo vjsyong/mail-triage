@@ -254,7 +254,7 @@ def stats():
         G = " WHERE " + store.REAL_MSG
         return {
             "total": one("SELECT COUNT(*) FROM messages" + G),
-            "queued": one("SELECT COUNT(*) FROM messages" + G + " AND status='queued'"),
+            "queued": one("SELECT COUNT(*) FROM messages" + G + " AND status IN ('new','queued')"),
             "classified": one("SELECT COUNT(*) FROM messages" + G + " AND status IN ('classified','llm-moved')"),
             "moved": one("SELECT COUNT(*) FROM messages" + G + " AND action_taken LIKE 'move%'"),
             "needs_reply": one("SELECT COUNT(*) FROM messages" + G + " AND llm_needs_reply=1"
@@ -2488,9 +2488,9 @@ DASH_TMPL = """
 <a href="{{ url_for('assistant') }}"><b>{{ pending_approvals }}</b> pending approval{{ 's' if pending_approvals != 1 else '' }}</a>
 </div>{% if not st.needs_reply and not st.errors and not pending_approvals %}<p class="sub">You're caught up — browse recent mail below.</p>{% endif %}
   <div class="dsc" role="group" aria-label="Automation status">
-    <span class="dschip{{ ' off' if not settings.rules_apply else '' }}" title="{{ 'Rules act live' if settings.rules_apply else 'Rules act in dry-run (suggest only)' }}">Rules {{ 'live' if settings.rules_apply else 'dry-run' }}</span>
-    <span class="dschip{{ ' off' if not settings.llm_suggest else '' }}" title="{{ 'LLM classification on' if settings.llm_suggest else 'LLM classification off' }}">LLM {{ 'on' if settings.llm_suggest else 'off' }}</span>
-    <span class="dschip{{ ' off' if not settings.llm_apply else '' }}" title="{{ 'Auto-filing ON' if settings.llm_apply else 'Auto-filing off (suggests only)' }}">Auto-filing {{ 'ON' if settings.llm_apply else 'off' }}</span>
+    <a class="dschip{{ ' off' if not settings.rules_apply else '' }}" href="{{ url_for('automation_controls') }}#ctl-rules" title="{{ 'Rules act live' if settings.rules_apply else 'Rules act in dry-run (suggest only)' }}">Rules {{ 'live' if settings.rules_apply else 'dry-run' }}</a>
+    <a class="dschip{{ ' off' if not settings.llm_suggest else '' }}" href="{{ url_for('automation_controls') }}#ctl-classify" title="{{ 'LLM classification on' if settings.llm_suggest else 'LLM classification off' }}">LLM {{ 'on' if settings.llm_suggest else 'off' }}</a>
+    <a class="dschip{{ ' off' if not settings.llm_apply else '' }}" href="{{ url_for('automation_categories') }}#filing-switch" title="{{ 'Auto-filing ON' if settings.llm_apply else 'Auto-filing off (suggests only)' }}">Auto-filing {{ 'ON' if settings.llm_apply else 'off' }}</a>
     <a class="dschip chg" href="{{ url_for('settings') }}">Settings →</a>
   </div>
 </section>
@@ -6755,7 +6755,7 @@ MESSAGE_TMPL = """
       </div>
     </details>
     <details class="card msg-disclosure" id="audit">
-      <summary>Audit trail · {{ m.audit|length }} events</summary>
+      <summary>Audit trail · {{ m.audit|length }} event{{ 's' if m.audit|length != 1 else '' }}</summary>
       <div class="card-h"><h3>Audit trail</h3><span class="sub">How this email was triaged, oldest first{% if m.audit %} · {{ m.audit|length }} event{{ 's' if m.audit|length != 1 else '' }}{% endif %}</span></div>
       {% for ev in m.audit %}
       <div class="arow2">

@@ -1446,7 +1446,10 @@ def _messages_filter_where(filt):
     else:
         where.append("coalesce(snoozed_until, 0) <= %d" % now)
     if filt == "queued":
-        where.append("status='queued'")
+        # "Awaiting LLM" = everything the classifier intake accepts: fresh ('new')
+        # plus the post-rules queue ('queued'); same set as the classify-all
+        # button (unclassified_count) and app.stats()["queued"].
+        where.append("status IN ('new','queued')")
     elif filt == "unmatched":
         where.append("status IN ('queued','classified')")
     elif filt == "needs_reply":
