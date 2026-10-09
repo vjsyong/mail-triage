@@ -2483,9 +2483,9 @@ DASH_TMPL = """
 {% endif %}
 <div class="dash-workbench" id="dash-workbench">
 <section class="card" data-order="1"><div class="card-h"><h3>Needs your attention</h3></div><div class="dash-attention">
-<a href="{{ url_for('messages', f='needs_reply') }}"><b>{{ st.needs_reply }}</b> need{{ 's' if st.needs_reply == 1 else '' }} a reply</a>
-<a href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> error{{ 's' if st.errors != 1 else '' }}</a>
-<a href="{{ url_for('assistant') }}"><b>{{ pending_approvals }}</b> pending approval{{ 's' if pending_approvals != 1 else '' }}</a>
+{% if st.needs_reply %}<a href="{{ url_for('messages', f='needs_reply') }}"><b>{{ st.needs_reply }}</b> need{{ 's' if st.needs_reply == 1 else '' }} a reply</a>{% endif %}
+{% if st.errors %}<a href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> error{{ 's' if st.errors != 1 else '' }}</a>{% endif %}
+{% if pending_approvals %}<a href="{{ url_for('assistant') }}"><b>{{ pending_approvals }}</b> pending approval{{ 's' if pending_approvals != 1 else '' }}</a>{% endif %}
 </div>{% if not st.needs_reply and not st.errors and not pending_approvals %}<p class="sub">You're caught up — browse recent mail below.</p>{% endif %}
   <div class="dsc" role="group" aria-label="Automation status">
     <a class="dschip{{ ' off' if not settings.rules_apply else '' }}" href="{{ url_for('automation_controls') }}#ctl-rules" title="{{ 'Rules act live' if settings.rules_apply else 'Rules act in dry-run (suggest only)' }}">Rules {{ 'live' if settings.rules_apply else 'dry-run' }}</a>
@@ -6724,7 +6724,8 @@ MESSAGE_TMPL = """
         {% if m.classified_by and m.classified_by.startswith('heuristic') %}<span class="badge acc">⚙ {{ m.classified_by }}</span>{% endif %}
       </div>
       <form class="row category-correction" method="post" action="{{ url_for('message_category', mid=m.id) }}"><label for="correct-category">Correct category</label><select id="correct-category" name="category" required><option value="">Choose category…</option>{% for c in categories %}<option {{ 'selected' if m.llm_category==c else '' }}>{{ c }}</option>{% endfor %}</select><button class="btn small" type="submit">Save correction</button><span class="sub">Teaches the models; does not move mail.</span></form>
-      {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_reason %} · why: {{ m.llm_reason }}{% endif %}{% if m.llm_suggested_folder %} · suggested folder: {{ m.llm_suggested_folder }}{% endif %}</div>{% endif %}
+      {% set _mvt = (m.action_taken or '')[5:] if (m.action_taken or '').startswith('move') else '' %}
+      {% if m.llm_summary %}<div class="note">LLM summary: {{ m.llm_summary }}{% if m.llm_reason %} · why: {{ m.llm_reason }}{% endif %}{% if m.llm_suggested_folder %} · {{ ('filed to ' + _mvt) if _mvt else ('suggested folder: ' + m.llm_suggested_folder) }}{% endif %}</div>{% endif %}
       {% if m.llm_thinking %}<details class="sub" style="margin:8px 0 0"><summary style="cursor:pointer">classifier thinking</summary><pre class="mono" style="white-space:pre-wrap;font-size:.8rem;color:var(--dim);margin:6px 0">{{ m.llm_thinking }}</pre></details>{% endif %}
       {% if classify_result %}<div class="note" style="margin-top:8px">LLM classified this as <b>{{ classify_result.category }}</b>
         ({{ '%.0f' % (classify_result.confidence*100) }}%) — {{ classify_result.summary }}{% if classify_result.reason %} · why: {{ classify_result.reason }}{% endif %}{% if classify_result.moved %} · filed to {{ classify_result.moved }}{% endif %}</div>{% endif %}
@@ -7898,6 +7899,9 @@ def _suggestions_for_path(path):
             row = plugins.get(pid)
             if row and row.get('enabled') and engine.agent_permissions().get('plugin:' + pid) != 'off':
                 chips.append({'label': label, 'prompt': prompt})
+        # the invoice-finder plugin chip supersedes the built-in "Find an old invoice" prompt
+        if any(c.get('label') == 'Find invoices' for c in chips):
+            chips = [c for c in chips if c.get('label') != 'Find an old invoice']
     return chips
 
 
@@ -8884,7 +8888,7 @@ SETTINGS_TMPL = """
   <a href="#general">General</a>
   <a href="#ai">AI</a>
   <a href="#mail">Mail</a>
-  <a href="#sorting">Automation</a>
+  <a href="#sorting">Sorting &amp; filing</a>
   <a href="#searchidx">Search</a>
 </nav>
 <div class="setbody">
@@ -10258,7 +10262,6 @@ LOG_TMPL = """
       <input type="search" name="q" value="{{ q }}" placeholder="Filter lines&hellip;" aria-label="Filter log lines" style="width:170px">
       <button class="btn small" type="submit">Find</button>
     </form>
-    <button class="btn small" id="logpause" type="button">Pause</button>
     <a class="chip{{ ' active' if lvl == 'all' and not mins else '' }}" href="{{ url_for('log', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">All</a>
     <a class="chip{{ ' active' if lvl == 'error' else '' }}" href="{{ url_for('log', lvl='error', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Errors{% if errors %} <span class="n">{{ errors }}</span>{% endif %}</a>
     <a class="chip{{ ' active' if lvl == 'warn' else '' }}" href="{{ url_for('log', lvl='warn', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Warnings{% if warns %} <span class="n">{{ warns }}</span>{% endif %}</a>
@@ -10268,6 +10271,7 @@ LOG_TMPL = """
     <a class="chip{{ ' active' if mins == '15' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='15') }}">15m</a>
     <a class="chip{{ ' active' if mins == '60' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='60') }}">1h</a>
     <a class="chip{{ ' active' if mins == '1440' else '' }}" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins='1440') }}">24h</a>
+    <button class="btn small" id="logpause" type="button">Pause</button>
     <a class="btn small" href="{{ url_for('log', lvl=lvl, debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Refresh</a>
   </div>
 </div>

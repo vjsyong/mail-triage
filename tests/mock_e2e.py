@@ -3899,10 +3899,11 @@ def main():
     import app as _appm
     _s = _appm.stats()
     _pa = store.count_pending_agent_actions()
-    check("attention counts pluralize correctly (1 error, 0 errors, needs a reply at 1)",
-          ("<b>%d</b> error%s</a>" % (_s["errors"], "" if _s["errors"] == 1 else "s")).encode() in d
-          and ("<b>%d</b> need%s a reply</a>" % (_s["needs_reply"], "s" if _s["needs_reply"] == 1 else "")).encode() in d
-          and ("<b>%d</b> pending approval%s</a>" % (_pa, "" if _pa == 1 else "s")).encode() in d)
+    _counters = [("<b>%d</b> error%s</a>" % (_s["errors"], "" if _s["errors"] == 1 else "s"), _s["errors"]),
+                 ("<b>%d</b> need%s a reply</a>" % (_s["needs_reply"], "s" if _s["needs_reply"] == 1 else ""), _s["needs_reply"]),
+                 ("<b>%d</b> pending approval%s</a>" % (_pa, "" if _pa == 1 else "s"), _pa)]
+    check("attention counters pluralize; zero counters stay hidden (derived from live counts)",
+          all(((exp.encode() in d) == (n > 0)) for exp, n in _counters))
     check("automation status renders as chips with a settings link",
           b'class="dsc"' in d and b"Auto-filing" in d and b"Settings" in d)
     check("status chips deep-link to their controls",
@@ -5457,6 +5458,9 @@ def main():
           and b"Can do directly" in r.data and b"agent permissions:" not in r.data)
     check("plugin chips show their declared action with a plugin tint",
           b"chip sm plug" in r.data and b">Find invoices</span>" in r.data)
+    _chips_asst = [s["label"] for s in app_mod._suggestions_for_path("/assistant")]
+    check("near-duplicate invoice chips are merged (plugin chip occupies exactly one slot)",
+          ("Find an old invoice" in _chips_asst) != ("Find invoices" in _chips_asst))
     check("plugin action labels fall back to the plugin id",
           plugins_mod.action_label(plugins_mod.get("good-demo")) == "Ping demo"
           and plugins_mod.action_label({"id": "plain-demo", "manifest": {}}) == "plain-demo")
