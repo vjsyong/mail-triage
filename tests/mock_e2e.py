@@ -2738,6 +2738,17 @@ def main():
     store.update_message(rows_b[0]["id"], llm_summary="Summary under the row test")
     r = client.get("/messages?per=500")
     check("summary line renders under the message row", b"Summary under the row test" in r.data)
+    store.update_message(rows_b[0]["id"], llm_summary="", snippet="Snippet fallback under the row probe")
+    r = client.get("/messages?per=500")
+    check("snippet renders under the row when no LLM summary exists",
+          b"Snippet fallback under the row probe" in r.data)
+    store.update_message(rows_b[0]["id"], llm_summary="Summary under the row test", snippet="weekly deals inside")
+    check("sender cell splits local part from domain (domain never clipped away)",
+          b'class="fromclip"' in r.data and b'<span class="ft">@x.com</span>' in r.data)
+    _any_tag = any((m.get("user_tag") or "") for m in store.messages(limit=500))
+    r = client.get("/messages?per=500")
+    check("tag column hidden exactly when the page has no tags",
+          (b"mailtbl notags" in r.data) == (not _any_tag))
     check("count_messages matches the unfiltered list",
           store.count_messages("all") == len(store.messages(limit=100000)))
     check("count_messages respects filters",
@@ -3899,7 +3910,7 @@ def main():
     import app as _appm
     _s = _appm.stats()
     _pa = store.count_pending_agent_actions()
-    _counters = [("<b>%d</b> error%s</a>" % (_s["errors"], "" if _s["errors"] == 1 else "s"), _s["errors"]),
+    _counters = [("<b>%d</b> failed message%s</a>" % (_s["errors"], "" if _s["errors"] == 1 else "s"), _s["errors"]),
                  ("<b>%d</b> need%s a reply</a>" % (_s["needs_reply"], "s" if _s["needs_reply"] == 1 else ""), _s["needs_reply"]),
                  ("<b>%d</b> pending approval%s</a>" % (_pa, "" if _pa == 1 else "s"), _pa)]
     check("attention counters pluralize; zero counters stay hidden (derived from live counts)",

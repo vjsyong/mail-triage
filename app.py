@@ -2484,7 +2484,7 @@ DASH_TMPL = """
 <div class="dash-workbench" id="dash-workbench">
 <section class="card" data-order="1"><div class="card-h"><h3>Needs your attention</h3></div><div class="dash-attention">
 {% if st.needs_reply %}<a href="{{ url_for('messages', f='needs_reply') }}"><b>{{ st.needs_reply }}</b> need{{ 's' if st.needs_reply == 1 else '' }} a reply</a>{% endif %}
-{% if st.errors %}<a href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> error{{ 's' if st.errors != 1 else '' }}</a>{% endif %}
+{% if st.errors %}<a href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> failed message{{ 's' if st.errors != 1 else '' }}</a>{% endif %}
 {% if pending_approvals %}<a href="{{ url_for('assistant') }}"><b>{{ pending_approvals }}</b> pending approval{{ 's' if pending_approvals != 1 else '' }}</a>{% endif %}
 </div>{% if not st.needs_reply and not st.errors and not pending_approvals %}<p class="sub">You're caught up — browse recent mail below.</p>{% endif %}
   <div class="dsc" role="group" aria-label="Automation status">
@@ -3483,7 +3483,7 @@ CLASSIFIERS_TMPL = """
       <td>{{ h.category }}</td>
       <td class="sub">{{ h.samples }}{% if h.excluded %} <span class="badge">{{ h.excluded }} removed</span>{% endif %}</td>
       <td class="sub">{{ h.label_source }}{% if h.weak_labels %} <span class="badge warn">weak</span>{% endif %}</td>
-      <td class="sub" style="max-width:340px" title="{{ h.description }}">{{ h.description[:170] }}</td>
+      <td class="sub" style="max-width:340px" title="{{ h.description }}">{% set _d = h.description or '' %}{{ (_d[:169].rsplit(' ', 1)[0] + '…') if _d|length > 169 else _d }}</td>
       <td class="sub">{{ h.when }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
         <a class="btn small" href="{{ url_for('classifier_dataset', hid=h.id) }}">Dataset</a>
@@ -6241,6 +6241,8 @@ MESSAGES_TMPL = """
 .mailtbl{table-layout:fixed;width:100%}.mailtbl th:nth-child(1){width:34px}.mailtbl th:nth-child(2){width:104px}.mailtbl th:nth-child(3){width:170px}.mailtbl th:nth-child(5){width:80px}.mailtbl th:nth-child(6){width:116px}.mailtbl th:nth-child(7){width:100px}
 .mailtbl td{overflow-wrap:anywhere}.mailtbl td:nth-child(3){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mailtbl td:nth-child(4) a{display:block;font-weight:600}.mailtbl td:nth-child(4) .sub{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:3px}
+.mailtbl.notags th:nth-child(5),.mailtbl.notags td:nth-child(5){display:none}
+.mailtbl .fromclip{display:flex;min-width:0}.mailtbl .fromclip .fh{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.mailtbl .fromclip .ft{flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(min-width:768px) and (max-width:1399px){.mailtbl th:nth-child(3){width:140px}.mailtbl th:nth-child(5),.mailtbl td:nth-child(5){display:none}.mailtbl th:nth-child(6){width:108px}.mailtbl th:nth-child(7){width:90px}}
 @media(max-width:767px){.mailtbl{table-layout:auto}}
 </style>
@@ -6333,7 +6335,8 @@ MESSAGES_TMPL = """
       <button class="btn small primary" type="submit" formaction="{{ url_for('messages_classify') }}">Classify selected</button>
     </div>
     {% if msgs %}
-    <div class="tablewrap"><table class="tbl mcards mailtbl">
+    {% set any_tag = msgs|selectattr('user_tag')|list|length > 0 %}
+    <div class="tablewrap"><table class="tbl mcards mailtbl{{ '' if any_tag else ' notags' }}">
       <thead><tr>
         <th class="sel"><input type="checkbox" id="selall" aria-label="Select all on this page"></th>
         <th>date</th><th>from</th><th>subject</th><th>tag</th><th>status</th><th>category</th>
@@ -6343,9 +6346,9 @@ MESSAGES_TMPL = """
       <tr>
         <td class="sel"><input type="checkbox" name="ids" value="{{ m.id }}" aria-label="Select message"></td>
         <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
-        <td class="sub" title="{{ m.from_addr }}">{{ m.from_addr|clip(34) }}</td>
+        <td class="sub" title="{{ m.from_addr }}"><div class="fromclip">{% set _fp = (m.from_addr or '').rsplit('@', 1) %}{% if _fp|length == 2 %}<span class="fh">{{ _fp[0] }}</span><span class="ft">@{{ _fp[1] }}</span>{% else %}<span class="fh">{{ m.from_addr }}</span>{% endif %}</div></td>
         <td><a href="{{ url_for('message_detail', mid=m.id, f=filt, **search_form) }}" title="{{ m.subject }}">{{ m.subject|clip(84) or '(no subject)' }}</a>
-          {% if m.llm_summary %}<div class="sub" style="font-size:.78rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(150) }}</div>{% endif %}</td>
+          {% if m.llm_summary %}<div class="sub" style="font-size:.78rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(150) }}</div>{% elif m.snippet %}<div class="sub" style="font-size:.78rem" title="{{ m.snippet }}">{{ m.snippet|clip(150) }}</div>{% endif %}</td>
         <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
         <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.snoozed_active %} <span class="badge warn" title="until {{ m.snoozed_h }}">snoozed</span>{% endif %}{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
         <td class="sub">{{ m.llm }}</td>
@@ -7952,7 +7955,7 @@ def _assistant_page(sid):
         ts = s.get("last_ts") or s.get("created") or 0
         d = int((ts + off) // 86400) if ts else -1
         s["group"] = "Today" if d == today else ("Yesterday" if d == today - 1 else "Earlier")
-        s["when"] = time.strftime("%H:%M" if d == today else "%m-%d", time.gmtime(ts + off)) if ts else ""
+        s["when"] = time.strftime("%H:%M" if d == today else "%m-%d %H:%M", time.gmtime(ts + off)) if ts else ""
         s["active"] = _assistant_active_run(s["id"]) is not None
     convo, convo_html = _assistant_fragment(sid, "/assistant",
                                             url_for("assistant_session", sid=sid))
@@ -9737,7 +9740,7 @@ ACCOUNTS_TMPL = """
       {% if p.running %}<span class="badge ok">proxy running</span>{% else %}<span class="badge warn">proxy stopped</span>{% endif %}
       <span class="sub">
         {% for l in p.listener_rows %}<span class="mono">127.0.0.1:{{ l.port }}</span> <span class="dot {{ 'ok' if l.up else 'err' }}"></span>{% if not loop.last %} · {% endif %}{% else %}no listeners yet{% endfor %}
-        {% if p.pid %} · pid {{ p.pid }}{% endif %}{% if p.started_h %} · up since {{ p.started_h }}{% endif %}
+        {% if p.started_h %} · running since {{ p.started_h }}{% endif %}
         {% if p.restarts %} · restarted {{ p.restarts }}×{% endif %}
       </span>
     </div>
