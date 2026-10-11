@@ -2226,6 +2226,9 @@ def main():
           any("move to" in (e.get("message") or "")
               and "failed" in (e.get("message") or "")
               for e in store.recent_events(50)))
+    check("failure log lines never leak payload reprs",
+          all("{'op':" not in (e.get("message") or "")
+              for e in store.recent_events(200) if e.get("level") == "error"))
     # Retry parked is a manual action: it must run the classifier on exactly the
     # parked ids so the scheduled worker's hourly budget cannot starve it.
     store.update_message(cfrow["id"], status="error")
@@ -2749,6 +2752,11 @@ def main():
     r = client.get("/messages?per=500")
     check("tag column hidden exactly when the page has no tags",
           (b"mailtbl notags" in r.data) == (not _any_tag))
+    _dimset = ("matched", "llm-moved", "assistant-moved", "classified", "kept", "sent")
+    _listed = store.messages(limit=min(500, store.count_messages("all")), filt="all", offset=0)
+    check("processed rows recede (r-dim count derives from live statuses)",
+          r.data.count(b'class="r-dim"')
+          == sum(1 for _m in _listed if (_m.get("status") or "") in _dimset))
     check("count_messages matches the unfiltered list",
           store.count_messages("all") == len(store.messages(limit=100000)))
     check("count_messages respects filters",
@@ -3104,6 +3112,13 @@ def main():
 
     r = client.get("/classifiers")
     check("classifiers page renders", r.status_code == 200 and b"Promo robot" in r.data)
+    _hrow = store.get_heuristic(hid)
+    _hm = json.loads(_hrow.get("model") or "{}")
+    _has_other = any((c.get("label") == "__other__") for c in (_hm.get("conditions") or []))
+    check("classifier evidence speaks prose, not internal labels",
+          (b"__other__" not in r.data)
+          and (not _has_other
+               or ("not %s" % (_hrow.get("category") or "this category")).encode() in r.data))
     r = client.get("/messages/%d" % row_new["id"])
     check("message page shows the heuristic badge",
           ("heuristic:%d" % hid).encode() in r.data)
@@ -3331,6 +3346,8 @@ def main():
     r = client.get("/settings")
     check("settings page carries the new endpoint cards",
           b"LLM endpoint" in r.data and b"Embeddings" in r.data and b"Reranker" in r.data)
+    check("remote-images help states both on and off behaviour",
+          b"On: images load automatically." in r.data)
     # -- the Settings model dropdown is fed by the endpoint's /models list
     verify_endpoint(client, "/settings/test-llm",
                     {"llm_base_url": llm_base_mock, "llm_model": "settings-model-x"})
@@ -3406,6 +3423,8 @@ def main():
     check("accounts page renders the account + status",
           r.status_code == 200 and b"acct@example.com" in r.data
           and b"not authorised" in r.data)
+    check("account card speaks sign-in language, not the mechanism word",
+          b"loopback mode" not in r.data and b"sign-in via paste-back" in r.data)
     r = client.post("/api/proxy/auth/nobody@example.com")
     check("auth start rejects unknown accounts", r.status_code == 404)
 
@@ -3915,6 +3934,8 @@ def main():
                  ("<b>%d</b> pending approval%s</a>" % (_pa, "" if _pa == 1 else "s"), _pa)]
     check("attention counters pluralize; zero counters stay hidden (derived from live counts)",
           all(((exp.encode() in d) == (n > 0)) for exp, n in _counters))
+    check("failure counter carries the error tint (derived from live counts)",
+          (b'class="att-err"' in d) == (_s["errors"] > 0))
     check("automation status renders as chips with a settings link",
           b'class="dsc"' in d and b"Auto-filing" in d and b"Settings" in d)
     check("status chips deep-link to their controls",

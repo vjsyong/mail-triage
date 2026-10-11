@@ -518,5 +518,6 @@ def view(h):
             "samples": stats.get("samples"), "label_source": stats.get("source"),
             "weak_labels": bool(stats.get("weak_labels")), "trained_at": stats.get("trained_at"),
             "excluded": len(heuristic_excluded(h)),
-            "description": describe(h.get("kind") or "", model),
+            "description": describe(h.get("kind") or "", model).replace(
+                OTHER_LABEL, "not %s" % (h.get("category") or "this category")),
             "created_by": h.get("created_by") or ""}

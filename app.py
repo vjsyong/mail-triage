@@ -2405,7 +2405,7 @@ DASH_TMPL = """
 .dashgrid .card{margin:0}
 .syswrap>summary{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600}
 .dash-workbench{display:flex;flex-direction:column}.dash-workbench>[data-order="1"]{order:1}.dash-workbench>[data-order="2"]{order:2}.dash-workbench>[data-order="3"]{order:3}.dash-workbench>[data-order="4"]{order:4}.dash-workbench>[data-order="5"]{order:5}
-.dash-attention{display:flex;gap:16px;flex-wrap:wrap}.dash-attention a{display:flex;align-items:center;gap:8px;font-weight:600;padding:8px 0}.dash-attention b{font-size:1.35rem}
+.dash-attention{display:flex;gap:16px;flex-wrap:wrap}.dash-attention a{display:flex;align-items:center;gap:8px;font-weight:600;padding:8px 0}.dash-attention b{font-size:1.35rem}.dash-attention a.att-err{color:var(--err)}
 .dash-workbench .dashgrid{grid-template-columns:1fr}.dash-workbench .metrics{margin-top:14px}.dash-workbench .sys{margin-top:14px}.dash-workbench .frow:nth-of-type(n+5){display:none}
 .actwrap>summary{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;cursor:pointer;list-style:none}
 .actwrap>summary::-webkit-details-marker{display:none}
@@ -2484,7 +2484,7 @@ DASH_TMPL = """
 <div class="dash-workbench" id="dash-workbench">
 <section class="card" data-order="1"><div class="card-h"><h3>Needs your attention</h3></div><div class="dash-attention">
 {% if st.needs_reply %}<a href="{{ url_for('messages', f='needs_reply') }}"><b>{{ st.needs_reply }}</b> need{{ 's' if st.needs_reply == 1 else '' }} a reply</a>{% endif %}
-{% if st.errors %}<a href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> failed message{{ 's' if st.errors != 1 else '' }}</a>{% endif %}
+{% if st.errors %}<a class="att-err" href="{{ url_for('messages', f='errors') }}"><b>{{ st.errors }}</b> failed message{{ 's' if st.errors != 1 else '' }}</a>{% endif %}
 {% if pending_approvals %}<a href="{{ url_for('assistant') }}"><b>{{ pending_approvals }}</b> pending approval{{ 's' if pending_approvals != 1 else '' }}</a>{% endif %}
 </div>{% if not st.needs_reply and not st.errors and not pending_approvals %}<p class="sub">You're caught up — browse recent mail below.</p>{% endif %}
   <div class="dsc" role="group" aria-label="Automation status">
@@ -6245,6 +6245,9 @@ MESSAGES_TMPL = """
 .mailtbl .fromclip{display:flex;min-width:0}.mailtbl .fromclip .fh{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.mailtbl .fromclip .ft{flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(min-width:768px) and (max-width:1399px){.mailtbl th:nth-child(3){width:140px}.mailtbl th:nth-child(5),.mailtbl td:nth-child(5){display:none}.mailtbl th:nth-child(6){width:108px}.mailtbl th:nth-child(7){width:90px}}
 @media(max-width:767px){.mailtbl{table-layout:auto}}
+/* processed rows recede so NEW/ERROR keep the eye (status-derived; no read-state in the schema) */
+.mailtbl tr.r-dim td:nth-child(4) a{color:var(--dim);font-weight:500}
+#bulk .tbl.mcards tr.r-dim td:nth-child(3){color:var(--dim)}
 </style>
 <div class="page-head">
   <div>
@@ -6343,7 +6346,7 @@ MESSAGES_TMPL = """
       </tr></thead>
       <tbody>
       {% for m in msgs %}
-      <tr>
+      <tr class="{{ 'r-dim' if m.status in ('matched', 'llm-moved', 'assistant-moved', 'classified', 'kept', 'sent') else '' }}">
         <td class="sel"><input type="checkbox" name="ids" value="{{ m.id }}" aria-label="Select message"></td>
         <td class="sub mono" style="background:none;border:0;font-size:.77rem">{{ m.when }}</td>
         <td class="sub" title="{{ m.from_addr }}"><div class="fromclip">{% set _fp = (m.from_addr or '').rsplit('@', 1) %}{% if _fp|length == 2 %}<span class="fh">{{ _fp[0] }}</span><span class="ft">@{{ _fp[1] }}</span>{% else %}<span class="fh">{{ m.from_addr }}</span>{% endif %}</div></td>
@@ -8908,7 +8911,7 @@ SETTINGS_TMPL = """
         <div class="st-c"><input type="text" name="my_name" value="{{ s.my_name }}" aria-label="Your name"></div></div>
       <div class="setrow"><div class="st-l"><b>Time display offset (hours)</b><span class="sub">Hours from UTC; timestamps show as {{ tz }}.</span></div>
         <div class="st-c"><input type="number" step="0.5" name="display_tz_offset" value="{{ '%g'|format(s.display_tz_offset|float) }}" min="-14" max="14" aria-label="Time display offset"></div></div>
-      <div class="setrow"><div class="st-l"><b>Remote images in the viewer</b><span class="sub">When off, every message keeps a &ldquo;Load images&rdquo; button instead.</span></div>
+      <div class="setrow"><div class="st-l"><b>Remote images in the viewer</b><span class="sub">On: images load automatically. Off: every message keeps a &ldquo;Load images&rdquo; button instead.</span></div>
         <div class="st-c"><label class="check"><input type="checkbox" name="render_images" value="1" {{ 'checked' if s.render_images else '' }}><input type="hidden" name="render_images" value="0"> <span>Always load</span></label></div></div>
       <div class="savebar"><button class="btn primary" type="submit">Save general</button></div>
     </form>
@@ -9761,7 +9764,7 @@ ACCOUNTS_TMPL = """
         {% if a.auth.status in ['starting','triggering','triggered','url_ready'] %}<span class="badge acc">authorising…</span>
         {% elif a.token.authorized %}<span class="badge ok">authorised</span>{% if a.token.expires_h %} · access token until {{ a.token.expires_h }}{% endif %}
         {% else %}<span class="badge warn">not authorised</span> — sign in once to start reading mail{% endif %}
-        &nbsp;· {{ a.mode }} mode
+        &nbsp;· {{ 'sign-in via paste-back' if a.mode == 'loopback' else 'sign-in from any tailnet device' }}
       </div>
     </div>
     <div class="row">

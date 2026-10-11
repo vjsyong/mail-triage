@@ -1758,8 +1758,8 @@ def _process_folder(mc, folder, settings, rules, flows=None):
                         moved += 1
                 except Exception as exc:
                     status = "error"
-                    store.log_event("error", "rule '%s' action failed for uid=%s: %r"
-                                    % (rule.get("name"), uid, exc))
+                    store.log_event("error", "rule '%s' action failed for uid=%s: %s"
+                                    % (rule.get("name"), uid, _one_line_err(exc)))
             store.update_message(row["id"], status=status, rule_id=rule["id"],
                                  action_taken=",".join(taken), **mv_fields)
             store.log_event("info", "rule '%s' → %s | %s (%s)"
@@ -2991,6 +2991,37 @@ def enqueue_act(op, message_id=None, params=None, priority=0):
     return jid
 
 
+def _one_line_err(exc):
+    """One readable line for a failure log: unwraps Exception('...')-style repr
+    wrappers (up to two levels), so the reader sees the message, not Python
+    internals."""
+    msg = str(exc) if exc is not None else "unknown error"
+    for _ in range(2):
+        m = re.match(r"^[A-Za-z_][A-Za-z0-9_.]*\((['\"])(.*)\1\)$", msg.strip())
+        if not m:
+            break
+        msg = m.group(2)
+    return " ".join(msg.split())[:300]
+
+
+def _act_desc(p):
+    """Human-readable one-liner for an act payload (log text, not a repr)."""
+    p = p or {}
+    op = str(p.get("op") or "?")
+    mid = p.get("message_id")
+    if op == "move":
+        op = "move \u2192 %s" % ((p.get("folder") or "?").strip() or "?")
+    elif op == "flags":
+        parts = ["+" + str(f) for f in (p.get("add") or [])]
+        parts += ["-" + str(f) for f in (p.get("remove") or [])]
+        op = "flags %s" % " ".join(parts)
+    elif op == "flow":
+        op = "flow %s" % (p.get("flow_id") or "?")
+    elif op == "create_folder":
+        op = "create folder '%s'" % (p.get("name") or "?")
+    return ("%s \u00b7 msg %s" % (op, mid)) if mid else op
+
+
 def run_act(op, message_id=None, params=None, timeout=60.0, priority=0):
     """Run one mutation, waiting for its outcome. Inline when this process has
     no runner and is not the stage worker; otherwise durable via the runner.
@@ -3159,7 +3190,7 @@ class ActRunner(threading.Thread):
                     store.fail_job(job["id"], repr(exc))
                     self.state["failed"] += 1
                     self.state["last_error"] = repr(exc)
-                    store.log_event("error", "act failed (%s): %r" % (job["payload"], exc))
+                    store.log_event("error", "act failed: %s — %s" % (_act_desc(job["payload"]), _one_line_err(exc)))
                 self.state["last_ok"] = int(time.time())
         finally:
             _ACT_RUNNER_ALIVE.clear()
@@ -3204,8 +3235,8 @@ def process_mailbox():
             break
         except Exception as exc:
             if attempt <= IMAP_RETRIES and _imap_disconnect(exc):
-                store.log_event("warn", "check hit a connection error (%r) — reconnecting "
-                                "(retry %d/%d)" % (exc, attempt, IMAP_RETRIES))
+                store.log_event("warn", "check hit a connection error (%s) — reconnecting "
+                                "(retry %d/%d)" % (_one_line_err(exc), attempt, IMAP_RETRIES))
                 time.sleep(IMAP_RETRY_DELAY)
                 continue
             if _imap_disconnect(exc) and imap_token_selfheal(exc):
