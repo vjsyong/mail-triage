@@ -1591,7 +1591,7 @@ class Worker(threading.Thread):
                 store.log_event("debug", "check complete in %.1fs (nothing new)" % (time.time() - started))
         except Exception as exc:
             self.state["last_error"] = repr(exc)
-            store.log_event("error", "check failed: %r" % exc)
+            store.log_event("error", "check failed: %s" % _one_line_err(exc))
         finally:
             self.state["last_cycle"] = time.time()
             self.state["running"] = False

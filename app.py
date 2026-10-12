@@ -6320,7 +6320,7 @@ MESSAGES_TMPL = """
       {% endfor %}
       </span>
       <span class="tactions">
-      {% if unclassified or classify_state.running %}<button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify all<span class="mhide"> unclassified</span> ({{ unclassified }})</button>{% endif %}
+      {% if unclassified or classify_state.running %}<button class="btn small" type="submit" formaction="{{ url_for('messages_classify_all') }}" {{ 'disabled' if classify_state.running else '' }}>Classify<span class="mhide"> all</span> unclassified ({{ unclassified }})</button>{% endif %}
       {% if tagged_count %}
       <button class="btn small" type="submit" formaction="{{ url_for('learn_rules') }}" {{ 'disabled' if not tagged_count else '' }} title="{{ 'Nothing to learn from yet — tag some messages first' if not tagged_count else '' }}">Learn rules<span class="mhide"> from tags</span> ({{ tagged_count }})</button>
       {% endif %}
@@ -6353,7 +6353,7 @@ MESSAGES_TMPL = """
         <td><a href="{{ url_for('message_detail', mid=m.id, f=filt, **search_form) }}" title="{{ m.subject }}">{{ m.subject|clip(84) or '(no subject)' }}</a>
           {% if m.llm_summary %}<div class="sub" style="font-size:.78rem" title="{{ m.llm_summary }}">{{ m.llm_summary|clip(150) }}</div>{% elif m.snippet %}<div class="sub" style="font-size:.78rem" title="{{ m.snippet }}">{{ m.snippet|clip(150) }}</div>{% endif %}</td>
         <td>{% if m.user_tag %}<span class="badge warn">{{ m.user_tag }}</span>{% endif %}</td>
-        <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.snoozed_active %} <span class="badge warn" title="until {{ m.snoozed_h }}">snoozed</span>{% endif %}{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
+        <td><span class="badge {{ m.badge[0] }}">{{ m.badge[1] }}</span>{% if m.snoozed_active %} <span class="badge warn" title="until {{ m.snoozed_h }}">snoozed</span>{% endif %}{% if m.llm_needs_reply %} <span class="badge warn">needs reply</span>{% endif %}{% if m.action %} <span class="sub">{{ m.action }}</span>{% endif %}</td>
         <td class="sub">{{ m.llm }}</td>
       </tr>
       {% endfor %}
@@ -6450,10 +6450,16 @@ def messages():
         + [json.loads(r.get("actions") or "{}").get("move_to", "")
            for r in store.list_rules() if r.get("enabled")]))
     tag_options = [t for t in tag_options if t]
-    filter_chips = [(key, label, store.count_messages(key, search=search)) for key, label in (
-        ("all", "All"), ("queued", "Awaiting LLM"), ("needs_reply", "Needs reply"),
-        ("moved", "Sorted"), ("tagged", "Tagged"), ("snoozed", "Snoozed"),
-        ("errors", "Errors"))]
+    # The dashboard's red failure count deep-links to f=errors; surface that queue
+    # right after "All" whenever it has content (or is the active filter), so phones
+    # don't have to scroll the chip row to reach the number's target.
+    _err_n = store.count_messages("errors", search=search)
+    _chips = [("all", "All"), ("queued", "Awaiting LLM"), ("needs_reply", "Needs reply"),
+              ("moved", "Sorted"), ("tagged", "Tagged"), ("snoozed", "Snoozed"),
+              ("errors", "Errors")]
+    if _err_n or filt == "errors":
+        _chips.insert(1, _chips.pop(-1))
+    filter_chips = [(key, label, store.count_messages(key, search=search)) for key, label in _chips]
     return render(_render_src(
         MESSAGES_TMPL, msgs=msgs, filt=filt, page=page, pages=pages, per=per, total=total,
         proposals=_proposal_views(),
@@ -10269,7 +10275,7 @@ LOG_TMPL = """
       <button class="btn small" type="submit">Find</button>
     </form>
     <a class="chip{{ ' active' if lvl == 'all' and not mins else '' }}" href="{{ url_for('log', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">All</a>
-    <a class="chip{{ ' active' if lvl == 'error' else '' }}" href="{{ url_for('log', lvl='error', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Errors{% if errors %} <span class="n">{{ errors }}</span>{% endif %}</a>
+    <a class="chip{{ ' active' if lvl == 'error' else '' }}" href="{{ url_for('log', lvl='error', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}" title="Error entries in the recent activity log">Errors{% if errors %} <span class="n">{{ errors }}</span>{% endif %}</a>
     <a class="chip{{ ' active' if lvl == 'warn' else '' }}" href="{{ url_for('log', lvl='warn', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Warnings{% if warns %} <span class="n">{{ warns }}</span>{% endif %}</a>
     <a class="chip{{ ' active' if lvl == 'info' else '' }}" href="{{ url_for('log', lvl='info', debug=('1' if show_debug else none), q=(q or none), mins=(mins or none)) }}">Info</a>
     {% if show_debug %}<a class="chip" href="{{ url_for('log', lvl=lvl, q=(q or none), mins=(mins or none)) }}">hide debug lines</a>

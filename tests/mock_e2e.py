@@ -4127,6 +4127,15 @@ def main():
     r = client.get("/messages/%d?f=needs_reply" % nrC["id"])
     check("viewer offers the no-reply action when flagged",
           b"No reply needed" in r.data and b"No reply" in r.data)
+    r = client.get("/messages?f=needs_reply")
+    check("needs-reply rows carry a badge in the list",
+          b'<span class="badge warn">needs reply</span>' in r.data)
+    r = client.get("/messages")
+    _i_err, _i_aw = r.data.find(b">Errors"), r.data.find(b"Awaiting LLM")
+    if store.count_messages("errors"):
+        check("Errors chip leads the queue when failures exist", 0 <= _i_err < _i_aw)
+    else:
+        check("Errors chip keeps its tail slot when nothing failed", _i_aw < _i_err)
     r = client.post("/messages/%d/needs-reply" % nrC["id"], data={"next": "1", "f": "needs_reply"})
     check("single clear + next clears the flag and advances", r.status_code == 302
           and store.get_message(nrC["id"])["llm_needs_reply"] == 0)
@@ -4144,6 +4153,9 @@ def main():
     r = client.get("/log")
     check("log page offers search + window + pause controls",
           b'name="q"' in r.data and b"logpause" in r.data and b">24h<" in r.data)
+    check("failure log lines unwrap repr wrappers to prose",
+          engine._one_line_err(Exception('RuntimeError("SELECT INBOX failed")'))
+          == "SELECT INBOX failed")
     r = client.get("/log?mins=15")
     check("time window hides old lines, keeps fresh ones",
           b"ancient-token line" not in r.data and b"needle-alpha" in r.data)
