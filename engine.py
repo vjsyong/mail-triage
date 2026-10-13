@@ -949,8 +949,8 @@ def _topic_matches(c, ctx):
         now = time.time()
         if now - _TOPIC_FAIL_TS[0] > 300:
             _TOPIC_FAIL_TS[0] = now
-            store.log_event("error", "flow topic condition: embedding failed: %r "
-                            "(check the Search index endpoint settings)" % exc)
+            store.log_event("error", "flow topic condition: embedding failed: %s "
+                            "(check the Search index endpoint settings)" % _one_line_err(exc))
         return False
     ctx["last_topic_score"] = score
     ctx["last_topic_desc"] = desc
@@ -1042,8 +1042,8 @@ def _apply_flow(mc, flow, row, settings, live):
                         "by": "flow \"%s\"" % (flow.get("name") or "")})
                 except Exception as exc:
                     taken.append("move:%s FAILED" % dest)
-                    store.log_event("error", "flow '%s': move to %s failed: %r"
-                                    % (flow.get("name"), dest, exc))
+                    store.log_event("error", "flow '%s': move to %s failed: %s"
+                                    % (flow.get("name"), dest, _one_line_err(exc)))
             else:
                 taken.append("move:" + dest)
         elif t == "mark_read":
@@ -1101,7 +1101,7 @@ def _apply_flow(mc, flow, row, settings, live):
                         taken.append("draft skipped (no template)")
                 except Exception as exc:
                     taken.append("draft FAILED")
-                    store.log_event("error", "flow '%s': draft failed: %r" % (flow.get("name"), exc))
+                    store.log_event("error", "flow '%s': draft failed: %s" % (flow.get("name"), _one_line_err(exc)))
             else:
                 taken.append("draft")
     return taken, fields
@@ -1566,7 +1566,7 @@ class Worker(threading.Thread):
             if n:
                 store.log_event("info", "audit backfill: %d event(s) reconstructed from stored state" % n)
         except Exception as exc:
-            store.log_event("warn", "audit backfill failed: %r" % exc)
+            store.log_event("warn", "audit backfill failed: %s" % _one_line_err(exc))
         while not self.stop_flag.is_set():
             settings = store.all_settings()
             interval = max(15, int(settings.get("poll_interval", 90) or 90))
@@ -1633,7 +1633,7 @@ def refine_heuristics_once():
             store.log_event("info", "heuristic %r retrained (+%d new label(s))" % (hname, delta))
             done.append((_hid, hname, delta))
     except Exception as exc:
-        store.log_event("error", "heuristic auto-refine failed: %r" % exc)
+        store.log_event("error", "heuristic auto-refine failed: %s" % _one_line_err(exc))
     return done
 
 
@@ -1690,7 +1690,7 @@ def _process_folder(mc, folder, settings, rules, flows=None):
         try:
             meta = mc.fetch_meta(uid)
         except Exception as exc:
-            store.log_event("error", "fetch failed for %s uid=%s: %r" % (folder, uid, exc))
+            store.log_event("error", "fetch failed for %s uid=%s: %s" % (folder, uid, _one_line_err(exc)))
             continue
         store.insert_message(folder, uid, uv, meta)  # no-op if already known
         row = store.get_message_by_uid(folder, uid, uv)
@@ -2356,7 +2356,7 @@ def heal_snippets(workers=6, rescue=True):
             try:
                 mc = MailClient().connect()
             except Exception as exc:
-                store.log_event("error", "heal: connect failed: %r" % exc)
+                store.log_event("error", "heal: connect failed: %s" % _one_line_err(exc))
                 with lock:
                     skipped[0] += len(items)
                     stuck.extend(items)
@@ -2426,7 +2426,7 @@ def heal_locations(workers=6):
             try:
                 found = _header_index(folder)
             except Exception as exc:
-                store.log_event("warn", "heal-locations: %s: %r" % (folder, exc))
+                store.log_event("warn", "heal-locations: %s: %s" % (folder, _one_line_err(exc)))
                 continue
             with lock:
                 for mid, uid in found.items():
@@ -2572,8 +2572,8 @@ def classify_and_store(msg, settings, mc=None):
                 fields["status"] = "flow" if live else "flow-dry"
                 fields["action_taken"] = "flow:%s" % (fl.get("name") or fl.get("id"))
             except Exception as exc:
-                store.log_event("error", "flow '%s' failed after classification: %r"
-                                % (fl.get("name"), exc))
+                store.log_event("error", "flow '%s' failed after classification: %s"
+                                % (fl.get("name"), _one_line_err(exc)))
             break
     if filing_wanted and not already_filed and not guard and not kept and not res.get("_flow"):
         out = run_act("move", msg["id"], {"folder": folder, "source": "auto-file"})
@@ -2823,7 +2823,7 @@ def scan_index_folders_batch(mc, limit=120):
             try:
                 meta = mc.fetch_meta(uid)
             except Exception as exc:
-                store.log_event("error", "fetch failed for %s uid=%s: %r" % (folder, uid, exc))
+                store.log_event("error", "fetch failed for %s uid=%s: %s" % (folder, uid, _one_line_err(exc)))
                 continue
             row = store.get_message_by_uid(folder, uid, uv)
             if row is None and (meta.get("msgid") or "").strip():
@@ -2885,7 +2885,7 @@ class BodyFetcher(threading.Thread):
                     mc = MailClient().connect()
                 except Exception as exc:
                     self.state.update({"running": False, "last_error": repr(exc)})
-                    store.log_event("warn", "body fetch: connect failed (%r) - retrying" % exc)
+                    store.log_event("warn", "body fetch: connect failed (%s) - retrying" % _one_line_err(exc))
                     self.stop_flag.wait(5)
                     continue
             try:
@@ -2916,8 +2916,8 @@ class BodyFetcher(threading.Thread):
                     self.stop_flag.wait(2)
             except Exception as exc:
                 self.state.update({"running": False, "last_error": repr(exc)})
-                store.log_event("warn", "body fetch hit a connection error (%r) - reconnecting"
-                                % exc)
+                store.log_event("warn", "body fetch hit a connection error (%s) - reconnecting"
+                                % _one_line_err(exc))
                 if mc is not None:
                     try:
                         mc.close()
@@ -3001,6 +3001,9 @@ def _one_line_err(exc):
         if not m:
             break
         msg = m.group(2)
+    # bytes literals (`b'...'`) are Python's repr of wire bytes; the
+    # reader wants the text, so drop the prefix ("BAD [b'x']" -> "BAD ['x']").
+    msg = re.sub(r"\bb(['\"])", r"\1", msg)
     return " ".join(msg.split())[:300]
 
 
@@ -3175,7 +3178,7 @@ class ActRunner(threading.Thread):
                             store.requeue_expired_jobs()
                             store.prune_jobs()
                         except Exception as exc:
-                            store.log_event("warn", "jobs maintenance failed: %r" % exc)
+                            store.log_event("warn", "jobs maintenance failed: %s" % _one_line_err(exc))
                     _ACT_WAKE.wait(1.0)
                     _ACT_WAKE.clear()
                     continue
@@ -3458,7 +3461,7 @@ class ClassifyJob(threading.Thread):
             except Exception as exc:  # keep the stage alive no matter what
                 self.state["last_error"] = repr(exc)
                 self.state["running"] = False
-                store.log_event("error", "classify stage crashed: %r" % exc)
+                store.log_event("error", "classify stage crashed: %s" % _one_line_err(exc))
             finally:
                 self.stop_flag.clear()  # a stopped batch must not gate the schedule
 
@@ -3561,8 +3564,8 @@ class ClassifyJob(threading.Thread):
                                 % (msg.get("subject") or "")[:50])
                 store.fail_job(job["id"], repr(exc))
             else:
-                store.log_event("error", "classify: '%s' failed (retry later): %r"
-                                % ((msg.get("subject") or "")[:50], exc))
+                store.log_event("error", "classify: '%s' failed (retry later): %s"
+                                % ((msg.get("subject") or "")[:50], _one_line_err(exc)))
                 store.fail_job(job["id"], repr(exc))
             return "failed"
         if not res.get("_heuristic_id"):
@@ -5947,7 +5950,7 @@ class AssistantAgent:
         finally:
             self.close()
         if error is not None:
-            store.log_event("error", "assistant failed: %r" % error)
+            store.log_event("error", "assistant failed: %s" % _one_line_err(error))
             yield {"type": "error", "message": repr(error)}
             return
         reply = "".join(reply_parts).strip()

@@ -575,7 +575,8 @@ class Supervisor(threading.Thread):
             try:
                 ensure_running()
             except Exception as exc:  # pragma: no cover
-                store.log_event("error", "emailproxy supervisor: %r" % exc)
+                import engine
+                store.log_event("error", "emailproxy supervisor: %s" % engine._one_line_err(exc))
             self.stop_flag.wait(15)
 
 

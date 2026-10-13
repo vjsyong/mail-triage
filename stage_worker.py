@@ -186,7 +186,9 @@ class IndexRunner(threading.Thread):
                     enqueue_index(rebuild=False, manual=False,
                                   not_before=int(time.time()) + 15)
             except Exception as exc:
-                store.log_event("error", "stage index runner crashed: %r" % exc)
+                import engine
+                store.log_event("error", "stage index runner crashed: %s"
+                                % engine._one_line_err(exc))
                 self.stop_flag.wait(3)
         publisher.stop_flag.set()
 
@@ -216,7 +218,9 @@ class LearnRunner(threading.Thread):
                                    "last_error": None})
             except Exception as exc:
                 self.state.update({"running": False, "last_error": repr(exc)})
-                store.log_event("error", "heuristic auto-refine failed: %r" % exc)
+                import engine
+                store.log_event("error", "heuristic auto-refine failed: %s"
+                                % engine._one_line_err(exc))
             store.set_stage_state("learn", dict(self.state))
             self.stop_flag.wait(self.interval)
 
@@ -269,7 +273,9 @@ class Supervisor(threading.Thread):
                 self.state.update({"running": False, "last_error": repr(exc)})
                 backoff = min(max(backoff, 5) * 2, 300)
                 try:
-                    store.log_event("error", "stage worker failed to start: %r" % exc)
+                    import engine
+                    store.log_event("error", "stage worker failed to start: %s"
+                                    % engine._one_line_err(exc))
                 except Exception:
                     pass
                 self.stop_flag.wait(backoff)

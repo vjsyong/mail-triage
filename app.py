@@ -3479,10 +3479,10 @@ CLASSIFIERS_TMPL = """
     {% for h in hx %}
     <tr>
       <td><b>{{ h.name }}</b>{% if not h.enabled %} <span class="badge">disabled</span>{% endif %}<div class="sub" style="font-size:.75rem">min conf {{ '%.2f' % (h.min_confidence or 0.8) }} · by {{ h.created_by }}</div></td>
-      <td class="mono" style="font-size:.79rem">{{ h.kind }}</td>
+      <td class="mono" style="font-size:.79rem">{{ h.kind|replace('_', ' ') }}</td>
       <td>{{ h.category }}</td>
       <td class="sub">{{ h.samples }}{% if h.excluded %} <span class="badge">{{ h.excluded }} removed</span>{% endif %}</td>
-      <td class="sub">{{ h.label_source }}{% if h.weak_labels %} <span class="badge warn">weak</span>{% endif %}</td>
+      <td class="sub">{{ h.label_source }}{% if h.weak_labels %} <span class="badge warn" title="Trained from LLM auto-tags, not your manual tags">weak</span>{% endif %}</td>
       <td class="sub" style="max-width:340px" title="{{ h.description }}">{% set _d = h.description or '' %}{{ (_d[:169].rsplit(' ', 1)[0] + '…') if _d|length > 169 else _d }}</td>
       <td class="sub">{{ h.when }}</td>
       <td class="r"><span class="rowacts" style="justify-content:flex-end">
@@ -4745,7 +4745,7 @@ CLASSIFIER_DATASET_TMPL = """
   <div>
     <div class="backlink"><a href="{{ url_for('classifiers') }}">← Classifiers</a></div>
     <h1 class="page-title">{{ h.name }}</h1>
-    <div class="page-desc">dataset review · {{ h.kind }} · {{ h.category }}</div>
+    <div class="page-desc">dataset review · {{ h.kind|replace('_', ' ') }} · {{ h.category }}</div>
   </div>
   <div class="row">
     <form class="inline" method="post" action="{{ url_for('classifier_retrain', hid=h.id) }}"><button class="btn primary" type="submit">Retrain with current dataset</button></form>
@@ -4753,7 +4753,7 @@ CLASSIFIER_DATASET_TMPL = """
 </div>
 <div class="card">
   <div class="row" style="margin-bottom:8px">
-    <span class="badge">{{ h.kind }}</span>
+    <span class="badge">{{ h.kind|replace('_', ' ') }}</span>
     <span class="badge acc">{{ h.category }}</span>
     <span class="badge {{ 'warn' if ds.weak else 'ok' }}">labels: {{ 'LLM auto-tags' if ds.weak else 'your tags' }}</span>
     {% if not h.enabled %}<span class="badge">disabled</span>{% endif %}
@@ -6456,7 +6456,7 @@ def messages():
     _err_n = store.count_messages("errors", search=search)
     _chips = [("all", "All"), ("queued", "Awaiting LLM"), ("needs_reply", "Needs reply"),
               ("moved", "Sorted"), ("tagged", "Tagged"), ("snoozed", "Snoozed"),
-              ("errors", "Errors")]
+              ("errors", "Failed messages")]
     if _err_n or filt == "errors":
         _chips.insert(1, _chips.pop(-1))
     filter_chips = [(key, label, store.count_messages(key, search=search)) for key, label in _chips]
@@ -7233,7 +7233,7 @@ def message_part(mid, section):
         finally:
             mc.close()
     except Exception as exc:
-        store.log_event("error", "inline part fetch failed for msg %d [%s]: %r" % (mid, section, exc))
+        store.log_event("error", "inline part fetch failed for msg %d [%s]: %s" % (mid, section, engine._one_line_err(exc)))
         return ("part fetch failed", 502)
     if not (ct or "").lower().startswith("image/"):
         return ("not an image part", 404)
@@ -7299,10 +7299,10 @@ def message_img(mid):
                 data, ct = _fetch_remote_image(url, verify=False)
                 store.log_event("warn", "unverified image fetch (bad chain): %s" % url[:110])
             except Exception as exc2:
-                store.log_event("warn", "remote image fetch failed (%s): %r" % (url[:110], exc2))
+                store.log_event("warn", "remote image fetch failed (%s): %s" % (url[:110], engine._one_line_err(exc2)))
                 return ("fetch failed", 502)
         else:
-            store.log_event("warn", "remote image fetch failed (%s): %r" % (url[:110], exc))
+            store.log_event("warn", "remote image fetch failed (%s): %s" % (url[:110], engine._one_line_err(exc)))
             return ("fetch failed", 502)
     if data is None or len(data) > 8 * 1024 * 1024:
         return ("too large", 502)
@@ -8144,7 +8144,7 @@ def _assistant_run_worker(run):
             run.terminal = True
             run.error = repr(exc)
             try:
-                store.log_event("error", "assistant run failed: %r" % exc)
+                store.log_event("error", "assistant run failed: %s" % engine._one_line_err(exc))
             except Exception:
                 pass
             _assistant_emit(run, "error", {"message": "assistant failed: %r" % exc})
